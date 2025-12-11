@@ -1,0 +1,181 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// ATTRIBUTES — Определения атрибутов для типа каталога
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Метаданные атрибутов: какие поля есть у товаров данного типа,
+// их типы данных, обязательность, участие в фильтрации и вариантах.
+//
+// ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+// │ catalog_type │ key         │ display_name │ data_type │ is_required │ is_variant │ is_filterable │
+// ├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+// │ clothing     │ brand       │ Бренд        │ enum      │ true        │ false      │ true          │
+// │ clothing     │ size        │ Размер       │ enum      │ true        │ true       │ true          │
+// │ clothing     │ color       │ Цвет         │ enum      │ true        │ true       │ true          │
+// │ clothing     │ material    │ Материал     │ string    │ false       │ false      │ true          │
+// │ restaurant   │ ingredients │ Состав       │ string    │ true        │ false      │ false         │
+// │ restaurant   │ calories    │ Калории      │ integer   │ false       │ false      │ true          │
+// │ restaurant   │ is_vegan    │ Веганское    │ boolean   │ false       │ false      │ true          │
+// └──────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+model Attribute {
+    // Уникальный идентификатор определения атрибута
+    id String @id @default(uuid()) @db.Uuid
+
+    // FK на тип каталога — атрибут принадлежит этому типу
+    typeId String @map("type_id") @db.Uuid
+
+    // Программный ключ атрибута (используется в коде, API)
+    // Пример: "size", "color", "brand", "ingredients", "calories"
+    key String @db.VarChar(100)
+
+    // Отображаемое название для UI
+    // Пример: "Размер", "Цвет", "Бренд", "Состав", "Калории"
+    displayName String @map("display_name") @db.VarChar(255)
+
+    // Тип данных атрибута (определяет колонку для хранения значения)
+    // STRING → valueString, INTEGER → valueInteger, и т.д.
+    dataType DataType @map("data_type")
+
+    // Обязателен ли атрибут при создании товара
+    // true: товар нельзя сохранить без этого атрибута
+    // Пример: brand обязателен, material — нет
+    isRequired Boolean @default(false) @map("is_required")
+
+    // Участвует ли в формировании вариантов товара
+    // true: создаёт отдельные SKU (размер S + цвет белый = отдельный вариант)
+    // Пример: size, color — вариантные; brand, material — нет
+    isVariantAttribute Boolean @default(false) @map("is_variant_attribute")
+
+    // Доступен ли в фильтрах каталога
+    // true: появляется в панели фильтров
+    // Пример: brand, size, color — фильтруемые; description — нет
+    isFilterable Boolean @default(false) @map("is_filterable")
+
+    // Порядок отображения в UI (формы, карточки)
+    // Пример: brand=1, size=2, color=3, material=4
+    displayOrder Int @default(0) @map("display_order")
+
+    // ─── Связи ───
+    type              Type[]
+    // Допустимые значения для ENUM-атрибутов
+    enumValues        AttributeEnumValue[]
+    // Значения этого атрибута у товаров
+    productAttributes ProductAttribute[]
+    // Значения этого атрибута у вариантов
+    variantAttributes VariantAttribute[]
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    // ─── Ограничения ───
+    // Ключ атрибута уникален в рамках типа каталога
+    // Нельзя создать два атрибута "size" для clothing
+    @@unique([typeId, key])
+    @@map("attributes")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ATTRIBUTE_ENUM_VALUES — Допустимые значения для ENUM-атрибутов
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Справочник допустимых значений. FK-связь гарантирует, что нельзя
+// записать недопустимое значение (например, размер "XXL" если его нет в списке).
+//
+// ┌─────────────────────────────────────────────────────────┐
+// │ attribute (key) │ value  │ display_name │ display_order │
+// ├─────────────────────────────────────────────────────────┤
+// │ size            │ xs     │ XS           │ 1             │
+// │ size            │ s      │ S            │ 2             │
+// │ size            │ m      │ M            │ 3             │
+// │ size            │ l      │ L            │ 4             │ 
+// │ size            │ xl     │ XL           │ 5             │
+// │ color           │ white  │ Белый        │ 1             │
+// │ color           │ black  │ Чёрный       │ 2             │
+// │ brand           │ nike   │ Nike         │ 1             │
+// │ brand           │ adidas │ Adidas       │ 2             │ 
+// └─────────────────────────────────────────────────────────┘
+
+model AttributeEnumValue {
+    // Уникальный идентификатор значения
+    id String @id @default(uuid()) @db.Uuid
+
+    // FK на определение атрибута (size, color, brand)
+    attributeId String @map("attribute_id") @db.Uuid
+
+    // Программное значение (используется в коде, API, URL фильтров)
+    // Пример: "xs", "s", "m", "white", "black", "nike"
+    value String @db.VarChar(255)
+
+    // Отображаемое название для UI
+    // Пример: "XS", "S", "M", "Белый", "Чёрный", "Nike"
+    // Может отличаться от value для локализации
+    displayName String? @map("display_name") @db.VarChar(255)
+
+    // Порядок в списке (для селектов, кнопок размеров)
+    // Пример: XS=1, S=2, M=3, L=4, XL=5
+    displayOrder Int @default(0) @map("display_order")
+
+    // ─── Связи ───
+    attribute         Attribute          @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+    // Товары с этим значением атрибута
+    productAttributes ProductAttribute[]
+    // Варианты с этим значением
+    variantAttributes VariantAttribute[]
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    // ─── Ограничения ───
+    // Значение уникально в рамках атрибута
+    // Нельзя создать два "m" для атрибута size
+    @@unique([attributeId, value])
+    @@map("attribute_enum_values")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VARIANT_ATTRIBUTES — Атрибуты варианта
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Значения вариантных атрибутов (size, color).
+// Только ENUM — вариант всегда выбор из списка.
+//
+// ┌────────────────────────────────────────────┐
+// │ variant (sku)    │ attribute │ enum_value  │
+// ├────────────────────────────────────────────┤
+// │ NIKE-DRI-S-WHT   │ size      │ s           │
+// │ NIKE-DRI-S-WHT   │ color     │ white       │
+// │ NIKE-DRI-S-BLK   │ size      │ s           │
+// │ NIKE-DRI-S-BLK   │ color     │ black       │  
+// │ NIKE-DRI-M-WHT   │ size      │ m           │
+// │ NIKE-DRI-M-WHT   │ color     │ white       │
+// └────────────────────────────────────────────┘
+
+model VariantAttribute {
+    // Уникальный идентификатор записи
+    id String @id @default(uuid()) @db.Uuid
+
+    // FK на вариант товара
+    variantId String @map("variant_id") @db.Uuid
+
+    // FK на определение атрибута (size, color)
+    // Должен быть isVariantAttribute = true
+    attributeId String @map("attribute_id") @db.Uuid
+
+    // FK на допустимое значение (обязателен, т.к. варианты только ENUM)
+    // Пример: ссылка на "s", "m", "white", "black"
+    enumValueId String @map("enum_value_id") @db.Uuid
+
+    // ─── Связи ───
+    variant   ProductVariant     @relation(fields: [variantId], references: [id], onDelete: Cascade)
+    attribute Attribute          @relation(fields: [attributeId], references: [id])
+    enumValue AttributeEnumValue @relation(fields: [enumValueId], references: [id])
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    // ─── Ограничения ───
+    // Один атрибут — одно значение на вариант
+    // Вариант не может иметь два размера
+    @@unique([variantId, attributeId])
+    @@map("variant_attributes")
+}

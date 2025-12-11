@@ -1,0 +1,65 @@
+enum Role {
+    CATALOG_MODERATOR
+    USER
+    ADMIN
+}
+
+enum ProductsDisplayMode {
+    LIST
+    CATEGORY
+}
+
+enum CatalogStatus {
+    PROPOSAL
+    IMPLEMENTATION
+    OPERATIONAL
+    REFUSAL
+}
+
+enum PaymentMethod {
+    CASH
+    TRANSFER
+    ACQUIRING
+}
+
+enum Status {
+    PENDING
+    COMPLETED
+}
+
+enum Metric {
+    YANDEX
+}
+
+enum ContactType {
+    PHONE
+    EMAIL
+    WHATSAPP
+    TELEGRAM
+    SMS
+    MAP
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRODUCT_STATUS — Статусы товара
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// DRAFT    — черновик, редактируется, не виден покупателям
+// ACTIVE   — опубликован, доступен для покупки
+// ARCHIVED — снят с продажи, сохранён для истории заказов
+// HIDDEN   — скрыт
+
+enum ProductStatus {
+    DRAFT
+    ACTIVE
+    ARCHIVED
+    HIDDEN
+}
+
+enum DataType {
+    STRING
+    INTEGER
+    DECIMAL
+    BOOLEAN
+    ENUM
+}

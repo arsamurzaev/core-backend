@@ -1,0 +1,13 @@
+model Regionality {
+    id String @id @default(uuid()) @db.Uuid
+
+    code String @unique
+    name String
+
+    catalogs Catalog[]
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@map("regionality")
+}

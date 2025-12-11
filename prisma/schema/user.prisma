@@ -1,0 +1,17 @@
+model User {
+    id String @id @default(uuid()) @db.Uuid
+
+    name String
+
+    login    String
+    password String
+
+    role Role
+
+    catalog Catalog[]
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@map("users")
+}

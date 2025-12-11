@@ -1,0 +1,138 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// CATALOGS — Каталоги (магазины, рестораны, бренды)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Конкретные каталоги, привязанные к типу. Все каталоги одного типа
+// имеют одинаковую структуру атрибутов.
+//
+// ┌──────────────────────────────────────────────────────────────┐
+// │ id   │ catalog_type_id │ name        │ slug   │ domain       │
+// ├──────────────────────────────────────────────────────────────┤
+// │ uuid │ clothing_uuid   │ H&M         │ hm     │ paradox.ru   │
+// │ uuid │ clothing_uuid   │ Zara        │ zara   │ c4.ru        │
+// │ uuid │ restaurant_uuid │ KFC         │ kfc    │ attarcha.ru  │
+// │ uuid │ restaurant_uuid │ McDonald's  │ mcdon  │ tbiliso.ru   │
+// └──────────────────────────────────────────────────────────────┘
+
+model Catalog {
+    // Уникальный идентификатор каталога
+    id String @id @default(uuid()) @db.Uuid
+
+    // URL-friendly идентификатор (уникален глобально)
+    // Пример: "hm", "zara", "kfc"
+    // Используется: hm.myctlg.ru
+    slug String @unique
+
+    // Доменное имя каталога (уникален глобально)
+    // Пример: "paradox.ru", "c4.ru", "attarcha.ru"
+    // Используется: hm.myctlg.ru
+    domain String?
+
+    // Название каталога для UI
+    // Пример: "H&M", "Zara", "KFC", "McDonald's"
+    name String
+
+    // FK на тип каталога — определяет доступные атрибуты товаров
+    // Пример: ссылка на "clothing" или "restaurant"
+    type   Type   @relation(fields: [typeId], references: [id])
+    typeId String @map("type_id") @db.Uuid
+
+    // ─── Связи ───
+    // Родительский каталог
+    parent   Catalog? @relation("CatalogToCatalog", fields: [parentId], references: [id], onDelete: Cascade)
+    parentId String?  @map("catalog_id") @db.Uuid
+
+    // Дочерний каталог
+    children Catalog[] @relation("CatalogToCatalog")
+
+    user   User?   @relation(fields: [userId], references: [id])
+    userId String? @db.Uuid
+
+    payments Payment[]
+    activity Activity[]
+    region   Regionality[]
+    config   CatalogConfig?
+    settings CatalogSettings?
+    metrics  Metrics[]
+    contacts CatalogContact[]
+    products Product[]
+    category Category[]
+    order    Order[]
+    cart     Cart[]
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@index([typeId])
+    @@map("catalogs")
+}
+
+// Здесь основные ключи отображения
+model CatalogConfig {
+    id String @id @default(uuid()) @db.Uuid
+
+    catalogId String  @unique @map("catalog_id") @db.Uuid
+    catalog   Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+
+    about String @default("")
+
+    description String?
+
+    logoUrl String @default("") @map("logo_url")
+    bgUrl   String @default("") @map("bg_url")
+
+    status CatalogStatus @default(PROPOSAL)
+
+    note String?
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@map("catalog_configs")
+}
+
+model CatalogContact {
+    id String @id @default(uuid()) @db.Uuid
+
+    type     ContactType // PHONE, EMAIL, WHATSAPP, TELEGRAM
+    position Int
+
+    value String
+
+    catalog   Catalog @relation(fields: [catalogId], references: [id])
+    catalogId String  @map("catalog_id") @db.Uuid
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@map("catalog_contacts")
+}
+
+// Здесь настройки бизнес логики
+model CatalogSettings {
+    id String @id @default(uuid()) @db.Uuid
+
+    catalog   Catalog @relation(fields: [catalogId], references: [id])
+    catalogId String  @unique @map("catalog_id") @db.Uuid
+
+    isActive            Boolean             @default(true) @map("is_active")
+    isCommerceEnabled   Boolean             @default(true) @map("is_commerce_enabled")
+    productsDisplayMode ProductsDisplayMode @default(LIST) @map("products_display_mode")
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@map("catalog_settings")
+}
+
+// Здесь настройки интеграции
+model CatalogIntegration {
+    id String @id @default(uuid()) @db.Uuid
+
+    // Здесь будет интеграция с разными системами
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@map("catalog_integrations")
+}

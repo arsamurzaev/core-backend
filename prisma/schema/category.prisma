@@ -1,0 +1,30 @@
+model Category {
+    // Уникальный идентификатор категории
+    // Пример: "550e8400-e29b-41d4-a716-446655440000"
+    id String @id @default(uuid()) @db.Uuid
+
+    position Int @default(0)
+
+    name       String  @db.Char(255)
+    imageUrl   String  @default("") @map("image_url")
+    descriptor String? @map("descriptor")
+
+    discount Int?
+
+    // ─── Связи ───
+    // Каталоги этого типа (H&M, Zara для clothing)
+    catalog   Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+    catalogId String  @map("catalog_id") @db.Uuid
+
+    parent   Category? @relation("CategoryToCategory", fields: [parentId], references: [id], onDelete: Cascade)
+    parentId String?   @map("parent_id") @db.Uuid
+
+    products Product[]
+
+    children Category[] @relation("CategoryToCategory")
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@map("categories")
+}

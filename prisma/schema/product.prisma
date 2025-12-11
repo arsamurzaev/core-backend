@@ -1,0 +1,189 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRODUCTS — Товары
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Базовая информация о товаре. Специфичные данные хранятся в ProductAttribute.
+//
+// ┌────────────────────────────────────────────────────────────────────────────────────────┐
+// │ catalog │ sku              │ name                  │ slug              │ base_price    │
+// ├────────────────────────────────────────────────────────────────────────────────────────┤
+// │ H&M     │ HM-TSHIRT-001    │ Футболка базовая      │ futbolka-bazovaya │ 999.00        │
+// │ H&M     │ HM-JEANS-001     │ Джинсы slim fit       │ dzhinsy-slim      │ 2499.00       │
+// │ KFC     │ KFC-BUCKET-001   │ Баскет Оригинальный   │ basket-original   │ 599.00        │
+// │ KFC     │ KFC-BURGER-001   │ Шефбургер             │ shefburger        │ 189.00        │
+// └────────────────────────────────────────────────────────────────────────────────────────┘
+
+model Product {
+    // Уникальный идентификатор товара
+    id String @id @default(uuid()) @db.Uuid
+
+    // FK на каталог (H&M, KFC) — через каталог определяется тип и атрибуты
+    catalogId String @map("catalog_id") @db.Uuid
+
+    // Артикул товара (уникален глобально)
+    // Пример: "HM-TSHIRT-001", "KFC-BUCKET-001"
+    // Используется для интеграций, учёта, поиска
+    sku String @unique @db.VarChar(100)
+
+    // Название товара для UI
+    // Пример: "Футболка базовая", "Баскет Оригинальный"
+    name String @db.VarChar(255)
+
+    // URL-friendly идентификатор
+    // Пример: "futbolka-bazovaya", "basket-original"
+    // Используется: /catalog/hm/product/futbolka-bazovaya
+    slug String @db.VarChar(255)
+
+    // Базовая цена товара (без учёта модификаторов вариантов)
+    // Пример: 999.00, 2499.00, 599.00
+    // Итоговая цена варианта = basePrice + variant.priceModifier
+    price Decimal @db.Decimal(12, 2)
+
+    imagesUrls String[] @map("images_urls")
+
+    isPopular Boolean @default(false) @map("is_popular")
+
+    // Статус публикации
+    // DRAFT: черновик, не виден покупателям
+    // ACTIVE: опубликован, доступен для покупки
+    // ARCHIVED: снят с продажи, скрыт
+    status ProductStatus @default(ACTIVE)
+
+    // ─── Связи ───
+    catalog           Catalog            @relation(fields: [catalogId], references: [id])
+    // Варианты товара (S+белый, M+чёрный)
+    variants          ProductVariant[]
+    productAttributes ProductAttribute[]
+    cartItem          CartItem[]
+    category          Category[]
+
+    // Временные метки
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    // ─── Индексы ───
+    @@index([catalogId]) // Быстрый листинг товаров каталога
+    @@index([status]) // Фильтр по статусу (только активные)
+    @@index([slug]) // Поиск по slug
+    @@map("products")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRODUCT_ATTRIBUTES — Значения атрибутов товара
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Хранит значения НЕвариантных атрибутов товара.
+// Вариантные атрибуты (size, color) хранятся в VariantAttribute.
+//
+// ┌───────────────────────────────────────────────────────────────────────────────────────────────────┐
+// │ product          │ attribute │ enum_value │ value_string    │ value_int │ value_dec │ value_bool  │
+// ├───────────────────────────────────────────────────────────────────────────────────────────────────┤
+// │ Футболка Nike    │ brand     │ nike_uuid  │ NULL            │ NULL      │ NULL      │ NULL        │
+// │ Футболка Nike    │ material  │ NULL       │ 100% полиэстер  │ NULL      │ NULL      │ NULL        │
+// │ Шефбургер KFC    │ calories  │ NULL       │ NULL            │ 450       │ NULL      │ NULL        │ 
+// │ Шефбургер KFC    │ is_vegan  │ NULL       │ NULL            │ NULL      │ NULL      │ false       │  
+// │ Салат KFC        │ weight    │ NULL       │ NULL            │ NULL      │ 0.250     │ NULL        │
+// └───────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+model ProductAttribute {
+    // Уникальный идентификатор записи
+    id String @id @default(uuid()) @db.Uuid
+
+    // FK на товар
+    productId String @map("product_id") @db.Uuid
+
+    // FK на определение атрибута (brand, material, calories)
+    attributeId String @map("attribute_id") @db.Uuid
+
+    // ─── Значение атрибута (заполняется ОДНО поле в зависимости от dataType) ───
+
+    // Для ENUM: FK на допустимое значение
+    // Пример: ссылка на "nike" в AttributeEnumValue
+    // Гарантирует валидность — нельзя записать несуществующее значение
+    enumValueId String? @map("enum_value_id") @db.Uuid
+
+    // Для STRING: произвольный текст
+    // Пример: "100% полиэстер", "Курица, картофель, специи"
+    valueString String? @map("value_string") @db.VarChar(500)
+
+    // Для INTEGER: целое число
+    // Пример: 450 (калории), 24 (месяцы гарантии), 6 (штук в упаковке)
+    valueInteger Int? @map("value_integer")
+
+    // Для DECIMAL: дробное число
+    // Пример: 0.250 (кг), 15.6 (дюймы), 1.5 (литры)
+    valueDecimal Decimal? @map("value_decimal") @db.Decimal(12, 4)
+
+    // Для BOOLEAN: да/нет
+    // Пример: true (вегетарианское), false (не водонепроницаемый)
+    valueBoolean Boolean? @map("value_boolean")
+
+    // ─── Связи ───
+    product   Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+    attribute Attribute           @relation(fields: [attributeId], references: [id])
+    enumValue AttributeEnumValue? @relation(fields: [enumValueId], references: [id])
+
+    // ─── Ограничения ───
+    // Один атрибут — одно значение на товар
+    // Нельзя записать brand дважды для одного товара
+    @@unique([productId, attributeId])
+    // Быстрая фильтрация по атрибуту
+    @@index([attributeId])
+    @@map("product_attributes")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRODUCT_VARIANTS — Варианты товара (SKU)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Каждая комбинация вариантных атрибутов = отдельный вариант.
+// Вариант имеет свой SKU, остаток, модификатор цены.
+//
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ product          │ sku              │ price_modifier │ stock │ is_available │
+// ├─────────────────────────────────────────────────────────────────────────────┤
+// │ Футболка Nike    │ NIKE-DRI-S-WHT   │ 0.00           │ 10    │ true         │
+// │ Футболка Nike    │ NIKE-DRI-S-BLK   │ 0.00           │ 5     │ true         │ 
+// │ Футболка Nike    │ NIKE-DRI-M-WHT   │ 0.00           │ 8     │ true         │
+// │ Футболка Nike    │ NIKE-DRI-L-WHT   │ 200.00         │ 3     │ true         │
+// │ Футболка Nike    │ NIKE-DRI-XL-WHT  │ 200.00         │ 0     │ false        │
+// └─────────────────────────────────────────────────────────────────────────────┘
+//
+// Итоговая цена варианта = Product.basePrice + ProductVariant.priceModifier
+// Пример: 999.00 + 200.00 = 1199.00 для размера L
+
+model ProductVariant {
+    // Уникальный идентификатор варианта
+    id String @id @default(uuid()) @db.Uuid
+
+    // FK на товар
+    productId String @map("product_id") @db.Uuid
+
+    // SKU варианта (уникален глобально)
+    // Формат: {PRODUCT_SKU}-{SIZE}-{COLOR}
+    // Пример: "NIKE-DRI-S-WHT", "NIKE-DRI-M-BLK"
+    sku String @unique @db.VarChar(100)
+
+    // Остаток на складе
+    // Пример: 10, 5, 0
+    // При 0 вариант недоступен для заказа
+    stock Int @default(0)
+
+    // Доступен ли для заказа
+    // false: скрыт в UI, нельзя добавить в корзину
+    // Может быть false даже при stock > 0 (ручное отключение)
+    isAvailable Boolean @default(true) @map("is_available")
+
+    // ─── Связи ───
+    product    Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+    // Атрибуты варианта (size=M, color=white)
+    attributes VariantAttribute[]
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    // ─── Индексы ───
+    @@index([productId]) // Быстрое получение вариантов товара
+    @@index([isAvailable]) // Фильтр только доступных
+    @@map("product_variants")
+}

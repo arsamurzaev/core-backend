@@ -1,0 +1,24 @@
+model Order {
+    id String @id @default(uuid()) @db.Uuid
+
+    status Status @default(PENDING)
+
+    token   String?
+    comment String?
+
+    commentByAdmin String? @map("comment_by_admin")
+
+    paymentMethod PaymentMethod? @map("payment_method")
+    paymentProof  String[]       @map("payment_proof")
+    products      Json
+
+    totalAmount Int @default(0) @map("total_amount")
+
+    catalog   Catalog @relation(fields: [catalogId], references: [id])
+    catalogId String  @map("catalog_id") @db.Uuid
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@map("orders")
+}
