@@ -35,6 +35,8 @@ enum ContactType {
     PHONE
     EMAIL
     WHATSAPP
+    MAX
+    BIP
     TELEGRAM
     SMS
     MAP
@@ -54,6 +56,7 @@ enum ProductStatus {
     ACTIVE
     ARCHIVED
     HIDDEN
+    DELETE
 }
 
 enum DataType {
@@ -62,4 +65,64 @@ enum DataType {
     DECIMAL
     BOOLEAN
     ENUM
+}
+
+enum AnalyticsEventType {
+    PAGE_VIEW
+    VIEW_PRODUCT
+    PRODUCT_CLICK_FROM_LIST
+
+    SEARCH_SUBMIT
+    SEARCH_RESULTS
+    SEARCH_ZERO_RESULTS
+
+    FILTER_APPLY
+    FILTER_RESET
+    SORT_CHANGE
+
+    ADD_TO_CART
+    REMOVE_FROM_CART
+    BEGIN_CHECKOUT
+
+    CLICK_CONTACT
+    LEAD_SUBMIT
+
+    ERROR_CLIENT
+    ERROR_API
+    PERF
+}
+
+enum AnalyticsPageType {
+    HOME
+    CATALOG
+    CATEGORY
+    PRODUCT
+    SEARCH
+    CART
+    CHECKOUT
+    OTHER
+}
+
+enum DeviceType {
+    MOBILE
+    DESKTOP
+    TABLET
+    OTHER
+}
+
+enum LeadChannel {
+    FORM
+    PHONE
+    EMAIL
+    WHATSAPP
+    TELEGRAM
+    SMS
+    OTHER
+}
+
+enum LeadStatus {
+    SUBMITTED
+    QUALIFIED
+    DISQUALIFIED
+    EXPIRED
 }

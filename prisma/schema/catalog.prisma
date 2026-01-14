@@ -60,8 +60,9 @@ model Catalog {
     order    Order[]
     cart     Cart[]
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+    deleteAt  DateTime? @map("delete_at") // Дата удаления 
+    createdAt DateTime  @default(now()) @map("created_at")
+    updatedAt DateTime  @updatedAt @map("updated_at")
 
     @@index([typeId])
     @@map("catalogs")
@@ -85,8 +86,9 @@ model CatalogConfig {
 
     note String?
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+    deleteAt  DateTime? @map("delete_at") // Дата удаления 
+    createdAt DateTime  @default(now()) @map("created_at")
+    updatedAt DateTime  @updatedAt @map("updated_at")
 
     @@map("catalog_configs")
 }
@@ -102,8 +104,9 @@ model CatalogContact {
     catalog   Catalog @relation(fields: [catalogId], references: [id])
     catalogId String  @map("catalog_id") @db.Uuid
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+    deleteAt  DateTime? @map("delete_at") // Дата удаления 
+    createdAt DateTime  @default(now()) @map("created_at")
+    updatedAt DateTime  @updatedAt @map("updated_at")
 
     @@map("catalog_contacts")
 }
@@ -119,20 +122,9 @@ model CatalogSettings {
     isCommerceEnabled   Boolean             @default(true) @map("is_commerce_enabled")
     productsDisplayMode ProductsDisplayMode @default(LIST) @map("products_display_mode")
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+    deleteAt  DateTime? @map("delete_at") // Дата удаления 
+    createdAt DateTime  @default(now()) @map("created_at")
+    updatedAt DateTime  @updatedAt @map("updated_at")
 
     @@map("catalog_settings")
-}
-
-// Здесь настройки интеграции
-model CatalogIntegration {
-    id String @id @default(uuid()) @db.Uuid
-
-    // Здесь будет интеграция с разными системами
-
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
-
-    @@map("catalog_integrations")
 }

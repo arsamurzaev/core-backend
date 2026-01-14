@@ -34,8 +34,9 @@ model Type {
     attributes Attribute[]
     activities Activity[]
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+    deleteAt  DateTime? @map("delete_at") // Дата удаления 
+    createdAt DateTime  @default(now()) @map("created_at")
+    updatedAt DateTime  @updatedAt @map("updated_at")
 
     @@map("types")
 }

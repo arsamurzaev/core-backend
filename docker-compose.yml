@@ -1,41 +1,36 @@
-version: "3.8"
+version: '3.9'
 
 services:
-  catalog-postgres:
-    image: postgres:16-alpine
-    container_name: catalog-postgres
-    restart: unless-stopped
+  postgres:
+    container_name: postgres-core
+    image: postgres:15
+    restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - 5433:5432
     volumes:
-      - catalog-postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend-core
 
-  catalog-redis:
-    image: redis:7-alpine
-    container_name: catalog-redis
-    restart: unless-stopped
+  redis:
+    container_name: redis-core
+    image: redis:6.2
+    restart: always
     command: redis-server --requirepass ${REDIS_PASSWORD}
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - 6379:6379
     volumes:
-      - catalog-redis-data:/data
-    healthcheck:
-      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - redis_data:/data
+    networks:
+      - backend-core
 
 volumes:
-  catalog-postgres-data:
-  catalog-redis-data:
+  postgres_data:
+  redis_data:
+
+
+networks:
+  backend-core:

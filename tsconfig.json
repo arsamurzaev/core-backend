@@ -10,18 +10,18 @@
 		"emitDecoratorMetadata": true,
 		"experimentalDecorators": true,
 		"allowSyntheticDefaultImports": true,
-		"target": "es2024",
+		"target": "es2022",
 		"sourceMap": true,
 		"outDir": "./dist",
 		"baseUrl": "./",
 		"paths": {
-			"@/*": ["*"],
-			"@generated": ["generated"],
-			"@generated/*": ["generated/*"]
+			"@/*": ["src/*"],
+			"@generated": ["prisma/generated"],
+			"@generated/*": ["prisma/generated/*"]
 		},
 		"incremental": true,
 		"skipLibCheck": true,
-		"strictNullChecks": true,
+		"strictNullChecks": false,
 		"forceConsistentCasingInFileNames": true,
 		"noImplicitAny": false,
 		"strictBindCallApply": false,

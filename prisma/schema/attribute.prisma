@@ -56,7 +56,7 @@ model Attribute {
     displayOrder Int @default(0) @map("display_order")
 
     // ─── Связи ───
-    type              Type[]
+    type              Type                 @relation(fields: [typeId], references: [id], onDelete: Cascade)
     // Допустимые значения для ENUM-атрибутов
     enumValues        AttributeEnumValue[]
     // Значения этого атрибута у товаров
@@ -64,8 +64,9 @@ model Attribute {
     // Значения этого атрибута у вариантов
     variantAttributes VariantAttribute[]
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+    deleteAt  DateTime? @map("delete_at") // Дата удаления 
+    createdAt DateTime  @default(now()) @map("created_at")
+    updatedAt DateTime  @updatedAt @map("updated_at")
 
     // ─── Ограничения ───
     // Ключ атрибута уникален в рамках типа каталога
@@ -122,8 +123,9 @@ model AttributeEnumValue {
     // Варианты с этим значением
     variantAttributes VariantAttribute[]
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+    deleteAt  DateTime? @map("delete_at") // Дата удаления 
+    createdAt DateTime  @default(now()) @map("created_at")
+    updatedAt DateTime  @updatedAt @map("updated_at")
 
     // ─── Ограничения ───
     // Значение уникально в рамках атрибута
@@ -170,12 +172,14 @@ model VariantAttribute {
     attribute Attribute          @relation(fields: [attributeId], references: [id])
     enumValue AttributeEnumValue @relation(fields: [enumValueId], references: [id])
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+    deleteAt  DateTime? @map("delete_at") // Дата удаления 
+    createdAt DateTime  @default(now()) @map("created_at")
+    updatedAt DateTime  @updatedAt @map("updated_at")
 
     // ─── Ограничения ───
     // Один атрибут — одно значение на вариант
     // Вариант не может иметь два размера
     @@unique([variantId, attributeId])
+    @@index([attributeId, enumValueId])
     @@map("variant_attributes")
 }

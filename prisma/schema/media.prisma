@@ -1,0 +1,49 @@
+model Media {
+    id           String @id @default(uuid())
+    originalName String @map("original_name")
+    mimeType     String @map("mime_type")
+    size         Int?
+    width        Int?
+    height       Int?
+
+    storage String // "s3", "local", ...
+    key     String // path/storageKey
+
+    checksum String? // sha256/etag
+    status   MediaStatus @default(UPLOADED)
+
+    variants MediaVariant[]
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@map("media")
+}
+
+model MediaVariant {
+    id      String @id @default(uuid())
+    mediaId String @map("media_id")
+    media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+    kind     String // "miniature" | "medium" | "large" | "webp" | "avif" | "square_256" ...
+    mimeType String? @map("mime_type")
+    size     Int?
+    width    Int?
+    height   Int?
+
+    storage String
+    key     String
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@unique([mediaId, kind])
+    @@map("media_variants")
+}
+
+enum MediaStatus {
+    UPLOADED
+    PROCESSING
+    READY
+    FAILED
+}

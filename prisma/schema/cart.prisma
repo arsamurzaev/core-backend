@@ -1,13 +1,17 @@
 model Cart {
     id String @id @default(uuid()) @db.Uuid
 
-    cartItems CartItem[]
+    items CartItem[]
+
+    userId String? @map("user_id") @db.Uuid
+    token  String?
 
     catalog   Catalog @relation(fields: [catalogId], references: [id])
     catalogId String  @map("catalog_id") @db.Uuid
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+    deleteAt  DateTime? @map("delete_at") // Дата удаления 
+    createdAt DateTime  @default(now()) @map("created_at")
+    updatedAt DateTime  @updatedAt @map("updated_at")
 
     @@map("carts")
 }
@@ -16,15 +20,18 @@ model CartItem {
     id String @id @default(uuid()) @db.Uuid
 
     product   Product @relation(fields: [productId], references: [id])
-    productId String @map("product_id") @db.Uuid
+    productId String  @map("product_id") @db.Uuid
 
     quantity Int @default(1)
 
     cart   Cart   @relation(fields: [cartId], references: [id])
     cartId String @map("cart_id") @db.Uuid
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+    variantId String? @map("variant_id") @db.Uuid
+
+    deleteAt  DateTime? @map("delete_at") // Дата удаления 
+    createdAt DateTime  @default(now()) @map("created_at")
+    updatedAt DateTime  @updatedAt @map("updated_at")
 
     @@map("cart_items")
 }

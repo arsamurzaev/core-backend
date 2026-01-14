@@ -1,0 +1,15 @@
+// Здесь настройки интеграции
+model Integration {
+    id String @id @default(uuid()) @db.Uuid
+
+    // Здесь будет интеграция с разными системами
+    name String
+
+    metadata Json
+
+    deleteAt  DateTime? @map("delete_at") // Дата удаления 
+    createdAt DateTime  @default(now()) @map("created_at")
+    updatedAt DateTime  @updatedAt @map("updated_at")
+
+    @@map("integrations")
+}

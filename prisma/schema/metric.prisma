@@ -7,8 +7,9 @@ model Metrics {
     provider  Metric @default(YANDEX) // yandex, google, custom
     counterId String @default("104676804") @map("counter_id") // идентификатор счётчика
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+    deleteAt  DateTime? @map("delete_at") // Дата удаления 
+    createdAt DateTime  @default(now()) @map("created_at")
+    updatedAt DateTime  @updatedAt @map("updated_at")
 
     @@map("metrics")
 }

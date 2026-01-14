@@ -4,8 +4,9 @@ model Payment {
     catalog   Catalog @relation(fields: [catalogId], references: [id])
     catalogId String  @map("catalog_id") @db.Uuid
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+    deleteAt  DateTime? @map("delete_at") // Дата удаления 
+    createdAt DateTime  @default(now()) @map("created_at")
+    updatedAt DateTime  @updatedAt @map("updated_at")
 
     @@map("payments")
 }

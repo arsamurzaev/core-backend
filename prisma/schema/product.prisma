@@ -49,6 +49,10 @@ model Product {
     // ARCHIVED: снят с продажи, скрыт
     status ProductStatus @default(ACTIVE)
 
+    position Int @default(0)
+
+    deleteAt DateTime? @map("delete_at") // Дата удаления 
+
     // ─── Связи ───
     catalog           Catalog            @relation(fields: [catalogId], references: [id])
     // Варианты товара (S+белый, M+чёрный)
@@ -56,12 +60,16 @@ model Product {
     productAttributes ProductAttribute[]
     cartItem          CartItem[]
     category          Category[]
+    orderItems        OrderItem[]
 
     // Временные метки
     createdAt DateTime @default(now()) @map("created_at")
     updatedAt DateTime @updatedAt @map("updated_at")
 
     // ─── Индексы ───
+    @@unique([catalogId, sku])
+    @@unique([catalogId, slug])
+    @@index([catalogId, status])
     @@index([catalogId]) // Быстрый листинг товаров каталога
     @@index([status]) // Фильтр по статусу (только активные)
     @@index([slug]) // Поиск по slug
@@ -118,6 +126,8 @@ model ProductAttribute {
     // Пример: true (вегетарианское), false (не водонепроницаемый)
     valueBoolean Boolean? @map("value_boolean")
 
+    deleteAt DateTime? @map("delete_at") // Дата удаления 
+
     // ─── Связи ───
     product   Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
     attribute Attribute           @relation(fields: [attributeId], references: [id])
@@ -128,6 +138,9 @@ model ProductAttribute {
     // Нельзя записать brand дважды для одного товара
     @@unique([productId, attributeId])
     // Быстрая фильтрация по атрибуту
+    @@index([attributeId, enumValueId])
+    @@index([attributeId, valueInteger])
+    @@index([attributeId, valueDecimal])
     @@index([attributeId])
     @@map("product_attributes")
 }
@@ -164,15 +177,23 @@ model ProductVariant {
     // Пример: "NIKE-DRI-S-WHT", "NIKE-DRI-M-BLK"
     sku String @unique @db.VarChar(100)
 
+    variantKey String @map("variant_key") @db.VarChar(300)
+
     // Остаток на складе
     // Пример: 10, 5, 0
     // При 0 вариант недоступен для заказа
     stock Int @default(0)
 
+    // Модификатор цены
+    // Пример: 0.00, 200.00
+    price Decimal @db.Decimal(12, 2)
+
     // Доступен ли для заказа
     // false: скрыт в UI, нельзя добавить в корзину
     // Может быть false даже при stock > 0 (ручное отключение)
     isAvailable Boolean @default(true) @map("is_available")
+
+    deleteAt DateTime? @map("delete_at") // Дата удаления 
 
     // ─── Связи ───
     product    Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
