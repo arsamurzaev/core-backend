@@ -17,8 +17,8 @@
 
 import * as runtime from "@prisma/client/runtime/index-browser"
 
-export type * from '../models'
-export type * from './prismaNamespace'
+export type * from '../models.js'
+export type * from './prismaNamespace.js'
 
 export const Decimal = runtime.Decimal
 
@@ -286,6 +286,8 @@ export const CatalogScalarFieldEnum = {
   id: 'id',
   slug: 'slug',
   domain: 'domain',
+  login: 'login',
+  password: 'password',
   name: 'name',
   typeId: 'typeId',
   parentId: 'parentId',
@@ -303,6 +305,7 @@ export const CatalogConfigScalarFieldEnum = {
   catalogId: 'catalogId',
   about: 'about',
   description: 'description',
+  currency: 'currency',
   logoUrl: 'logoUrl',
   bgUrl: 'bgUrl',
   status: 'status',
@@ -565,6 +568,7 @@ export const UserScalarFieldEnum = {
   login: 'login',
   password: 'password',
   role: 'role',
+  isEmailConfirmed: 'isEmailConfirmed',
   deleteAt: 'deleteAt',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'

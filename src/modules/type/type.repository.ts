@@ -18,7 +18,9 @@ export class TypeRepository {
 	}
 
 	findAll() {
-		return this.prismaService.type.findMany()
+		return this.prismaService.type.findMany({
+			select: { id: true, code: true, name: true }
+		})
 	}
 
 	create(dto: CreateTypeDtoReq) {

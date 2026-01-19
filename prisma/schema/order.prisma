@@ -1,7 +1,7 @@
 model Order {
     id String @id @default(uuid()) @db.Uuid
 
-    status Status @default(PENDING)
+    status OrderStatus @default(PENDING)
 
     token   String?
     comment String?

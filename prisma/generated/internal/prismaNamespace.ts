@@ -16,10 +16,10 @@
  */
 
 import * as runtime from "@prisma/client/runtime/client"
-import type * as Prisma from "../models"
-import { type PrismaClient } from "./class"
+import type * as Prisma from "../models.js"
+import { type PrismaClient } from "./class.js"
 
-export type * from '../models'
+export type * from '../models.js'
 
 export type DMMF = typeof runtime.DMMF
 
@@ -2953,6 +2953,8 @@ export const CatalogScalarFieldEnum = {
   id: 'id',
   slug: 'slug',
   domain: 'domain',
+  login: 'login',
+  password: 'password',
   name: 'name',
   typeId: 'typeId',
   parentId: 'parentId',
@@ -2970,6 +2972,7 @@ export const CatalogConfigScalarFieldEnum = {
   catalogId: 'catalogId',
   about: 'about',
   description: 'description',
+  currency: 'currency',
   logoUrl: 'logoUrl',
   bgUrl: 'bgUrl',
   status: 'status',
@@ -3232,6 +3235,7 @@ export const UserScalarFieldEnum = {
   login: 'login',
   password: 'password',
   role: 'role',
+  isEmailConfirmed: 'isEmailConfirmed',
   deleteAt: 'deleteAt',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
@@ -3540,16 +3544,16 @@ export type ListEnumMetricFieldRefInput<$PrismaModel> = FieldRefInputType<$Prism
 
 
 /**
- * Reference to a field of type 'Status'
+ * Reference to a field of type 'OrderStatus'
  */
-export type EnumStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Status'>
+export type EnumOrderStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'OrderStatus'>
     
 
 
 /**
- * Reference to a field of type 'Status[]'
+ * Reference to a field of type 'OrderStatus[]'
  */
-export type ListEnumStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Status[]'>
+export type ListEnumOrderStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'OrderStatus[]'>
     
 
 

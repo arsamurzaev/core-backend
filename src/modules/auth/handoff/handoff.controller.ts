@@ -1,0 +1,94 @@
+import { Role } from '@generated/client'
+import {
+	Controller,
+	ForbiddenException,
+	Get,
+	Query,
+	Res,
+	UnauthorizedException
+} from '@nestjs/common'
+import type { Response } from 'express'
+
+import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { RequestContext } from '@/shared/tenancy/request-context'
+
+import { SessionService } from '../session/session.service'
+import { HandoffService } from './handoff.service'
+
+const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
+const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
+const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'strict') as 'strict' | 'lax'
+const isProd = process.env.NODE_ENV === 'production'
+
+function sanitizeNext(next?: string): string {
+	if (!next) return '/admin'
+	if (!next.startsWith('/')) return '/admin'
+	if (next.startsWith('//')) return '/admin'
+	if (next.includes('http://') || next.includes('https://')) return '/admin'
+	return next
+}
+
+@Controller('/auth')
+export class HandoffController {
+	constructor(
+		private readonly handoff: HandoffService,
+		private readonly sessions: SessionService,
+		private readonly prisma: PrismaService
+	) {}
+
+	@Get('/handoff')
+	async exchange(
+		@Query('token') token: string,
+		@Query('next') next: string | undefined,
+		@Res() res: Response
+	) {
+		const store = RequestContext.mustGet()
+		if (!store.catalogId) throw new ForbiddenException('Нет контекста каталога')
+
+		const payload = await this.handoff.consume(token)
+		if (!payload)
+			throw new UnauthorizedException('Токен недействителен или истёк')
+
+		if (payload.catalogId !== store.catalogId) {
+			throw new ForbiddenException('Токен не для этого каталога')
+		}
+
+		// если не ADMIN — перепроверяем владение каталогом
+		if (payload.role !== Role.ADMIN) {
+			const ownerId =
+				store.ownerUserId ??
+				(
+					await this.prisma.catalog.findUnique({
+						where: { id: store.catalogId },
+						select: { userId: true }
+					})
+				)?.userId
+
+			if (!ownerId || ownerId !== payload.userId) {
+				throw new ForbiddenException('Нет прав на вход в этот каталог')
+			}
+		}
+
+		const { sid, csrf } = await this.sessions.createForUser(payload.userId)
+
+		res.setHeader('Cache-Control', 'no-store')
+
+		res.cookie(SID_COOKIE, sid, {
+			httpOnly: true,
+			sameSite: SAME_SITE,
+			secure: isProd,
+			path: '/',
+			maxAge: 1000 * 60 * 60 * 24 * 7
+		})
+
+		res.cookie(CSRF_COOKIE, csrf, {
+			httpOnly: false,
+			sameSite: SAME_SITE,
+			secure: isProd,
+			path: '/',
+			maxAge: 1000 * 60 * 60 * 24 * 7
+		})
+
+		return res.redirect(302, sanitizeNext(next ?? payload.next))
+	}
+}

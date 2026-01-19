@@ -5,6 +5,7 @@ model Regionality {
     name String
 
     catalogs Catalog[]
+    users    User[]
 
     deleteAt  DateTime? @map("delete_at") // Дата удаления 
     createdAt DateTime  @default(now()) @map("created_at")

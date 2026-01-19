@@ -1,5 +1,5 @@
 enum Role {
-    CATALOG_MODERATOR
+    CATALOG_OWNER
     USER
     ADMIN
 }
@@ -22,7 +22,7 @@ enum PaymentMethod {
     ACQUIRING
 }
 
-enum Status {
+enum OrderStatus {
     PENDING
     COMPLETED
 }

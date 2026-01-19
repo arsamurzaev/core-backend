@@ -1,0 +1,40 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
+
+export type RequestContextStore = {
+	requestId: string
+	host: string
+
+	// tenancy
+	catalogId?: string
+	catalogSlug?: string
+	typeId?: string
+
+	ownerUserId?: string | null
+}
+
+export class RequestContext {
+	private static readonly als = new AsyncLocalStorage<RequestContextStore>()
+
+	static run<T>(store: RequestContextStore, fn: () => T): T {
+		return this.als.run(store, fn)
+	}
+
+	static get(): RequestContextStore | undefined {
+		return this.als.getStore()
+	}
+
+	static mustGet(): RequestContextStore {
+		const store = this.get()
+		if (!store) {
+			throw new Error(
+				'RequestContext is not initialized. Did you forget to apply CatalogContextMiddleware globally?'
+			)
+		}
+		return store
+	}
+
+	static patch(patch: Partial<RequestContextStore>): void {
+		const store = this.mustGet()
+		Object.assign(store, patch)
+	}
+}

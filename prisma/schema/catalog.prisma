@@ -26,7 +26,10 @@ model Catalog {
     // Доменное имя каталога (уникален глобально)
     // Пример: "paradox.ru", "c4.ru", "attarcha.ru"
     // Используется: hm.myctlg.ru
-    domain String?
+    domain String? @unique
+
+    login    String
+    password String
 
     // Название каталога для UI
     // Пример: "H&M", "Zara", "KFC", "McDonald's"
@@ -78,6 +81,8 @@ model CatalogConfig {
     about String @default("")
 
     description String?
+
+    currency String @default("₽")
 
     logoUrl String @default("") @map("logo_url")
     bgUrl   String @default("") @map("bg_url")

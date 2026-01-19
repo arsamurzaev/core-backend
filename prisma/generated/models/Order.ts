@@ -9,8 +9,8 @@
  * 🟢 You can import this file directly.
  */
 import type * as runtime from "@prisma/client/runtime/client"
-import type * as $Enums from "../enums"
-import type * as Prisma from "../internal/prismaNamespace"
+import type * as $Enums from "../enums.js"
+import type * as Prisma from "../internal/prismaNamespace.js"
 
 /**
  * Model Order
@@ -36,7 +36,7 @@ export type OrderSumAggregateOutputType = {
 
 export type OrderMinAggregateOutputType = {
   id: string | null
-  status: $Enums.Status | null
+  status: $Enums.OrderStatus | null
   token: string | null
   comment: string | null
   commentByAdmin: string | null
@@ -50,7 +50,7 @@ export type OrderMinAggregateOutputType = {
 
 export type OrderMaxAggregateOutputType = {
   id: string | null
-  status: $Enums.Status | null
+  status: $Enums.OrderStatus | null
   token: string | null
   comment: string | null
   commentByAdmin: string | null
@@ -221,7 +221,7 @@ export type OrderGroupByArgs<ExtArgs extends runtime.Types.Extensions.InternalAr
 
 export type OrderGroupByOutputType = {
   id: string
-  status: $Enums.Status
+  status: $Enums.OrderStatus
   token: string | null
   comment: string | null
   commentByAdmin: string | null
@@ -260,7 +260,7 @@ export type OrderWhereInput = {
   OR?: Prisma.OrderWhereInput[]
   NOT?: Prisma.OrderWhereInput | Prisma.OrderWhereInput[]
   id?: Prisma.UuidFilter<"Order"> | string
-  status?: Prisma.EnumStatusFilter<"Order"> | $Enums.Status
+  status?: Prisma.EnumOrderStatusFilter<"Order"> | $Enums.OrderStatus
   token?: Prisma.StringNullableFilter<"Order"> | string | null
   comment?: Prisma.StringNullableFilter<"Order"> | string | null
   commentByAdmin?: Prisma.StringNullableFilter<"Order"> | string | null
@@ -299,7 +299,7 @@ export type OrderWhereUniqueInput = Prisma.AtLeast<{
   AND?: Prisma.OrderWhereInput | Prisma.OrderWhereInput[]
   OR?: Prisma.OrderWhereInput[]
   NOT?: Prisma.OrderWhereInput | Prisma.OrderWhereInput[]
-  status?: Prisma.EnumStatusFilter<"Order"> | $Enums.Status
+  status?: Prisma.EnumOrderStatusFilter<"Order"> | $Enums.OrderStatus
   token?: Prisma.StringNullableFilter<"Order"> | string | null
   comment?: Prisma.StringNullableFilter<"Order"> | string | null
   commentByAdmin?: Prisma.StringNullableFilter<"Order"> | string | null
@@ -341,7 +341,7 @@ export type OrderScalarWhereWithAggregatesInput = {
   OR?: Prisma.OrderScalarWhereWithAggregatesInput[]
   NOT?: Prisma.OrderScalarWhereWithAggregatesInput | Prisma.OrderScalarWhereWithAggregatesInput[]
   id?: Prisma.UuidWithAggregatesFilter<"Order"> | string
-  status?: Prisma.EnumStatusWithAggregatesFilter<"Order"> | $Enums.Status
+  status?: Prisma.EnumOrderStatusWithAggregatesFilter<"Order"> | $Enums.OrderStatus
   token?: Prisma.StringNullableWithAggregatesFilter<"Order"> | string | null
   comment?: Prisma.StringNullableWithAggregatesFilter<"Order"> | string | null
   commentByAdmin?: Prisma.StringNullableWithAggregatesFilter<"Order"> | string | null
@@ -357,7 +357,7 @@ export type OrderScalarWhereWithAggregatesInput = {
 
 export type OrderCreateInput = {
   id?: string
-  status?: $Enums.Status
+  status?: $Enums.OrderStatus
   token?: string | null
   comment?: string | null
   commentByAdmin?: string | null
@@ -374,7 +374,7 @@ export type OrderCreateInput = {
 
 export type OrderUncheckedCreateInput = {
   id?: string
-  status?: $Enums.Status
+  status?: $Enums.OrderStatus
   token?: string | null
   comment?: string | null
   commentByAdmin?: string | null
@@ -391,7 +391,7 @@ export type OrderUncheckedCreateInput = {
 
 export type OrderUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  status?: Prisma.EnumStatusFieldUpdateOperationsInput | $Enums.Status
+  status?: Prisma.EnumOrderStatusFieldUpdateOperationsInput | $Enums.OrderStatus
   token?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   comment?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   commentByAdmin?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -408,7 +408,7 @@ export type OrderUpdateInput = {
 
 export type OrderUncheckedUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  status?: Prisma.EnumStatusFieldUpdateOperationsInput | $Enums.Status
+  status?: Prisma.EnumOrderStatusFieldUpdateOperationsInput | $Enums.OrderStatus
   token?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   comment?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   commentByAdmin?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -425,7 +425,7 @@ export type OrderUncheckedUpdateInput = {
 
 export type OrderCreateManyInput = {
   id?: string
-  status?: $Enums.Status
+  status?: $Enums.OrderStatus
   token?: string | null
   comment?: string | null
   commentByAdmin?: string | null
@@ -441,7 +441,7 @@ export type OrderCreateManyInput = {
 
 export type OrderUpdateManyMutationInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  status?: Prisma.EnumStatusFieldUpdateOperationsInput | $Enums.Status
+  status?: Prisma.EnumOrderStatusFieldUpdateOperationsInput | $Enums.OrderStatus
   token?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   comment?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   commentByAdmin?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -456,7 +456,7 @@ export type OrderUpdateManyMutationInput = {
 
 export type OrderUncheckedUpdateManyInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  status?: Prisma.EnumStatusFieldUpdateOperationsInput | $Enums.Status
+  status?: Prisma.EnumOrderStatusFieldUpdateOperationsInput | $Enums.OrderStatus
   token?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   comment?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   commentByAdmin?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -591,8 +591,8 @@ export type OrderCreatepaymentProofInput = {
   set: string[]
 }
 
-export type EnumStatusFieldUpdateOperationsInput = {
-  set?: $Enums.Status
+export type EnumOrderStatusFieldUpdateOperationsInput = {
+  set?: $Enums.OrderStatus
 }
 
 export type NullableEnumPaymentMethodFieldUpdateOperationsInput = {
@@ -620,7 +620,7 @@ export type OrderUpdateOneRequiredWithoutItemsNestedInput = {
 
 export type OrderCreateWithoutCatalogInput = {
   id?: string
-  status?: $Enums.Status
+  status?: $Enums.OrderStatus
   token?: string | null
   comment?: string | null
   commentByAdmin?: string | null
@@ -636,7 +636,7 @@ export type OrderCreateWithoutCatalogInput = {
 
 export type OrderUncheckedCreateWithoutCatalogInput = {
   id?: string
-  status?: $Enums.Status
+  status?: $Enums.OrderStatus
   token?: string | null
   comment?: string | null
   commentByAdmin?: string | null
@@ -681,7 +681,7 @@ export type OrderScalarWhereInput = {
   OR?: Prisma.OrderScalarWhereInput[]
   NOT?: Prisma.OrderScalarWhereInput | Prisma.OrderScalarWhereInput[]
   id?: Prisma.UuidFilter<"Order"> | string
-  status?: Prisma.EnumStatusFilter<"Order"> | $Enums.Status
+  status?: Prisma.EnumOrderStatusFilter<"Order"> | $Enums.OrderStatus
   token?: Prisma.StringNullableFilter<"Order"> | string | null
   comment?: Prisma.StringNullableFilter<"Order"> | string | null
   commentByAdmin?: Prisma.StringNullableFilter<"Order"> | string | null
@@ -697,7 +697,7 @@ export type OrderScalarWhereInput = {
 
 export type OrderCreateWithoutItemsInput = {
   id?: string
-  status?: $Enums.Status
+  status?: $Enums.OrderStatus
   token?: string | null
   comment?: string | null
   commentByAdmin?: string | null
@@ -713,7 +713,7 @@ export type OrderCreateWithoutItemsInput = {
 
 export type OrderUncheckedCreateWithoutItemsInput = {
   id?: string
-  status?: $Enums.Status
+  status?: $Enums.OrderStatus
   token?: string | null
   comment?: string | null
   commentByAdmin?: string | null
@@ -745,7 +745,7 @@ export type OrderUpdateToOneWithWhereWithoutItemsInput = {
 
 export type OrderUpdateWithoutItemsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  status?: Prisma.EnumStatusFieldUpdateOperationsInput | $Enums.Status
+  status?: Prisma.EnumOrderStatusFieldUpdateOperationsInput | $Enums.OrderStatus
   token?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   comment?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   commentByAdmin?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -761,7 +761,7 @@ export type OrderUpdateWithoutItemsInput = {
 
 export type OrderUncheckedUpdateWithoutItemsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  status?: Prisma.EnumStatusFieldUpdateOperationsInput | $Enums.Status
+  status?: Prisma.EnumOrderStatusFieldUpdateOperationsInput | $Enums.OrderStatus
   token?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   comment?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   commentByAdmin?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -777,7 +777,7 @@ export type OrderUncheckedUpdateWithoutItemsInput = {
 
 export type OrderCreateManyCatalogInput = {
   id?: string
-  status?: $Enums.Status
+  status?: $Enums.OrderStatus
   token?: string | null
   comment?: string | null
   commentByAdmin?: string | null
@@ -792,7 +792,7 @@ export type OrderCreateManyCatalogInput = {
 
 export type OrderUpdateWithoutCatalogInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  status?: Prisma.EnumStatusFieldUpdateOperationsInput | $Enums.Status
+  status?: Prisma.EnumOrderStatusFieldUpdateOperationsInput | $Enums.OrderStatus
   token?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   comment?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   commentByAdmin?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -808,7 +808,7 @@ export type OrderUpdateWithoutCatalogInput = {
 
 export type OrderUncheckedUpdateWithoutCatalogInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  status?: Prisma.EnumStatusFieldUpdateOperationsInput | $Enums.Status
+  status?: Prisma.EnumOrderStatusFieldUpdateOperationsInput | $Enums.OrderStatus
   token?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   comment?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   commentByAdmin?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -824,7 +824,7 @@ export type OrderUncheckedUpdateWithoutCatalogInput = {
 
 export type OrderUncheckedUpdateManyWithoutCatalogInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
-  status?: Prisma.EnumStatusFieldUpdateOperationsInput | $Enums.Status
+  status?: Prisma.EnumOrderStatusFieldUpdateOperationsInput | $Enums.OrderStatus
   token?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   comment?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   commentByAdmin?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -958,7 +958,7 @@ export type $OrderPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs 
   }
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
-    status: $Enums.Status
+    status: $Enums.OrderStatus
     token: string | null
     comment: string | null
     commentByAdmin: string | null
@@ -1396,7 +1396,7 @@ export interface Prisma__OrderClient<T, Null = never, ExtArgs extends runtime.Ty
  */
 export interface OrderFieldRefs {
   readonly id: Prisma.FieldRef<"Order", 'String'>
-  readonly status: Prisma.FieldRef<"Order", 'Status'>
+  readonly status: Prisma.FieldRef<"Order", 'OrderStatus'>
   readonly token: Prisma.FieldRef<"Order", 'String'>
   readonly comment: Prisma.FieldRef<"Order", 'String'>
   readonly commentByAdmin: Prisma.FieldRef<"Order", 'String'>

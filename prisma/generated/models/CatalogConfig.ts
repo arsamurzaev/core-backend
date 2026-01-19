@@ -9,8 +9,8 @@
  * 🟢 You can import this file directly.
  */
 import type * as runtime from "@prisma/client/runtime/client"
-import type * as $Enums from "../enums"
-import type * as Prisma from "../internal/prismaNamespace"
+import type * as $Enums from "../enums.js"
+import type * as Prisma from "../internal/prismaNamespace.js"
 
 /**
  * Model CatalogConfig
@@ -29,6 +29,7 @@ export type CatalogConfigMinAggregateOutputType = {
   catalogId: string | null
   about: string | null
   description: string | null
+  currency: string | null
   logoUrl: string | null
   bgUrl: string | null
   status: $Enums.CatalogStatus | null
@@ -43,6 +44,7 @@ export type CatalogConfigMaxAggregateOutputType = {
   catalogId: string | null
   about: string | null
   description: string | null
+  currency: string | null
   logoUrl: string | null
   bgUrl: string | null
   status: $Enums.CatalogStatus | null
@@ -57,6 +59,7 @@ export type CatalogConfigCountAggregateOutputType = {
   catalogId: number
   about: number
   description: number
+  currency: number
   logoUrl: number
   bgUrl: number
   status: number
@@ -73,6 +76,7 @@ export type CatalogConfigMinAggregateInputType = {
   catalogId?: true
   about?: true
   description?: true
+  currency?: true
   logoUrl?: true
   bgUrl?: true
   status?: true
@@ -87,6 +91,7 @@ export type CatalogConfigMaxAggregateInputType = {
   catalogId?: true
   about?: true
   description?: true
+  currency?: true
   logoUrl?: true
   bgUrl?: true
   status?: true
@@ -101,6 +106,7 @@ export type CatalogConfigCountAggregateInputType = {
   catalogId?: true
   about?: true
   description?: true
+  currency?: true
   logoUrl?: true
   bgUrl?: true
   status?: true
@@ -188,6 +194,7 @@ export type CatalogConfigGroupByOutputType = {
   catalogId: string
   about: string
   description: string | null
+  currency: string
   logoUrl: string
   bgUrl: string
   status: $Enums.CatalogStatus
@@ -223,6 +230,7 @@ export type CatalogConfigWhereInput = {
   catalogId?: Prisma.UuidFilter<"CatalogConfig"> | string
   about?: Prisma.StringFilter<"CatalogConfig"> | string
   description?: Prisma.StringNullableFilter<"CatalogConfig"> | string | null
+  currency?: Prisma.StringFilter<"CatalogConfig"> | string
   logoUrl?: Prisma.StringFilter<"CatalogConfig"> | string
   bgUrl?: Prisma.StringFilter<"CatalogConfig"> | string
   status?: Prisma.EnumCatalogStatusFilter<"CatalogConfig"> | $Enums.CatalogStatus
@@ -238,6 +246,7 @@ export type CatalogConfigOrderByWithRelationInput = {
   catalogId?: Prisma.SortOrder
   about?: Prisma.SortOrder
   description?: Prisma.SortOrderInput | Prisma.SortOrder
+  currency?: Prisma.SortOrder
   logoUrl?: Prisma.SortOrder
   bgUrl?: Prisma.SortOrder
   status?: Prisma.SortOrder
@@ -256,6 +265,7 @@ export type CatalogConfigWhereUniqueInput = Prisma.AtLeast<{
   NOT?: Prisma.CatalogConfigWhereInput | Prisma.CatalogConfigWhereInput[]
   about?: Prisma.StringFilter<"CatalogConfig"> | string
   description?: Prisma.StringNullableFilter<"CatalogConfig"> | string | null
+  currency?: Prisma.StringFilter<"CatalogConfig"> | string
   logoUrl?: Prisma.StringFilter<"CatalogConfig"> | string
   bgUrl?: Prisma.StringFilter<"CatalogConfig"> | string
   status?: Prisma.EnumCatalogStatusFilter<"CatalogConfig"> | $Enums.CatalogStatus
@@ -271,6 +281,7 @@ export type CatalogConfigOrderByWithAggregationInput = {
   catalogId?: Prisma.SortOrder
   about?: Prisma.SortOrder
   description?: Prisma.SortOrderInput | Prisma.SortOrder
+  currency?: Prisma.SortOrder
   logoUrl?: Prisma.SortOrder
   bgUrl?: Prisma.SortOrder
   status?: Prisma.SortOrder
@@ -291,6 +302,7 @@ export type CatalogConfigScalarWhereWithAggregatesInput = {
   catalogId?: Prisma.UuidWithAggregatesFilter<"CatalogConfig"> | string
   about?: Prisma.StringWithAggregatesFilter<"CatalogConfig"> | string
   description?: Prisma.StringNullableWithAggregatesFilter<"CatalogConfig"> | string | null
+  currency?: Prisma.StringWithAggregatesFilter<"CatalogConfig"> | string
   logoUrl?: Prisma.StringWithAggregatesFilter<"CatalogConfig"> | string
   bgUrl?: Prisma.StringWithAggregatesFilter<"CatalogConfig"> | string
   status?: Prisma.EnumCatalogStatusWithAggregatesFilter<"CatalogConfig"> | $Enums.CatalogStatus
@@ -304,6 +316,7 @@ export type CatalogConfigCreateInput = {
   id?: string
   about?: string
   description?: string | null
+  currency?: string
   logoUrl?: string
   bgUrl?: string
   status?: $Enums.CatalogStatus
@@ -319,6 +332,7 @@ export type CatalogConfigUncheckedCreateInput = {
   catalogId: string
   about?: string
   description?: string | null
+  currency?: string
   logoUrl?: string
   bgUrl?: string
   status?: $Enums.CatalogStatus
@@ -332,6 +346,7 @@ export type CatalogConfigUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   about?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  currency?: Prisma.StringFieldUpdateOperationsInput | string
   logoUrl?: Prisma.StringFieldUpdateOperationsInput | string
   bgUrl?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.EnumCatalogStatusFieldUpdateOperationsInput | $Enums.CatalogStatus
@@ -347,6 +362,7 @@ export type CatalogConfigUncheckedUpdateInput = {
   catalogId?: Prisma.StringFieldUpdateOperationsInput | string
   about?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  currency?: Prisma.StringFieldUpdateOperationsInput | string
   logoUrl?: Prisma.StringFieldUpdateOperationsInput | string
   bgUrl?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.EnumCatalogStatusFieldUpdateOperationsInput | $Enums.CatalogStatus
@@ -361,6 +377,7 @@ export type CatalogConfigCreateManyInput = {
   catalogId: string
   about?: string
   description?: string | null
+  currency?: string
   logoUrl?: string
   bgUrl?: string
   status?: $Enums.CatalogStatus
@@ -374,6 +391,7 @@ export type CatalogConfigUpdateManyMutationInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   about?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  currency?: Prisma.StringFieldUpdateOperationsInput | string
   logoUrl?: Prisma.StringFieldUpdateOperationsInput | string
   bgUrl?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.EnumCatalogStatusFieldUpdateOperationsInput | $Enums.CatalogStatus
@@ -388,6 +406,7 @@ export type CatalogConfigUncheckedUpdateManyInput = {
   catalogId?: Prisma.StringFieldUpdateOperationsInput | string
   about?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  currency?: Prisma.StringFieldUpdateOperationsInput | string
   logoUrl?: Prisma.StringFieldUpdateOperationsInput | string
   bgUrl?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.EnumCatalogStatusFieldUpdateOperationsInput | $Enums.CatalogStatus
@@ -407,6 +426,7 @@ export type CatalogConfigCountOrderByAggregateInput = {
   catalogId?: Prisma.SortOrder
   about?: Prisma.SortOrder
   description?: Prisma.SortOrder
+  currency?: Prisma.SortOrder
   logoUrl?: Prisma.SortOrder
   bgUrl?: Prisma.SortOrder
   status?: Prisma.SortOrder
@@ -421,6 +441,7 @@ export type CatalogConfigMaxOrderByAggregateInput = {
   catalogId?: Prisma.SortOrder
   about?: Prisma.SortOrder
   description?: Prisma.SortOrder
+  currency?: Prisma.SortOrder
   logoUrl?: Prisma.SortOrder
   bgUrl?: Prisma.SortOrder
   status?: Prisma.SortOrder
@@ -435,6 +456,7 @@ export type CatalogConfigMinOrderByAggregateInput = {
   catalogId?: Prisma.SortOrder
   about?: Prisma.SortOrder
   description?: Prisma.SortOrder
+  currency?: Prisma.SortOrder
   logoUrl?: Prisma.SortOrder
   bgUrl?: Prisma.SortOrder
   status?: Prisma.SortOrder
@@ -484,6 +506,7 @@ export type CatalogConfigCreateWithoutCatalogInput = {
   id?: string
   about?: string
   description?: string | null
+  currency?: string
   logoUrl?: string
   bgUrl?: string
   status?: $Enums.CatalogStatus
@@ -497,6 +520,7 @@ export type CatalogConfigUncheckedCreateWithoutCatalogInput = {
   id?: string
   about?: string
   description?: string | null
+  currency?: string
   logoUrl?: string
   bgUrl?: string
   status?: $Enums.CatalogStatus
@@ -526,6 +550,7 @@ export type CatalogConfigUpdateWithoutCatalogInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   about?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  currency?: Prisma.StringFieldUpdateOperationsInput | string
   logoUrl?: Prisma.StringFieldUpdateOperationsInput | string
   bgUrl?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.EnumCatalogStatusFieldUpdateOperationsInput | $Enums.CatalogStatus
@@ -539,6 +564,7 @@ export type CatalogConfigUncheckedUpdateWithoutCatalogInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   about?: Prisma.StringFieldUpdateOperationsInput | string
   description?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  currency?: Prisma.StringFieldUpdateOperationsInput | string
   logoUrl?: Prisma.StringFieldUpdateOperationsInput | string
   bgUrl?: Prisma.StringFieldUpdateOperationsInput | string
   status?: Prisma.EnumCatalogStatusFieldUpdateOperationsInput | $Enums.CatalogStatus
@@ -555,6 +581,7 @@ export type CatalogConfigSelect<ExtArgs extends runtime.Types.Extensions.Interna
   catalogId?: boolean
   about?: boolean
   description?: boolean
+  currency?: boolean
   logoUrl?: boolean
   bgUrl?: boolean
   status?: boolean
@@ -570,6 +597,7 @@ export type CatalogConfigSelectCreateManyAndReturn<ExtArgs extends runtime.Types
   catalogId?: boolean
   about?: boolean
   description?: boolean
+  currency?: boolean
   logoUrl?: boolean
   bgUrl?: boolean
   status?: boolean
@@ -585,6 +613,7 @@ export type CatalogConfigSelectUpdateManyAndReturn<ExtArgs extends runtime.Types
   catalogId?: boolean
   about?: boolean
   description?: boolean
+  currency?: boolean
   logoUrl?: boolean
   bgUrl?: boolean
   status?: boolean
@@ -600,6 +629,7 @@ export type CatalogConfigSelectScalar = {
   catalogId?: boolean
   about?: boolean
   description?: boolean
+  currency?: boolean
   logoUrl?: boolean
   bgUrl?: boolean
   status?: boolean
@@ -609,7 +639,7 @@ export type CatalogConfigSelectScalar = {
   updatedAt?: boolean
 }
 
-export type CatalogConfigOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "catalogId" | "about" | "description" | "logoUrl" | "bgUrl" | "status" | "note" | "deleteAt" | "createdAt" | "updatedAt", ExtArgs["result"]["catalogConfig"]>
+export type CatalogConfigOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "catalogId" | "about" | "description" | "currency" | "logoUrl" | "bgUrl" | "status" | "note" | "deleteAt" | "createdAt" | "updatedAt", ExtArgs["result"]["catalogConfig"]>
 export type CatalogConfigInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   catalog?: boolean | Prisma.CatalogDefaultArgs<ExtArgs>
 }
@@ -630,6 +660,7 @@ export type $CatalogConfigPayload<ExtArgs extends runtime.Types.Extensions.Inter
     catalogId: string
     about: string
     description: string | null
+    currency: string
     logoUrl: string
     bgUrl: string
     status: $Enums.CatalogStatus
@@ -1065,6 +1096,7 @@ export interface CatalogConfigFieldRefs {
   readonly catalogId: Prisma.FieldRef<"CatalogConfig", 'String'>
   readonly about: Prisma.FieldRef<"CatalogConfig", 'String'>
   readonly description: Prisma.FieldRef<"CatalogConfig", 'String'>
+  readonly currency: Prisma.FieldRef<"CatalogConfig", 'String'>
   readonly logoUrl: Prisma.FieldRef<"CatalogConfig", 'String'>
   readonly bgUrl: Prisma.FieldRef<"CatalogConfig", 'String'>
   readonly status: Prisma.FieldRef<"CatalogConfig", 'CatalogStatus'>

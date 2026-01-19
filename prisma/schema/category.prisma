@@ -5,7 +5,7 @@ model Category {
 
     position Int @default(0)
 
-    name       String  @db.Char(255)
+    name       String  @db.VarChar(255)
     imageUrl   String  @default("") @map("image_url")
     descriptor String? @map("descriptor")
 

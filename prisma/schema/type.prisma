@@ -21,11 +21,11 @@ model Type {
     // Программный код типа (используется в URL, API, коде)
     // Пример: "clothing", "restaurant", "electronics"
     // Уникален — нельзя создать два типа с одинаковым кодом
-    code String @unique @db.Char(50)
+    code String @unique @db.VarChar(50)
 
     // Отображаемое название для UI
     // Пример: "Одежда и аксессуары", "Рестораны и кафе"
-    name String @db.Char(255)
+    name String @db.VarChar(255)
 
     // ─── Связи ───
     // Каталоги этого типа (H&M, Zara для clothing)

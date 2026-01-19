@@ -10,7 +10,7 @@
 */
 
 export const Role = {
-  CATALOG_MODERATOR: 'CATALOG_MODERATOR',
+  CATALOG_OWNER: 'CATALOG_OWNER',
   USER: 'USER',
   ADMIN: 'ADMIN'
 } as const
@@ -45,12 +45,12 @@ export const PaymentMethod = {
 export type PaymentMethod = (typeof PaymentMethod)[keyof typeof PaymentMethod]
 
 
-export const Status = {
+export const OrderStatus = {
   PENDING: 'PENDING',
   COMPLETED: 'COMPLETED'
 } as const
 
-export type Status = (typeof Status)[keyof typeof Status]
+export type OrderStatus = (typeof OrderStatus)[keyof typeof OrderStatus]
 
 
 export const Metric = {

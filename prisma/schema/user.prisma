@@ -3,12 +3,15 @@ model User {
 
     name String
 
-    login    String
+    login    String @unique
     password String
 
     role Role
 
-    catalog Catalog[]
+    isEmailConfirmed Boolean
+
+    catalogs Catalog[]
+    regions  Regionality[]
 
     deleteAt  DateTime? @map("delete_at") // Дата удаления 
     createdAt DateTime  @default(now()) @map("created_at")

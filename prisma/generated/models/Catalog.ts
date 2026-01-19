@@ -9,8 +9,8 @@
  * 🟢 You can import this file directly.
  */
 import type * as runtime from "@prisma/client/runtime/client"
-import type * as $Enums from "../enums"
-import type * as Prisma from "../internal/prismaNamespace"
+import type * as $Enums from "../enums.js"
+import type * as Prisma from "../internal/prismaNamespace.js"
 
 /**
  * Model Catalog
@@ -28,6 +28,8 @@ export type CatalogMinAggregateOutputType = {
   id: string | null
   slug: string | null
   domain: string | null
+  login: string | null
+  password: string | null
   name: string | null
   typeId: string | null
   parentId: string | null
@@ -41,6 +43,8 @@ export type CatalogMaxAggregateOutputType = {
   id: string | null
   slug: string | null
   domain: string | null
+  login: string | null
+  password: string | null
   name: string | null
   typeId: string | null
   parentId: string | null
@@ -54,6 +58,8 @@ export type CatalogCountAggregateOutputType = {
   id: number
   slug: number
   domain: number
+  login: number
+  password: number
   name: number
   typeId: number
   parentId: number
@@ -69,6 +75,8 @@ export type CatalogMinAggregateInputType = {
   id?: true
   slug?: true
   domain?: true
+  login?: true
+  password?: true
   name?: true
   typeId?: true
   parentId?: true
@@ -82,6 +90,8 @@ export type CatalogMaxAggregateInputType = {
   id?: true
   slug?: true
   domain?: true
+  login?: true
+  password?: true
   name?: true
   typeId?: true
   parentId?: true
@@ -95,6 +105,8 @@ export type CatalogCountAggregateInputType = {
   id?: true
   slug?: true
   domain?: true
+  login?: true
+  password?: true
   name?: true
   typeId?: true
   parentId?: true
@@ -181,6 +193,8 @@ export type CatalogGroupByOutputType = {
   id: string
   slug: string
   domain: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId: string | null
@@ -215,6 +229,8 @@ export type CatalogWhereInput = {
   id?: Prisma.UuidFilter<"Catalog"> | string
   slug?: Prisma.StringFilter<"Catalog"> | string
   domain?: Prisma.StringNullableFilter<"Catalog"> | string | null
+  login?: Prisma.StringFilter<"Catalog"> | string
+  password?: Prisma.StringFilter<"Catalog"> | string
   name?: Prisma.StringFilter<"Catalog"> | string
   typeId?: Prisma.UuidFilter<"Catalog"> | string
   parentId?: Prisma.UuidNullableFilter<"Catalog"> | string | null
@@ -243,6 +259,8 @@ export type CatalogOrderByWithRelationInput = {
   id?: Prisma.SortOrder
   slug?: Prisma.SortOrder
   domain?: Prisma.SortOrderInput | Prisma.SortOrder
+  login?: Prisma.SortOrder
+  password?: Prisma.SortOrder
   name?: Prisma.SortOrder
   typeId?: Prisma.SortOrder
   parentId?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -270,10 +288,12 @@ export type CatalogOrderByWithRelationInput = {
 export type CatalogWhereUniqueInput = Prisma.AtLeast<{
   id?: string
   slug?: string
+  domain?: string
   AND?: Prisma.CatalogWhereInput | Prisma.CatalogWhereInput[]
   OR?: Prisma.CatalogWhereInput[]
   NOT?: Prisma.CatalogWhereInput | Prisma.CatalogWhereInput[]
-  domain?: Prisma.StringNullableFilter<"Catalog"> | string | null
+  login?: Prisma.StringFilter<"Catalog"> | string
+  password?: Prisma.StringFilter<"Catalog"> | string
   name?: Prisma.StringFilter<"Catalog"> | string
   typeId?: Prisma.UuidFilter<"Catalog"> | string
   parentId?: Prisma.UuidNullableFilter<"Catalog"> | string | null
@@ -296,12 +316,14 @@ export type CatalogWhereUniqueInput = Prisma.AtLeast<{
   category?: Prisma.CategoryListRelationFilter
   order?: Prisma.OrderListRelationFilter
   cart?: Prisma.CartListRelationFilter
-}, "id" | "slug">
+}, "id" | "slug" | "domain">
 
 export type CatalogOrderByWithAggregationInput = {
   id?: Prisma.SortOrder
   slug?: Prisma.SortOrder
   domain?: Prisma.SortOrderInput | Prisma.SortOrder
+  login?: Prisma.SortOrder
+  password?: Prisma.SortOrder
   name?: Prisma.SortOrder
   typeId?: Prisma.SortOrder
   parentId?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -321,6 +343,8 @@ export type CatalogScalarWhereWithAggregatesInput = {
   id?: Prisma.UuidWithAggregatesFilter<"Catalog"> | string
   slug?: Prisma.StringWithAggregatesFilter<"Catalog"> | string
   domain?: Prisma.StringNullableWithAggregatesFilter<"Catalog"> | string | null
+  login?: Prisma.StringWithAggregatesFilter<"Catalog"> | string
+  password?: Prisma.StringWithAggregatesFilter<"Catalog"> | string
   name?: Prisma.StringWithAggregatesFilter<"Catalog"> | string
   typeId?: Prisma.UuidWithAggregatesFilter<"Catalog"> | string
   parentId?: Prisma.UuidNullableWithAggregatesFilter<"Catalog"> | string | null
@@ -334,6 +358,8 @@ export type CatalogCreateInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
@@ -341,7 +367,7 @@ export type CatalogCreateInput = {
   type: Prisma.TypeCreateNestedOneWithoutCatalogsInput
   parent?: Prisma.CatalogCreateNestedOneWithoutChildrenInput
   children?: Prisma.CatalogCreateNestedManyWithoutParentInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutCatalogInput
   activity?: Prisma.ActivityCreateNestedManyWithoutCatalogsInput
   region?: Prisma.RegionalityCreateNestedManyWithoutCatalogsInput
@@ -359,6 +385,8 @@ export type CatalogUncheckedCreateInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -384,6 +412,8 @@ export type CatalogUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -391,7 +421,7 @@ export type CatalogUpdateInput = {
   type?: Prisma.TypeUpdateOneRequiredWithoutCatalogsNestedInput
   parent?: Prisma.CatalogUpdateOneWithoutChildrenNestedInput
   children?: Prisma.CatalogUpdateManyWithoutParentNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutCatalogNestedInput
   activity?: Prisma.ActivityUpdateManyWithoutCatalogsNestedInput
   region?: Prisma.RegionalityUpdateManyWithoutCatalogsNestedInput
@@ -409,6 +439,8 @@ export type CatalogUncheckedUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -434,6 +466,8 @@ export type CatalogCreateManyInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -447,6 +481,8 @@ export type CatalogUpdateManyMutationInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -457,6 +493,8 @@ export type CatalogUncheckedUpdateManyInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -490,6 +528,8 @@ export type CatalogCountOrderByAggregateInput = {
   id?: Prisma.SortOrder
   slug?: Prisma.SortOrder
   domain?: Prisma.SortOrder
+  login?: Prisma.SortOrder
+  password?: Prisma.SortOrder
   name?: Prisma.SortOrder
   typeId?: Prisma.SortOrder
   parentId?: Prisma.SortOrder
@@ -503,6 +543,8 @@ export type CatalogMaxOrderByAggregateInput = {
   id?: Prisma.SortOrder
   slug?: Prisma.SortOrder
   domain?: Prisma.SortOrder
+  login?: Prisma.SortOrder
+  password?: Prisma.SortOrder
   name?: Prisma.SortOrder
   typeId?: Prisma.SortOrder
   parentId?: Prisma.SortOrder
@@ -516,6 +558,8 @@ export type CatalogMinOrderByAggregateInput = {
   id?: Prisma.SortOrder
   slug?: Prisma.SortOrder
   domain?: Prisma.SortOrder
+  login?: Prisma.SortOrder
+  password?: Prisma.SortOrder
   name?: Prisma.SortOrder
   typeId?: Prisma.SortOrder
   parentId?: Prisma.SortOrder
@@ -873,6 +917,8 @@ export type CatalogCreateWithoutActivityInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
@@ -880,7 +926,7 @@ export type CatalogCreateWithoutActivityInput = {
   type: Prisma.TypeCreateNestedOneWithoutCatalogsInput
   parent?: Prisma.CatalogCreateNestedOneWithoutChildrenInput
   children?: Prisma.CatalogCreateNestedManyWithoutParentInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutCatalogInput
   region?: Prisma.RegionalityCreateNestedManyWithoutCatalogsInput
   config?: Prisma.CatalogConfigCreateNestedOneWithoutCatalogInput
@@ -897,6 +943,8 @@ export type CatalogUncheckedCreateWithoutActivityInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -945,6 +993,8 @@ export type CatalogScalarWhereInput = {
   id?: Prisma.UuidFilter<"Catalog"> | string
   slug?: Prisma.StringFilter<"Catalog"> | string
   domain?: Prisma.StringNullableFilter<"Catalog"> | string | null
+  login?: Prisma.StringFilter<"Catalog"> | string
+  password?: Prisma.StringFilter<"Catalog"> | string
   name?: Prisma.StringFilter<"Catalog"> | string
   typeId?: Prisma.UuidFilter<"Catalog"> | string
   parentId?: Prisma.UuidNullableFilter<"Catalog"> | string | null
@@ -958,6 +1008,8 @@ export type CatalogCreateWithoutCartInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
@@ -965,7 +1017,7 @@ export type CatalogCreateWithoutCartInput = {
   type: Prisma.TypeCreateNestedOneWithoutCatalogsInput
   parent?: Prisma.CatalogCreateNestedOneWithoutChildrenInput
   children?: Prisma.CatalogCreateNestedManyWithoutParentInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutCatalogInput
   activity?: Prisma.ActivityCreateNestedManyWithoutCatalogsInput
   region?: Prisma.RegionalityCreateNestedManyWithoutCatalogsInput
@@ -982,6 +1034,8 @@ export type CatalogUncheckedCreateWithoutCartInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -1022,6 +1076,8 @@ export type CatalogUpdateWithoutCartInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -1029,7 +1085,7 @@ export type CatalogUpdateWithoutCartInput = {
   type?: Prisma.TypeUpdateOneRequiredWithoutCatalogsNestedInput
   parent?: Prisma.CatalogUpdateOneWithoutChildrenNestedInput
   children?: Prisma.CatalogUpdateManyWithoutParentNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutCatalogNestedInput
   activity?: Prisma.ActivityUpdateManyWithoutCatalogsNestedInput
   region?: Prisma.RegionalityUpdateManyWithoutCatalogsNestedInput
@@ -1046,6 +1102,8 @@ export type CatalogUncheckedUpdateWithoutCartInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1070,13 +1128,15 @@ export type CatalogCreateWithoutChildrenInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   type: Prisma.TypeCreateNestedOneWithoutCatalogsInput
   parent?: Prisma.CatalogCreateNestedOneWithoutChildrenInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutCatalogInput
   activity?: Prisma.ActivityCreateNestedManyWithoutCatalogsInput
   region?: Prisma.RegionalityCreateNestedManyWithoutCatalogsInput
@@ -1094,6 +1154,8 @@ export type CatalogUncheckedCreateWithoutChildrenInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -1123,13 +1185,15 @@ export type CatalogCreateWithoutParentInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   type: Prisma.TypeCreateNestedOneWithoutCatalogsInput
   children?: Prisma.CatalogCreateNestedManyWithoutParentInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutCatalogInput
   activity?: Prisma.ActivityCreateNestedManyWithoutCatalogsInput
   region?: Prisma.RegionalityCreateNestedManyWithoutCatalogsInput
@@ -1147,6 +1211,8 @@ export type CatalogUncheckedCreateWithoutParentInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   userId?: string | null
@@ -1192,13 +1258,15 @@ export type CatalogUpdateWithoutChildrenInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   type?: Prisma.TypeUpdateOneRequiredWithoutCatalogsNestedInput
   parent?: Prisma.CatalogUpdateOneWithoutChildrenNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutCatalogNestedInput
   activity?: Prisma.ActivityUpdateManyWithoutCatalogsNestedInput
   region?: Prisma.RegionalityUpdateManyWithoutCatalogsNestedInput
@@ -1216,6 +1284,8 @@ export type CatalogUncheckedUpdateWithoutChildrenInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1256,6 +1326,8 @@ export type CatalogCreateWithoutConfigInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
@@ -1263,7 +1335,7 @@ export type CatalogCreateWithoutConfigInput = {
   type: Prisma.TypeCreateNestedOneWithoutCatalogsInput
   parent?: Prisma.CatalogCreateNestedOneWithoutChildrenInput
   children?: Prisma.CatalogCreateNestedManyWithoutParentInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutCatalogInput
   activity?: Prisma.ActivityCreateNestedManyWithoutCatalogsInput
   region?: Prisma.RegionalityCreateNestedManyWithoutCatalogsInput
@@ -1280,6 +1352,8 @@ export type CatalogUncheckedCreateWithoutConfigInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -1320,6 +1394,8 @@ export type CatalogUpdateWithoutConfigInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -1327,7 +1403,7 @@ export type CatalogUpdateWithoutConfigInput = {
   type?: Prisma.TypeUpdateOneRequiredWithoutCatalogsNestedInput
   parent?: Prisma.CatalogUpdateOneWithoutChildrenNestedInput
   children?: Prisma.CatalogUpdateManyWithoutParentNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutCatalogNestedInput
   activity?: Prisma.ActivityUpdateManyWithoutCatalogsNestedInput
   region?: Prisma.RegionalityUpdateManyWithoutCatalogsNestedInput
@@ -1344,6 +1420,8 @@ export type CatalogUncheckedUpdateWithoutConfigInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1368,6 +1446,8 @@ export type CatalogCreateWithoutContactsInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
@@ -1375,7 +1455,7 @@ export type CatalogCreateWithoutContactsInput = {
   type: Prisma.TypeCreateNestedOneWithoutCatalogsInput
   parent?: Prisma.CatalogCreateNestedOneWithoutChildrenInput
   children?: Prisma.CatalogCreateNestedManyWithoutParentInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutCatalogInput
   activity?: Prisma.ActivityCreateNestedManyWithoutCatalogsInput
   region?: Prisma.RegionalityCreateNestedManyWithoutCatalogsInput
@@ -1392,6 +1472,8 @@ export type CatalogUncheckedCreateWithoutContactsInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -1432,6 +1514,8 @@ export type CatalogUpdateWithoutContactsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -1439,7 +1523,7 @@ export type CatalogUpdateWithoutContactsInput = {
   type?: Prisma.TypeUpdateOneRequiredWithoutCatalogsNestedInput
   parent?: Prisma.CatalogUpdateOneWithoutChildrenNestedInput
   children?: Prisma.CatalogUpdateManyWithoutParentNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutCatalogNestedInput
   activity?: Prisma.ActivityUpdateManyWithoutCatalogsNestedInput
   region?: Prisma.RegionalityUpdateManyWithoutCatalogsNestedInput
@@ -1456,6 +1540,8 @@ export type CatalogUncheckedUpdateWithoutContactsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1480,6 +1566,8 @@ export type CatalogCreateWithoutSettingsInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
@@ -1487,7 +1575,7 @@ export type CatalogCreateWithoutSettingsInput = {
   type: Prisma.TypeCreateNestedOneWithoutCatalogsInput
   parent?: Prisma.CatalogCreateNestedOneWithoutChildrenInput
   children?: Prisma.CatalogCreateNestedManyWithoutParentInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutCatalogInput
   activity?: Prisma.ActivityCreateNestedManyWithoutCatalogsInput
   region?: Prisma.RegionalityCreateNestedManyWithoutCatalogsInput
@@ -1504,6 +1592,8 @@ export type CatalogUncheckedCreateWithoutSettingsInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -1544,6 +1634,8 @@ export type CatalogUpdateWithoutSettingsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -1551,7 +1643,7 @@ export type CatalogUpdateWithoutSettingsInput = {
   type?: Prisma.TypeUpdateOneRequiredWithoutCatalogsNestedInput
   parent?: Prisma.CatalogUpdateOneWithoutChildrenNestedInput
   children?: Prisma.CatalogUpdateManyWithoutParentNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutCatalogNestedInput
   activity?: Prisma.ActivityUpdateManyWithoutCatalogsNestedInput
   region?: Prisma.RegionalityUpdateManyWithoutCatalogsNestedInput
@@ -1568,6 +1660,8 @@ export type CatalogUncheckedUpdateWithoutSettingsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1592,6 +1686,8 @@ export type CatalogCreateWithoutCategoryInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
@@ -1599,7 +1695,7 @@ export type CatalogCreateWithoutCategoryInput = {
   type: Prisma.TypeCreateNestedOneWithoutCatalogsInput
   parent?: Prisma.CatalogCreateNestedOneWithoutChildrenInput
   children?: Prisma.CatalogCreateNestedManyWithoutParentInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutCatalogInput
   activity?: Prisma.ActivityCreateNestedManyWithoutCatalogsInput
   region?: Prisma.RegionalityCreateNestedManyWithoutCatalogsInput
@@ -1616,6 +1712,8 @@ export type CatalogUncheckedCreateWithoutCategoryInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -1656,6 +1754,8 @@ export type CatalogUpdateWithoutCategoryInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -1663,7 +1763,7 @@ export type CatalogUpdateWithoutCategoryInput = {
   type?: Prisma.TypeUpdateOneRequiredWithoutCatalogsNestedInput
   parent?: Prisma.CatalogUpdateOneWithoutChildrenNestedInput
   children?: Prisma.CatalogUpdateManyWithoutParentNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutCatalogNestedInput
   activity?: Prisma.ActivityUpdateManyWithoutCatalogsNestedInput
   region?: Prisma.RegionalityUpdateManyWithoutCatalogsNestedInput
@@ -1680,6 +1780,8 @@ export type CatalogUncheckedUpdateWithoutCategoryInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1704,6 +1806,8 @@ export type CatalogCreateWithoutMetricsInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
@@ -1711,7 +1815,7 @@ export type CatalogCreateWithoutMetricsInput = {
   type: Prisma.TypeCreateNestedOneWithoutCatalogsInput
   parent?: Prisma.CatalogCreateNestedOneWithoutChildrenInput
   children?: Prisma.CatalogCreateNestedManyWithoutParentInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutCatalogInput
   activity?: Prisma.ActivityCreateNestedManyWithoutCatalogsInput
   region?: Prisma.RegionalityCreateNestedManyWithoutCatalogsInput
@@ -1728,6 +1832,8 @@ export type CatalogUncheckedCreateWithoutMetricsInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -1768,6 +1874,8 @@ export type CatalogUpdateWithoutMetricsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -1775,7 +1883,7 @@ export type CatalogUpdateWithoutMetricsInput = {
   type?: Prisma.TypeUpdateOneRequiredWithoutCatalogsNestedInput
   parent?: Prisma.CatalogUpdateOneWithoutChildrenNestedInput
   children?: Prisma.CatalogUpdateManyWithoutParentNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutCatalogNestedInput
   activity?: Prisma.ActivityUpdateManyWithoutCatalogsNestedInput
   region?: Prisma.RegionalityUpdateManyWithoutCatalogsNestedInput
@@ -1792,6 +1900,8 @@ export type CatalogUncheckedUpdateWithoutMetricsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1816,6 +1926,8 @@ export type CatalogCreateWithoutOrderInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
@@ -1823,7 +1935,7 @@ export type CatalogCreateWithoutOrderInput = {
   type: Prisma.TypeCreateNestedOneWithoutCatalogsInput
   parent?: Prisma.CatalogCreateNestedOneWithoutChildrenInput
   children?: Prisma.CatalogCreateNestedManyWithoutParentInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutCatalogInput
   activity?: Prisma.ActivityCreateNestedManyWithoutCatalogsInput
   region?: Prisma.RegionalityCreateNestedManyWithoutCatalogsInput
@@ -1840,6 +1952,8 @@ export type CatalogUncheckedCreateWithoutOrderInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -1880,6 +1994,8 @@ export type CatalogUpdateWithoutOrderInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -1887,7 +2003,7 @@ export type CatalogUpdateWithoutOrderInput = {
   type?: Prisma.TypeUpdateOneRequiredWithoutCatalogsNestedInput
   parent?: Prisma.CatalogUpdateOneWithoutChildrenNestedInput
   children?: Prisma.CatalogUpdateManyWithoutParentNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutCatalogNestedInput
   activity?: Prisma.ActivityUpdateManyWithoutCatalogsNestedInput
   region?: Prisma.RegionalityUpdateManyWithoutCatalogsNestedInput
@@ -1904,6 +2020,8 @@ export type CatalogUncheckedUpdateWithoutOrderInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -1928,6 +2046,8 @@ export type CatalogCreateWithoutPaymentsInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
@@ -1935,7 +2055,7 @@ export type CatalogCreateWithoutPaymentsInput = {
   type: Prisma.TypeCreateNestedOneWithoutCatalogsInput
   parent?: Prisma.CatalogCreateNestedOneWithoutChildrenInput
   children?: Prisma.CatalogCreateNestedManyWithoutParentInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   activity?: Prisma.ActivityCreateNestedManyWithoutCatalogsInput
   region?: Prisma.RegionalityCreateNestedManyWithoutCatalogsInput
   config?: Prisma.CatalogConfigCreateNestedOneWithoutCatalogInput
@@ -1952,6 +2072,8 @@ export type CatalogUncheckedCreateWithoutPaymentsInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -1992,6 +2114,8 @@ export type CatalogUpdateWithoutPaymentsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -1999,7 +2123,7 @@ export type CatalogUpdateWithoutPaymentsInput = {
   type?: Prisma.TypeUpdateOneRequiredWithoutCatalogsNestedInput
   parent?: Prisma.CatalogUpdateOneWithoutChildrenNestedInput
   children?: Prisma.CatalogUpdateManyWithoutParentNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   activity?: Prisma.ActivityUpdateManyWithoutCatalogsNestedInput
   region?: Prisma.RegionalityUpdateManyWithoutCatalogsNestedInput
   config?: Prisma.CatalogConfigUpdateOneWithoutCatalogNestedInput
@@ -2016,6 +2140,8 @@ export type CatalogUncheckedUpdateWithoutPaymentsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -2040,6 +2166,8 @@ export type CatalogCreateWithoutProductsInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
@@ -2047,7 +2175,7 @@ export type CatalogCreateWithoutProductsInput = {
   type: Prisma.TypeCreateNestedOneWithoutCatalogsInput
   parent?: Prisma.CatalogCreateNestedOneWithoutChildrenInput
   children?: Prisma.CatalogCreateNestedManyWithoutParentInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutCatalogInput
   activity?: Prisma.ActivityCreateNestedManyWithoutCatalogsInput
   region?: Prisma.RegionalityCreateNestedManyWithoutCatalogsInput
@@ -2064,6 +2192,8 @@ export type CatalogUncheckedCreateWithoutProductsInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -2104,6 +2234,8 @@ export type CatalogUpdateWithoutProductsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -2111,7 +2243,7 @@ export type CatalogUpdateWithoutProductsInput = {
   type?: Prisma.TypeUpdateOneRequiredWithoutCatalogsNestedInput
   parent?: Prisma.CatalogUpdateOneWithoutChildrenNestedInput
   children?: Prisma.CatalogUpdateManyWithoutParentNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutCatalogNestedInput
   activity?: Prisma.ActivityUpdateManyWithoutCatalogsNestedInput
   region?: Prisma.RegionalityUpdateManyWithoutCatalogsNestedInput
@@ -2128,6 +2260,8 @@ export type CatalogUncheckedUpdateWithoutProductsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -2152,6 +2286,8 @@ export type CatalogCreateWithoutRegionInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
@@ -2159,7 +2295,7 @@ export type CatalogCreateWithoutRegionInput = {
   type: Prisma.TypeCreateNestedOneWithoutCatalogsInput
   parent?: Prisma.CatalogCreateNestedOneWithoutChildrenInput
   children?: Prisma.CatalogCreateNestedManyWithoutParentInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutCatalogInput
   activity?: Prisma.ActivityCreateNestedManyWithoutCatalogsInput
   config?: Prisma.CatalogConfigCreateNestedOneWithoutCatalogInput
@@ -2176,6 +2312,8 @@ export type CatalogUncheckedCreateWithoutRegionInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -2221,13 +2359,15 @@ export type CatalogCreateWithoutTypeInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
   updatedAt?: Date | string
   parent?: Prisma.CatalogCreateNestedOneWithoutChildrenInput
   children?: Prisma.CatalogCreateNestedManyWithoutParentInput
-  user?: Prisma.UserCreateNestedOneWithoutCatalogInput
+  user?: Prisma.UserCreateNestedOneWithoutCatalogsInput
   payments?: Prisma.PaymentCreateNestedManyWithoutCatalogInput
   activity?: Prisma.ActivityCreateNestedManyWithoutCatalogsInput
   region?: Prisma.RegionalityCreateNestedManyWithoutCatalogsInput
@@ -2245,6 +2385,8 @@ export type CatalogUncheckedCreateWithoutTypeInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   parentId?: string | null
   userId?: string | null
@@ -2295,6 +2437,8 @@ export type CatalogCreateWithoutUserInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   deleteAt?: Date | string | null
   createdAt?: Date | string
@@ -2319,6 +2463,8 @@ export type CatalogUncheckedCreateWithoutUserInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -2369,6 +2515,8 @@ export type CatalogUpdateWithoutActivityInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -2376,7 +2524,7 @@ export type CatalogUpdateWithoutActivityInput = {
   type?: Prisma.TypeUpdateOneRequiredWithoutCatalogsNestedInput
   parent?: Prisma.CatalogUpdateOneWithoutChildrenNestedInput
   children?: Prisma.CatalogUpdateManyWithoutParentNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutCatalogNestedInput
   region?: Prisma.RegionalityUpdateManyWithoutCatalogsNestedInput
   config?: Prisma.CatalogConfigUpdateOneWithoutCatalogNestedInput
@@ -2393,6 +2541,8 @@ export type CatalogUncheckedUpdateWithoutActivityInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -2417,6 +2567,8 @@ export type CatalogUncheckedUpdateManyWithoutActivityInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -2430,6 +2582,8 @@ export type CatalogCreateManyParentInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   userId?: string | null
@@ -2442,13 +2596,15 @@ export type CatalogUpdateWithoutParentInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   type?: Prisma.TypeUpdateOneRequiredWithoutCatalogsNestedInput
   children?: Prisma.CatalogUpdateManyWithoutParentNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutCatalogNestedInput
   activity?: Prisma.ActivityUpdateManyWithoutCatalogsNestedInput
   region?: Prisma.RegionalityUpdateManyWithoutCatalogsNestedInput
@@ -2466,6 +2622,8 @@ export type CatalogUncheckedUpdateWithoutParentInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   userId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -2490,6 +2648,8 @@ export type CatalogUncheckedUpdateManyWithoutParentInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   userId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -2502,6 +2662,8 @@ export type CatalogUpdateWithoutRegionInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -2509,7 +2671,7 @@ export type CatalogUpdateWithoutRegionInput = {
   type?: Prisma.TypeUpdateOneRequiredWithoutCatalogsNestedInput
   parent?: Prisma.CatalogUpdateOneWithoutChildrenNestedInput
   children?: Prisma.CatalogUpdateManyWithoutParentNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutCatalogNestedInput
   activity?: Prisma.ActivityUpdateManyWithoutCatalogsNestedInput
   config?: Prisma.CatalogConfigUpdateOneWithoutCatalogNestedInput
@@ -2526,6 +2688,8 @@ export type CatalogUncheckedUpdateWithoutRegionInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -2550,6 +2714,8 @@ export type CatalogUncheckedUpdateManyWithoutRegionInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -2563,6 +2729,8 @@ export type CatalogCreateManyTypeInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   parentId?: string | null
   userId?: string | null
@@ -2575,13 +2743,15 @@ export type CatalogUpdateWithoutTypeInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   parent?: Prisma.CatalogUpdateOneWithoutChildrenNestedInput
   children?: Prisma.CatalogUpdateManyWithoutParentNestedInput
-  user?: Prisma.UserUpdateOneWithoutCatalogNestedInput
+  user?: Prisma.UserUpdateOneWithoutCatalogsNestedInput
   payments?: Prisma.PaymentUpdateManyWithoutCatalogNestedInput
   activity?: Prisma.ActivityUpdateManyWithoutCatalogsNestedInput
   region?: Prisma.RegionalityUpdateManyWithoutCatalogsNestedInput
@@ -2599,6 +2769,8 @@ export type CatalogUncheckedUpdateWithoutTypeInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   userId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -2623,6 +2795,8 @@ export type CatalogUncheckedUpdateManyWithoutTypeInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   userId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -2635,6 +2809,8 @@ export type CatalogCreateManyUserInput = {
   id?: string
   slug: string
   domain?: string | null
+  login: string
+  password: string
   name: string
   typeId: string
   parentId?: string | null
@@ -2647,6 +2823,8 @@ export type CatalogUpdateWithoutUserInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   deleteAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -2671,6 +2849,8 @@ export type CatalogUncheckedUpdateWithoutUserInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -2695,6 +2875,8 @@ export type CatalogUncheckedUpdateManyWithoutUserInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   slug?: Prisma.StringFieldUpdateOperationsInput | string
   domain?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  login?: Prisma.StringFieldUpdateOperationsInput | string
+  password?: Prisma.StringFieldUpdateOperationsInput | string
   name?: Prisma.StringFieldUpdateOperationsInput | string
   typeId?: Prisma.StringFieldUpdateOperationsInput | string
   parentId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -2819,6 +3001,8 @@ export type CatalogSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs 
   id?: boolean
   slug?: boolean
   domain?: boolean
+  login?: boolean
+  password?: boolean
   name?: boolean
   typeId?: boolean
   parentId?: boolean
@@ -2848,6 +3032,8 @@ export type CatalogSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Exten
   id?: boolean
   slug?: boolean
   domain?: boolean
+  login?: boolean
+  password?: boolean
   name?: boolean
   typeId?: boolean
   parentId?: boolean
@@ -2864,6 +3050,8 @@ export type CatalogSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Exten
   id?: boolean
   slug?: boolean
   domain?: boolean
+  login?: boolean
+  password?: boolean
   name?: boolean
   typeId?: boolean
   parentId?: boolean
@@ -2880,6 +3068,8 @@ export type CatalogSelectScalar = {
   id?: boolean
   slug?: boolean
   domain?: boolean
+  login?: boolean
+  password?: boolean
   name?: boolean
   typeId?: boolean
   parentId?: boolean
@@ -2889,7 +3079,7 @@ export type CatalogSelectScalar = {
   updatedAt?: boolean
 }
 
-export type CatalogOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "slug" | "domain" | "name" | "typeId" | "parentId" | "userId" | "deleteAt" | "createdAt" | "updatedAt", ExtArgs["result"]["catalog"]>
+export type CatalogOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "slug" | "domain" | "login" | "password" | "name" | "typeId" | "parentId" | "userId" | "deleteAt" | "createdAt" | "updatedAt", ExtArgs["result"]["catalog"]>
 export type CatalogInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   type?: boolean | Prisma.TypeDefaultArgs<ExtArgs>
   parent?: boolean | Prisma.Catalog$parentArgs<ExtArgs>
@@ -2942,6 +3132,8 @@ export type $CatalogPayload<ExtArgs extends runtime.Types.Extensions.InternalArg
     id: string
     slug: string
     domain: string | null
+    login: string
+    password: string
     name: string
     typeId: string
     parentId: string | null
@@ -3390,6 +3582,8 @@ export interface CatalogFieldRefs {
   readonly id: Prisma.FieldRef<"Catalog", 'String'>
   readonly slug: Prisma.FieldRef<"Catalog", 'String'>
   readonly domain: Prisma.FieldRef<"Catalog", 'String'>
+  readonly login: Prisma.FieldRef<"Catalog", 'String'>
+  readonly password: Prisma.FieldRef<"Catalog", 'String'>
   readonly name: Prisma.FieldRef<"Catalog", 'String'>
   readonly typeId: Prisma.FieldRef<"Catalog", 'String'>
   readonly parentId: Prisma.FieldRef<"Catalog", 'String'>

@@ -1,6 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common'
-
-import { prismaSafe } from '@/shared/prisma/prisma-error.helper'
+import { Injectable } from '@nestjs/common'
 
 import { CreateTypeDtoReq } from './dto/req/create-type.dto.req'
 import { TypeRepository } from './type.repository'
@@ -10,27 +8,16 @@ export class TypeService {
 	constructor(private readonly repo: TypeRepository) {}
 
 	async getAll() {
-		return prismaSafe(async () => {
-			const types = await this.repo.findAll()
-
-			return types
-		})
+		return this.repo.findAll()
 	}
 
 	async create(dto: CreateTypeDtoReq) {
-		return prismaSafe(
-			async () => {
-				const exists = await this.repo.findByCode(dto.code)
-				if (exists) {
-					throw new BadRequestException('Тип с таким кодом уже существует')
-				}
+		return this.repo.create(dto)
+	}
 
-				const type = await this.repo.create(dto)
-				return { id: type.id }
-			},
-			{
-				uniqueMessage: 'Тип с таким кодом уже существует'
-			}
-		)
+	async delete(id: string) {
+		await this.repo.delete(id)
+
+		return { ok: true }
 	}
 }
