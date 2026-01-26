@@ -10,6 +10,9 @@ export type RequestContextStore = {
 	typeId?: string
 
 	ownerUserId?: string | null
+
+	// bypass tenant scoping for SkipCatalog routes
+	skipCatalog?: boolean
 }
 
 export class RequestContext {

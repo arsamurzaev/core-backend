@@ -1,6 +1,16 @@
 import { Role } from '@generated/client'
 import { Controller, Get, Param, Query, Res, UseGuards } from '@nestjs/common'
-import { ApiOperation } from '@nestjs/swagger'
+import {
+	ApiForbiddenResponse,
+	ApiFoundResponse,
+	ApiNotFoundResponse,
+	ApiOperation,
+	ApiParam,
+	ApiQuery,
+	ApiSecurity,
+	ApiTags,
+	ApiUnauthorizedResponse
+} from '@nestjs/swagger'
 import type { Response } from 'express'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
@@ -10,6 +20,8 @@ import { SessionGuard } from '../auth/guards/session.guard'
 import { HandoffService } from '../auth/handoff/handoff.service'
 
 // Тут поставь guard админ-панели, который уже делает req.user
+@ApiTags('Admin')
+@ApiSecurity('csrf')
 @UseGuards(SessionGuard)
 @Controller('/admin/sso')
 export class AdminSsoController {
@@ -24,6 +36,19 @@ export class AdminSsoController {
 	})
 	@Roles(Role.ADMIN)
 	@Get('/catalog/:catalogId')
+	@ApiParam({
+		name: 'catalogId',
+		description: 'Catalog id'
+	})
+	@ApiQuery({
+		name: 'next',
+		required: false,
+		description: 'Path to redirect after SSO'
+	})
+	@ApiFoundResponse({ description: 'Redirects to the SSO URL' })
+	@ApiNotFoundResponse({ description: 'Catalog not found' })
+	@ApiUnauthorizedResponse({ description: 'Not authenticated' })
+	@ApiForbiddenResponse({ description: 'Not enough permissions' })
 	async enter(
 		@Param('catalogId') catalogId: string,
 		@Query('next') next: string | undefined,

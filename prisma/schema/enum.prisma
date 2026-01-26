@@ -126,3 +126,23 @@ enum LeadStatus {
     DISQUALIFIED
     EXPIRED
 }
+
+enum SeoEntityType {
+    CATALOG
+    CATEGORY
+    PRODUCT
+    PAGE
+    BRAND
+    ARTICLE
+    OTHER
+}
+
+enum SeoChangeFreq {
+    ALWAYS
+    HOURLY
+    DAILY
+    WEEKLY
+    MONTHLY
+    YEARLY
+    NEVER
+}

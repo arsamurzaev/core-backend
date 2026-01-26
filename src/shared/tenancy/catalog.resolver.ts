@@ -43,13 +43,18 @@ export class CatalogResolver {
 		const cached = this.getCached(key)
 		if (cached !== undefined) return cached
 
-		const catalog = await this.prisma.catalog.findUnique({
-			where: { slug },
+		const catalog = await this.prisma.catalog.findFirst({
+			where: { slug, deleteAt: null },
 			select: { id: true, slug: true, typeId: true, userId: true }
 		})
 
 		const value = catalog
-			? { catalogId: catalog.id, slug: catalog.slug, typeId: catalog.typeId }
+			? {
+					catalogId: catalog.id,
+					slug: catalog.slug,
+					typeId: catalog.typeId,
+					ownerUserId: catalog.userId ?? null
+				}
 			: null
 
 		this.setCached(key, value)
@@ -62,13 +67,18 @@ export class CatalogResolver {
 		if (cached !== undefined) return cached
 
 		// Лучше если domain в Prisma: domain String? @unique
-		const catalog = await this.prisma.catalog.findUnique({
-			where: { domain },
+		const catalog = await this.prisma.catalog.findFirst({
+			where: { domain, deleteAt: null },
 			select: { id: true, slug: true, typeId: true, userId: true }
 		})
 
 		const value = catalog
-			? { catalogId: catalog.id, slug: catalog.slug, typeId: catalog.typeId }
+			? {
+					catalogId: catalog.id,
+					slug: catalog.slug,
+					typeId: catalog.typeId,
+					ownerUserId: catalog.userId ?? null
+				}
 			: null
 
 		this.setCached(key, value)

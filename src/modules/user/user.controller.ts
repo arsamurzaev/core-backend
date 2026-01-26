@@ -1,5 +1,5 @@
 import { Body, Controller, Post, Res } from '@nestjs/common'
-import { ApiOperation } from '@nestjs/swagger'
+import { ApiCreatedResponse, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { type Response } from 'express'
 
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
@@ -7,12 +7,16 @@ import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 import { CreateUserDtoReq } from './dto/requests/create-user.dto.req'
 import { UserService } from './user.service'
 
+@ApiTags('User')
 @SkipCatalog()
 @Controller('user')
 export class UserController {
 	constructor(private readonly userService: UserService) {}
 
 	@Post('register')
+	@ApiCreatedResponse({
+		description: 'User registered and session cookies set'
+	})
 	@ApiOperation({ summary: 'Регистрация пользователя' })
 	async register(@Body() dto: CreateUserDtoReq, @Res() res: Response) {
 		const { sid, csrf } = await this.userService.register(dto)

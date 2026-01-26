@@ -103,12 +103,6 @@ export class SessionGuard implements CanActivate {
 			const have = ROLE_RANK[user.role]
 			if (have < need) throw new ForbiddenException('Недостаточно прав')
 		}
-
-		// доступ к каталогу
-		if (user.role === Role.ADMIN) return true
-
-
-		// USER в каталог-админку не пускаем (без таблиц доступа иначе невозможно контролировать)
-		throw new ForbiddenException('Нет доступа')
+		return true
 	}
 }

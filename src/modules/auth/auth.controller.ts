@@ -1,4 +1,11 @@
 import { Controller, Post, Res, UseGuards } from '@nestjs/common'
+import {
+	ApiOkResponse,
+	ApiOperation,
+	ApiSecurity,
+	ApiTags,
+	ApiUnauthorizedResponse
+} from '@nestjs/swagger'
 import type { Response } from 'express'
 
 import { SessionGuard } from './guards/session.guard'
@@ -9,12 +16,17 @@ const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
 const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'strict') as 'strict' | 'lax'
 const isProd = process.env.NODE_ENV === 'production'
 
+@ApiTags('Auth')
 @Controller('/auth')
 export class AuthController {
 	constructor(private readonly sessions: SessionService) {}
 
 	@UseGuards(SessionGuard)
 	@Post('/logout')
+	@ApiOperation({ summary: 'Logout' })
+	@ApiSecurity('csrf')
+	@ApiOkResponse({ description: 'Session cleared' })
+	@ApiUnauthorizedResponse({ description: 'Not authenticated' })
 	async logout(@Res({ passthrough: true }) res: Response) {
 		const sid = (res.req as any).sessionId as string | undefined
 		if (sid) await this.sessions.destroy(sid)

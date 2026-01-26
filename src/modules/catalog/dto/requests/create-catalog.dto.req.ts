@@ -1,24 +1,79 @@
 import { CatalogStatus } from '@generated/enums'
-import { ApiProperty } from '@nestjs/swagger'
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
 import {
 	IsEnum,
 	IsNotEmpty,
+	IsOptional,
 	IsString,
+	Matches,
 	MaxLength,
 	MinLength
 } from 'class-validator'
 
+const SLUG_PATTERN = /^[a-z0-9-]+$/
+const DOMAIN_PATTERN = /^[a-z0-9.-]+$/
+
 export class CreateCatalogDtoReq {
 	@ApiProperty({ type: String, example: 'catalog' })
+	@Transform(({ value }) =>
+		value === undefined ? value : String(value).trim().toLowerCase()
+	)
+	@Matches(SLUG_PATTERN)
 	@IsString({ message: 'Идентификатор каталога должен быть строкой' })
 	@IsNotEmpty({ message: 'Идентификатор каталога не должен быть пустым' })
 	slug: string
+
+	@ApiPropertyOptional({
+		type: String,
+		example: 'example.com',
+		nullable: true
+	})
+	@IsOptional()
+	@IsString()
+	@Matches(DOMAIN_PATTERN)
+	@Transform(({ value }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		const normalized = String(value).trim().toLowerCase()
+		return normalized.length ? normalized : null
+	})
+	domain?: string | null
 
 	@ApiProperty({ type: String, example: 'type ID' })
 	@IsString({ message: 'Тип каталога должен быть строкой' })
 	@IsNotEmpty({ message: 'Тип каталога не должен быть пустым' })
 	typeId: string
+
+	@ApiPropertyOptional({
+		type: String,
+		example: 'parent ID',
+		nullable: true
+	})
+	@IsOptional()
+	@IsString()
+	@Transform(({ value }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		const normalized = String(value).trim()
+		return normalized.length ? normalized : null
+	})
+	parentId?: string | null
+
+	@ApiPropertyOptional({
+		type: String,
+		example: 'user ID',
+		nullable: true
+	})
+	@IsOptional()
+	@IsString()
+	@Transform(({ value }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		const normalized = String(value).trim()
+		return normalized.length ? normalized : null
+	})
+	userId?: string | null
 
 	@ApiProperty({ type: String, example: 'Каталог' })
 	@IsString({ message: 'Название каталога должно быть строкой' })

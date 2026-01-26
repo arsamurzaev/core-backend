@@ -1,20 +1,33 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { SeoController } from './seo.controller';
-import { SeoService } from './seo.service';
+import { Test, TestingModule } from '@nestjs/testing'
+
+import { SeoController } from './seo.controller'
+import { SeoService } from './seo.service'
 
 describe('SeoController', () => {
-  let controller: SeoController;
+	let controller: SeoController
 
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      controllers: [SeoController],
-      providers: [SeoService],
-    }).compile();
+	beforeEach(async () => {
+		const module: TestingModule = await Test.createTestingModule({
+			controllers: [SeoController],
+			providers: [
+				{
+					provide: SeoService,
+					useValue: {
+						getAll: jest.fn(),
+						getByEntity: jest.fn(),
+						getById: jest.fn(),
+						create: jest.fn(),
+						update: jest.fn(),
+						remove: jest.fn()
+					}
+				}
+			]
+		}).compile()
 
-    controller = module.get<SeoController>(SeoController);
-  });
+		controller = module.get<SeoController>(SeoController)
+	})
 
-  it('should be defined', () => {
-    expect(controller).toBeDefined();
-  });
-});
+	it('should be defined', () => {
+		expect(controller).toBeDefined()
+	})
+})

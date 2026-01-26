@@ -1,11 +1,12 @@
 import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common'
-import { ApiOperation } from '@nestjs/swagger'
+import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger'
 
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
 import { CreateTypeDtoReq } from './dto/req/create-type.dto.req'
 import { TypeService } from './type.service'
 
+@ApiTags('Type')
 @SkipCatalog()
 @Controller('type')
 export class TypeController {
@@ -34,6 +35,10 @@ export class TypeController {
 		description: 'Удаление'
 	})
 	@Delete('/:id')
+	@ApiParam({
+		description: 'Type id',
+		name: 'id'
+	})
 	async delete(@Param('id') id: string) {
 		return this.typeService.delete(id)
 	}

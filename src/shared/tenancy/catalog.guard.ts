@@ -19,7 +19,12 @@ export class CatalogGuard implements CanActivate {
 			context.getHandler(),
 			context.getClass()
 		])
-		if (skip) return true
+		if (skip) {
+			if (RequestContext.get()) {
+				RequestContext.patch({ skipCatalog: true })
+			}
+			return true
+		}
 
 		const store = RequestContext.get()
 		if (!store) {

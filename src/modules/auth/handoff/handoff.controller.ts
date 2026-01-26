@@ -7,6 +7,14 @@ import {
 	Res,
 	UnauthorizedException
 } from '@nestjs/common'
+import {
+	ApiForbiddenResponse,
+	ApiFoundResponse,
+	ApiOperation,
+	ApiQuery,
+	ApiTags,
+	ApiUnauthorizedResponse
+} from '@nestjs/swagger'
 import type { Response } from 'express'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
@@ -28,6 +36,7 @@ function sanitizeNext(next?: string): string {
 	return next
 }
 
+@ApiTags('Auth')
 @Controller('/auth')
 export class HandoffController {
 	constructor(
@@ -37,6 +46,22 @@ export class HandoffController {
 	) {}
 
 	@Get('/handoff')
+	@ApiOperation({ summary: 'Exchange handoff token and redirect' })
+	@ApiQuery({
+		name: 'token',
+		required: true,
+		description: 'Handoff token'
+	})
+	@ApiQuery({
+		name: 'next',
+		required: false,
+		description: 'Redirect path override'
+	})
+	@ApiFoundResponse({
+		description: 'Redirects to target path and sets session cookies'
+	})
+	@ApiUnauthorizedResponse({ description: 'Token invalid or expired' })
+	@ApiForbiddenResponse({ description: 'Token not valid for catalog' })
 	async exchange(
 		@Query('token') token: string,
 		@Query('next') next: string | undefined,
