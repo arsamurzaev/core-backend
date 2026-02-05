@@ -32,9 +32,7 @@ export class CreateAttributeDtoReq {
 	key: string
 
 	@ApiProperty({ type: String, example: 'Brand' })
-	@Transform(({ value }) =>
-		value === undefined ? value : String(value).trim()
-	)
+	@Transform(({ value }) => (value === undefined ? value : String(value).trim()))
 	@IsString()
 	@IsNotEmpty()
 	@MaxLength(255)

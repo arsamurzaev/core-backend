@@ -1,9 +1,9 @@
 import {
-    CanActivate,
-    ExecutionContext,
-    Injectable,
-    InternalServerErrorException,
-    NotFoundException
+	CanActivate,
+	ExecutionContext,
+	Injectable,
+	InternalServerErrorException,
+	NotFoundException
 } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
 
@@ -27,6 +27,9 @@ export class CatalogGuard implements CanActivate {
 		}
 
 		const store = RequestContext.get()
+		if (store?.skipCatalog) {
+			return true
+		}
 		if (!store) {
 			throw new InternalServerErrorException(
 				'RequestContext not initialized (middleware not applied)'

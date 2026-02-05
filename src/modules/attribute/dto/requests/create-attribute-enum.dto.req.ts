@@ -21,9 +21,7 @@ export class CreateAttributeEnumDtoReq {
 
 	@ApiPropertyOptional({ type: String, example: 'XS' })
 	@IsOptional()
-	@Transform(({ value }) =>
-		value === undefined ? value : String(value).trim()
-	)
+	@Transform(({ value }) => (value === undefined ? value : String(value).trim()))
 	@IsString()
 	@MaxLength(255)
 	displayName?: string

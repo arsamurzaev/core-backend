@@ -24,9 +24,7 @@ export class CreateProductDtoReq {
 	@IsString()
 	@IsNotEmpty()
 	@Matches(SKU_PATTERN)
-	@Transform(({ value }) =>
-		value === undefined ? value : String(value).trim()
-	)
+	@Transform(({ value }) => (value === undefined ? value : String(value).trim()))
 	sku: string
 
 	@ApiProperty({ type: String, example: 'Basic T-Shirt' })

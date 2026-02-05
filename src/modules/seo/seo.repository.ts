@@ -60,11 +60,7 @@ export class SeoRepository {
 		})
 	}
 
-	findByEntity(
-		catalogId: string,
-		entityType: SeoEntityType,
-		entityId: string
-	) {
+	findByEntity(catalogId: string, entityType: SeoEntityType, entityId: string) {
 		return this.prisma.seoSetting.findFirst({
 			where: { catalogId, entityType, entityId, deleteAt: null },
 			select: seoSelect
@@ -78,11 +74,7 @@ export class SeoRepository {
 		})
 	}
 
-	async update(
-		id: string,
-		catalogId: string,
-		data: SeoSettingUpdateInput
-	) {
+	async update(id: string, catalogId: string, data: SeoSettingUpdateInput) {
 		const result = await this.prisma.seoSetting.updateMany({
 			where: { id, catalogId, deleteAt: null },
 			data

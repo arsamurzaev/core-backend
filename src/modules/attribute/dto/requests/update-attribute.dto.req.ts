@@ -27,9 +27,7 @@ export class UpdateAttributeDtoReq {
 
 	@ApiPropertyOptional({ type: String, example: 'Brand' })
 	@IsOptional()
-	@Transform(({ value }) =>
-		value === undefined ? value : String(value).trim()
-	)
+	@Transform(({ value }) => (value === undefined ? value : String(value).trim()))
 	@IsString()
 	@MaxLength(255)
 	displayName?: string

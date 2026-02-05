@@ -87,8 +87,10 @@ export class SeoService {
 			twitterSite: normalizeOptionalString(dto.twitterSite),
 			twitterCreator: normalizeOptionalString(dto.twitterCreator),
 			hreflang: dto.hreflang ?? undefined,
-			structuredData: dto.structuredData ?? undefined,
-			extras: dto.extras ?? undefined,
+			structuredData: dto.structuredData
+				? JSON.stringify(dto.structuredData)
+				: undefined,
+			extras: dto.extras ? JSON.stringify(dto.extras) : undefined,
 			sitemapPriority: dto.sitemapPriority ?? undefined,
 			sitemapChangeFreq: dto.sitemapChangeFreq ?? undefined
 		}
@@ -182,11 +184,14 @@ export class SeoService {
 		if (dto.hreflang !== undefined) {
 			data.hreflang = dto.hreflang
 		}
+
 		if (dto.structuredData !== undefined) {
 			data.structuredData = dto.structuredData
+				? JSON.stringify(dto.structuredData)
+				: undefined
 		}
 		if (dto.extras !== undefined) {
-			data.extras = dto.extras
+			data.extras = dto.extras ? JSON.stringify(dto.extras) : undefined
 		}
 		if (dto.sitemapPriority !== undefined) {
 			data.sitemapPriority = dto.sitemapPriority

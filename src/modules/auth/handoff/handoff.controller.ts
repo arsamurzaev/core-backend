@@ -4,6 +4,7 @@ import {
 	ForbiddenException,
 	Get,
 	Query,
+	Req,
 	Res,
 	UnauthorizedException
 } from '@nestjs/common'
@@ -15,17 +16,19 @@ import {
 	ApiTags,
 	ApiUnauthorizedResponse
 } from '@nestjs/swagger'
-import type { Response } from 'express'
+import type { Request, Response } from 'express'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { getClientInfo } from '@/shared/http/utils/client-info'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
-import { SessionService } from '../session/session.service'
+import { AuthService } from '../auth.service'
+
 import { HandoffService } from './handoff.service'
 
 const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
 const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
-const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'strict') as 'strict' | 'lax'
+const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'lax') as 'strict' | 'lax'
 const isProd = process.env.NODE_ENV === 'production'
 
 function sanitizeNext(next?: string): string {
@@ -41,7 +44,7 @@ function sanitizeNext(next?: string): string {
 export class HandoffController {
 	constructor(
 		private readonly handoff: HandoffService,
-		private readonly sessions: SessionService,
+		private readonly auth: AuthService,
 		private readonly prisma: PrismaService
 	) {}
 
@@ -65,6 +68,7 @@ export class HandoffController {
 	async exchange(
 		@Query('token') token: string,
 		@Query('next') next: string | undefined,
+		@Req() req: Request,
 		@Res() res: Response
 	) {
 		const store = RequestContext.mustGet()
@@ -94,7 +98,12 @@ export class HandoffController {
 			}
 		}
 
-		const { sid, csrf } = await this.sessions.createForUser(payload.userId)
+		const { ip, userAgent } = getClientInfo(req)
+		const { sid, csrf } = await this.auth.createSessionForUser(
+			payload.userId,
+			{ ip, userAgent },
+			store.catalogId
+		)
 
 		res.setHeader('Cache-Control', 'no-store')
 

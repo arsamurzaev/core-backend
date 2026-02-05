@@ -1,2 +1,1 @@
-export * from './all-configs.interface';
-
+export * from './all-configs.interface'

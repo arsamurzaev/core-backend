@@ -1,9 +1,20 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, NestMiddleware } from '@nestjs/common'
 import type { NextFunction, Request, Response } from 'express'
 import { randomUUID } from 'node:crypto'
 
 import { CatalogResolver } from './catalog.resolver'
 import { RequestContext, type RequestContextStore } from './request-context'
+
+function isSwaggerRoute(req: Request): boolean {
+	const url = req.originalUrl ?? req.url ?? ''
+	const path = url.split('?')[0] ?? ''
+	return (
+		path.startsWith('/docs') ||
+		path === '/openapi.json' ||
+		path === '/openapi.yaml'
+	)
+}
 
 function normalizeHost(raw: string): string {
 	let host = raw.split(',')[0]?.trim().toLowerCase() ?? ''
@@ -82,6 +93,20 @@ export class CatalogContextMiddleware implements NestMiddleware {
 
 		_res.setHeader('x-request-id', requestId)
 
+		if (isSwaggerRoute(req)) {
+			const store: RequestContextStore = {
+				requestId,
+				host,
+				skipCatalog: true
+			}
+
+			RequestContext.run(store, () => {
+				;(req as any).requestId = requestId
+				next()
+			})
+			return
+		}
+
 		try {
 			const slug = extractSlug(host)
 
@@ -105,7 +130,7 @@ export class CatalogContextMiddleware implements NestMiddleware {
 				next()
 			})
 		} catch (err) {
-			next(err as any)
+			next(err)
 		}
 	}
 }

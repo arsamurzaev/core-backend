@@ -4,7 +4,7 @@ import { hash } from 'argon2'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
-import { SessionService } from '../auth/session/session.service'
+import { AuthService } from '../auth/auth.service'
 
 import { CreateUserDtoReq } from './dto/requests/create-user.dto.req'
 
@@ -12,13 +12,21 @@ import { CreateUserDtoReq } from './dto/requests/create-user.dto.req'
 export class UserService {
 	constructor(
 		private readonly prisma: PrismaService,
-		private readonly sessionService: SessionService
+		private readonly authService: AuthService
 	) {}
 
-	async register(dto: CreateUserDtoReq) {
+	async register(
+		dto: CreateUserDtoReq,
+		meta?: { ip?: string | null; userAgent?: string | null }
+	) {
 		const { login, password, role, regionalityIds, name } = dto
 
-		const hashedPassword = await hash(password) 
+		const hashedPassword = await hash(password)
+
+		const regionConnect =
+			regionalityIds && regionalityIds.length > 0
+				? { connect: regionalityIds.map(regionalityId => ({ id: regionalityId })) }
+				: undefined
 
 		const formatDto: Prisma.UserCreateInput = {
 			name,
@@ -26,9 +34,7 @@ export class UserService {
 			password: hashedPassword,
 			isEmailConfirmed: false,
 			role,
-			regions: {
-				connect: regionalityIds.map(regionalityId => ({ id: regionalityId }))
-			}
+			...(regionConnect ? { regions: regionConnect } : {})
 		}
 
 		const existUser = await this.prisma.user.findFirst({ where: { login } })
@@ -38,7 +44,7 @@ export class UserService {
 
 		const user = await this.prisma.user.create({ data: formatDto })
 
-		const token = await this.sessionService.createForUser(user.id)
+		const token = await this.authService.createSessionForUser(user.id, meta, null)
 
 		return token
 	}

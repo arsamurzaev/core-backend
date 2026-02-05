@@ -1,5 +1,5 @@
 import { DataType } from '@generated/enums'
-import { Injectable, BadRequestException } from '@nestjs/common'
+import { BadRequestException, Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
@@ -55,9 +55,7 @@ export class ProductAttributeBuilder {
 		const attributeIds = new Set<string>()
 		for (const input of inputs) {
 			if (attributeIds.has(input.attributeId)) {
-				throw new BadRequestException(
-					`Duplicate attribute ${input.attributeId}`
-				)
+				throw new BadRequestException(`Duplicate attribute ${input.attributeId}`)
 			}
 			attributeIds.add(input.attributeId)
 		}
@@ -68,12 +66,8 @@ export class ProductAttributeBuilder {
 		)
 
 		if (attributeMap.size !== attributeIds.size) {
-			const missing = [...attributeIds].filter(
-				id => !attributeMap.has(id)
-			)
-			throw new BadRequestException(
-				`Unknown attributes: ${missing.join(', ')}`
-			)
+			const missing = [...attributeIds].filter(id => !attributeMap.has(id))
+			throw new BadRequestException(`Unknown attributes: ${missing.join(', ')}`)
 		}
 
 		for (const attribute of attributes) {
@@ -103,7 +97,7 @@ export class ProductAttributeBuilder {
 		const enumValueMap = await this.loadEnumValues(enumValueIds)
 
 		return inputs.map(input =>
-			this.buildValue(input, attributeMap.get(input.attributeId)!, enumValueMap)
+			this.buildValue(input, attributeMap.get(input.attributeId), enumValueMap)
 		)
 	}
 
@@ -188,9 +182,7 @@ export class ProductAttributeBuilder {
 				}
 				const value = (input.valueString ?? '').trim()
 				if (!value) {
-					throw new BadRequestException(
-						`Attribute ${attribute.key} cannot be empty`
-					)
+					throw new BadRequestException(`Attribute ${attribute.key} cannot be empty`)
 				}
 				return {
 					attributeId: attribute.id,
@@ -227,7 +219,7 @@ export class ProductAttributeBuilder {
 						`Attribute ${attribute.key} expects valueDecimal`
 					)
 				}
-				if (!Number.isFinite(input.valueDecimal as number)) {
+				if (!Number.isFinite(input.valueDecimal)) {
 					throw new BadRequestException(
 						`Attribute ${attribute.key} must be a number`
 					)

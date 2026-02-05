@@ -6,9 +6,7 @@ import {
 	IsEnum,
 	IsOptional,
 	IsString,
-	Matches,
-	MaxLength,
-	MinLength
+	Matches
 } from 'class-validator'
 
 const SLUG_PATTERN = /^[a-z0-9-]+$/
@@ -49,21 +47,6 @@ export class UpdateCatalogDtoReq {
 	@IsOptional()
 	@IsEnum(CatalogStatus)
 	status?: CatalogStatus
-
-	@ApiPropertyOptional({ type: String, example: 'login' })
-	@IsOptional()
-	@IsString()
-	@Transform(({ value }) =>
-		value === undefined ? value : String(value).trim().toLowerCase()
-	)
-	login?: string
-
-	@ApiPropertyOptional({ type: String, example: 'password' })
-	@IsOptional()
-	@IsString()
-	@MinLength(8)
-	@MaxLength(24)
-	password?: string
 
 	@ApiPropertyOptional({ type: String, example: 'type ID' })
 	@IsOptional()

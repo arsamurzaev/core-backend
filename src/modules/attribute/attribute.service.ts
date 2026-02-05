@@ -1,10 +1,10 @@
+import { DataType } from '@generated/enums'
 import {
 	AttributeCreateInput,
 	AttributeEnumValueCreateInput,
 	AttributeEnumValueUpdateInput,
 	AttributeUpdateInput
 } from '@generated/models'
-import { DataType } from '@generated/enums'
 import {
 	BadRequestException,
 	Injectable,
@@ -94,8 +94,7 @@ export class AttributeService {
 			if (!current) throw new NotFoundException('Attribute not found')
 
 			const nextType = dto.dataType ?? current.dataType
-			const nextVariant =
-				dto.isVariantAttribute ?? current.isVariantAttribute
+			const nextVariant = dto.isVariantAttribute ?? current.isVariantAttribute
 
 			this.ensureVariantRules(nextType, nextVariant)
 		}
@@ -124,9 +123,7 @@ export class AttributeService {
 		const data: AttributeEnumValueCreateInput = {
 			value: normalizeEnumValue(dto.value),
 			displayName:
-				dto.displayName === undefined
-					? null
-					: normalizeLabel(dto.displayName),
+				dto.displayName === undefined ? null : normalizeLabel(dto.displayName),
 			displayOrder: dto.displayOrder ?? 0,
 			attribute: { connect: { id: attributeId } }
 		}
@@ -157,11 +154,7 @@ export class AttributeService {
 			throw new BadRequestException('No fields to update')
 		}
 
-		const enumValue = await this.repo.updateEnumValue(
-			id,
-			attributeId,
-			data
-		)
+		const enumValue = await this.repo.updateEnumValue(id, attributeId, data)
 		if (!enumValue) throw new NotFoundException('Enum value not found')
 
 		return enumValue
@@ -178,9 +171,7 @@ export class AttributeService {
 
 	private ensureVariantRules(dataType: DataType, isVariantAttribute?: boolean) {
 		if (isVariantAttribute && dataType !== DataType.ENUM) {
-			throw new BadRequestException(
-				'Variant attributes must use ENUM data type'
-			)
+			throw new BadRequestException('Variant attributes must use ENUM data type')
 		}
 	}
 

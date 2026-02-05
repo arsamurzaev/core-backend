@@ -8,8 +8,16 @@ import {
 	Post,
 	UseGuards
 } from '@nestjs/common'
-import { ApiOperation, ApiParam, ApiSecurity, ApiTags } from '@nestjs/swagger'
+import {
+	ApiCreatedResponse,
+	ApiOkResponse,
+	ApiOperation,
+	ApiParam,
+	ApiSecurity,
+	ApiTags
+} from '@nestjs/swagger'
 
+import { Public } from '@/shared/http/decorators/public.decorator'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
 import { Roles } from '../auth/decorators/roles.decorator'
@@ -19,6 +27,10 @@ import { SessionGuard } from '../auth/guards/session.guard'
 import { CatalogService } from './catalog.service'
 import { CreateCatalogDtoReq } from './dto/requests/create-catalog.dto.req'
 import { UpdateCatalogDtoReq } from './dto/requests/update-catalog.dto.req'
+import {
+	CatalogCreateResponseDto,
+	CatalogDto
+} from './dto/responses/catalog.dto.res'
 
 @ApiTags('Catalog')
 @ApiSecurity('csrf')
@@ -29,16 +41,17 @@ export class CatalogController {
 
 	@Get('/current')
 	@ApiOperation({ summary: 'Get current catalog' })
-	@Roles(Role.CATALOG_OWNER)
-	@UseGuards(CatalogAccessGuard)
+	@Public()
+	@ApiOkResponse({ type: CatalogDto })
 	async getCurrent() {
 		return this.catalogService.getCurrent()
 	}
 
 	@Patch('/current')
 	@ApiOperation({ summary: 'Update current catalog' })
-	@Roles(Role.CATALOG_OWNER)
+	@Roles(Role.CATALOG)
 	@UseGuards(CatalogAccessGuard)
+	@ApiOkResponse({ type: CatalogDto })
 	async updateCurrent(@Body() dto: UpdateCatalogDtoReq) {
 		return this.catalogService.updateCurrent(dto)
 	}
@@ -47,6 +60,7 @@ export class CatalogController {
 	@ApiOperation({ summary: 'List catalogs' })
 	@Roles(Role.ADMIN)
 	@SkipCatalog()
+	@ApiOkResponse({ type: CatalogDto, isArray: true })
 	async getAll() {
 		return this.catalogService.getAll()
 	}
@@ -59,6 +73,7 @@ export class CatalogController {
 	})
 	@Roles(Role.ADMIN)
 	@SkipCatalog()
+	@ApiOkResponse({ type: CatalogDto })
 	async getById(@Param('id') id: string) {
 		return this.catalogService.getById(id)
 	}
@@ -71,6 +86,7 @@ export class CatalogController {
 	})
 	@Roles(Role.ADMIN)
 	@SkipCatalog()
+	@ApiOkResponse({ type: CatalogDto })
 	async updateById(@Param('id') id: string, @Body() dto: UpdateCatalogDtoReq) {
 		return this.catalogService.updateById(id, dto)
 	}
@@ -79,6 +95,7 @@ export class CatalogController {
 	@ApiOperation({ summary: 'Create catalog' })
 	@Roles(Role.ADMIN)
 	@SkipCatalog()
+	@ApiCreatedResponse({ type: CatalogCreateResponseDto })
 	async create(@Body() dto: CreateCatalogDtoReq) {
 		return this.catalogService.create(dto)
 	}

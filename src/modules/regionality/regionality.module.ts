@@ -1,9 +1,10 @@
-import { Module } from '@nestjs/common';
-import { RegionalityService } from './regionality.service';
-import { RegionalityController } from './regionality.controller';
+import { Module } from '@nestjs/common'
+
+import { RegionalityController } from './regionality.controller'
+import { RegionalityService } from './regionality.service'
 
 @Module({
-  controllers: [RegionalityController],
-  providers: [RegionalityService],
+	controllers: [RegionalityController],
+	providers: [RegionalityService]
 })
 export class RegionalityModule {}

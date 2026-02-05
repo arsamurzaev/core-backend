@@ -1,3 +1,4 @@
+import { Prisma } from '@generated/client'
 import { CatalogCreateInput, CatalogUpdateInput } from '@generated/models'
 import { Injectable } from '@nestjs/common'
 
@@ -7,7 +8,6 @@ const catalogSelect = {
 	id: true,
 	slug: true,
 	domain: true,
-	login: true,
 	name: true,
 	typeId: true,
 	parentId: true,
@@ -22,15 +22,12 @@ const catalogSelect = {
 			description: true,
 			currency: true,
 			logoUrl: true,
-			bgUrl: true,
-			note: true
+			bgUrl: true
 		}
 	},
 	settings: {
 		select: {
-			isActive: true,
-			isCommerceEnabled: true,
-			productsDisplayMode: true
+			isActive: true
 		}
 	}
 }
@@ -45,10 +42,10 @@ export class CatalogRepository {
 		})
 	}
 
-	async getById(id: string) {
+	async getById(id: string, select?: Prisma.CatalogSelect) {
 		return this.prisma.catalog.findUnique({
 			where: { id },
-			select: catalogSelect
+			select: { ...catalogSelect, ...select }
 		})
 	}
 

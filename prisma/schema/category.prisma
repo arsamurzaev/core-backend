@@ -19,7 +19,7 @@ model Category {
     parent   Category? @relation("CategoryToCategory", fields: [parentId], references: [id], onDelete: Cascade)
     parentId String?   @map("parent_id") @db.Uuid
 
-    products Product[]
+    categoryProducts CategoryProduct[]
 
     children Category[] @relation("CategoryToCategory")
 
@@ -28,4 +28,18 @@ model Category {
     updatedAt DateTime  @updatedAt @map("updated_at")
 
     @@map("categories")
+}
+
+model CategoryProduct {
+    categoryId String @map("category_id") @db.Uuid
+    productId  String @map("product_id") @db.Uuid
+
+    position Int @default(0)
+
+    category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+    product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+    @@id([categoryId, productId])
+    @@index([categoryId, position, productId])
+    @@map("category_products")
 }

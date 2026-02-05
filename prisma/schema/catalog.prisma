@@ -28,9 +28,6 @@ model Catalog {
     // Используется: hm.myctlg.ru
     domain String? @unique
 
-    login    String
-    password String
-
     // Название каталога для UI
     // Пример: "H&M", "Zara", "KFC", "McDonald's"
     name String
@@ -64,9 +61,12 @@ model Catalog {
     order       Order[]
     cart        Cart[]
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+    subscriptionEndsAt DateTime? @map("subscription_ends_at") // Дата окончания подписки
+
+    deleteAt DateTime? @map("delete_at") // Дата удаления 
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
 
     @@index([typeId])
     @@map("catalogs")
@@ -124,9 +124,7 @@ model CatalogSettings {
     catalog   Catalog @relation(fields: [catalogId], references: [id])
     catalogId String  @unique @map("catalog_id") @db.Uuid
 
-    isActive            Boolean             @default(true) @map("is_active")
-    isCommerceEnabled   Boolean             @default(true) @map("is_commerce_enabled")
-    productsDisplayMode ProductsDisplayMode @default(LIST) @map("products_display_mode")
+    isActive Boolean @default(true) @map("is_active")
 
     deleteAt  DateTime? @map("delete_at") // Дата удаления 
     createdAt DateTime  @default(now()) @map("created_at")

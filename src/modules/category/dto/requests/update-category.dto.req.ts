@@ -6,8 +6,11 @@ import {
 	IsOptional,
 	IsString,
 	MaxLength,
-	Min
+	Min,
+	ValidateNested
 } from 'class-validator'
+
+import { CategoryProductInputDtoReq } from './category-product.dto.req'
 
 export class UpdateCategoryDtoReq {
 	@ApiPropertyOptional({ type: String, example: 'Category name' })
@@ -21,7 +24,11 @@ export class UpdateCategoryDtoReq {
 	@IsString()
 	imageUrl?: string
 
-	@ApiPropertyOptional({ type: String, example: 'Short description', nullable: true })
+	@ApiPropertyOptional({
+		type: String,
+		example: 'Short description',
+		nullable: true
+	})
 	@IsOptional()
 	@IsString()
 	@Transform(({ value }) => {
@@ -57,9 +64,10 @@ export class UpdateCategoryDtoReq {
 	})
 	parentId?: string | null
 
-	@ApiPropertyOptional({ type: [String], example: ['product-id'] })
+	@ApiPropertyOptional({ type: [CategoryProductInputDtoReq] })
 	@IsOptional()
 	@IsArray()
-	@IsString({ each: true })
-	productIds?: string[]
+	@ValidateNested({ each: true })
+	@Type(() => CategoryProductInputDtoReq)
+	products?: CategoryProductInputDtoReq[]
 }

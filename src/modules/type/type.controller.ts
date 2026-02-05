@@ -1,9 +1,17 @@
 import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common'
-import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger'
+import {
+	ApiCreatedResponse,
+	ApiOkResponse,
+	ApiOperation,
+	ApiParam,
+	ApiTags
+} from '@nestjs/swagger'
 
+import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
 import { CreateTypeDtoReq } from './dto/req/create-type.dto.req'
+import { TypeDto } from './dto/responses/type.dto.res'
 import { TypeService } from './type.service'
 
 @ApiTags('Type')
@@ -17,6 +25,7 @@ export class TypeController {
 		description: 'Получить все типы, которые есть в системе.'
 	})
 	@Get('/get-all')
+	@ApiOkResponse({ type: TypeDto, isArray: true })
 	async getAll() {
 		return this.typeService.getAll()
 	}
@@ -26,6 +35,7 @@ export class TypeController {
 		description: 'Создание нового типа.'
 	})
 	@Post()
+	@ApiCreatedResponse({ type: TypeDto })
 	async create(@Body() dto: CreateTypeDtoReq) {
 		return this.typeService.create(dto)
 	}
@@ -39,6 +49,7 @@ export class TypeController {
 		description: 'Type id',
 		name: 'id'
 	})
+	@ApiOkResponse({ type: OkResponseDto })
 	async delete(@Param('id') id: string) {
 		return this.typeService.delete(id)
 	}

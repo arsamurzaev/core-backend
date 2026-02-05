@@ -23,9 +23,13 @@ async function bootstrap() {
 		.setVersion('1.0')
 		.build()
 
-	const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig)
+	const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig, {
+		operationIdFactory: (controllerKey, methodKey) =>
+			`${controllerKey}_${methodKey}`
+	})
 
 	SwaggerModule.setup('/docs', app, swaggerDocument, {
+		jsonDocumentUrl: '/openapi.json',
 		yamlDocumentUrl: '/openapi.yaml',
 		swaggerOptions: {
 			withCredentials: true,

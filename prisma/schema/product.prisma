@@ -59,7 +59,7 @@ model Product {
     variants          ProductVariant[]
     productAttributes ProductAttribute[]
     cartItem          CartItem[]
-    category          Category[]
+    categoryProducts  CategoryProduct[]
     orderItems        OrderItem[]
 
     // Временные метки

@@ -41,9 +41,32 @@ const attributeSelectWithEnums = {
 	}
 }
 
+const uuidRegex =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
 @Injectable()
 export class AttributeRepository {
 	constructor(private readonly prisma: PrismaService) {}
+
+	private normalizeTypeKey(value: string) {
+		return value.trim().toLowerCase()
+	}
+
+	private isUuid(value: string) {
+		return uuidRegex.test(value)
+	}
+
+	private async resolveTypeId(value: string) {
+		const normalized = value.trim()
+		if (this.isUuid(normalized)) return normalized
+
+		const type = await this.prisma.type.findUnique({
+			where: { code: this.normalizeTypeKey(normalized) },
+			select: { id: true }
+		})
+
+		return type?.id ?? null
+	}
 
 	findById(id: string, withEnums = false) {
 		return this.prisma.attribute.findFirst({
@@ -52,9 +75,12 @@ export class AttributeRepository {
 		})
 	}
 
-	findByType(typeId: string, withEnums = false) {
+	async findByType(typeId: string, withEnums = false) {
+		const resolvedTypeId = await this.resolveTypeId(typeId)
+		if (!resolvedTypeId) return []
+
 		return this.prisma.attribute.findMany({
-			where: { typeId, deleteAt: null },
+			where: { typeId: resolvedTypeId, deleteAt: null },
 			select: withEnums ? attributeSelectWithEnums : attributeSelect,
 			orderBy: [{ displayOrder: 'asc' }, { key: 'asc' }]
 		})

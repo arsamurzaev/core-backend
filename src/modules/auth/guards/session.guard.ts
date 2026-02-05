@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Role } from '@generated/client'
 import {
 	CanActivate,
@@ -7,15 +9,19 @@ import {
 	UnauthorizedException
 } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
-import type { Request } from 'express'
+import type { Request, Response } from 'express'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { IS_PUBLIC_KEY } from '@/shared/http/decorators/public.decorator'
 
 import { ROLES_KEY } from '../decorators/roles.decorator'
 import { SessionService } from '../session/session.service'
 
 const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
 const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
+const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'lax') as 'strict' | 'lax'
+const isProd = process.env.NODE_ENV === 'production'
+const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7
 
 function parseCookie(
 	header: string | undefined,
@@ -34,10 +40,10 @@ function isUnsafeMethod(method: string | undefined) {
 	return m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE'
 }
 
-// Иерархия: ADMIN > CATALOG_OWNER > USER
+// Иерархия: ADMIN > CATALOG > USER
 const ROLE_RANK: Record<Role, number> = {
 	ADMIN: 3,
-	CATALOG_OWNER: 2,
+	CATALOG: 2,
 	USER: 1
 }
 
@@ -55,7 +61,15 @@ export class SessionGuard implements CanActivate {
 	) {}
 
 	async canActivate(context: ExecutionContext): Promise<boolean> {
-		const req = context.switchToHttp().getRequest<Request>()
+		const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+			context.getHandler(),
+			context.getClass()
+		])
+		if (isPublic) return true
+
+		const http = context.switchToHttp()
+		const req = http.getRequest<Request>()
+		const res = http.getResponse<Response>()
 
 		const sid =
 			(req as any).cookies?.[SID_COOKIE] ??
@@ -90,7 +104,6 @@ export class SessionGuard implements CanActivate {
 		;(req as any).user = user
 		;(req as any).sessionId = sid
 
-
 		// Roles(...) с иерархией
 		const required =
 			this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
@@ -102,6 +115,28 @@ export class SessionGuard implements CanActivate {
 			const need = requiredRank(required)
 			const have = ROLE_RANK[user.role]
 			if (have < need) throw new ForbiddenException('Недостаточно прав')
+		}
+		try {
+			await this.sessions.touch(sid, session.userId)
+		} catch {
+			// no-op: do not block request if refresh fails
+		}
+
+		if (res?.cookie) {
+			res.cookie(SID_COOKIE, sid, {
+				httpOnly: true,
+				sameSite: SAME_SITE,
+				secure: isProd,
+				path: '/',
+				maxAge: SESSION_MAX_AGE_MS
+			})
+			res.cookie(CSRF_COOKIE, session.csrf, {
+				httpOnly: false,
+				sameSite: SAME_SITE,
+				secure: isProd,
+				path: '/',
+				maxAge: SESSION_MAX_AGE_MS
+			})
 		}
 		return true
 	}

@@ -3,8 +3,8 @@ import { Type } from 'class-transformer'
 import {
 	IsBoolean,
 	IsInt,
-	IsNumber,
 	IsNotEmpty,
+	IsNumber,
 	IsOptional,
 	IsString,
 	MaxLength

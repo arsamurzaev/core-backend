@@ -7,6 +7,10 @@ import {
 
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 
+import type {
+	CategorySelect,
+	CategorySelectWithRelations
+} from './category.repository'
 import { CategoryRepository } from './category.repository'
 import { CreateCategoryDtoReq } from './dto/requests/create-category.dto.req'
 import { UpdateCategoryDtoReq } from './dto/requests/update-category.dto.req'
@@ -32,12 +36,13 @@ export class CategoryService {
 		const catalogId = mustCatalogId()
 		const category = await this.repo.findById(id, catalogId, true)
 		if (!category) throw new NotFoundException('Category not found')
-		return category
+		return this.mapCategoryRelations(category)
 	}
 
 	async create(dto: CreateCategoryDtoReq) {
 		const catalogId = mustCatalogId()
-		const productIds = this.normalizeProductIds(dto.productIds)
+		const products = this.normalizeCategoryProducts(dto.products)
+		const productIds = products.map(product => product.productId)
 		const parentId = dto.parentId ?? null
 
 		if (parentId) {
@@ -64,8 +69,14 @@ export class CategoryService {
 		}
 
 		if (validProductIds.length) {
-			data.products = {
-				connect: validProductIds.map(id => ({ id }))
+			const positionById = new Map(
+				products.map(product => [product.productId, product.position])
+			)
+			data.categoryProducts = {
+				create: validProductIds.map(productId => ({
+					product: { connect: { id: productId } },
+					position: positionById.get(productId) ?? 0
+				}))
 			}
 		}
 
@@ -75,7 +86,7 @@ export class CategoryService {
 	async update(id: string, dto: UpdateCategoryDtoReq) {
 		const catalogId = mustCatalogId()
 		const data: CategoryUpdateInput = {}
-		const hasProductChanges = dto.productIds !== undefined
+		const hasProductChanges = dto.products !== undefined
 
 		if (dto.name !== undefined) {
 			data.name = normalizeName(dto.name)
@@ -107,14 +118,25 @@ export class CategoryService {
 		}
 
 		if (hasProductChanges) {
-			const productIds = this.normalizeProductIds(dto.productIds)
+			const products = this.normalizeCategoryProducts(dto.products)
+			const productIds = products.map(product => product.productId)
 			const validProductIds = await this.ensureProductsInCatalog(
 				productIds,
 				catalogId
 			)
-			data.products = {
-				set: validProductIds.map(productId => ({ id: productId }))
+			const positionById = new Map(
+				products.map(product => [product.productId, product.position])
+			)
+			const categoryProducts = { deleteMany: {} } as NonNullable<
+				CategoryUpdateInput['categoryProducts']
+			>
+			if (validProductIds.length) {
+				categoryProducts.create = validProductIds.map(productId => ({
+					product: { connect: { id: productId } },
+					position: positionById.get(productId) ?? 0
+				}))
 			}
+			data.categoryProducts = categoryProducts
 		}
 
 		if (Object.keys(data).length === 0) {
@@ -124,7 +146,7 @@ export class CategoryService {
 		const category = await this.repo.update(id, catalogId, data)
 		if (!category) throw new NotFoundException('Category not found')
 
-		return category
+		return this.mapCategoryRelations(category)
 	}
 
 	async remove(id: string) {
@@ -135,14 +157,26 @@ export class CategoryService {
 		return { ok: true }
 	}
 
-	private normalizeProductIds(productIds?: string[]): string[] {
-		if (!productIds) return []
-		const trimmed = productIds.map(id => id.trim()).filter(Boolean)
-		const unique = new Set(trimmed)
-		if (unique.size !== trimmed.length) {
+	private normalizeCategoryProducts(
+		products?: { productId: string; position?: number }[]
+	): { productId: string; position: number }[] {
+		if (!products) return []
+		const normalized = products.map((product, index) => {
+			const productId = product.productId?.trim()
+			if (!productId) {
+				throw new BadRequestException('Product id is required')
+			}
+			const position =
+				Number.isInteger(product.position) && product.position >= 0
+					? product.position
+					: index
+			return { productId, position }
+		})
+		const unique = new Set(normalized.map(product => product.productId))
+		if (unique.size !== normalized.length) {
 			throw new BadRequestException('Duplicate product ids')
 		}
-		return [...unique]
+		return normalized
 	}
 
 	private async ensureProductsInCatalog(
@@ -159,5 +193,19 @@ export class CategoryService {
 			)
 		}
 		return productIds
+	}
+
+	private mapCategoryRelations(
+		category: CategorySelect | CategorySelectWithRelations | null
+	) {
+		if (!category || !('categoryProducts' in category)) return category
+		const { categoryProducts, ...rest } = category
+		return {
+			...rest,
+			products: categoryProducts.map(item => ({
+				productId: item.productId,
+				position: item.position
+			}))
+		}
 	}
 }

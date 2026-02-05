@@ -23,9 +23,7 @@ export class UpdateProductDtoReq {
 	@IsOptional()
 	@IsString()
 	@Matches(SKU_PATTERN)
-	@Transform(({ value }) =>
-		value === undefined ? value : String(value).trim()
-	)
+	@Transform(({ value }) => (value === undefined ? value : String(value).trim()))
 	sku?: string
 
 	@ApiPropertyOptional({ type: String, example: 'Basic T-Shirt' })

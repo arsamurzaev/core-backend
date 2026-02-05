@@ -7,8 +7,15 @@ import {
 	Patch,
 	Post
 } from '@nestjs/common'
-import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger'
+import {
+	ApiCreatedResponse,
+	ApiOkResponse,
+	ApiOperation,
+	ApiParam,
+	ApiTags
+} from '@nestjs/swagger'
 
+import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
 import { AttributeService } from './attribute.service'
@@ -16,6 +23,10 @@ import { CreateAttributeEnumDtoReq } from './dto/requests/create-attribute-enum.
 import { CreateAttributeDtoReq } from './dto/requests/create-attribute.dto.req'
 import { UpdateAttributeEnumDtoReq } from './dto/requests/update-attribute-enum.dto.req'
 import { UpdateAttributeDtoReq } from './dto/requests/update-attribute.dto.req'
+import {
+	AttributeDto,
+	AttributeEnumValueDto
+} from './dto/responses/attribute.dto.res'
 
 @ApiTags('Attribute')
 @SkipCatalog()
@@ -25,7 +36,8 @@ export class AttributeController {
 
 	@Get('/type/:typeId')
 	@ApiOperation({ summary: 'List attributes by type' })
-	@ApiParam({ name: 'typeId', description: 'Type id' })
+	@ApiParam({ name: 'typeId', description: 'Type id or code' })
+	@ApiOkResponse({ type: AttributeDto, isArray: true })
 	async getByType(@Param('typeId') typeId: string) {
 		return this.attributeService.getByType(typeId)
 	}
@@ -33,12 +45,14 @@ export class AttributeController {
 	@Get('/:id')
 	@ApiOperation({ summary: 'Get attribute by id' })
 	@ApiParam({ name: 'id', description: 'Attribute id' })
+	@ApiOkResponse({ type: AttributeDto })
 	async getById(@Param('id') id: string) {
 		return this.attributeService.getById(id)
 	}
 
 	@Post()
 	@ApiOperation({ summary: 'Create attribute' })
+	@ApiCreatedResponse({ type: AttributeDto })
 	async create(@Body() dto: CreateAttributeDtoReq) {
 		return this.attributeService.create(dto)
 	}
@@ -46,6 +60,7 @@ export class AttributeController {
 	@Patch('/:id')
 	@ApiOperation({ summary: 'Update attribute' })
 	@ApiParam({ name: 'id', description: 'Attribute id' })
+	@ApiOkResponse({ type: AttributeDto })
 	async update(@Param('id') id: string, @Body() dto: UpdateAttributeDtoReq) {
 		return this.attributeService.update(id, dto)
 	}
@@ -53,6 +68,7 @@ export class AttributeController {
 	@Delete('/:id')
 	@ApiOperation({ summary: 'Delete attribute' })
 	@ApiParam({ name: 'id', description: 'Attribute id' })
+	@ApiOkResponse({ type: OkResponseDto })
 	async remove(@Param('id') id: string) {
 		return this.attributeService.remove(id)
 	}
@@ -60,6 +76,7 @@ export class AttributeController {
 	@Get('/:attributeId/enum')
 	@ApiOperation({ summary: 'List enum values' })
 	@ApiParam({ name: 'attributeId', description: 'Attribute id' })
+	@ApiOkResponse({ type: AttributeEnumValueDto, isArray: true })
 	async getEnumValues(@Param('attributeId') attributeId: string) {
 		return this.attributeService.getEnumValues(attributeId)
 	}
@@ -67,6 +84,7 @@ export class AttributeController {
 	@Post('/:attributeId/enum')
 	@ApiOperation({ summary: 'Create enum value' })
 	@ApiParam({ name: 'attributeId', description: 'Attribute id' })
+	@ApiCreatedResponse({ type: AttributeEnumValueDto })
 	async createEnumValue(
 		@Param('attributeId') attributeId: string,
 		@Body() dto: CreateAttributeEnumDtoReq
@@ -78,6 +96,7 @@ export class AttributeController {
 	@ApiOperation({ summary: 'Update enum value' })
 	@ApiParam({ name: 'attributeId', description: 'Attribute id' })
 	@ApiParam({ name: 'id', description: 'Enum value id' })
+	@ApiOkResponse({ type: AttributeEnumValueDto })
 	async updateEnumValue(
 		@Param('attributeId') attributeId: string,
 		@Param('id') id: string,
@@ -90,6 +109,7 @@ export class AttributeController {
 	@ApiOperation({ summary: 'Delete enum value' })
 	@ApiParam({ name: 'attributeId', description: 'Attribute id' })
 	@ApiParam({ name: 'id', description: 'Enum value id' })
+	@ApiOkResponse({ type: OkResponseDto })
 	async removeEnumValue(
 		@Param('attributeId') attributeId: string,
 		@Param('id') id: string

@@ -14,6 +14,7 @@ import { ProductAttributeBuilder } from './product-attribute.builder'
 import { ProductRepository } from './product.repository'
 
 type ProductList = Awaited<ReturnType<ProductRepository['findAll']>>
+type PopularProductList = Awaited<ReturnType<ProductRepository['findPopular']>>
 
 const PRODUCTS_CACHE_TTL_SEC =
 	Number(process.env.CATALOG_PRODUCTS_CACHE_TTL_SEC ?? 0) || 0
@@ -48,6 +49,21 @@ export class ProductService {
 		if (cached !== null) return cached
 
 		const products = await this.repo.findAll(catalogId)
+		await this.cache.setJson(cacheKey, products, this.cacheTtlSec)
+		return products
+	}
+
+	async getPopular() {
+		const catalogId = mustCatalogId()
+		if (!this.cacheTtlSec) {
+			return this.repo.findPopular(catalogId)
+		}
+
+		const cacheKey = await this.buildCatalogPopularProductsCacheKey(catalogId)
+		const cached = await this.cache.getJson<PopularProductList>(cacheKey)
+		if (cached !== null) return cached
+
+		const products = await this.repo.findPopular(catalogId)
 		await this.cache.setJson(cacheKey, products, this.cacheTtlSec)
 		return products
 	}
@@ -153,6 +169,19 @@ export class ProductService {
 			catalogId,
 			'products',
 			'list',
+			`v${version}`
+		])
+	}
+
+	private async buildCatalogPopularProductsCacheKey(
+		catalogId: string
+	): Promise<string> {
+		const version = await this.cache.getVersion(PRODUCTS_CACHE_VERSION, catalogId)
+		return this.cache.buildKey([
+			'catalog',
+			catalogId,
+			'products',
+			'popular',
 			`v${version}`
 		])
 	}

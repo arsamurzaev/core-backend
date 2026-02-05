@@ -6,9 +6,7 @@ import {
 	IsNotEmpty,
 	IsOptional,
 	IsString,
-	Matches,
-	MaxLength,
-	MinLength
+	Matches
 } from 'class-validator'
 
 const SLUG_PATTERN = /^[a-z0-9-]+$/
@@ -87,18 +85,18 @@ export class CreateCatalogDtoReq {
 	@IsNotEmpty({ message: 'Статус каталога не должен быть пустым' })
 	status: CatalogStatus
 
-	@ApiProperty({ type: String, example: 'login' })
-	@IsString({ message: 'Логин должен быть строкой' })
-	@IsNotEmpty({ message: 'Логин не может быть пустым' })
-	@Transform(({ value }) => String(value).trim().toLowerCase())
-	login: string
+	// @ApiProperty({ type: String, example: 'login' })
+	// @IsString({ message: 'Логин должен быть строкой' })
+	// @IsNotEmpty({ message: 'Логин не может быть пустым' })
+	// @Transform(({ value }) => String(value).trim().toLowerCase())
+	// login: string
 
-	@ApiProperty({ type: String, example: 'password' })
-	@IsString({ message: 'Пароль должен быть строкой' })
-	@MinLength(8, { message: 'Пароль не должен быть короче 8 символов' })
-	@MaxLength(24, { message: 'Пароль не должен превышать 24 символов' })
-	@IsNotEmpty({ message: 'Пароль не может быть пустым' })
-	password: string
+	// @ApiProperty({ type: String, example: 'password' })
+	// @IsString({ message: 'Пароль должен быть строкой' })
+	// @MinLength(8, { message: 'Пароль не должен быть короче 8 символов' })
+	// @MaxLength(24, { message: 'Пароль не должен превышать 24 символов' })
+	// @IsNotEmpty({ message: 'Пароль не может быть пустым' })
+	// password: string
 
 	// @ApiProperty({ type: String, example: 'id рода деятельности' })
 	// @IsString({ message: 'id рода деятельности должен быть строкой' })

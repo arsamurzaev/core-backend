@@ -9,7 +9,16 @@ import {
 	Post,
 	UseGuards
 } from '@nestjs/common'
-import { ApiOperation, ApiParam, ApiSecurity, ApiTags } from '@nestjs/swagger'
+import {
+	ApiCreatedResponse,
+	ApiOkResponse,
+	ApiOperation,
+	ApiParam,
+	ApiSecurity,
+	ApiTags
+} from '@nestjs/swagger'
+
+import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { CatalogAccessGuard } from '../auth/guards/catalog-access.guard'
@@ -17,6 +26,7 @@ import { SessionGuard } from '../auth/guards/session.guard'
 
 import { CreateSeoDtoReq } from './dto/requests/create-seo.dto.req'
 import { UpdateSeoDtoReq } from './dto/requests/update-seo.dto.req'
+import { SeoDto } from './dto/responses/seo.dto.res'
 import { SeoService } from './seo.service'
 
 @ApiTags('Seo')
@@ -26,6 +36,7 @@ export class SeoController {
 
 	@Get()
 	@ApiOperation({ summary: 'List seo settings' })
+	@ApiOkResponse({ type: SeoDto, isArray: true })
 	async getAll() {
 		return this.seoService.getAll()
 	}
@@ -40,6 +51,7 @@ export class SeoController {
 		name: 'entityId',
 		description: 'Entity id'
 	})
+	@ApiOkResponse({ type: SeoDto })
 	async getByEntity(
 		@Param('entityType') entityType: SeoEntityType,
 		@Param('entityId') entityId: string
@@ -50,6 +62,7 @@ export class SeoController {
 	@Get('/:id')
 	@ApiOperation({ summary: 'Get seo setting by id' })
 	@ApiParam({ name: 'id', description: 'Seo setting id' })
+	@ApiOkResponse({ type: SeoDto })
 	async getById(@Param('id') id: string) {
 		return this.seoService.getById(id)
 	}
@@ -58,7 +71,8 @@ export class SeoController {
 	@ApiOperation({ summary: 'Create seo setting' })
 	@ApiSecurity('csrf')
 	@UseGuards(SessionGuard, CatalogAccessGuard)
-	@Roles(Role.CATALOG_OWNER)
+	@Roles(Role.CATALOG)
+	@ApiCreatedResponse({ type: SeoDto })
 	async create(@Body() dto: CreateSeoDtoReq) {
 		return this.seoService.create(dto)
 	}
@@ -67,8 +81,9 @@ export class SeoController {
 	@ApiOperation({ summary: 'Update seo setting' })
 	@ApiSecurity('csrf')
 	@UseGuards(SessionGuard, CatalogAccessGuard)
-	@Roles(Role.CATALOG_OWNER)
+	@Roles(Role.CATALOG)
 	@ApiParam({ name: 'id', description: 'Seo setting id' })
+	@ApiOkResponse({ type: SeoDto })
 	async update(@Param('id') id: string, @Body() dto: UpdateSeoDtoReq) {
 		return this.seoService.update(id, dto)
 	}
@@ -77,8 +92,9 @@ export class SeoController {
 	@ApiOperation({ summary: 'Delete seo setting' })
 	@ApiSecurity('csrf')
 	@UseGuards(SessionGuard, CatalogAccessGuard)
-	@Roles(Role.CATALOG_OWNER)
+	@Roles(Role.CATALOG)
 	@ApiParam({ name: 'id', description: 'Seo setting id' })
+	@ApiOkResponse({ type: OkResponseDto })
 	async remove(@Param('id') id: string) {
 		return this.seoService.remove(id)
 	}

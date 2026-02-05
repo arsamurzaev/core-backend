@@ -3,7 +3,7 @@ model User {
 
     name String
 
-    login    String @unique
+    login    String
     password String
 
     role Role
@@ -17,5 +17,6 @@ model User {
     createdAt DateTime  @default(now()) @map("created_at")
     updatedAt DateTime  @updatedAt @map("updated_at")
 
+    @@unique([login, role])
     @@map("users")
 }

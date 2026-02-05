@@ -1,3 +1,4 @@
+import type { Prisma } from '@generated/client'
 import { SortOrder } from '@generated/internal/prismaNamespace'
 import { CategoryCreateInput, CategoryUpdateInput } from '@generated/models'
 import { Injectable } from '@nestjs/common'
@@ -33,10 +34,19 @@ const categorySelectWithRelations = {
 		},
 		orderBy: [{ position: SortOrder.asc }, { name: SortOrder.asc }]
 	},
-	products: {
-		select: { id: true }
+	categoryProducts: {
+		select: { productId: true, position: true },
+		orderBy: [{ position: SortOrder.asc }, { productId: SortOrder.asc }]
 	}
 }
+
+export type CategorySelect = Prisma.CategoryGetPayload<{
+	select: typeof categorySelect
+}>
+
+export type CategorySelectWithRelations = Prisma.CategoryGetPayload<{
+	select: typeof categorySelectWithRelations
+}>
 
 @Injectable()
 export class CategoryRepository {
@@ -50,7 +60,11 @@ export class CategoryRepository {
 		})
 	}
 
-	findById(id: string, catalogId: string, withRelations = false) {
+	findById(
+		id: string,
+		catalogId: string,
+		withRelations = false
+	): Promise<CategorySelect | CategorySelectWithRelations | null> {
 		return this.prisma.category.findFirst({
 			where: { id, catalogId, deleteAt: null },
 			select: withRelations ? categorySelectWithRelations : categorySelect
@@ -61,7 +75,11 @@ export class CategoryRepository {
 		return this.prisma.category.create({ data, select: categorySelect })
 	}
 
-	async update(id: string, catalogId: string, data: CategoryUpdateInput) {
+	async update(
+		id: string,
+		catalogId: string,
+		data: CategoryUpdateInput
+	): Promise<CategorySelectWithRelations | null> {
 		const existing = await this.prisma.category.findFirst({
 			where: { id, catalogId, deleteAt: null },
 			select: { id: true }

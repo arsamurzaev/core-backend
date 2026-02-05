@@ -4,7 +4,6 @@ import {
 	Injectable,
 	NotFoundException
 } from '@nestjs/common'
-import { hash } from 'argon2'
 
 import { RequestContext } from '@/shared/tenancy/request-context'
 
@@ -23,10 +22,6 @@ const RESERVED_SUBDOMAINS = new Set(
 )
 
 function normalizeSlug(value: string): string {
-	return value.trim().toLowerCase()
-}
-
-function normalizeLogin(value: string): string {
 	return value.trim().toLowerCase()
 }
 
@@ -52,32 +47,17 @@ export class CatalogService {
 	constructor(private readonly repo: CatalogRepository) {}
 
 	async create(dto: CreateCatalogDtoReq) {
-		const {
-			password,
-			typeId,
-			status,
-			domain,
-			slug,
-			login,
-			parentId,
-			userId,
-			...rest
-		} = dto
+		const { typeId, status, domain, slug, parentId, userId, ...rest } = dto
 
 		const normalizedSlug = normalizeSlug(slug)
 		ensureSlugAllowed(normalizedSlug)
 		const normalizedDomain = normalizeDomain(domain ?? null)
-		const normalizedLogin = normalizeLogin(login)
-
-		const passwordHash = await hash(password)
 
 		const data: CatalogCreateInput = {
 			...rest,
 			slug: normalizedSlug,
 			domain: normalizedDomain,
-			login: normalizedLogin,
 			type: { connect: { id: typeId } },
-			password: passwordHash,
 			config: {
 				create: {
 					status
@@ -118,7 +98,11 @@ export class CatalogService {
 	async getCurrent() {
 		const store = RequestContext.get()
 		if (!store?.catalogId) throw new NotFoundException('Catalog not found')
-		const catalog = await this.repo.getById(store.catalogId)
+		const catalog = await this.repo.getById(store.catalogId, {
+			createdAt: false,
+			updatedAt: false,
+			deleteAt: false
+		})
 		if (!catalog) throw new NotFoundException('Catalog not found')
 		return catalog
 	}
@@ -168,14 +152,6 @@ export class CatalogService {
 
 		if (dto.name !== undefined) {
 			data.name = dto.name
-		}
-
-		if (dto.login !== undefined) {
-			data.login = normalizeLogin(dto.login)
-		}
-
-		if (dto.password) {
-			data.password = await hash(dto.password)
 		}
 
 		if (options.allowType && dto.typeId) {

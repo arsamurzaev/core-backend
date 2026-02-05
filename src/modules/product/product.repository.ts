@@ -70,6 +70,14 @@ export class ProductRepository {
 		})
 	}
 
+	findPopular(catalogId: string) {
+		return this.prisma.product.findMany({
+			where: { deleteAt: null, catalogId, isPopular: true },
+			select: productSelect,
+			orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }]
+		})
+	}
+
 	findById(id: string, catalogId: string) {
 		return this.prisma.product.findFirst({
 			where: { id, catalogId, deleteAt: null },
