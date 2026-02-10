@@ -1,4 +1,4 @@
-import { DataType, ProductStatus } from '@generated/enums'
+import { DataType, ProductStatus, ProductVariantStatus } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
@@ -65,11 +65,63 @@ export class ProductAttributeDto {
 	@ApiPropertyOptional({ type: Boolean, nullable: true })
 	valueBoolean?: boolean | null
 
+	@ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+	valueDateTime?: string | null
+
 	@ApiProperty({ type: ProductAttributeRefDto })
 	attribute: ProductAttributeRefDto
 
 	@ApiPropertyOptional({ type: ProductAttributeEnumValueDto, nullable: true })
 	enumValue?: ProductAttributeEnumValueDto | null
+}
+
+export class VariantAttributeDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	attributeId: string
+
+	@ApiProperty({ type: String })
+	enumValueId: string
+
+	@ApiProperty({ type: ProductAttributeRefDto })
+	attribute: ProductAttributeRefDto
+
+	@ApiProperty({ type: ProductAttributeEnumValueDto })
+	enumValue: ProductAttributeEnumValueDto
+}
+
+export class ProductVariantDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	sku: string
+
+	@ApiProperty({ type: String })
+	variantKey: string
+
+	@ApiProperty({ type: Number })
+	stock: number
+
+	@ApiProperty({ type: String, example: '0.00' })
+	price: string
+
+	@ApiProperty({ enum: ProductVariantStatus })
+	status: ProductVariantStatus
+
+	@ApiProperty({ type: Boolean })
+	isAvailable: boolean
+
+	@ApiProperty({ type: String, format: 'date-time' })
+	createdAt: string
+
+	@ApiProperty({ type: String, format: 'date-time' })
+	updatedAt: string
+
+	@ApiProperty({ type: [VariantAttributeDto] })
+	attributes: VariantAttributeDto[]
 }
 
 export class ProductDto {
@@ -110,6 +162,21 @@ export class ProductDto {
 export class ProductWithAttributesDto extends ProductDto {
 	@ApiProperty({ type: [ProductAttributeDto] })
 	productAttributes: ProductAttributeDto[]
+}
+
+export class ProductWithDetailsDto extends ProductWithAttributesDto {
+	@ApiProperty({ type: [ProductVariantDto] })
+	variants: ProductVariantDto[]
+}
+
+export class ProductUpdateResponseDto extends ProductWithAttributesDto {
+	@ApiProperty({ example: true })
+	ok: boolean
+}
+
+export class ProductVariantsResponseDto extends ProductWithDetailsDto {
+	@ApiProperty({ example: true })
+	ok: boolean
 }
 
 export class ProductCreateResponseDto extends OkResponseDto {

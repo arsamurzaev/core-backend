@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
+import { ProductWithAttributesDto } from '@/modules/product/dto/responses/product.dto.res'
+
 export class CategoryDto {
 	@ApiProperty({ type: String })
 	id: string
@@ -65,13 +67,23 @@ export class CategoryProductDto {
 	position: number
 }
 
+export class CategoryProductWithDetailsDto extends CategoryProductDto {
+	@ApiProperty({ type: ProductWithAttributesDto })
+	product: ProductWithAttributesDto
+}
+
+export class CategoryProductsPageDto {
+	@ApiProperty({ type: [CategoryProductWithDetailsDto] })
+	items: CategoryProductWithDetailsDto[]
+
+	@ApiProperty({ type: String, nullable: true })
+	nextCursor: string | null
+}
+
 export class CategoryWithRelationsDto extends CategoryDto {
 	@ApiPropertyOptional({ type: CategoryParentDto, nullable: true })
 	parent?: CategoryParentDto | null
 
 	@ApiProperty({ type: [CategoryChildDto] })
 	children: CategoryChildDto[]
-
-	@ApiProperty({ type: [CategoryProductDto] })
-	products: CategoryProductDto[]
 }

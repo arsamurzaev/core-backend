@@ -1,17 +1,39 @@
-import { ApiProperty } from '@nestjs/swagger'
+﻿import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
-import { IsNotEmpty, IsString } from 'class-validator'
+import {
+	IsNotEmpty,
+	IsOptional,
+	IsString,
+	Matches,
+	MaxLength,
+	MinLength
+} from 'class-validator'
+
+const CODE_PATTERN = /^[a-z0-9-]+$/
 
 export class CreateTypeDtoReq {
-	@ApiProperty({ type: String, example: 'Тип' })
-	@IsString({ message: 'Тип должен быть строкой' })
-	@IsNotEmpty({ message: 'Имя типа не может быть пустым' })
+	@ApiProperty({ type: String, example: 'РўРёРї' })
+	@IsString({ message: 'РўРёРї РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ СЃС‚СЂРѕРєРѕРёМ†' })
+	@IsNotEmpty({ message: 'РРјСЏ С‚РёРїР° РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј' })
+	@MaxLength(255)
 	@Transform(({ value }) => String(value).trim().toLowerCase())
 	name: string
 
-	@ApiProperty({ type: String, example: 'default' })
-	@IsString({ message: 'Программный код должен быть строкой' })
-	@IsNotEmpty({ message: 'Программный код типа не может быть пустым' })
-	@Transform(({ value }) => String(value).trim().toLowerCase())
-	code: string
+	@ApiPropertyOptional({
+		type: String,
+		example: 'default',
+		description: 'Если не указан, будет сгенерирован автоматически'
+	})
+	@IsOptional()
+	@IsString({ message: 'РџСЂРѕРіСЂР°РјРјРЅС‹Р№ РєРѕРґ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ СЃС‚СЂРѕРєРѕРёМ†' })
+	@IsNotEmpty({ message: 'РџСЂРѕРіСЂР°РјРјРЅС‹Р№ РєРѕРґ С‚РёРїР° РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј' })
+	@MinLength(2)
+	@MaxLength(50)
+	@Matches(CODE_PATTERN)
+	@Transform(({ value }) => {
+		if (value === undefined || value === null) return value
+		const normalized = String(value).trim().toLowerCase()
+		return normalized.length ? normalized : undefined
+	})
+	code?: string
 }

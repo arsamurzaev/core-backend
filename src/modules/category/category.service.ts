@@ -7,13 +7,12 @@ import {
 
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 
-import type {
-	CategorySelect,
-	CategorySelectWithRelations
-} from './category.repository'
 import { CategoryRepository } from './category.repository'
 import { CreateCategoryDtoReq } from './dto/requests/create-category.dto.req'
 import { UpdateCategoryDtoReq } from './dto/requests/update-category.dto.req'
+
+const CATEGORY_PRODUCTS_DEFAULT_LIMIT = 20
+const CATEGORY_PRODUCTS_MAX_LIMIT = 100
 
 function normalizeName(value: string): string {
 	return value.trim()
@@ -35,8 +34,37 @@ export class CategoryService {
 	async getById(id: string) {
 		const catalogId = mustCatalogId()
 		const category = await this.repo.findById(id, catalogId, true)
-		if (!category) throw new NotFoundException('Category not found')
-		return this.mapCategoryRelations(category)
+		if (!category) throw new NotFoundException('Категория не найдена')
+		return category
+	}
+
+	async getProductsByCategory(
+		id: string,
+		options?: { cursor?: string; limit?: number | string }
+	) {
+		const catalogId = mustCatalogId()
+		const category = await this.repo.findById(id, catalogId)
+		if (!category) throw new NotFoundException('Категория не найдена')
+
+		const limit = this.normalizeLimit(options?.limit)
+		const cursor = options?.cursor?.trim() || undefined
+
+		const items = await this.repo.findCategoryProductsPage(id, catalogId, {
+			cursor,
+			take: limit + 1
+		})
+
+		const hasMore = items.length > limit
+		const pageItems = hasMore ? items.slice(0, limit) : items
+		const nextCursor =
+			hasMore && pageItems.length
+				? this.encodeCursor({
+						position: pageItems[pageItems.length - 1].position,
+						productId: pageItems[pageItems.length - 1].productId
+					})
+				: null
+
+		return { items: pageItems, nextCursor }
 	}
 
 	async create(dto: CreateCategoryDtoReq) {
@@ -47,7 +75,7 @@ export class CategoryService {
 
 		if (parentId) {
 			const parent = await this.repo.findById(parentId, catalogId)
-			if (!parent) throw new BadRequestException('Parent category not found')
+			if (!parent) throw new BadRequestException('Родительская категория не найдена')
 		}
 
 		const validProductIds = await this.ensureProductsInCatalog(
@@ -109,10 +137,11 @@ export class CategoryService {
 				data.parent = { disconnect: true }
 			} else {
 				if (dto.parentId === id) {
-					throw new BadRequestException('Category cannot be its own parent')
+					throw new BadRequestException('Категория не может быть сама себе родителем')
 				}
 				const parent = await this.repo.findById(dto.parentId, catalogId)
-				if (!parent) throw new BadRequestException('Parent category not found')
+				if (!parent)
+					throw new BadRequestException('Родительская категория не найдена')
 				data.parent = { connect: { id: dto.parentId } }
 			}
 		}
@@ -140,19 +169,19 @@ export class CategoryService {
 		}
 
 		if (Object.keys(data).length === 0) {
-			throw new BadRequestException('No fields to update')
+			throw new BadRequestException('Нет полей для обновления')
 		}
 
 		const category = await this.repo.update(id, catalogId, data)
-		if (!category) throw new NotFoundException('Category not found')
+		if (!category) throw new NotFoundException('Категория не найдена')
 
-		return this.mapCategoryRelations(category)
+		return category
 	}
 
 	async remove(id: string) {
 		const catalogId = mustCatalogId()
 		const category = await this.repo.softDelete(id, catalogId)
-		if (!category) throw new NotFoundException('Category not found')
+		if (!category) throw new NotFoundException('Категория не найдена')
 
 		return { ok: true }
 	}
@@ -164,7 +193,7 @@ export class CategoryService {
 		const normalized = products.map((product, index) => {
 			const productId = product.productId?.trim()
 			if (!productId) {
-				throw new BadRequestException('Product id is required')
+				throw new BadRequestException('productId обязателен')
 			}
 			const position =
 				Number.isInteger(product.position) && product.position >= 0
@@ -174,7 +203,7 @@ export class CategoryService {
 		})
 		const unique = new Set(normalized.map(product => product.productId))
 		if (unique.size !== normalized.length) {
-			throw new BadRequestException('Duplicate product ids')
+			throw new BadRequestException('Дублирующиеся productId')
 		}
 		return normalized
 	}
@@ -189,23 +218,22 @@ export class CategoryService {
 		const missing = productIds.filter(id => !found.has(id))
 		if (missing.length) {
 			throw new BadRequestException(
-				`Products not found in catalog: ${missing.join(', ')}`
+				`Товары не найдены в каталоге: ${missing.join(', ')}`
 			)
 		}
 		return productIds
 	}
 
-	private mapCategoryRelations(
-		category: CategorySelect | CategorySelectWithRelations | null
-	) {
-		if (!category || !('categoryProducts' in category)) return category
-		const { categoryProducts, ...rest } = category
-		return {
-			...rest,
-			products: categoryProducts.map(item => ({
-				productId: item.productId,
-				position: item.position
-			}))
-		}
+	private normalizeLimit(value?: number | string): number {
+		const raw =
+			typeof value === 'string' ? Number(value.trim()) : (value as number)
+		if (!Number.isFinite(raw)) return CATEGORY_PRODUCTS_DEFAULT_LIMIT
+		const normalized = Math.floor(raw)
+		if (normalized <= 0) return CATEGORY_PRODUCTS_DEFAULT_LIMIT
+		return Math.min(normalized, CATEGORY_PRODUCTS_MAX_LIMIT)
+	}
+
+	private encodeCursor(value: { position: number; productId: string }): string {
+		return Buffer.from(JSON.stringify(value)).toString('base64')
 	}
 }

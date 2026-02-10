@@ -1,6 +1,7 @@
 import { CatalogStatus, ProductsDisplayMode } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
+import { AttributeDto } from '@/modules/attribute/dto/responses/attribute.dto.res'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 
 export class CatalogConfigDto {
@@ -35,6 +36,20 @@ export class CatalogSettingsDto {
 
 	@ApiProperty({ enum: ProductsDisplayMode })
 	productsDisplayMode: ProductsDisplayMode
+}
+
+export class CatalogTypeDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	code: string
+
+	@ApiProperty({ type: String })
+	name: string
+
+	@ApiProperty({ type: [AttributeDto] })
+	attributes: AttributeDto[]
 }
 
 export class CatalogDto {
@@ -73,6 +88,11 @@ export class CatalogDto {
 
 	@ApiProperty({ type: CatalogSettingsDto })
 	settings: CatalogSettingsDto
+}
+
+export class CatalogCurrentDto extends CatalogDto {
+	@ApiProperty({ type: CatalogTypeDto })
+	type: CatalogTypeDto
 }
 
 export class CatalogCreateResponseDto extends OkResponseDto {

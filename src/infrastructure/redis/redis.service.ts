@@ -23,13 +23,13 @@ export class RedisService
 				infer: true
 			}),
 			host: configService.get<string>('redis.host', { infer: true }),
-			port: configService.get<number>('redis.port', { infer: true }),
+			port: configService.get('redis.port', { infer: true }),
 			maxLoadingRetryTime: 5,
 			enableOfflineQueue: true
 		})
 	}
 
-	async onModuleInit() {
+	onModuleInit() {
 		const start = Date.now()
 
 		this.logger.log('Подключение к Redis...')

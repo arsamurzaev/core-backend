@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Type } from 'class-transformer'
 import {
 	IsBoolean,
+	IsDateString,
 	IsInt,
 	IsNotEmpty,
 	IsNumber,
@@ -43,4 +44,9 @@ export class ProductAttributeValueDto {
 	@IsOptional()
 	@IsBoolean()
 	valueBoolean?: boolean
+
+	@ApiPropertyOptional({ type: String, format: 'date-time' })
+	@IsOptional()
+	@IsDateString()
+	valueDateTime?: string
 }

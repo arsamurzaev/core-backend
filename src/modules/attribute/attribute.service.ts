@@ -10,6 +10,13 @@ import {
 	Injectable,
 	NotFoundException
 } from '@nestjs/common'
+import slugify from 'slugify'
+
+import {
+	CATALOG_CURRENT_CACHE_TTL_SEC,
+	CATALOG_TYPE_CACHE_VERSION
+} from '@/shared/cache/catalog-cache.constants'
+import { CacheService } from '@/shared/cache/cache.service'
 
 import { AttributeRepository } from './attribute.repository'
 import { CreateAttributeEnumDtoReq } from './dto/requests/create-attribute-enum.dto.req'
@@ -29,9 +36,31 @@ function normalizeEnumValue(value: string): string {
 	return value.trim().toLowerCase()
 }
 
+const ATTRIBUTE_KEY_MAX_LENGTH = 100
+const ENUM_VALUE_MAX_LENGTH = 255
+const ATTRIBUTE_KEY_FALLBACK = 'attr'
+const ENUM_VALUE_FALLBACK = 'value'
+
+function buildKeyFromLabel(value: string): string {
+	const slug = slugify(value, { lower: true, strict: true, trim: true })
+	return slug.replace(/-+/g, '-').replace(/^[-_]+|[-_]+$/g, '')
+}
+
+function applySuffix(base: string, suffix: number, maxLength: number): string {
+	const suffixPart = suffix > 0 ? `-${suffix}` : ''
+	const headLength = Math.max(0, maxLength - suffixPart.length)
+	const head = base.slice(0, headLength).replace(/-+$/g, '')
+	return `${head}${suffixPart}`
+}
+
 @Injectable()
 export class AttributeService {
-	constructor(private readonly repo: AttributeRepository) {}
+	private readonly cacheTtlSec = CATALOG_CURRENT_CACHE_TTL_SEC
+
+	constructor(
+		private readonly repo: AttributeRepository,
+		private readonly cache: CacheService
+	) {}
 
 	async getByType(typeId: string) {
 		return this.repo.findByType(typeId, true)
@@ -39,15 +68,19 @@ export class AttributeService {
 
 	async getById(id: string) {
 		const attribute = await this.repo.findById(id, true)
-		if (!attribute) throw new NotFoundException('Attribute not found')
+		if (!attribute) throw new NotFoundException('Атрибут не найден')
 		return attribute
 	}
 
 	async create(dto: CreateAttributeDtoReq) {
 		this.ensureVariantRules(dto.dataType, dto.isVariantAttribute)
 
+		const key = dto.key
+			? normalizeKey(dto.key)
+			: await this.generateAttributeKey(dto.typeId, dto.displayName)
+
 		const data: AttributeCreateInput = {
-			key: normalizeKey(dto.key),
+			key,
 			displayName: normalizeLabel(dto.displayName),
 			dataType: dto.dataType,
 			isRequired: dto.isRequired ?? false,
@@ -57,7 +90,9 @@ export class AttributeService {
 			type: { connect: { id: dto.typeId } }
 		}
 
-		return this.repo.create(data)
+		const attribute = await this.repo.create(data)
+		await this.invalidateTypeCache(attribute.typeId)
+		return attribute
 	}
 
 	async update(id: string, dto: UpdateAttributeDtoReq) {
@@ -86,12 +121,12 @@ export class AttributeService {
 		}
 
 		if (Object.keys(data).length === 0) {
-			throw new BadRequestException('No fields to update')
+			throw new BadRequestException('Нет полей для обновления')
 		}
 
 		if (dto.dataType !== undefined || dto.isVariantAttribute !== undefined) {
 			const current = await this.repo.findById(id)
-			if (!current) throw new NotFoundException('Attribute not found')
+			if (!current) throw new NotFoundException('Атрибут не найден')
 
 			const nextType = dto.dataType ?? current.dataType
 			const nextVariant = dto.isVariantAttribute ?? current.isVariantAttribute
@@ -100,15 +135,17 @@ export class AttributeService {
 		}
 
 		const attribute = await this.repo.update(id, data)
-		if (!attribute) throw new NotFoundException('Attribute not found')
+		if (!attribute) throw new NotFoundException('Атрибут не найден')
 
+		await this.invalidateTypeCache(attribute.typeId)
 		return attribute
 	}
 
 	async remove(id: string) {
 		const attribute = await this.repo.softDelete(id)
-		if (!attribute) throw new NotFoundException('Attribute not found')
+		if (!attribute) throw new NotFoundException('Атрибут не найден')
 
+		await this.invalidateTypeCache(attribute.typeId)
 		return { ok: true }
 	}
 
@@ -118,17 +155,23 @@ export class AttributeService {
 	}
 
 	async createEnumValue(attributeId: string, dto: CreateAttributeEnumDtoReq) {
-		await this.requireEnumAttribute(attributeId)
+		const attribute = await this.requireEnumAttribute(attributeId)
+
+		const value = dto.value
+			? normalizeEnumValue(dto.value)
+			: await this.generateEnumValue(attributeId, dto.displayName)
 
 		const data: AttributeEnumValueCreateInput = {
-			value: normalizeEnumValue(dto.value),
+			value,
 			displayName:
 				dto.displayName === undefined ? null : normalizeLabel(dto.displayName),
 			displayOrder: dto.displayOrder ?? 0,
 			attribute: { connect: { id: attributeId } }
 		}
 
-		return this.repo.createEnumValue(data)
+		const enumValue = await this.repo.createEnumValue(data)
+		await this.invalidateTypeCache(attribute.typeId)
+		return enumValue
 	}
 
 	async updateEnumValue(
@@ -136,7 +179,7 @@ export class AttributeService {
 		id: string,
 		dto: UpdateAttributeEnumDtoReq
 	) {
-		await this.requireEnumAttribute(attributeId)
+		const attribute = await this.requireEnumAttribute(attributeId)
 
 		const data: AttributeEnumValueUpdateInput = {}
 
@@ -151,36 +194,87 @@ export class AttributeService {
 		}
 
 		if (Object.keys(data).length === 0) {
-			throw new BadRequestException('No fields to update')
+			throw new BadRequestException('Нет полей для обновления')
 		}
 
 		const enumValue = await this.repo.updateEnumValue(id, attributeId, data)
-		if (!enumValue) throw new NotFoundException('Enum value not found')
+		if (!enumValue) throw new NotFoundException('Значение перечисления не найдено')
 
+		await this.invalidateTypeCache(attribute.typeId)
 		return enumValue
 	}
 
 	async removeEnumValue(attributeId: string, id: string) {
-		await this.requireEnumAttribute(attributeId)
+		const attribute = await this.requireEnumAttribute(attributeId)
 
 		const enumValue = await this.repo.softDeleteEnumValue(id, attributeId)
-		if (!enumValue) throw new NotFoundException('Enum value not found')
+		if (!enumValue) throw new NotFoundException('Значение перечисления не найдено')
 
+		await this.invalidateTypeCache(attribute.typeId)
 		return { ok: true }
 	}
 
 	private ensureVariantRules(dataType: DataType, isVariantAttribute?: boolean) {
 		if (isVariantAttribute && dataType !== DataType.ENUM) {
-			throw new BadRequestException('Variant attributes must use ENUM data type')
+			throw new BadRequestException('Вариантные атрибуты должны иметь тип ENUM')
 		}
 	}
 
 	private async requireEnumAttribute(attributeId: string) {
 		const attribute = await this.repo.findById(attributeId)
-		if (!attribute) throw new NotFoundException('Attribute not found')
+		if (!attribute) throw new NotFoundException('Атрибут не найден')
 		if (attribute.dataType !== DataType.ENUM) {
-			throw new BadRequestException('Attribute is not ENUM')
+			throw new BadRequestException('Атрибут не типа ENUM')
 		}
 		return attribute
+	}
+
+	private async invalidateTypeCache(typeId: string): Promise<void> {
+		if (!this.cacheTtlSec) return
+		await this.cache.bumpVersion(CATALOG_TYPE_CACHE_VERSION, typeId)
+	}
+
+	private async generateAttributeKey(
+		typeId: string,
+		displayName: string
+	): Promise<string> {
+		const base = buildKeyFromLabel(displayName) || ATTRIBUTE_KEY_FALLBACK
+		return this.ensureUniqueKey(base, ATTRIBUTE_KEY_MAX_LENGTH, key =>
+			this.repo.existsKey(typeId, key)
+		)
+	}
+
+	private async generateEnumValue(
+		attributeId: string,
+		displayName?: string
+	): Promise<string> {
+		const label = displayName?.trim()
+		if (!label) {
+			throw new BadRequestException(
+				'Нужно указать value или displayName для перечисления'
+			)
+		}
+
+		const base = buildKeyFromLabel(label) || ENUM_VALUE_FALLBACK
+		return this.ensureUniqueKey(base, ENUM_VALUE_MAX_LENGTH, value =>
+			this.repo.existsEnumValue(attributeId, value)
+		)
+	}
+
+	private async ensureUniqueKey(
+		base: string,
+		maxLength: number,
+		exists: (candidate: string) => Promise<boolean>
+	): Promise<string> {
+		const normalizedBase = base
+		let candidate = applySuffix(normalizedBase, 0, maxLength)
+		let suffix = 1
+
+		while (await exists(candidate)) {
+			candidate = applySuffix(normalizedBase, suffix, maxLength)
+			suffix += 1
+		}
+
+		return candidate
 	}
 }

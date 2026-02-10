@@ -1,4 +1,4 @@
-import { CatalogStatus } from '@generated/enums'
+﻿import { CatalogStatus } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
 import {
@@ -6,21 +6,34 @@ import {
 	IsNotEmpty,
 	IsOptional,
 	IsString,
-	Matches
+	Matches,
+	MaxLength,
+	MinLength
 } from 'class-validator'
 
 const SLUG_PATTERN = /^[a-z0-9-]+$/
 const DOMAIN_PATTERN = /^[a-z0-9.-]+$/
+const SLUG_MIN_LENGTH = 2
+const SLUG_MAX_LENGTH = 63
 
 export class CreateCatalogDtoReq {
-	@ApiProperty({ type: String, example: 'catalog' })
-	@Transform(({ value }) =>
-		value === undefined ? value : String(value).trim().toLowerCase()
-	)
+	@ApiPropertyOptional({
+		type: String,
+		example: 'catalog',
+		description: 'Если не указан, будет сгенерирован автоматически'
+	})
+	@Transform(({ value }) => {
+		if (value === undefined || value === null) return value
+		const normalized = String(value).trim().toLowerCase()
+		return normalized.length ? normalized : undefined
+	})
+	@IsOptional()
 	@Matches(SLUG_PATTERN)
-	@IsString({ message: 'Идентификатор каталога должен быть строкой' })
-	@IsNotEmpty({ message: 'Идентификатор каталога не должен быть пустым' })
-	slug: string
+	@MinLength(SLUG_MIN_LENGTH)
+	@MaxLength(SLUG_MAX_LENGTH)
+	@IsString({ message: 'РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РєР°С‚Р°Р»РѕРіР° РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ СЃС‚СЂРѕРєРѕРёМ†' })
+	@IsNotEmpty({ message: 'РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РєР°С‚Р°Р»РѕРіР° РЅРµ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј' })
+	slug?: string
 
 	@ApiPropertyOptional({
 		type: String,
@@ -29,6 +42,7 @@ export class CreateCatalogDtoReq {
 	})
 	@IsOptional()
 	@IsString()
+	@MaxLength(253)
 	@Matches(DOMAIN_PATTERN)
 	@Transform(({ value }) => {
 		if (value === undefined) return undefined

@@ -36,7 +36,7 @@ export class AttributeController {
 
 	@Get('/type/:typeId')
 	@ApiOperation({ summary: 'List attributes by type' })
-	@ApiParam({ name: 'typeId', description: 'Type id or code' })
+	@ApiParam({ name: 'typeId', description: 'ID или код типа' })
 	@ApiOkResponse({ type: AttributeDto, isArray: true })
 	async getByType(@Param('typeId') typeId: string) {
 		return this.attributeService.getByType(typeId)
@@ -44,7 +44,7 @@ export class AttributeController {
 
 	@Get('/:id')
 	@ApiOperation({ summary: 'Get attribute by id' })
-	@ApiParam({ name: 'id', description: 'Attribute id' })
+	@ApiParam({ name: 'id', description: 'ID атрибута' })
 	@ApiOkResponse({ type: AttributeDto })
 	async getById(@Param('id') id: string) {
 		return this.attributeService.getById(id)
@@ -59,7 +59,7 @@ export class AttributeController {
 
 	@Patch('/:id')
 	@ApiOperation({ summary: 'Update attribute' })
-	@ApiParam({ name: 'id', description: 'Attribute id' })
+	@ApiParam({ name: 'id', description: 'ID атрибута' })
 	@ApiOkResponse({ type: AttributeDto })
 	async update(@Param('id') id: string, @Body() dto: UpdateAttributeDtoReq) {
 		return this.attributeService.update(id, dto)
@@ -67,7 +67,7 @@ export class AttributeController {
 
 	@Delete('/:id')
 	@ApiOperation({ summary: 'Delete attribute' })
-	@ApiParam({ name: 'id', description: 'Attribute id' })
+	@ApiParam({ name: 'id', description: 'ID атрибута' })
 	@ApiOkResponse({ type: OkResponseDto })
 	async remove(@Param('id') id: string) {
 		return this.attributeService.remove(id)
@@ -75,7 +75,7 @@ export class AttributeController {
 
 	@Get('/:attributeId/enum')
 	@ApiOperation({ summary: 'List enum values' })
-	@ApiParam({ name: 'attributeId', description: 'Attribute id' })
+	@ApiParam({ name: 'attributeId', description: 'ID атрибута' })
 	@ApiOkResponse({ type: AttributeEnumValueDto, isArray: true })
 	async getEnumValues(@Param('attributeId') attributeId: string) {
 		return this.attributeService.getEnumValues(attributeId)
@@ -83,7 +83,7 @@ export class AttributeController {
 
 	@Post('/:attributeId/enum')
 	@ApiOperation({ summary: 'Create enum value' })
-	@ApiParam({ name: 'attributeId', description: 'Attribute id' })
+	@ApiParam({ name: 'attributeId', description: 'ID атрибута' })
 	@ApiCreatedResponse({ type: AttributeEnumValueDto })
 	async createEnumValue(
 		@Param('attributeId') attributeId: string,
@@ -94,8 +94,8 @@ export class AttributeController {
 
 	@Patch('/:attributeId/enum/:id')
 	@ApiOperation({ summary: 'Update enum value' })
-	@ApiParam({ name: 'attributeId', description: 'Attribute id' })
-	@ApiParam({ name: 'id', description: 'Enum value id' })
+	@ApiParam({ name: 'attributeId', description: 'ID атрибута' })
+	@ApiParam({ name: 'id', description: 'ID значения перечисления' })
 	@ApiOkResponse({ type: AttributeEnumValueDto })
 	async updateEnumValue(
 		@Param('attributeId') attributeId: string,
@@ -107,8 +107,8 @@ export class AttributeController {
 
 	@Delete('/:attributeId/enum/:id')
 	@ApiOperation({ summary: 'Delete enum value' })
-	@ApiParam({ name: 'attributeId', description: 'Attribute id' })
-	@ApiParam({ name: 'id', description: 'Enum value id' })
+	@ApiParam({ name: 'attributeId', description: 'ID атрибута' })
+	@ApiParam({ name: 'id', description: 'ID значения перечисления' })
 	@ApiOkResponse({ type: OkResponseDto })
 	async removeEnumValue(
 		@Param('attributeId') attributeId: string,

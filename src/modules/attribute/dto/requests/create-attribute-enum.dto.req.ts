@@ -1,23 +1,32 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+import { ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {
 	IsInt,
 	IsNotEmpty,
 	IsOptional,
 	IsString,
+	Matches,
 	MaxLength,
 	Min
 } from 'class-validator'
 
+const ENUM_VALUE_PATTERN = /^[a-z0-9_-]+$/
+
 export class CreateAttributeEnumDtoReq {
-	@ApiProperty({ type: String, example: 'xs' })
+	@ApiPropertyOptional({
+		type: String,
+		example: 'xs',
+		description: 'Если не указан, значение будет сгенерировано из displayName'
+	})
 	@Transform(({ value }) =>
 		value === undefined ? value : String(value).trim().toLowerCase()
 	)
+	@IsOptional()
 	@IsString()
 	@IsNotEmpty()
+	@Matches(ENUM_VALUE_PATTERN)
 	@MaxLength(255)
-	value: string
+	value?: string
 
 	@ApiPropertyOptional({ type: String, example: 'XS' })
 	@IsOptional()

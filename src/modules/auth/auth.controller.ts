@@ -74,10 +74,10 @@ export class AuthController {
 	@Post('/login')
 	@ApiOperation({ summary: 'Login' })
 	@ApiOkResponse({
-		description: 'Authenticated, cookies set',
+		description: 'Аутентифицирован, cookies установлены',
 		type: AuthLoginResponseDto
 	})
-	@ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+	@ApiUnauthorizedResponse({ description: 'Неверные учётные данные' })
 	async login(
 		@Body() dto: LoginDtoReq,
 		@Req() req: Request,
@@ -101,10 +101,10 @@ export class AuthController {
 	@Get('/me')
 	@ApiOperation({ summary: 'Get current user' })
 	@ApiOkResponse({
-		description: 'Authenticated user',
+		description: 'Аутентифицированный пользователь',
 		type: AuthLoginResponseDto
 	})
-	@ApiUnauthorizedResponse({ description: 'Not authenticated' })
+	@ApiUnauthorizedResponse({ description: 'Не авторизован' })
 	me(@Req() req: Request) {
 		return { ok: true, user: (req as any).user }
 	}
@@ -113,8 +113,8 @@ export class AuthController {
 	@Post('/logout')
 	@ApiOperation({ summary: 'Logout' })
 	@ApiSecurity('csrf')
-	@ApiOkResponse({ description: 'Session cleared', type: OkResponseDto })
-	@ApiUnauthorizedResponse({ description: 'Not authenticated' })
+	@ApiOkResponse({ description: 'Сессия очищена', type: OkResponseDto })
+	@ApiUnauthorizedResponse({ description: 'Не авторизован' })
 	async logout(@Res({ passthrough: true }) res: Response) {
 		const sid = (res.req as any).sessionId as string | undefined
 		if (sid) await this.sessions.destroy(sid)

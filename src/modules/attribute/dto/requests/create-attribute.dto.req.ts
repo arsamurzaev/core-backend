@@ -10,6 +10,7 @@ import {
 	IsString,
 	Matches,
 	MaxLength,
+	MinLength,
 	Min
 } from 'class-validator'
 
@@ -21,15 +22,21 @@ export class CreateAttributeDtoReq {
 	@IsNotEmpty()
 	typeId: string
 
-	@ApiProperty({ type: String, example: 'brand' })
+	@ApiPropertyOptional({
+		type: String,
+		example: 'brand',
+		description: 'Если не указан, ключ будет сгенерирован из названия'
+	})
 	@Transform(({ value }) =>
 		value === undefined ? value : String(value).trim().toLowerCase()
 	)
+	@IsOptional()
 	@IsString()
 	@IsNotEmpty()
+	@MinLength(2)
 	@MaxLength(100)
 	@Matches(KEY_PATTERN)
-	key: string
+	key?: string
 
 	@ApiProperty({ type: String, example: 'Brand' })
 	@Transform(({ value }) => (value === undefined ? value : String(value).trim()))

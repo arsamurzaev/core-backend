@@ -4,6 +4,50 @@ import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
+const enumValueSelect = {
+	id: true,
+	attributeId: true,
+	value: true,
+	displayName: true,
+	displayOrder: true,
+	createdAt: true,
+	updatedAt: true
+}
+
+const attributeSelect = {
+	id: true,
+	typeId: true,
+	key: true,
+	displayName: true,
+	dataType: true,
+	isRequired: true,
+	isVariantAttribute: true,
+	isFilterable: true,
+	displayOrder: true,
+	createdAt: true,
+	updatedAt: true
+}
+
+const attributeSelectWithEnums = {
+	...attributeSelect,
+	enumValues: {
+		where: { deleteAt: null },
+		select: enumValueSelect,
+		orderBy: [{ displayOrder: 'asc' as const }, { value: 'asc' as const }]
+	}
+}
+
+const typeSelectWithAttributes = {
+	id: true,
+	code: true,
+	name: true,
+	attributes: {
+		where: { deleteAt: null },
+		select: attributeSelectWithEnums,
+		orderBy: [{ displayOrder: 'asc' as const }, { key: 'asc' as const }]
+	}
+}
+
 const catalogSelect = {
 	id: true,
 	slug: true,
@@ -32,6 +76,13 @@ const catalogSelect = {
 	}
 }
 
+const catalogSelectWithType = {
+	...catalogSelect,
+	type: {
+		select: typeSelectWithAttributes
+	}
+}
+
 @Injectable()
 export class CatalogRepository {
 	constructor(private readonly prisma: PrismaService) {}
@@ -49,6 +100,13 @@ export class CatalogRepository {
 		})
 	}
 
+	async getByIdWithType(id: string, select?: Prisma.CatalogSelect) {
+		return this.prisma.catalog.findUnique({
+			where: { id },
+			select: { ...catalogSelectWithType, ...select }
+		})
+	}
+
 	async getBySlug(slug: string) {
 		return this.prisma.catalog.findUnique({
 			where: { slug },
@@ -61,6 +119,28 @@ export class CatalogRepository {
 			where: { domain },
 			select: catalogSelect
 		})
+	}
+
+	async existsSlug(slug: string, excludeId?: string): Promise<boolean> {
+		const catalog = await this.prisma.catalog.findFirst({
+			where: {
+				slug,
+				...(excludeId ? { id: { not: excludeId } } : {})
+			},
+			select: { id: true }
+		})
+		return Boolean(catalog)
+	}
+
+	async existsDomain(domain: string, excludeId?: string): Promise<boolean> {
+		const catalog = await this.prisma.catalog.findFirst({
+			where: {
+				domain,
+				...(excludeId ? { id: { not: excludeId } } : {})
+			},
+			select: { id: true }
+		})
+		return Boolean(catalog)
 	}
 
 	async create(data: CatalogCreateInput) {

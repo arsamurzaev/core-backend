@@ -24,7 +24,7 @@ function normalizeOptionalString(
 function normalizeRequiredString(value: string, name: string): string {
 	const normalized = value.trim()
 	if (!normalized) {
-		throw new BadRequestException(`${name} is required`)
+		throw new BadRequestException(`Поле ${name} обязательно`)
 	}
 	return normalized
 }
@@ -41,7 +41,7 @@ export class SeoService {
 	async getById(id: string) {
 		const catalogId = mustCatalogId()
 		const seo = await this.repo.findById(id, catalogId)
-		if (!seo) throw new NotFoundException('Seo setting not found')
+		if (!seo) throw new NotFoundException('SEO-настройка не найдена')
 		return seo
 	}
 
@@ -53,7 +53,7 @@ export class SeoService {
 			entityType,
 			normalizedEntityId
 		)
-		if (!seo) throw new NotFoundException('Seo setting not found')
+		if (!seo) throw new NotFoundException('SEO-настройка не найдена')
 		return seo
 	}
 
@@ -114,7 +114,7 @@ export class SeoService {
 		}
 		if (dto.entityId !== undefined) {
 			if (dto.entityId === null) {
-				throw new BadRequestException('entityId is required')
+				throw new BadRequestException('Поле entityId обязательно')
 			}
 			data.entityId = normalizeRequiredString(dto.entityId, 'entityId')
 		}
@@ -207,11 +207,11 @@ export class SeoService {
 		}
 
 		if (Object.keys(data).length === 0) {
-			throw new BadRequestException('No fields to update')
+			throw new BadRequestException('Нет полей для обновления')
 		}
 
 		const seo = await this.repo.update(id, catalogId, data)
-		if (!seo) throw new NotFoundException('Seo setting not found')
+		if (!seo) throw new NotFoundException('SEO-настройка не найдена')
 
 		return seo
 	}
@@ -219,7 +219,7 @@ export class SeoService {
 	async remove(id: string) {
 		const catalogId = mustCatalogId()
 		const seo = await this.repo.softDelete(id, catalogId)
-		if (!seo) throw new NotFoundException('Seo setting not found')
+		if (!seo) throw new NotFoundException('SEO-настройка не найдена')
 		return { ok: true }
 	}
 }

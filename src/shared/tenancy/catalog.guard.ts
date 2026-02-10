@@ -32,7 +32,7 @@ export class CatalogGuard implements CanActivate {
 		}
 		if (!store) {
 			throw new InternalServerErrorException(
-				'RequestContext not initialized (middleware not applied)'
+				'RequestContext не инициализирован (middleware не применён)'
 			)
 		}
 

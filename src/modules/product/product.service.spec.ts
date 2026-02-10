@@ -5,6 +5,7 @@ import { CacheService } from '@/shared/cache/cache.service'
 import { ProductAttributeBuilder } from './product-attribute.builder'
 import { ProductRepository } from './product.repository'
 import { ProductService } from './product.service'
+import { ProductVariantBuilder } from './product-variant.builder'
 
 describe('ProductService', () => {
 	let service: ProductService
@@ -29,6 +30,12 @@ describe('ProductService', () => {
 					useValue: {
 						buildForCreate: jest.fn(),
 						buildForUpdate: jest.fn()
+					}
+				},
+				{
+					provide: ProductVariantBuilder,
+					useValue: {
+						build: jest.fn()
 					}
 				},
 				{

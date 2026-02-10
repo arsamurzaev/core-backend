@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing'
 
+import { CacheService } from '@/shared/cache/cache.service'
+
 import { AttributeRepository } from './attribute.repository'
 import { AttributeService } from './attribute.service'
 
@@ -23,6 +25,10 @@ describe('AttributeService', () => {
 						updateEnumValue: jest.fn(),
 						softDeleteEnumValue: jest.fn()
 					}
+				},
+				{
+					provide: CacheService,
+					useValue: { bumpVersion: jest.fn() }
 				}
 			]
 		}).compile()

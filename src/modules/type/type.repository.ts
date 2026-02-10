@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
-import { CreateTypeDtoReq } from './dto/req/create-type.dto.req'
 import { UpdateTypeDtoReq } from './dto/req/update-type.dto.req'
 
 @Injectable()
@@ -11,6 +10,14 @@ export class TypeRepository {
 
 	findByCode(code: string) {
 		return this.prismaService.type.findUnique({ where: { code } })
+	}
+
+	async existsCode(code: string): Promise<boolean> {
+		const type = await this.prismaService.type.findUnique({
+			where: { code },
+			select: { id: true }
+		})
+		return Boolean(type)
 	}
 
 	findById(id: string) {
@@ -23,8 +30,8 @@ export class TypeRepository {
 		})
 	}
 
-	create(dto: CreateTypeDtoReq) {
-		return this.prismaService.type.create({ data: dto })
+	create(data: { code: string; name: string }) {
+		return this.prismaService.type.create({ data })
 	}
 
 	update(id: string, dto: UpdateTypeDtoReq) {

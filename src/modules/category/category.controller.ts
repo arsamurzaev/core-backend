@@ -7,6 +7,7 @@ import {
 	Param,
 	Patch,
 	Post,
+	Query,
 	UseGuards
 } from '@nestjs/common'
 import {
@@ -17,6 +18,7 @@ import {
 	ApiOkResponse,
 	ApiOperation,
 	ApiParam,
+	ApiQuery,
 	ApiSecurity,
 	ApiTags
 } from '@nestjs/swagger'
@@ -32,6 +34,7 @@ import { CreateCategoryDtoReq } from './dto/requests/create-category.dto.req'
 import { UpdateCategoryDtoReq } from './dto/requests/update-category.dto.req'
 import {
 	CategoryDto,
+	CategoryProductsPageDto,
 	CategoryWithRelationsDto
 } from './dto/responses/category.dto.res'
 
@@ -43,7 +46,7 @@ export class CategoryController {
 	@Get()
 	@ApiOperation({ summary: 'List categories' })
 	@ApiOkResponse({
-		description: 'Categories list',
+		description: 'Список категорий',
 		type: CategoryDto,
 		isArray: true
 	})
@@ -55,15 +58,45 @@ export class CategoryController {
 	@ApiOperation({ summary: 'Get category by id' })
 	@ApiParam({
 		name: 'id',
-		description: 'Category id'
+		description: 'ID категории'
 	})
 	@ApiOkResponse({
-		description: 'Category details',
+		description: 'Детали категории',
 		type: CategoryWithRelationsDto
 	})
-	@ApiNotFoundResponse({ description: 'Category not found' })
+	@ApiNotFoundResponse({ description: 'Категория не найдена' })
 	async getById(@Param('id') id: string) {
 		return this.categoryService.getById(id)
+	}
+
+	@Get('/:id/products/infinite')
+	@ApiOperation({ summary: 'List category products (infinite)' })
+	@ApiParam({
+		name: 'id',
+		description: 'ID категории'
+	})
+	@ApiQuery({
+		name: 'cursor',
+		required: false,
+		description: 'Курсор из предыдущего ответа (opaque)'
+	})
+	@ApiQuery({
+		name: 'limit',
+		required: false,
+		description: 'Размер страницы (1-100)',
+		schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 }
+	})
+	@ApiOkResponse({
+		description: 'Страница товаров категории',
+		type: CategoryProductsPageDto
+	})
+	@ApiNotFoundResponse({ description: 'Категория не найдена' })
+	async getProductsByCategory(
+		@Param('id') id: string,
+		@Query('cursor') cursor?: string,
+		@Query('limit') limit?: string
+	) {
+		return this.categoryService.getProductsByCategory(id, { cursor, limit })
 	}
 
 	@Post()
@@ -72,11 +105,11 @@ export class CategoryController {
 	@Roles(Role.CATALOG)
 	@ApiOperation({ summary: 'Create category' })
 	@ApiCreatedResponse({
-		description: 'Category created',
+		description: 'Категория создана',
 		type: CategoryDto
 	})
-	@ApiBadRequestResponse({ description: 'Validation error' })
-	@ApiForbiddenResponse({ description: 'Forbidden' })
+	@ApiBadRequestResponse({ description: 'Ошибка валидации' })
+	@ApiForbiddenResponse({ description: 'Доступ запрещён' })
 	async create(@Body() dto: CreateCategoryDtoReq) {
 		return this.categoryService.create(dto)
 	}
@@ -88,15 +121,15 @@ export class CategoryController {
 	@ApiOperation({ summary: 'Update category' })
 	@ApiParam({
 		name: 'id',
-		description: 'Category id'
+		description: 'ID категории'
 	})
 	@ApiOkResponse({
-		description: 'Category updated',
+		description: 'Категория обновлена',
 		type: CategoryWithRelationsDto
 	})
-	@ApiBadRequestResponse({ description: 'Validation error' })
-	@ApiNotFoundResponse({ description: 'Category not found' })
-	@ApiForbiddenResponse({ description: 'Forbidden' })
+	@ApiBadRequestResponse({ description: 'Ошибка валидации' })
+	@ApiNotFoundResponse({ description: 'Категория не найдена' })
+	@ApiForbiddenResponse({ description: 'Доступ запрещён' })
 	async update(@Param('id') id: string, @Body() dto: UpdateCategoryDtoReq) {
 		return this.categoryService.update(id, dto)
 	}
@@ -108,11 +141,11 @@ export class CategoryController {
 	@ApiOperation({ summary: 'Delete category' })
 	@ApiParam({
 		name: 'id',
-		description: 'Category id'
+		description: 'ID категории'
 	})
-	@ApiOkResponse({ description: 'Category deleted', type: OkResponseDto })
-	@ApiNotFoundResponse({ description: 'Category not found' })
-	@ApiForbiddenResponse({ description: 'Forbidden' })
+	@ApiOkResponse({ description: 'Категория удалена', type: OkResponseDto })
+	@ApiNotFoundResponse({ description: 'Категория не найдена' })
+	@ApiForbiddenResponse({ description: 'Доступ запрещён' })
 	async remove(@Param('id') id: string) {
 		return this.categoryService.remove(id)
 	}

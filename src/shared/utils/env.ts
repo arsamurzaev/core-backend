@@ -17,7 +17,7 @@ export function validateEnv<T extends object>(
 		const message = errors
 			.map(
 				error =>
-					`\nError in ${error.property}:\n` +
+					`\nОшибка в ${error.property}:\n` +
 					Object.entries(error.constraints)
 						.map(([key, value]) => `${key}: ${value}`)
 						.join('\n')

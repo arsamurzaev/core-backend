@@ -17,7 +17,7 @@ export class UserController {
 
 	@Post('register')
 	@ApiCreatedResponse({
-		description: 'User registered and session cookies set',
+		description: 'Пользователь зарегистрирован, cookies установлены',
 		type: OkResponseDto
 	})
 	@ApiOperation({ summary: 'Регистрация пользователя' })

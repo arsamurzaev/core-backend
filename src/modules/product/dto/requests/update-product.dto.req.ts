@@ -10,10 +10,12 @@ import {
 	IsString,
 	Matches,
 	MaxLength,
+	MinLength,
 	ValidateNested
 } from 'class-validator'
 
 import { ProductAttributeValueDto } from './product-attribute.dto.req'
+import { ProductVariantUpdateDtoReq } from './product-variant-update.dto.req'
 
 const SLUG_PATTERN = /^[a-z0-9-]+$/
 const SKU_PATTERN = /^[A-Za-z0-9_-]+$/
@@ -22,6 +24,8 @@ export class UpdateProductDtoReq {
 	@ApiPropertyOptional({ type: String, example: 'TSHIRT-001' })
 	@IsOptional()
 	@IsString()
+	@MinLength(3)
+	@MaxLength(100)
 	@Matches(SKU_PATTERN)
 	@Transform(({ value }) => (value === undefined ? value : String(value).trim()))
 	sku?: string
@@ -35,6 +39,8 @@ export class UpdateProductDtoReq {
 	@ApiPropertyOptional({ type: String, example: 'basic-tshirt' })
 	@IsOptional()
 	@IsString()
+	@MinLength(2)
+	@MaxLength(255)
 	@Matches(SLUG_PATTERN)
 	@Transform(({ value }) =>
 		value === undefined ? value : String(value).trim().toLowerCase()
@@ -75,4 +81,11 @@ export class UpdateProductDtoReq {
 	@ValidateNested({ each: true })
 	@Type(() => ProductAttributeValueDto)
 	attributes?: ProductAttributeValueDto[]
+
+	@ApiPropertyOptional({ type: [ProductVariantUpdateDtoReq] })
+	@IsOptional()
+	@IsArray()
+	@ValidateNested({ each: true })
+	@Type(() => ProductVariantUpdateDtoReq)
+	variants?: ProductVariantUpdateDtoReq[]
 }

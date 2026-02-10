@@ -126,6 +126,10 @@ model ProductAttribute {
     // Пример: true (вегетарианское), false (не водонепроницаемый)
     valueBoolean Boolean? @map("value_boolean")
 
+    // Для DATETIME: дата/время
+    // Пример: 2026-02-05T12:00:00Z
+    valueDateTime DateTime? @map("value_datetime")
+
     deleteAt DateTime? @map("delete_at") // Дата удаления 
 
     // ─── Связи ───
@@ -188,6 +192,12 @@ model ProductVariant {
     // Пример: 0.00, 200.00
     price Decimal @db.Decimal(12, 2)
 
+    // Статус варианта
+    // ACTIVE: доступен к покупке
+    // OUT_OF_STOCK: нет в наличии
+    // DISABLED: выключен вручную
+    status ProductVariantStatus @default(ACTIVE)
+
     // Доступен ли для заказа
     // false: скрыт в UI, нельзя добавить в корзину
     // Может быть false даже при stock > 0 (ручное отключение)
@@ -206,5 +216,6 @@ model ProductVariant {
     // ─── Индексы ───
     @@index([productId]) // Быстрое получение вариантов товара
     @@index([isAvailable]) // Фильтр только доступных
+    @@index([status]) // Фильтр по статусу
     @@map("product_variants")
 }

@@ -53,18 +53,18 @@ export class HandoffController {
 	@ApiQuery({
 		name: 'token',
 		required: true,
-		description: 'Handoff token'
+		description: 'Handoff-С‚РѕРєРµРЅ'
 	})
 	@ApiQuery({
 		name: 'next',
 		required: false,
-		description: 'Redirect path override'
+		description: 'РџРµСЂРµРѕРїСЂРµРґРµР»РµРЅРёРµ РїСѓС‚Рё СЂРµРґРёСЂРµРєС‚Р°'
 	})
 	@ApiFoundResponse({
-		description: 'Redirects to target path and sets session cookies'
+		description: 'Р РµРґРёСЂРµРєС‚ РЅР° С†РµР»РµРІРѕР№ РїСѓС‚СЊ Рё СѓСЃС‚Р°РЅРѕРІРєР° cookies СЃРµСЃСЃРёРё'
 	})
-	@ApiUnauthorizedResponse({ description: 'Token invalid or expired' })
-	@ApiForbiddenResponse({ description: 'Token not valid for catalog' })
+	@ApiUnauthorizedResponse({ description: 'Токен недействителен или истёк' })
+	@ApiForbiddenResponse({ description: 'Токен не для этого каталога' })
 	async exchange(
 		@Query('token') token: string,
 		@Query('next') next: string | undefined,
@@ -126,3 +126,4 @@ export class HandoffController {
 		return res.redirect(302, sanitizeNext(next ?? payload.next))
 	}
 }
+

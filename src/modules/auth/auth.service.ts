@@ -71,12 +71,12 @@ export class AuthService {
 		})
 
 		if (!user?.password) {
-			throw new UnauthorizedException('Invalid credentials')
+			throw new UnauthorizedException('Неверные учётные данные')
 		}
 
 		const ok = await verify(user.password, password)
 		if (!ok) {
-			throw new UnauthorizedException('Invalid credentials')
+			throw new UnauthorizedException('Неверные учётные данные')
 		}
 
 		return { id: user.id, login: user.login, name: user.name, role: user.role }
@@ -104,7 +104,7 @@ export class AuthService {
 		const user = await this.validateUser(dto)
 
 		if (user.role !== Role.CATALOG) {
-			throw new ForbiddenException('Not allowed for catalog login')
+			throw new ForbiddenException('Нет прав на вход в каталог')
 		}
 
 		let ownerId = ownerUserId ?? null
@@ -117,7 +117,7 @@ export class AuthService {
 		}
 
 		if (!ownerId || ownerId !== user.id) {
-			throw new ForbiddenException('Not allowed for this catalog')
+			throw new ForbiddenException('Нет прав для этого каталога')
 		}
 
 		const { sid, csrf } = await this.createSessionForUser(

@@ -59,10 +59,17 @@ enum ProductStatus {
     DELETE
 }
 
+enum ProductVariantStatus {
+    ACTIVE
+    OUT_OF_STOCK
+    DISABLED
+}
+
 enum DataType {
     STRING
     INTEGER
     DECIMAL
+    DATETIME
     BOOLEAN
     ENUM
 }

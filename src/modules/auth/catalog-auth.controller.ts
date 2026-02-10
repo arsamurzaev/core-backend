@@ -67,12 +67,12 @@ export class CatalogAuthController {
 	@Post('login')
 	@ApiOperation({ summary: 'Catalog login' })
 	@ApiOkResponse({
-		description: 'Authenticated for catalog, cookies set',
+		description: 'Аутентифицирован для каталога, cookies установлены',
 		type: AuthCatalogLoginResponseDto
 	})
-	@ApiUnauthorizedResponse({ description: 'Invalid credentials' })
-	@ApiForbiddenResponse({ description: 'Not allowed for this catalog' })
-	@ApiNotFoundResponse({ description: 'Catalog not found' })
+	@ApiUnauthorizedResponse({ description: 'Неверные учётные данные' })
+	@ApiForbiddenResponse({ description: 'Нет прав для этого каталога' })
+	@ApiNotFoundResponse({ description: 'Каталог не найден' })
 	async login(
 		@Body() dto: LoginDtoReq,
 		@Req() req: Request,
@@ -80,7 +80,7 @@ export class CatalogAuthController {
 	) {
 		const store = RequestContext.get()
 		if (!store?.catalogId) {
-			throw new NotFoundException('Catalog not found')
+			throw new NotFoundException('Каталог не найден')
 		}
 
 		const { ip, userAgent } = getClientInfo(req)

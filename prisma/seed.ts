@@ -1,8 +1,10 @@
-import { PrismaPg } from '@prisma/adapter-pg'
+﻿import { PrismaPg } from '@prisma/adapter-pg'
 import { hash } from 'argon2'
+import { createHash } from 'crypto'
 import 'dotenv/config'
+import path from 'path'
 
-import { Prisma, PrismaClient } from './generated/client.js'
+import { Prisma, PrismaClient, type ProductStatus } from './generated/client.js'
 
 const databaseUrl = process.env.DATABASE_URI ?? process.env.DATABASE_URL
 
@@ -29,6 +31,204 @@ const baseUrl = (catalog: { slug: string; domain?: string | null }) =>
 	catalog.domain
 		? `https://${catalog.domain}`
 		: `https://${catalog.slug}.myctlg.ru`
+
+const DEFAULT_MEDIA_MIME = 'image/jpeg'
+const MEDIA_MIME_BY_EXT = new Map<string, string>([
+	['.jpg', 'image/jpeg'],
+	['.jpeg', 'image/jpeg'],
+	['.png', 'image/png'],
+	['.webp', 'image/webp'],
+	['.avif', 'image/avif']
+])
+const MEDIA_EXT_BY_MIME: Record<string, string> = {
+	'image/jpeg': 'jpg',
+	'image/png': 'png',
+	'image/webp': 'webp',
+	'image/avif': 'avif'
+}
+
+const guessMediaMime = (url: string): string => {
+	const cleaned = url.split('?')[0].split('#')[0]
+	let ext = ''
+	try {
+		ext = path.extname(new URL(cleaned).pathname).toLowerCase()
+	} catch {
+		ext = path.extname(cleaned).toLowerCase()
+	}
+	return MEDIA_MIME_BY_EXT.get(ext) ?? DEFAULT_MEDIA_MIME
+}
+
+const buildMediaOriginalName = (url: string, mimeType: string): string => {
+	const cleaned = url.split('?')[0].split('#')[0]
+	let base = ''
+	try {
+		base = path.basename(new URL(cleaned).pathname)
+	} catch {
+		base = path.basename(cleaned)
+	}
+	base = base.replace(/\.[a-z0-9]+$/i, '')
+	const safeBase = base.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '')
+	const fallback = `media-${createHash('sha1')
+		.update(url)
+		.digest('hex')
+		.slice(0, 8)}`
+	const ext = MEDIA_EXT_BY_MIME[mimeType] ?? 'jpg'
+	return `${safeBase || fallback}.${ext}`
+}
+
+const addMediaUrl = (
+	map: Map<string, Set<string>>,
+	catalogId: string,
+	url?: string | null
+) => {
+	const trimmed = url?.trim()
+	if (!trimmed) return
+	const entry = map.get(catalogId) ?? new Set<string>()
+	entry.add(trimmed)
+	map.set(catalogId, entry)
+}
+
+const commonProductAttributes = [
+	{
+		key: 'brand',
+		displayName: 'Бренд',
+		dataType: 'ENUM',
+		isRequired: true,
+		isVariantAttribute: false,
+		isFilterable: true,
+		displayOrder: 88
+	},
+	{
+		key: 'subtitle',
+		displayName: 'Подзаголовок',
+		dataType: 'STRING',
+		isRequired: false,
+		isVariantAttribute: false,
+		isFilterable: false,
+		displayOrder: 89
+	},
+	{
+		key: 'about',
+		displayName: 'О товаре',
+		dataType: 'STRING',
+		isRequired: false,
+		isVariantAttribute: false,
+		isFilterable: false,
+		displayOrder: 90
+	},
+	{
+		key: 'description',
+		displayName: 'Описание',
+		dataType: 'STRING',
+		isRequired: false,
+		isVariantAttribute: false,
+		isFilterable: false,
+		displayOrder: 91
+	},
+	{
+		key: 'discount',
+		displayName: 'Скидка',
+		dataType: 'INTEGER',
+		isRequired: false,
+		isVariantAttribute: false,
+		isFilterable: false,
+		displayOrder: 92
+	},
+	{
+		key: 'discountedPrice',
+		displayName: 'Цена со скидкой',
+		dataType: 'DECIMAL',
+		isRequired: false,
+		isVariantAttribute: false,
+		isFilterable: false,
+		displayOrder: 93
+	},
+	{
+		key: 'discountStartAt',
+		displayName: 'Скидка с',
+		dataType: 'DATETIME',
+		isRequired: false,
+		isVariantAttribute: false,
+		isFilterable: false,
+		displayOrder: 94
+	},
+	{
+		key: 'discountEndAt',
+		displayName: 'Скидка до',
+		dataType: 'DATETIME',
+		isRequired: false,
+		isVariantAttribute: false,
+		isFilterable: false,
+		displayOrder: 95
+	}
+] as const
+
+const createCommonAttributes = async (typeId: string) => {
+	const created = await Promise.all(
+		commonProductAttributes.map(attribute =>
+			prisma.attribute.create({
+				data: {
+					...attribute,
+					typeId
+				}
+			})
+		)
+	)
+
+	return Object.fromEntries(created.map(attribute => [attribute.key, attribute]))
+}
+
+const buildCommonProductAttributeValues = (
+	products: { id: string; name: string; price: Prisma.Decimal | number }[],
+	attributes: Record<string, { id: string }>,
+	options: { discount: number; start: Date; end: Date }
+) => {
+	return products.flatMap(product => {
+		const price = new Prisma.Decimal(product.price)
+		const discountedPrice = price
+			.mul(new Prisma.Decimal(100 - options.discount))
+			.div(100)
+			.toDecimalPlaces(2)
+
+		return [
+			{
+				productId: product.id,
+				attributeId: attributes.subtitle.id,
+				valueString: `${product.name} — подзаголовок`
+			},
+			{
+				productId: product.id,
+				attributeId: attributes.about.id,
+				valueString: `Кратко о ${product.name}.`
+			},
+			{
+				productId: product.id,
+				attributeId: attributes.description.id,
+				valueString: `Описание товара ${product.name}.`
+			},
+			{
+				productId: product.id,
+				attributeId: attributes.discount.id,
+				valueInteger: options.discount
+			},
+			{
+				productId: product.id,
+				attributeId: attributes.discountedPrice.id,
+				valueDecimal: discountedPrice
+			},
+			{
+				productId: product.id,
+				attributeId: attributes.discountStartAt.id,
+				valueDateTime: options.start
+			},
+			{
+				productId: product.id,
+				attributeId: attributes.discountEndAt.id,
+				valueDateTime: options.end
+			}
+		]
+	})
+}
 
 async function clearDatabase() {
 	await prisma.$transaction([
@@ -73,27 +273,27 @@ async function main() {
 	const passwordHash = await hash('password')
 
 	const regionMow = await prisma.regionality.create({
-		data: { code: 'RU-MOW', name: 'Moscow' }
+		data: { code: 'RU-MOW', name: 'Москва' }
 	})
 	const regionSpb = await prisma.regionality.create({
-		data: { code: 'RU-SPE', name: 'Saint Petersburg' }
+		data: { code: 'RU-SPE', name: 'Санкт-Петербург' }
 	})
 	const regionNyc = await prisma.regionality.create({
-		data: { code: 'US-NYC', name: 'New York' }
+		data: { code: 'US-NYC', name: 'Нью-Йорк' }
 	})
 	const regionBer = await prisma.regionality.create({
-		data: { code: 'DE-BE', name: 'Berlin' }
+		data: { code: 'DE-BE', name: 'Берлин' }
 	})
 	const regionDub = await prisma.regionality.create({
-		data: { code: 'AE-DU', name: 'Dubai' }
+		data: { code: 'AE-DU', name: 'Дубай' }
 	})
 	const regionSfo = await prisma.regionality.create({
-		data: { code: 'US-SFO', name: 'San Francisco' }
+		data: { code: 'US-SFO', name: 'Сан-Франциско' }
 	})
 
 	const admin = await prisma.user.create({
 		data: {
-			name: 'Admin',
+			name: 'Администратор',
 			login: 'admin',
 			password: passwordHash,
 			role: 'ADMIN',
@@ -103,7 +303,7 @@ async function main() {
 	})
 	const catalogUserLumen = await prisma.user.create({
 		data: {
-			name: 'Lumen Owner',
+			name: 'Владелец Lumen',
 			login: 'lumen',
 			password: passwordHash,
 			role: 'CATALOG',
@@ -113,7 +313,7 @@ async function main() {
 	})
 	const catalogUserLumenOutlet = await prisma.user.create({
 		data: {
-			name: 'Lumen Outlet Owner',
+			name: 'Владелец Lumen Outlet',
 			login: 'lumen-outlet',
 			password: passwordHash,
 			role: 'CATALOG',
@@ -123,7 +323,7 @@ async function main() {
 	})
 	const catalogUserGreen = await prisma.user.create({
 		data: {
-			name: 'Green Spoon Owner',
+			name: 'Владелец Green Spoon',
 			login: 'green-spoon',
 			password: passwordHash,
 			role: 'CATALOG',
@@ -133,7 +333,7 @@ async function main() {
 	})
 	const catalogUserUrban = await prisma.user.create({
 		data: {
-			name: 'Urban Cafe Owner',
+			name: 'Владелец Urban Cafe',
 			login: 'urban-cafe',
 			password: passwordHash,
 			role: 'CATALOG',
@@ -143,7 +343,7 @@ async function main() {
 	})
 	const catalogUserNova = await prisma.user.create({
 		data: {
-			name: 'Nova Tech Owner',
+			name: 'Владелец Nova Tech',
 			login: 'nova-tech',
 			password: passwordHash,
 			role: 'CATALOG',
@@ -153,7 +353,7 @@ async function main() {
 	})
 	const catalogUserGlow = await prisma.user.create({
 		data: {
-			name: 'Glow Owner',
+			name: 'Владелец Glow',
 			login: 'glow',
 			password: passwordHash,
 			role: 'CATALOG',
@@ -163,7 +363,7 @@ async function main() {
 	})
 	const shopper = await prisma.user.create({
 		data: {
-			name: 'Sample User',
+			name: 'Покупатель',
 			login: 'user',
 			password: passwordHash,
 			role: 'USER',
@@ -173,7 +373,7 @@ async function main() {
 	})
 	const shopper2 = await prisma.user.create({
 		data: {
-			name: 'Second User',
+			name: 'Покупатель 2',
 			login: 'user2',
 			password: passwordHash,
 			role: 'USER',
@@ -183,66 +383,71 @@ async function main() {
 	})
 
 	const activityRetail = await prisma.activity.create({
-		data: { name: 'Retail' }
+		data: { name: 'Розница' }
 	})
 	const activityFood = await prisma.activity.create({
-		data: { name: 'Food & Drink' }
+		data: { name: 'Еда и напитки' }
 	})
 	const activityTech = await prisma.activity.create({
-		data: { name: 'Electronics' }
+		data: { name: 'Электроника' }
 	})
 	const activityBeauty = await prisma.activity.create({
-		data: { name: 'Beauty & Care' }
+		data: { name: 'Красота и уход' }
 	})
 
 	const typeClothing = await prisma.type.create({
 		data: {
 			code: 'clothing',
-			name: 'Clothing & Accessories',
+			name: 'Одежда и аксессуары',
 			activities: { connect: [{ id: activityRetail.id }] }
 		}
 	})
 	const typeRestaurant = await prisma.type.create({
 		data: {
 			code: 'restaurant',
-			name: 'Restaurants & Cafes',
+			name: 'Рестораны и кафе',
 			activities: { connect: [{ id: activityFood.id }] }
 		}
 	})
 	const typeElectronics = await prisma.type.create({
 		data: {
 			code: 'electronics',
-			name: 'Electronics & Gadgets',
+			name: 'Электроника и гаджеты',
 			activities: { connect: [{ id: activityTech.id }] }
 		}
 	})
 	const typeBeauty = await prisma.type.create({
 		data: {
 			code: 'beauty',
-			name: 'Beauty & Care',
+			name: 'Красота и уход',
 			activities: {
 				connect: [{ id: activityBeauty.id }, { id: activityRetail.id }]
 			}
 		}
 	})
 
-	const attrBrand = await prisma.attribute.create({
-		data: {
-			typeId: typeClothing.id,
-			key: 'brand',
-			displayName: 'Brand',
-			dataType: 'ENUM',
-			isRequired: true,
-			isVariantAttribute: false,
-			isFilterable: true,
-			displayOrder: 1
-		}
-	})
+	const [
+		commonClothingAttributes,
+		commonRestaurantAttributes,
+		commonElectronicsAttributes,
+		commonBeautyAttributes
+	] = await Promise.all([
+		createCommonAttributes(typeClothing.id),
+		createCommonAttributes(typeRestaurant.id),
+		createCommonAttributes(typeElectronics.id),
+		createCommonAttributes(typeBeauty.id)
+	])
+
+	const attrBrand = commonClothingAttributes.brand
+	const attrRestaurantBrand = commonRestaurantAttributes.brand
+	const attrTechBrand = commonElectronicsAttributes.brand
+	const attrBeautyBrand = commonBeautyAttributes.brand
+
 	const attrSize = await prisma.attribute.create({
 		data: {
 			typeId: typeClothing.id,
 			key: 'size',
-			displayName: 'Size',
+			displayName: 'Размер',
 			dataType: 'ENUM',
 			isRequired: true,
 			isVariantAttribute: true,
@@ -254,7 +459,7 @@ async function main() {
 		data: {
 			typeId: typeClothing.id,
 			key: 'color',
-			displayName: 'Color',
+			displayName: 'Цвет',
 			dataType: 'ENUM',
 			isRequired: true,
 			isVariantAttribute: true,
@@ -266,7 +471,7 @@ async function main() {
 		data: {
 			typeId: typeClothing.id,
 			key: 'material',
-			displayName: 'Material',
+			displayName: 'Материал',
 			dataType: 'STRING',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -278,7 +483,7 @@ async function main() {
 		data: {
 			typeId: typeClothing.id,
 			key: 'fit',
-			displayName: 'Fit',
+			displayName: 'Посадка',
 			dataType: 'ENUM',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -290,7 +495,7 @@ async function main() {
 		data: {
 			typeId: typeClothing.id,
 			key: 'gender',
-			displayName: 'Gender',
+			displayName: 'Пол',
 			dataType: 'ENUM',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -302,7 +507,7 @@ async function main() {
 		data: {
 			typeId: typeClothing.id,
 			key: 'season',
-			displayName: 'Season',
+			displayName: 'Сезон',
 			dataType: 'ENUM',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -310,12 +515,24 @@ async function main() {
 			displayOrder: 7
 		}
 	})
+	const attrShoeSize = await prisma.attribute.create({
+		data: {
+			typeId: typeClothing.id,
+			key: 'shoe_size',
+			displayName: 'Размерный ряд обуви',
+			dataType: 'ENUM',
+			isRequired: false,
+			isVariantAttribute: false,
+			isFilterable: true,
+			displayOrder: 8
+		}
+	})
 
 	const attrIngredients = await prisma.attribute.create({
 		data: {
 			typeId: typeRestaurant.id,
 			key: 'ingredients',
-			displayName: 'Ingredients',
+			displayName: 'Состав',
 			dataType: 'STRING',
 			isRequired: true,
 			isVariantAttribute: false,
@@ -327,7 +544,7 @@ async function main() {
 		data: {
 			typeId: typeRestaurant.id,
 			key: 'calories',
-			displayName: 'Calories',
+			displayName: 'Калории',
 			dataType: 'INTEGER',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -339,7 +556,7 @@ async function main() {
 		data: {
 			typeId: typeRestaurant.id,
 			key: 'is_vegan',
-			displayName: 'Vegan',
+			displayName: 'Веганское',
 			dataType: 'BOOLEAN',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -351,7 +568,7 @@ async function main() {
 		data: {
 			typeId: typeRestaurant.id,
 			key: 'weight',
-			displayName: 'Weight',
+			displayName: 'Вес',
 			dataType: 'DECIMAL',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -363,7 +580,7 @@ async function main() {
 		data: {
 			typeId: typeRestaurant.id,
 			key: 'spicy_level',
-			displayName: 'Spicy Level',
+			displayName: 'Острота',
 			dataType: 'ENUM',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -375,7 +592,7 @@ async function main() {
 		data: {
 			typeId: typeRestaurant.id,
 			key: 'allergens',
-			displayName: 'Allergens',
+			displayName: 'Аллергены',
 			dataType: 'STRING',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -387,7 +604,7 @@ async function main() {
 		data: {
 			typeId: typeRestaurant.id,
 			key: 'cooking_time',
-			displayName: 'Cooking Time (min)',
+			displayName: 'Время приготовления (мин)',
 			dataType: 'INTEGER',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -396,23 +613,11 @@ async function main() {
 		}
 	})
 
-	const attrTechBrand = await prisma.attribute.create({
-		data: {
-			typeId: typeElectronics.id,
-			key: 'brand',
-			displayName: 'Brand',
-			dataType: 'ENUM',
-			isRequired: true,
-			isVariantAttribute: false,
-			isFilterable: true,
-			displayOrder: 1
-		}
-	})
 	const attrTechColor = await prisma.attribute.create({
 		data: {
 			typeId: typeElectronics.id,
 			key: 'color',
-			displayName: 'Color',
+			displayName: 'Цвет',
 			dataType: 'ENUM',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -424,7 +629,7 @@ async function main() {
 		data: {
 			typeId: typeElectronics.id,
 			key: 'screen_size',
-			displayName: 'Screen Size',
+			displayName: 'Диагональ экрана',
 			dataType: 'DECIMAL',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -436,7 +641,7 @@ async function main() {
 		data: {
 			typeId: typeElectronics.id,
 			key: 'memory',
-			displayName: 'Memory',
+			displayName: 'ОЗУ',
 			dataType: 'INTEGER',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -448,7 +653,7 @@ async function main() {
 		data: {
 			typeId: typeElectronics.id,
 			key: 'storage',
-			displayName: 'Storage',
+			displayName: 'Память',
 			dataType: 'INTEGER',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -460,7 +665,7 @@ async function main() {
 		data: {
 			typeId: typeElectronics.id,
 			key: 'battery',
-			displayName: 'Battery (mAh)',
+			displayName: 'Батарея (мА·ч)',
 			dataType: 'INTEGER',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -472,7 +677,7 @@ async function main() {
 		data: {
 			typeId: typeElectronics.id,
 			key: 'is_refurbished',
-			displayName: 'Refurbished',
+			displayName: 'Восстановленный',
 			dataType: 'BOOLEAN',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -484,7 +689,7 @@ async function main() {
 		data: {
 			typeId: typeElectronics.id,
 			key: 'warranty_months',
-			displayName: 'Warranty (months)',
+			displayName: 'Гарантия (мес)',
 			dataType: 'INTEGER',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -493,23 +698,11 @@ async function main() {
 		}
 	})
 
-	const attrBeautyBrand = await prisma.attribute.create({
-		data: {
-			typeId: typeBeauty.id,
-			key: 'brand',
-			displayName: 'Brand',
-			dataType: 'ENUM',
-			isRequired: true,
-			isVariantAttribute: false,
-			isFilterable: true,
-			displayOrder: 1
-		}
-	})
 	const attrBeautyVolume = await prisma.attribute.create({
 		data: {
 			typeId: typeBeauty.id,
 			key: 'volume',
-			displayName: 'Volume',
+			displayName: 'Объем',
 			dataType: 'DECIMAL',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -521,7 +714,7 @@ async function main() {
 		data: {
 			typeId: typeBeauty.id,
 			key: 'skin_type',
-			displayName: 'Skin Type',
+			displayName: 'Тип кожи',
 			dataType: 'ENUM',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -533,7 +726,7 @@ async function main() {
 		data: {
 			typeId: typeBeauty.id,
 			key: 'is_organic',
-			displayName: 'Organic',
+			displayName: 'Органический',
 			dataType: 'BOOLEAN',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -545,7 +738,7 @@ async function main() {
 		data: {
 			typeId: typeBeauty.id,
 			key: 'color',
-			displayName: 'Color',
+			displayName: 'Оттенок',
 			dataType: 'ENUM',
 			isRequired: false,
 			isVariantAttribute: false,
@@ -578,12 +771,36 @@ async function main() {
 			displayOrder: 3
 		}
 	})
+	const brandGreen = await prisma.attributeEnumValue.create({
+		data: {
+			attributeId: attrRestaurantBrand.id,
+			value: 'green',
+			displayName: 'Грин Спун',
+			displayOrder: 1
+		}
+	})
+	const brandUrban = await prisma.attributeEnumValue.create({
+		data: {
+			attributeId: attrRestaurantBrand.id,
+			value: 'urban',
+			displayName: 'Урбан Кафе',
+			displayOrder: 2
+		}
+	})
+	const sizeXxs = await prisma.attributeEnumValue.create({
+		data: {
+			attributeId: attrSize.id,
+			value: 'xxs',
+			displayName: 'XXS',
+			displayOrder: 1
+		}
+	})
 	const sizeXs = await prisma.attributeEnumValue.create({
 		data: {
 			attributeId: attrSize.id,
 			value: 'xs',
 			displayName: 'XS',
-			displayOrder: 1
+			displayOrder: 2
 		}
 	})
 	const sizeS = await prisma.attributeEnumValue.create({
@@ -591,7 +808,7 @@ async function main() {
 			attributeId: attrSize.id,
 			value: 's',
 			displayName: 'S',
-			displayOrder: 2
+			displayOrder: 3
 		}
 	})
 	const sizeM = await prisma.attributeEnumValue.create({
@@ -599,7 +816,7 @@ async function main() {
 			attributeId: attrSize.id,
 			value: 'm',
 			displayName: 'M',
-			displayOrder: 3
+			displayOrder: 4
 		}
 	})
 	const sizeL = await prisma.attributeEnumValue.create({
@@ -607,7 +824,7 @@ async function main() {
 			attributeId: attrSize.id,
 			value: 'l',
 			displayName: 'L',
-			displayOrder: 4
+			displayOrder: 5
 		}
 	})
 	const sizeXl = await prisma.attributeEnumValue.create({
@@ -615,14 +832,32 @@ async function main() {
 			attributeId: attrSize.id,
 			value: 'xl',
 			displayName: 'XL',
-			displayOrder: 5
+			displayOrder: 6
 		}
 	})
+	const sizeXxl = await prisma.attributeEnumValue.create({
+		data: {
+			attributeId: attrSize.id,
+			value: 'xxl',
+			displayName: 'XXL',
+			displayOrder: 7
+		}
+	})
+	for (let size = 30; size <= 48; size += 1) {
+		await prisma.attributeEnumValue.create({
+			data: {
+				attributeId: attrShoeSize.id,
+				value: String(size),
+				displayName: String(size),
+				displayOrder: size - 29
+			}
+		})
+	}
 	const colorWhite = await prisma.attributeEnumValue.create({
 		data: {
 			attributeId: attrColor.id,
 			value: 'white',
-			displayName: 'White',
+			displayName: 'Белый',
 			displayOrder: 1
 		}
 	})
@@ -630,7 +865,7 @@ async function main() {
 		data: {
 			attributeId: attrColor.id,
 			value: 'black',
-			displayName: 'Black',
+			displayName: 'Черный',
 			displayOrder: 2
 		}
 	})
@@ -638,7 +873,7 @@ async function main() {
 		data: {
 			attributeId: attrColor.id,
 			value: 'blue',
-			displayName: 'Blue',
+			displayName: 'Синий',
 			displayOrder: 3
 		}
 	})
@@ -646,7 +881,7 @@ async function main() {
 		data: {
 			attributeId: attrColor.id,
 			value: 'red',
-			displayName: 'Red',
+			displayName: 'Красный',
 			displayOrder: 4
 		}
 	})
@@ -655,7 +890,7 @@ async function main() {
 		data: {
 			attributeId: attrFit.id,
 			value: 'regular',
-			displayName: 'Regular',
+			displayName: 'Стандарт',
 			displayOrder: 1
 		}
 	})
@@ -663,7 +898,7 @@ async function main() {
 		data: {
 			attributeId: attrFit.id,
 			value: 'slim',
-			displayName: 'Slim',
+			displayName: 'Слим',
 			displayOrder: 2
 		}
 	})
@@ -671,7 +906,7 @@ async function main() {
 		data: {
 			attributeId: attrFit.id,
 			value: 'oversize',
-			displayName: 'Oversize',
+			displayName: 'Оверсайз',
 			displayOrder: 3
 		}
 	})
@@ -680,7 +915,7 @@ async function main() {
 		data: {
 			attributeId: attrGender.id,
 			value: 'men',
-			displayName: 'Men',
+			displayName: 'Мужской',
 			displayOrder: 1
 		}
 	})
@@ -688,7 +923,7 @@ async function main() {
 		data: {
 			attributeId: attrGender.id,
 			value: 'women',
-			displayName: 'Women',
+			displayName: 'Женский',
 			displayOrder: 2
 		}
 	})
@@ -696,7 +931,7 @@ async function main() {
 		data: {
 			attributeId: attrGender.id,
 			value: 'unisex',
-			displayName: 'Unisex',
+			displayName: 'Унисекс',
 			displayOrder: 3
 		}
 	})
@@ -705,7 +940,7 @@ async function main() {
 		data: {
 			attributeId: attrSeason.id,
 			value: 'summer',
-			displayName: 'Summer',
+			displayName: 'Лето',
 			displayOrder: 1
 		}
 	})
@@ -713,7 +948,7 @@ async function main() {
 		data: {
 			attributeId: attrSeason.id,
 			value: 'winter',
-			displayName: 'Winter',
+			displayName: 'Зима',
 			displayOrder: 2
 		}
 	})
@@ -721,7 +956,7 @@ async function main() {
 		data: {
 			attributeId: attrSeason.id,
 			value: 'all-season',
-			displayName: 'All Season',
+			displayName: 'Всесезон',
 			displayOrder: 3
 		}
 	})
@@ -730,7 +965,7 @@ async function main() {
 		data: {
 			attributeId: attrSpicy.id,
 			value: 'mild',
-			displayName: 'Mild',
+			displayName: 'Слабая',
 			displayOrder: 1
 		}
 	})
@@ -738,7 +973,7 @@ async function main() {
 		data: {
 			attributeId: attrSpicy.id,
 			value: 'medium',
-			displayName: 'Medium',
+			displayName: 'Средняя',
 			displayOrder: 2
 		}
 	})
@@ -746,7 +981,7 @@ async function main() {
 		data: {
 			attributeId: attrSpicy.id,
 			value: 'hot',
-			displayName: 'Hot',
+			displayName: 'Острая',
 			displayOrder: 3
 		}
 	})
@@ -780,7 +1015,7 @@ async function main() {
 		data: {
 			attributeId: attrTechColor.id,
 			value: 'black',
-			displayName: 'Black',
+			displayName: 'Черный',
 			displayOrder: 1
 		}
 	})
@@ -788,7 +1023,7 @@ async function main() {
 		data: {
 			attributeId: attrTechColor.id,
 			value: 'silver',
-			displayName: 'Silver',
+			displayName: 'Серебристый',
 			displayOrder: 2
 		}
 	})
@@ -796,7 +1031,7 @@ async function main() {
 		data: {
 			attributeId: attrTechColor.id,
 			value: 'blue',
-			displayName: 'Blue',
+			displayName: 'Синий',
 			displayOrder: 3
 		}
 	})
@@ -822,7 +1057,7 @@ async function main() {
 		data: {
 			attributeId: attrBeautySkinType.id,
 			value: 'dry',
-			displayName: 'Dry',
+			displayName: 'Сухая',
 			displayOrder: 1
 		}
 	})
@@ -830,7 +1065,7 @@ async function main() {
 		data: {
 			attributeId: attrBeautySkinType.id,
 			value: 'oily',
-			displayName: 'Oily',
+			displayName: 'Жирная',
 			displayOrder: 2
 		}
 	})
@@ -838,7 +1073,7 @@ async function main() {
 		data: {
 			attributeId: attrBeautySkinType.id,
 			value: 'normal',
-			displayName: 'Normal',
+			displayName: 'Нормальная',
 			displayOrder: 3
 		}
 	})
@@ -847,7 +1082,7 @@ async function main() {
 		data: {
 			attributeId: attrBeautyColor.id,
 			value: 'nude',
-			displayName: 'Nude',
+			displayName: 'Нюд',
 			displayOrder: 1
 		}
 	})
@@ -855,7 +1090,7 @@ async function main() {
 		data: {
 			attributeId: attrBeautyColor.id,
 			value: 'red',
-			displayName: 'Red',
+			displayName: 'Красный',
 			displayOrder: 2
 		}
 	})
@@ -863,7 +1098,7 @@ async function main() {
 		data: {
 			attributeId: attrBeautyColor.id,
 			value: 'rose',
-			displayName: 'Rose',
+			displayName: 'Розовый',
 			displayOrder: 3
 		}
 	})
@@ -872,7 +1107,7 @@ async function main() {
 		data: {
 			slug: 'lumen',
 			domain: 'lumen.demo',
-			name: 'Lumen Apparel',
+			name: 'Lumen Одежда',
 			typeId: typeClothing.id,
 			userId: catalogUserLumen.id,
 			activity: { connect: [{ id: activityRetail.id }] },
@@ -882,7 +1117,7 @@ async function main() {
 	const catalogLumenOutlet = await prisma.catalog.create({
 		data: {
 			slug: 'lumen-outlet',
-			name: 'Lumen Outlet',
+			name: 'Lumen Аутлет',
 			typeId: typeClothing.id,
 			parentId: catalogLumen.id,
 			userId: catalogUserLumenOutlet.id,
@@ -894,7 +1129,7 @@ async function main() {
 		data: {
 			slug: 'green-spoon',
 			domain: 'greenspoon.demo',
-			name: 'Green Spoon',
+			name: 'Грин Спун',
 			typeId: typeRestaurant.id,
 			userId: catalogUserGreen.id,
 			activity: { connect: [{ id: activityFood.id }] },
@@ -905,7 +1140,7 @@ async function main() {
 		data: {
 			slug: 'urban-cafe',
 			domain: 'urbancafe.demo',
-			name: 'Urban Cafe',
+			name: 'Урбан Кафе',
 			typeId: typeRestaurant.id,
 			userId: catalogUserUrban.id,
 			activity: { connect: [{ id: activityFood.id }] },
@@ -916,7 +1151,7 @@ async function main() {
 		data: {
 			slug: 'nova-tech',
 			domain: 'novatech.demo',
-			name: 'Nova Tech',
+			name: 'Нова Тех',
 			typeId: typeElectronics.id,
 			userId: catalogUserNova.id,
 			activity: { connect: [{ id: activityTech.id }] },
@@ -927,7 +1162,7 @@ async function main() {
 		data: {
 			slug: 'glow',
 			domain: 'glow.demo',
-			name: 'Glow Beauty',
+			name: 'Глоу Бьюти',
 			typeId: typeBeauty.id,
 			userId: catalogUserGlow.id,
 			activity: {
@@ -941,63 +1176,63 @@ async function main() {
 		data: [
 			{
 				catalogId: catalogLumen.id,
-				about: 'Minimalist basics for everyday wear.',
-				description: 'Seasonal collections and essentials.',
+				about: 'Минималистичная базовая одежда на каждый день.',
+				description: 'Сезонные коллекции и основные позиции.',
 				currency: 'RUB',
 				logoUrl: square('lumen-logo'),
 				bgUrl: img('lumen-hero', 1600, 900),
 				status: 'OPERATIONAL',
-				note: 'Seed data'
+				note: 'Данные сидера'
 			},
 			{
 				catalogId: catalogLumenOutlet.id,
-				about: 'Outlet for last season items.',
-				description: 'Limited stock and special prices.',
+				about: 'Аутлет с товарами прошлых сезонов.',
+				description: 'Ограниченные остатки и специальные цены.',
 				currency: 'RUB',
 				logoUrl: square('lumen-outlet-logo'),
 				bgUrl: img('lumen-outlet-hero', 1600, 900),
 				status: 'PROPOSAL',
-				note: 'Seed data'
+				note: 'Данные сидера'
 			},
 			{
 				catalogId: catalogGreen.id,
-				about: 'Fresh food made daily.',
-				description: 'Burgers, salads, and sides.',
+				about: 'Свежая еда каждый день.',
+				description: 'Бургеры, салаты и гарниры.',
 				currency: 'RUB',
 				logoUrl: square('greenspoon-logo'),
 				bgUrl: img('greenspoon-hero', 1600, 900),
 				status: 'OPERATIONAL',
-				note: 'Seed data'
+				note: 'Данные сидера'
 			},
 			{
 				catalogId: catalogUrban.id,
-				about: 'Coffee, pastries, and brunch.',
-				description: 'Downtown cafe with seasonal menu.',
+				about: 'Кофе, выпечка и завтраки.',
+				description: 'Городское кафе с сезонным меню.',
 				currency: 'USD',
 				logoUrl: square('urbancafe-logo'),
 				bgUrl: img('urbancafe-hero', 1600, 900),
 				status: 'OPERATIONAL',
-				note: 'Seed data'
+				note: 'Данные сидера'
 			},
 			{
 				catalogId: catalogNova.id,
-				about: 'Devices and accessories for everyday life.',
-				description: 'Smartphones, laptops, and audio gear.',
+				about: 'Устройства и аксессуары для повседневной жизни.',
+				description: 'Смартфоны, ноутбуки и аудио.',
 				currency: 'USD',
 				logoUrl: square('novatech-logo'),
 				bgUrl: img('novatech-hero', 1600, 900),
 				status: 'IMPLEMENTATION',
-				note: 'Seed data'
+				note: 'Данные сидера'
 			},
 			{
 				catalogId: catalogGlow.id,
-				about: 'Skincare essentials and daily rituals.',
-				description: 'Clean formulas and minimalist routines.',
+				about: 'Уход за кожей и ежедневные ритуалы.',
+				description: 'Чистые формулы и минималистичные процедуры.',
 				currency: 'EUR',
 				logoUrl: square('glow-logo'),
 				bgUrl: img('glow-hero', 1600, 900),
 				status: 'PROPOSAL',
-				note: 'Seed data'
+				note: 'Данные сидера'
 			}
 		]
 	})
@@ -1260,6 +1495,7 @@ async function main() {
 
 	const mediaHero = await prisma.media.create({
 		data: {
+			catalogId: catalogLumen.id,
 			originalName: 'hero.jpg',
 			mimeType: 'image/jpeg',
 			size: 245000,
@@ -1273,6 +1509,7 @@ async function main() {
 	})
 	const mediaBanner = await prisma.media.create({
 		data: {
+			catalogId: catalogLumen.id,
 			originalName: 'banner.jpg',
 			mimeType: 'image/jpeg',
 			size: 180000,
@@ -1286,6 +1523,7 @@ async function main() {
 	})
 	const mediaPhone = await prisma.media.create({
 		data: {
+			catalogId: catalogLumen.id,
 			originalName: 'phone.jpg',
 			mimeType: 'image/jpeg',
 			size: 210000,
@@ -1299,6 +1537,7 @@ async function main() {
 	})
 	const mediaSerum = await prisma.media.create({
 		data: {
+			catalogId: catalogLumen.id,
 			originalName: 'serum.jpg',
 			mimeType: 'image/jpeg',
 			size: 160000,
@@ -1399,199 +1638,199 @@ async function main() {
 	const categoryMen = await prisma.category.create({
 		data: {
 			catalogId: catalogLumen.id,
-			name: 'Men',
+			name: 'Мужское',
 			position: 1,
 			imageUrl: img('category-men', 800, 800),
-			descriptor: 'Menswear essentials'
+			descriptor: 'Базовый мужской гардероб'
 		}
 	})
 	const categoryWomen = await prisma.category.create({
 		data: {
 			catalogId: catalogLumen.id,
-			name: 'Women',
+			name: 'Женское',
 			position: 2,
 			imageUrl: img('category-women', 800, 800),
-			descriptor: 'Womenswear staples'
+			descriptor: 'Базовый женский гардероб'
 		}
 	})
 	const categoryAccessories = await prisma.category.create({
 		data: {
 			catalogId: catalogLumen.id,
-			name: 'Accessories',
+			name: 'Аксессуары',
 			position: 3,
 			imageUrl: img('category-accessories', 800, 800),
-			descriptor: 'Bags and accessories',
+			descriptor: 'Сумки и аксессуары',
 			discount: 10
 		}
 	})
 	const categoryTshirts = await prisma.category.create({
 		data: {
 			catalogId: catalogLumen.id,
-			name: 'T-Shirts',
+			name: 'Футболки',
 			position: 1,
 			parentId: categoryMen.id,
 			imageUrl: img('category-tshirts', 800, 800),
-			descriptor: 'Everyday tees'
+			descriptor: 'Футболки на каждый день'
 		}
 	})
 	const categoryJeans = await prisma.category.create({
 		data: {
 			catalogId: catalogLumen.id,
-			name: 'Jeans',
+			name: 'Джинсы',
 			position: 2,
 			parentId: categoryMen.id,
 			imageUrl: img('category-jeans', 800, 800),
-			descriptor: 'Slim and regular fits'
+			descriptor: 'Слим и стандартная посадка'
 		}
 	})
 	const categoryHoodies = await prisma.category.create({
 		data: {
 			catalogId: catalogLumen.id,
-			name: 'Hoodies',
+			name: 'Худи',
 			position: 3,
 			parentId: categoryMen.id,
 			imageUrl: img('category-hoodies', 800, 800),
-			descriptor: 'Warm layers'
+			descriptor: 'Теплые слои'
 		}
 	})
 	const categoryDresses = await prisma.category.create({
 		data: {
 			catalogId: catalogLumen.id,
-			name: 'Dresses',
+			name: 'Платья',
 			position: 1,
 			parentId: categoryWomen.id,
 			imageUrl: img('category-dresses', 800, 800),
-			descriptor: 'Seasonal dresses'
+			descriptor: 'Сезонные платья'
 		}
 	})
 	const categoryTops = await prisma.category.create({
 		data: {
 			catalogId: catalogLumen.id,
-			name: 'Tops',
+			name: 'Топы',
 			position: 2,
 			parentId: categoryWomen.id,
 			imageUrl: img('category-tops', 800, 800),
-			descriptor: 'Everyday tops'
+			descriptor: 'Топы на каждый день'
 		}
 	})
 	const categoryOutletSale = await prisma.category.create({
 		data: {
 			catalogId: catalogLumenOutlet.id,
-			name: 'Sale',
+			name: 'Распродажа',
 			position: 1,
 			imageUrl: img('category-outlet-sale', 800, 800),
-			descriptor: 'Limited time deals',
+			descriptor: 'Выгодные предложения',
 			discount: 30
 		}
 	})
 	const categoryOutletLastChance = await prisma.category.create({
 		data: {
 			catalogId: catalogLumenOutlet.id,
-			name: 'Last Chance',
+			name: 'Последний шанс',
 			position: 2,
 			imageUrl: img('category-outlet-last', 800, 800),
-			descriptor: 'Final stock',
+			descriptor: 'Последние остатки',
 			discount: 40
 		}
 	})
 	const categoryBurgers = await prisma.category.create({
 		data: {
 			catalogId: catalogGreen.id,
-			name: 'Burgers',
+			name: 'Бургеры',
 			position: 1,
 			imageUrl: img('category-burgers', 800, 800),
-			descriptor: 'Classic and signature'
+			descriptor: 'Классика и фирменные'
 		}
 	})
 	const categorySalads = await prisma.category.create({
 		data: {
 			catalogId: catalogGreen.id,
-			name: 'Salads',
+			name: 'Салаты',
 			position: 2,
 			imageUrl: img('category-salads', 800, 800),
-			descriptor: 'Fresh and light'
+			descriptor: 'Свежие и легкие'
 		}
 	})
 	const categoryDrinks = await prisma.category.create({
 		data: {
 			catalogId: catalogGreen.id,
-			name: 'Drinks',
+			name: 'Напитки',
 			position: 3,
 			imageUrl: img('category-drinks', 800, 800),
-			descriptor: 'Fresh drinks'
+			descriptor: 'Свежие напитки'
 		}
 	})
 	const categoryDesserts = await prisma.category.create({
 		data: {
 			catalogId: catalogGreen.id,
-			name: 'Desserts',
+			name: 'Десерты',
 			position: 4,
 			imageUrl: img('category-desserts', 800, 800),
-			descriptor: 'Sweet bites',
+			descriptor: 'Сладости',
 			discount: 5
 		}
 	})
 	const categoryCoffee = await prisma.category.create({
 		data: {
 			catalogId: catalogUrban.id,
-			name: 'Coffee',
+			name: 'Кофе',
 			position: 1,
 			imageUrl: img('category-coffee', 800, 800),
-			descriptor: 'Coffee classics'
+			descriptor: 'Кофейная классика'
 		}
 	})
 	const categoryPastries = await prisma.category.create({
 		data: {
 			catalogId: catalogUrban.id,
-			name: 'Pastries',
+			name: 'Выпечка',
 			position: 2,
 			imageUrl: img('category-pastries', 800, 800),
-			descriptor: 'Baked daily'
+			descriptor: 'Выпечка каждый день'
 		}
 	})
 	const categoryPhones = await prisma.category.create({
 		data: {
 			catalogId: catalogNova.id,
-			name: 'Phones',
+			name: 'Телефоны',
 			position: 1,
 			imageUrl: img('category-phones', 800, 800),
-			descriptor: 'Smartphones'
+			descriptor: 'Смартфоны'
 		}
 	})
 	const categoryLaptops = await prisma.category.create({
 		data: {
 			catalogId: catalogNova.id,
-			name: 'Laptops',
+			name: 'Ноутбуки',
 			position: 2,
 			imageUrl: img('category-laptops', 800, 800),
-			descriptor: 'Laptops and notebooks'
+			descriptor: 'Ноутбуки и ультрабуки'
 		}
 	})
 	const categoryGadgets = await prisma.category.create({
 		data: {
 			catalogId: catalogNova.id,
-			name: 'Gadgets',
+			name: 'Гаджеты',
 			position: 3,
 			imageUrl: img('category-gadgets', 800, 800),
-			descriptor: 'Audio and accessories'
+			descriptor: 'Аудио и аксессуары'
 		}
 	})
 	const categorySkincare = await prisma.category.create({
 		data: {
 			catalogId: catalogGlow.id,
-			name: 'Skincare',
+			name: 'Уход за кожей',
 			position: 1,
 			imageUrl: img('category-skincare', 800, 800),
-			descriptor: 'Skincare essentials'
+			descriptor: 'Базовый уход'
 		}
 	})
 	const categoryMakeup = await prisma.category.create({
 		data: {
 			catalogId: catalogGlow.id,
-			name: 'Makeup',
+			name: 'Макияж',
 			position: 2,
 			imageUrl: img('category-makeup', 800, 800),
-			descriptor: 'Makeup picks'
+			descriptor: 'Подборка макияжа'
 		}
 	})
 
@@ -1622,7 +1861,7 @@ async function main() {
 		data: {
 			catalogId: catalogLumen.id,
 			sku: 'LUM-TSHIRT-001',
-			name: 'Basic T-Shirt',
+			name: 'Базовая футболка',
 			slug: 'basic-tshirt',
 			price: tshirtPrice,
 			imagesUrls: [
@@ -1639,7 +1878,7 @@ async function main() {
 		data: {
 			catalogId: catalogLumen.id,
 			sku: 'LUM-JEANS-001',
-			name: 'Slim Jeans',
+			name: 'Джинсы слим',
 			slug: 'slim-jeans',
 			price: jeansPrice,
 			imagesUrls: [img('product-jeans-1'), img('product-jeans-2')],
@@ -1652,7 +1891,7 @@ async function main() {
 		data: {
 			catalogId: catalogLumen.id,
 			sku: 'LUM-HOODIE-001',
-			name: 'Classic Hoodie',
+			name: 'Классическое худи',
 			slug: 'classic-hoodie',
 			price: hoodiePrice,
 			imagesUrls: [img('product-hoodie-1'), img('product-hoodie-2')],
@@ -1665,7 +1904,7 @@ async function main() {
 		data: {
 			catalogId: catalogLumen.id,
 			sku: 'LUM-SHIRT-001',
-			name: 'Linen Shirt',
+			name: 'Льняная рубашка',
 			slug: 'linen-shirt',
 			price: shirtPrice,
 			imagesUrls: [img('product-shirt-1'), img('product-shirt-2')],
@@ -1678,7 +1917,7 @@ async function main() {
 		data: {
 			catalogId: catalogLumen.id,
 			sku: 'LUM-DRESS-001',
-			name: 'Summer Dress',
+			name: 'Летнее платье',
 			slug: 'summer-dress',
 			price: dressPrice,
 			imagesUrls: [img('product-dress-1'), img('product-dress-2')],
@@ -1691,7 +1930,7 @@ async function main() {
 		data: {
 			catalogId: catalogLumen.id,
 			sku: 'LUM-TOP-001',
-			name: 'Silk Top',
+			name: 'Шелковый топ',
 			slug: 'silk-top',
 			price: shirtPrice,
 			imagesUrls: [img('product-top-1'), img('product-top-2')],
@@ -1704,7 +1943,7 @@ async function main() {
 		data: {
 			catalogId: catalogLumen.id,
 			sku: 'LUM-BAG-001',
-			name: 'Canvas Tote',
+			name: 'Холщовая сумка',
 			slug: 'canvas-tote',
 			price: tshirtPrice,
 			imagesUrls: [img('product-tote-1')],
@@ -1713,11 +1952,571 @@ async function main() {
 			position: 7
 		}
 	})
+
+	type LumenExtraProductDefinition = {
+		sku: string
+		name: string
+		slug: string
+		price: number
+		imagesUrls: string[]
+		isPopular: boolean
+		status: ProductStatus
+		position: number
+		categories: string[]
+		attributes: {
+			brand: { id: string }
+			material: string
+			fit: { id: string }
+			gender: { id: string }
+			season: { id: string }
+		}
+		variants?: {
+			sku: string
+			size: { id: string; value: string }
+			color: { id: string; value: string }
+			stock: number
+			price: number
+		}[]
+	}
+
+	const lumenExtraProductDefinitions: ReadonlyArray<LumenExtraProductDefinition> =
+		[
+			{
+				sku: 'LUM-TSHIRT-002',
+				name: 'Плотная футболка',
+				slug: 'heavyweight-tee',
+				price: 2299,
+				imagesUrls: [
+					img('product-heavyweight-tee-1'),
+					img('product-heavyweight-tee-2')
+				],
+				isPopular: false,
+				status: 'ACTIVE',
+				position: 8,
+				categories: [categoryTshirts.id, categoryMen.id],
+				attributes: {
+					brand: brandLumen,
+					material: 'Плотный хлопок',
+					fit: fitRegular,
+					gender: genderMen,
+					season: seasonSummer
+				},
+				variants: [
+					{
+						sku: 'LUM-TSHIRT-002-S-WHT',
+						size: { id: sizeS.id, value: 's' },
+						color: { id: colorWhite.id, value: 'white' },
+						stock: 12,
+						price: 0
+					},
+					{
+						sku: 'LUM-TSHIRT-002-M-BLK',
+						size: { id: sizeM.id, value: 'm' },
+						color: { id: colorBlack.id, value: 'black' },
+						stock: 9,
+						price: 0
+					},
+					{
+						sku: 'LUM-TSHIRT-002-L-BLU',
+						size: { id: sizeL.id, value: 'l' },
+						color: { id: colorBlue.id, value: 'blue' },
+						stock: 6,
+						price: 100
+					}
+				]
+			},
+			{
+				sku: 'LUM-TSHIRT-003',
+				name: 'Свободная футболка с принтом',
+				slug: 'relaxed-graphic-tee',
+				price: 2499,
+				imagesUrls: [img('product-graphic-tee-1'), img('product-graphic-tee-2')],
+				isPopular: true,
+				status: 'ACTIVE',
+				position: 9,
+				categories: [categoryTshirts.id, categoryMen.id],
+				attributes: {
+					brand: brandNova,
+					material: 'Хлопковый джерси',
+					fit: fitOversize,
+					gender: genderUnisex,
+					season: seasonSummer
+				},
+				variants: [
+					{
+						sku: 'LUM-TSHIRT-003-S-BLK',
+						size: { id: sizeS.id, value: 's' },
+						color: { id: colorBlack.id, value: 'black' },
+						stock: 8,
+						price: 0
+					},
+					{
+						sku: 'LUM-TSHIRT-003-M-WHT',
+						size: { id: sizeM.id, value: 'm' },
+						color: { id: colorWhite.id, value: 'white' },
+						stock: 7,
+						price: 0
+					},
+					{
+						sku: 'LUM-TSHIRT-003-L-RED',
+						size: { id: sizeL.id, value: 'l' },
+						color: { id: colorRed.id, value: 'red' },
+						stock: 5,
+						price: 120
+					}
+				]
+			},
+			{
+				sku: 'LUM-TSHIRT-004',
+				name: 'Футболка с длинным рукавом',
+				slug: 'long-sleeve-tee',
+				price: 2599,
+				imagesUrls: [img('product-longsleeve-tee-1')],
+				isPopular: false,
+				status: 'ACTIVE',
+				position: 10,
+				categories: [categoryTshirts.id, categoryMen.id],
+				attributes: {
+					brand: brandLumen,
+					material: 'Хлопковый риб',
+					fit: fitRegular,
+					gender: genderMen,
+					season: seasonWinter
+				}
+			},
+			{
+				sku: 'LUM-TSHIRT-005',
+				name: 'Футболка с карманом',
+				slug: 'pocket-tee',
+				price: 2199,
+				imagesUrls: [img('product-pocket-tee-1')],
+				isPopular: false,
+				status: 'ACTIVE',
+				position: 11,
+				categories: [categoryTshirts.id, categoryMen.id],
+				attributes: {
+					brand: brandOrbit,
+					material: 'Мягкий хлопок',
+					fit: fitSlim,
+					gender: genderUnisex,
+					season: seasonAll
+				}
+			},
+			{
+				sku: 'LUM-JEANS-002',
+				name: 'Прямые джинсы',
+				slug: 'straight-jeans',
+				price: 4199,
+				imagesUrls: [
+					img('product-straight-jeans-1'),
+					img('product-straight-jeans-2')
+				],
+				isPopular: true,
+				status: 'ACTIVE',
+				position: 12,
+				categories: [categoryJeans.id, categoryMen.id],
+				attributes: {
+					brand: brandLumen,
+					material: 'Деним',
+					fit: fitRegular,
+					gender: genderMen,
+					season: seasonAll
+				},
+				variants: [
+					{
+						sku: 'LUM-JEANS-002-M-BLU',
+						size: { id: sizeM.id, value: 'm' },
+						color: { id: colorBlue.id, value: 'blue' },
+						stock: 6,
+						price: 0
+					},
+					{
+						sku: 'LUM-JEANS-002-L-BLU',
+						size: { id: sizeL.id, value: 'l' },
+						color: { id: colorBlue.id, value: 'blue' },
+						stock: 4,
+						price: 0
+					}
+				]
+			},
+			{
+				sku: 'LUM-JEANS-003',
+				name: 'Свободные джинсы',
+				slug: 'relaxed-jeans',
+				price: 4099,
+				imagesUrls: [img('product-relaxed-jeans-1')],
+				isPopular: false,
+				status: 'ACTIVE',
+				position: 13,
+				categories: [categoryJeans.id, categoryMen.id],
+				attributes: {
+					brand: brandNova,
+					material: 'Деним',
+					fit: fitRegular,
+					gender: genderMen,
+					season: seasonAll
+				}
+			},
+			{
+				sku: 'LUM-JEANS-004',
+				name: 'Черный деним',
+				slug: 'black-denim',
+				price: 4299,
+				imagesUrls: [img('product-black-denim-1')],
+				isPopular: false,
+				status: 'ACTIVE',
+				position: 14,
+				categories: [categoryJeans.id, categoryMen.id],
+				attributes: {
+					brand: brandOrbit,
+					material: 'Черный деним',
+					fit: fitSlim,
+					gender: genderMen,
+					season: seasonAll
+				}
+			},
+			{
+				sku: 'LUM-HOODIE-002',
+				name: 'Худи на молнии',
+				slug: 'zip-hoodie',
+				price: 4799,
+				imagesUrls: [img('product-zip-hoodie-1'), img('product-zip-hoodie-2')],
+				isPopular: true,
+				status: 'ACTIVE',
+				position: 15,
+				categories: [categoryHoodies.id, categoryMen.id],
+				attributes: {
+					brand: brandNova,
+					material: 'Флисовый хлопок',
+					fit: fitRegular,
+					gender: genderUnisex,
+					season: seasonWinter
+				},
+				variants: [
+					{
+						sku: 'LUM-HOODIE-002-S-BLK',
+						size: { id: sizeS.id, value: 's' },
+						color: { id: colorBlack.id, value: 'black' },
+						stock: 7,
+						price: 0
+					},
+					{
+						sku: 'LUM-HOODIE-002-M-BLU',
+						size: { id: sizeM.id, value: 'm' },
+						color: { id: colorBlue.id, value: 'blue' },
+						stock: 5,
+						price: 0
+					}
+				]
+			},
+			{
+				sku: 'LUM-HOODIE-003',
+				name: 'Флисовое худи',
+				slug: 'fleece-hoodie',
+				price: 4999,
+				imagesUrls: [img('product-fleece-hoodie-1')],
+				isPopular: false,
+				status: 'ACTIVE',
+				position: 16,
+				categories: [categoryHoodies.id, categoryMen.id],
+				attributes: {
+					brand: brandLumen,
+					material: 'Мягкий флис',
+					fit: fitOversize,
+					gender: genderUnisex,
+					season: seasonWinter
+				}
+			},
+			{
+				sku: 'LUM-HOODIE-004',
+				name: 'Легкое худи',
+				slug: 'lightweight-hoodie',
+				price: 4399,
+				imagesUrls: [img('product-lightweight-hoodie-1')],
+				isPopular: false,
+				status: 'DRAFT',
+				position: 17,
+				categories: [categoryHoodies.id, categoryMen.id],
+				attributes: {
+					brand: brandOrbit,
+					material: 'Легкий хлопок',
+					fit: fitSlim,
+					gender: genderMen,
+					season: seasonSummer
+				}
+			},
+			{
+				sku: 'LUM-DRESS-002',
+				name: 'Платье на запах',
+				slug: 'wrap-dress',
+				price: 6499,
+				imagesUrls: [img('product-wrap-dress-1'), img('product-wrap-dress-2')],
+				isPopular: true,
+				status: 'ACTIVE',
+				position: 18,
+				categories: [categoryDresses.id, categoryWomen.id],
+				attributes: {
+					brand: brandLumen,
+					material: 'Вискоза',
+					fit: fitSlim,
+					gender: genderWomen,
+					season: seasonSummer
+				},
+				variants: [
+					{
+						sku: 'LUM-DRESS-002-S-RED',
+						size: { id: sizeS.id, value: 's' },
+						color: { id: colorRed.id, value: 'red' },
+						stock: 5,
+						price: 0
+					},
+					{
+						sku: 'LUM-DRESS-002-M-BLK',
+						size: { id: sizeM.id, value: 'm' },
+						color: { id: colorBlack.id, value: 'black' },
+						stock: 4,
+						price: 0
+					}
+				]
+			},
+			{
+				sku: 'LUM-DRESS-003',
+				name: 'Платье-комбинация',
+				slug: 'slip-dress',
+				price: 5599,
+				imagesUrls: [img('product-slip-dress-1')],
+				isPopular: false,
+				status: 'ACTIVE',
+				position: 19,
+				categories: [categoryDresses.id, categoryWomen.id],
+				attributes: {
+					brand: brandNova,
+					material: 'Сатин',
+					fit: fitSlim,
+					gender: genderWomen,
+					season: seasonSummer
+				}
+			},
+			{
+				sku: 'LUM-DRESS-004',
+				name: 'Платье миди',
+				slug: 'midi-dress',
+				price: 6299,
+				imagesUrls: [img('product-midi-dress-1')],
+				isPopular: false,
+				status: 'ACTIVE',
+				position: 20,
+				categories: [categoryDresses.id, categoryWomen.id],
+				attributes: {
+					brand: brandOrbit,
+					material: 'Хлопковый поплин',
+					fit: fitRegular,
+					gender: genderWomen,
+					season: seasonAll
+				}
+			},
+			{
+				sku: 'LUM-TOP-002',
+				name: 'Рифленая майка',
+				slug: 'ribbed-tank',
+				price: 1999,
+				imagesUrls: [img('product-ribbed-tank-1')],
+				isPopular: false,
+				status: 'ACTIVE',
+				position: 21,
+				categories: [categoryTops.id, categoryWomen.id],
+				attributes: {
+					brand: brandLumen,
+					material: 'Рифленый хлопок',
+					fit: fitSlim,
+					gender: genderWomen,
+					season: seasonSummer
+				}
+			},
+			{
+				sku: 'LUM-TOP-003',
+				name: 'Кружевная блуза',
+				slug: 'lace-blouse',
+				price: 3499,
+				imagesUrls: [img('product-lace-blouse-1')],
+				isPopular: false,
+				status: 'ACTIVE',
+				position: 22,
+				categories: [categoryTops.id, categoryWomen.id],
+				attributes: {
+					brand: brandNova,
+					material: 'Кружевная смесь',
+					fit: fitRegular,
+					gender: genderWomen,
+					season: seasonSummer
+				}
+			},
+			{
+				sku: 'LUM-TOP-004',
+				name: 'Рубашка на пуговицах',
+				slug: 'button-shirt',
+				price: 2999,
+				imagesUrls: [img('product-button-shirt-1')],
+				isPopular: false,
+				status: 'ARCHIVED',
+				position: 23,
+				categories: [categoryTops.id, categoryWomen.id],
+				attributes: {
+					brand: brandOrbit,
+					material: 'Смесь хлопка',
+					fit: fitRegular,
+					gender: genderWomen,
+					season: seasonAll
+				}
+			},
+			{
+				sku: 'LUM-ACC-001',
+				name: 'Холщовая кепка',
+				slug: 'canvas-cap',
+				price: 1499,
+				imagesUrls: [img('product-canvas-cap-1')],
+				isPopular: false,
+				status: 'ACTIVE',
+				position: 24,
+				categories: [categoryAccessories.id, categoryMen.id],
+				attributes: {
+					brand: brandLumen,
+					material: 'Канвас',
+					fit: fitRegular,
+					gender: genderUnisex,
+					season: seasonSummer
+				},
+				variants: [
+					{
+						sku: 'LUM-ACC-001-S-WHT',
+						size: { id: sizeS.id, value: 's' },
+						color: { id: colorWhite.id, value: 'white' },
+						stock: 10,
+						price: 0
+					},
+					{
+						sku: 'LUM-ACC-001-M-BLK',
+						size: { id: sizeM.id, value: 'm' },
+						color: { id: colorBlack.id, value: 'black' },
+						stock: 7,
+						price: 0
+					}
+				]
+			},
+			{
+				sku: 'LUM-ACC-002',
+				name: 'Кожаный ремень',
+				slug: 'leather-belt',
+				price: 2499,
+				imagesUrls: [img('product-leather-belt-1')],
+				isPopular: false,
+				status: 'ACTIVE',
+				position: 25,
+				categories: [categoryAccessories.id, categoryMen.id],
+				attributes: {
+					brand: brandLumen,
+					material: 'Кожа',
+					fit: fitRegular,
+					gender: genderMen,
+					season: seasonAll
+				}
+			},
+			{
+				sku: 'LUM-ACC-003',
+				name: 'Шерстяной шарф',
+				slug: 'wool-scarf',
+				price: 2799,
+				imagesUrls: [img('product-wool-scarf-1')],
+				isPopular: false,
+				status: 'ACTIVE',
+				position: 26,
+				categories: [categoryAccessories.id, categoryWomen.id],
+				attributes: {
+					brand: brandNova,
+					material: 'Шерсть',
+					fit: fitRegular,
+					gender: genderWomen,
+					season: seasonWinter
+				}
+			},
+			{
+				sku: 'LUM-ACC-004',
+				name: 'Носки (3 пары)',
+				slug: 'crew-socks-3-pack',
+				price: 999,
+				imagesUrls: [img('product-crew-socks-1')],
+				isPopular: false,
+				status: 'ACTIVE',
+				position: 27,
+				categories: [categoryAccessories.id, categoryMen.id, categoryWomen.id],
+				attributes: {
+					brand: brandOrbit,
+					material: 'Смесь хлопка',
+					fit: fitRegular,
+					gender: genderUnisex,
+					season: seasonAll
+				}
+			},
+			{
+				sku: 'LUM-ACC-005',
+				name: 'Мини-кроссбоди',
+				slug: 'mini-crossbody',
+				price: 3299,
+				imagesUrls: [img('product-mini-crossbody-1')],
+				isPopular: true,
+				status: 'ACTIVE',
+				position: 28,
+				categories: [categoryAccessories.id, categoryWomen.id],
+				attributes: {
+					brand: brandLumen,
+					material: 'Кожа',
+					fit: fitRegular,
+					gender: genderWomen,
+					season: seasonAll
+				}
+			}
+		]
+
+	const lumenExtraProducts: {
+		product: { id: string; name: string; price: Prisma.Decimal | number }
+		categories: string[]
+		attributes: {
+			brand: { id: string }
+			material: string
+			fit: { id: string }
+			gender: { id: string }
+			season: { id: string }
+		}
+		variants?: {
+			sku: string
+			size: { id: string; value: string }
+			color: { id: string; value: string }
+			stock: number
+			price: number
+		}[]
+	}[] = []
+
+	for (const definition of lumenExtraProductDefinitions) {
+		const { categories, attributes, variants, ...productData } = definition
+		const product = await prisma.product.create({
+			data: {
+				catalogId: catalogLumen.id,
+				...productData
+			}
+		})
+		lumenExtraProducts.push({
+			product: { id: product.id, name: product.name, price: product.price },
+			categories,
+			attributes,
+			variants
+		})
+	}
+
 	const productOutletTshirt = await prisma.product.create({
 		data: {
 			catalogId: catalogLumenOutlet.id,
 			sku: 'OUT-TSHIRT-001',
-			name: 'Outlet T-Shirt',
+			name: 'Футболка из аутлета',
 			slug: 'outlet-tshirt',
 			price: outletTshirtPrice,
 			imagesUrls: [img('product-outlet-tshirt-1')],
@@ -1730,7 +2529,7 @@ async function main() {
 		data: {
 			catalogId: catalogLumenOutlet.id,
 			sku: 'OUT-JACKET-001',
-			name: 'Outlet Jacket',
+			name: 'Куртка из аутлета',
 			slug: 'outlet-jacket',
 			price: outletJacketPrice,
 			imagesUrls: [img('product-outlet-jacket-1')],
@@ -1743,7 +2542,7 @@ async function main() {
 		data: {
 			catalogId: catalogLumenOutlet.id,
 			sku: 'OUT-JEANS-001',
-			name: 'Outlet Jeans',
+			name: 'Джинсы из аутлета',
 			slug: 'outlet-jeans',
 			price: outletJeansPrice,
 			imagesUrls: [img('product-outlet-jeans-1')],
@@ -1756,7 +2555,7 @@ async function main() {
 		data: {
 			catalogId: catalogGreen.id,
 			sku: 'GRN-BURGER-001',
-			name: 'Classic Burger',
+			name: 'Классический бургер',
 			slug: 'classic-burger',
 			price: burgerPrice,
 			imagesUrls: [img('product-burger-1'), img('product-burger-2')],
@@ -1769,7 +2568,7 @@ async function main() {
 		data: {
 			catalogId: catalogGreen.id,
 			sku: 'GRN-SALAD-001',
-			name: 'Vegan Salad',
+			name: 'Веганский салат',
 			slug: 'vegan-salad',
 			price: saladPrice,
 			imagesUrls: [img('product-salad-1'), img('product-salad-2')],
@@ -1782,7 +2581,7 @@ async function main() {
 		data: {
 			catalogId: catalogGreen.id,
 			sku: 'GRN-WRAP-001',
-			name: 'Chicken Wrap',
+			name: 'Куриный ролл',
 			slug: 'chicken-wrap',
 			price: wrapPrice,
 			imagesUrls: [img('product-wrap-1'), img('product-wrap-2')],
@@ -1795,7 +2594,7 @@ async function main() {
 		data: {
 			catalogId: catalogGreen.id,
 			sku: 'GRN-JUICE-001',
-			name: 'Fresh Juice',
+			name: 'Свежий сок',
 			slug: 'fresh-juice',
 			price: juicePrice,
 			imagesUrls: [img('product-juice-1')],
@@ -1808,7 +2607,7 @@ async function main() {
 		data: {
 			catalogId: catalogGreen.id,
 			sku: 'GRN-CAKE-001',
-			name: 'Chocolate Cake',
+			name: 'Шоколадный торт',
 			slug: 'chocolate-cake',
 			price: cakePrice,
 			imagesUrls: [img('product-cake-1')],
@@ -1821,7 +2620,7 @@ async function main() {
 		data: {
 			catalogId: catalogUrban.id,
 			sku: 'URB-ESP-001',
-			name: 'Espresso',
+			name: 'Эспрессо',
 			slug: 'espresso',
 			price: espressoPrice,
 			imagesUrls: [img('product-espresso-1')],
@@ -1834,7 +2633,7 @@ async function main() {
 		data: {
 			catalogId: catalogUrban.id,
 			sku: 'URB-CAP-001',
-			name: 'Cappuccino',
+			name: 'Капучино',
 			slug: 'cappuccino',
 			price: cappuccinoPrice,
 			imagesUrls: [img('product-cappuccino-1')],
@@ -1847,7 +2646,7 @@ async function main() {
 		data: {
 			catalogId: catalogUrban.id,
 			sku: 'URB-CRO-001',
-			name: 'Butter Croissant',
+			name: 'Круассан с маслом',
 			slug: 'butter-croissant',
 			price: croissantPrice,
 			imagesUrls: [img('product-croissant-1')],
@@ -1860,7 +2659,7 @@ async function main() {
 		data: {
 			catalogId: catalogNova.id,
 			sku: 'NOV-PHONE-001',
-			name: 'Nova Phone X',
+			name: 'Смартфон Nova X',
 			slug: 'nova-phone-x',
 			price: phonePrice,
 			imagesUrls: [img('product-phone-1'), img('product-phone-2')],
@@ -1873,7 +2672,7 @@ async function main() {
 		data: {
 			catalogId: catalogNova.id,
 			sku: 'NOV-LAP-001',
-			name: 'Nova Laptop Air',
+			name: 'Ноутбук Nova Air',
 			slug: 'nova-laptop-air',
 			price: laptopPrice,
 			imagesUrls: [img('product-laptop-1')],
@@ -1886,7 +2685,7 @@ async function main() {
 		data: {
 			catalogId: catalogNova.id,
 			sku: 'NOV-EAR-001',
-			name: 'Nova Earbuds',
+			name: 'Наушники Nova',
 			slug: 'nova-earbuds',
 			price: earbudsPrice,
 			imagesUrls: [img('product-earbuds-1')],
@@ -1899,7 +2698,7 @@ async function main() {
 		data: {
 			catalogId: catalogGlow.id,
 			sku: 'GLW-SER-001',
-			name: 'Glow Serum',
+			name: 'Сыворотка Glow',
 			slug: 'glow-serum',
 			price: serumPrice,
 			imagesUrls: [img('product-serum-1')],
@@ -1912,7 +2711,7 @@ async function main() {
 		data: {
 			catalogId: catalogGlow.id,
 			sku: 'GLW-LIP-001',
-			name: 'Velvet Lipstick',
+			name: 'Помада Velvet',
 			slug: 'velvet-lipstick',
 			price: lipstickPrice,
 			imagesUrls: [img('product-lipstick-1')],
@@ -1925,7 +2724,7 @@ async function main() {
 		data: {
 			catalogId: catalogGlow.id,
 			sku: 'GLW-LIP-002',
-			name: 'Nude Lipstick',
+			name: 'Помада Nude',
 			slug: 'nude-lipstick',
 			price: lipstickPrice,
 			imagesUrls: [img('product-lipstick-nude-1')],
@@ -1938,7 +2737,7 @@ async function main() {
 		data: {
 			catalogId: catalogGlow.id,
 			sku: 'GLW-BLS-001',
-			name: 'Rose Blush',
+			name: 'Румяна Rose',
 			slug: 'rose-blush',
 			price: lipstickPrice,
 			imagesUrls: [img('product-blush-rose-1')],
@@ -1951,7 +2750,7 @@ async function main() {
 		data: {
 			catalogId: catalogGlow.id,
 			sku: 'GLW-CLN-001',
-			name: 'Daily Cleanser',
+			name: 'Ежедневный гель для умывания',
 			slug: 'daily-cleanser',
 			price: cleanserPrice,
 			imagesUrls: [img('product-cleanser-1')],
@@ -1960,6 +2759,21 @@ async function main() {
 			position: 5
 		}
 	})
+
+	const lumenExtraCategoryPositions = new Map<string, number>()
+	const nextLumenCategoryPosition = (categoryId: string) => {
+		const next = (lumenExtraCategoryPositions.get(categoryId) ?? 9) + 1
+		lumenExtraCategoryPositions.set(categoryId, next)
+		return next
+	}
+
+	const lumenExtraCategoryProducts = lumenExtraProducts.flatMap(item =>
+		item.categories.map(categoryId => ({
+			categoryId,
+			productId: item.product.id,
+			position: nextLumenCategoryPosition(categoryId)
+		}))
+	)
 
 	await prisma.categoryProduct.createMany({
 		data: [
@@ -2036,9 +2850,150 @@ async function main() {
 				categoryId: categorySkincare.id,
 				productId: productCleanser.id,
 				position: 5
-			}
+			},
+			...lumenExtraCategoryProducts
 		]
 	})
+
+	const discountStartAt = new Date('2026-02-01T00:00:00.000Z')
+	const discountEndAt = new Date('2026-02-15T00:00:00.000Z')
+
+	const clothingProducts = [
+		productTshirt,
+		productJeans,
+		productHoodie,
+		productLinenShirt,
+		productDress,
+		productSilkTop,
+		productTote,
+		...lumenExtraProducts.map(item => item.product),
+		productOutletTshirt,
+		productOutletJacket,
+		productOutletJeans
+	]
+	const restaurantProducts = [
+		productBurger,
+		productSalad,
+		productWrap,
+		productJuice,
+		productCake,
+		productEspresso,
+		productCappuccino,
+		productCroissant
+	]
+	const electronicsProducts = [productPhone, productLaptop, productEarbuds]
+	const beautyProducts = [
+		productSerum,
+		productLipstick,
+		productNudeLipstick,
+		productRoseBlush,
+		productCleanser
+	]
+
+	const commonAttributeValues = [
+		...buildCommonProductAttributeValues(
+			clothingProducts,
+			commonClothingAttributes,
+			{
+				discount: 15,
+				start: discountStartAt,
+				end: discountEndAt
+			}
+		),
+		...buildCommonProductAttributeValues(
+			restaurantProducts,
+			commonRestaurantAttributes,
+			{
+				discount: 10,
+				start: discountStartAt,
+				end: discountEndAt
+			}
+		),
+		...buildCommonProductAttributeValues(
+			electronicsProducts,
+			commonElectronicsAttributes,
+			{
+				discount: 5,
+				start: discountStartAt,
+				end: discountEndAt
+			}
+		),
+		...buildCommonProductAttributeValues(beautyProducts, commonBeautyAttributes, {
+			discount: 20,
+			start: discountStartAt,
+			end: discountEndAt
+		})
+	]
+
+	const lumenExtraAttributeValues = lumenExtraProducts.flatMap(item => [
+		{
+			productId: item.product.id,
+			attributeId: attrBrand.id,
+			enumValueId: item.attributes.brand.id
+		},
+		{
+			productId: item.product.id,
+			attributeId: attrMaterial.id,
+			valueString: item.attributes.material
+		},
+		{
+			productId: item.product.id,
+			attributeId: attrFit.id,
+			enumValueId: item.attributes.fit.id
+		},
+		{
+			productId: item.product.id,
+			attributeId: attrGender.id,
+			enumValueId: item.attributes.gender.id
+		},
+		{
+			productId: item.product.id,
+			attributeId: attrSeason.id,
+			enumValueId: item.attributes.season.id
+		}
+	])
+	const restaurantBrandValues = [
+		{
+			productId: productBurger.id,
+			attributeId: attrRestaurantBrand.id,
+			enumValueId: brandGreen.id
+		},
+		{
+			productId: productSalad.id,
+			attributeId: attrRestaurantBrand.id,
+			enumValueId: brandGreen.id
+		},
+		{
+			productId: productWrap.id,
+			attributeId: attrRestaurantBrand.id,
+			enumValueId: brandGreen.id
+		},
+		{
+			productId: productJuice.id,
+			attributeId: attrRestaurantBrand.id,
+			enumValueId: brandGreen.id
+		},
+		{
+			productId: productCake.id,
+			attributeId: attrRestaurantBrand.id,
+			enumValueId: brandGreen.id
+		},
+		{
+			productId: productEspresso.id,
+			attributeId: attrRestaurantBrand.id,
+			enumValueId: brandUrban.id
+		},
+		{
+			productId: productCappuccino.id,
+			attributeId: attrRestaurantBrand.id,
+			enumValueId: brandUrban.id
+		},
+		{
+			productId: productCroissant.id,
+			attributeId: attrRestaurantBrand.id,
+			enumValueId: brandUrban.id
+		}
+	]
 
 	await prisma.productAttribute.createMany({
 		data: [
@@ -2050,7 +3005,7 @@ async function main() {
 			{
 				productId: productTshirt.id,
 				attributeId: attrMaterial.id,
-				valueString: '100% cotton'
+				valueString: '100% хлопок'
 			},
 			{
 				productId: productTshirt.id,
@@ -2075,7 +3030,7 @@ async function main() {
 			{
 				productId: productJeans.id,
 				attributeId: attrMaterial.id,
-				valueString: '98% cotton, 2% elastane'
+				valueString: '98% хлопок, 2% эластан'
 			},
 			{
 				productId: productJeans.id,
@@ -2100,7 +3055,7 @@ async function main() {
 			{
 				productId: productHoodie.id,
 				attributeId: attrMaterial.id,
-				valueString: '80% cotton, 20% polyester'
+				valueString: '80% хлопок, 20% полиэстер'
 			},
 			{
 				productId: productHoodie.id,
@@ -2125,7 +3080,7 @@ async function main() {
 			{
 				productId: productLinenShirt.id,
 				attributeId: attrMaterial.id,
-				valueString: '100% linen'
+				valueString: '100% лен'
 			},
 			{
 				productId: productLinenShirt.id,
@@ -2150,7 +3105,7 @@ async function main() {
 			{
 				productId: productDress.id,
 				attributeId: attrMaterial.id,
-				valueString: 'Viscose blend'
+				valueString: 'Смесь вискозы'
 			},
 			{
 				productId: productDress.id,
@@ -2175,7 +3130,7 @@ async function main() {
 			{
 				productId: productSilkTop.id,
 				attributeId: attrMaterial.id,
-				valueString: 'Silk blend'
+				valueString: 'Шелковая смесь'
 			},
 			{
 				productId: productSilkTop.id,
@@ -2200,7 +3155,7 @@ async function main() {
 			{
 				productId: productTote.id,
 				attributeId: attrMaterial.id,
-				valueString: 'Canvas'
+				valueString: 'Канвас'
 			},
 			{
 				productId: productTote.id,
@@ -2225,7 +3180,7 @@ async function main() {
 			{
 				productId: productOutletTshirt.id,
 				attributeId: attrMaterial.id,
-				valueString: 'Cotton blend'
+				valueString: 'Смесь хлопка'
 			},
 			{
 				productId: productOutletTshirt.id,
@@ -2250,7 +3205,7 @@ async function main() {
 			{
 				productId: productOutletJacket.id,
 				attributeId: attrMaterial.id,
-				valueString: 'Nylon shell'
+				valueString: 'Нейлоновая оболочка'
 			},
 			{
 				productId: productOutletJacket.id,
@@ -2275,7 +3230,7 @@ async function main() {
 			{
 				productId: productOutletJeans.id,
 				attributeId: attrMaterial.id,
-				valueString: 'Denim'
+				valueString: 'Деним'
 			},
 			{
 				productId: productOutletJeans.id,
@@ -2295,7 +3250,7 @@ async function main() {
 			{
 				productId: productBurger.id,
 				attributeId: attrIngredients.id,
-				valueString: 'Beef, bun, lettuce, tomato, sauce'
+				valueString: 'Говядина, булка, салат, томат, соус'
 			},
 			{
 				productId: productBurger.id,
@@ -2320,7 +3275,7 @@ async function main() {
 			{
 				productId: productBurger.id,
 				attributeId: attrAllergens.id,
-				valueString: 'gluten'
+				valueString: 'глютен'
 			},
 			{
 				productId: productBurger.id,
@@ -2330,7 +3285,7 @@ async function main() {
 			{
 				productId: productSalad.id,
 				attributeId: attrIngredients.id,
-				valueString: 'Mixed greens, avocado, cucumber, seeds'
+				valueString: 'Смесь салатов, авокадо, огурец, семена'
 			},
 			{
 				productId: productSalad.id,
@@ -2355,7 +3310,7 @@ async function main() {
 			{
 				productId: productSalad.id,
 				attributeId: attrAllergens.id,
-				valueString: 'nuts'
+				valueString: 'орехи'
 			},
 			{
 				productId: productSalad.id,
@@ -2365,7 +3320,7 @@ async function main() {
 			{
 				productId: productWrap.id,
 				attributeId: attrIngredients.id,
-				valueString: 'Chicken, tortilla, greens, sauce'
+				valueString: 'Курица, тортилья, салат, соус'
 			},
 			{
 				productId: productWrap.id,
@@ -2390,7 +3345,7 @@ async function main() {
 			{
 				productId: productWrap.id,
 				attributeId: attrAllergens.id,
-				valueString: 'gluten'
+				valueString: 'глютен'
 			},
 			{
 				productId: productWrap.id,
@@ -2400,7 +3355,7 @@ async function main() {
 			{
 				productId: productJuice.id,
 				attributeId: attrIngredients.id,
-				valueString: 'Apple, ginger, lemon'
+				valueString: 'Яблоко, имбирь, лимон'
 			},
 			{
 				productId: productJuice.id,
@@ -2425,7 +3380,7 @@ async function main() {
 			{
 				productId: productJuice.id,
 				attributeId: attrAllergens.id,
-				valueString: 'none'
+				valueString: 'нет'
 			},
 			{
 				productId: productJuice.id,
@@ -2435,7 +3390,7 @@ async function main() {
 			{
 				productId: productCake.id,
 				attributeId: attrIngredients.id,
-				valueString: 'Cocoa, flour, sugar, butter'
+				valueString: 'Какао, мука, сахар, масло'
 			},
 			{
 				productId: productCake.id,
@@ -2460,7 +3415,7 @@ async function main() {
 			{
 				productId: productCake.id,
 				attributeId: attrAllergens.id,
-				valueString: 'gluten, dairy, eggs'
+				valueString: 'глютен, молочные продукты, яйца'
 			},
 			{
 				productId: productCake.id,
@@ -2470,7 +3425,7 @@ async function main() {
 			{
 				productId: productEspresso.id,
 				attributeId: attrIngredients.id,
-				valueString: 'Arabica beans, water'
+				valueString: 'Зерна арабики, вода'
 			},
 			{
 				productId: productEspresso.id,
@@ -2495,7 +3450,7 @@ async function main() {
 			{
 				productId: productEspresso.id,
 				attributeId: attrAllergens.id,
-				valueString: 'none'
+				valueString: 'нет'
 			},
 			{
 				productId: productEspresso.id,
@@ -2505,7 +3460,7 @@ async function main() {
 			{
 				productId: productCappuccino.id,
 				attributeId: attrIngredients.id,
-				valueString: 'Coffee, milk, foam'
+				valueString: 'Кофе, молоко, пена'
 			},
 			{
 				productId: productCappuccino.id,
@@ -2530,7 +3485,7 @@ async function main() {
 			{
 				productId: productCappuccino.id,
 				attributeId: attrAllergens.id,
-				valueString: 'dairy'
+				valueString: 'молочные продукты'
 			},
 			{
 				productId: productCappuccino.id,
@@ -2540,7 +3495,7 @@ async function main() {
 			{
 				productId: productCroissant.id,
 				attributeId: attrIngredients.id,
-				valueString: 'Butter, flour, sugar'
+				valueString: 'Масло, мука, сахар'
 			},
 			{
 				productId: productCroissant.id,
@@ -2565,7 +3520,7 @@ async function main() {
 			{
 				productId: productCroissant.id,
 				attributeId: attrAllergens.id,
-				valueString: 'gluten, dairy'
+				valueString: 'глютен, молочные продукты'
 			},
 			{
 				productId: productCroissant.id,
@@ -2791,7 +3746,10 @@ async function main() {
 				productId: productCleanser.id,
 				attributeId: attrBeautyOrganic.id,
 				valueBoolean: true
-			}
+			},
+			...lumenExtraAttributeValues,
+			...restaurantBrandValues,
+			...commonAttributeValues
 		]
 	})
 
@@ -2810,6 +3768,7 @@ async function main() {
 		stock: number
 		price: number
 	}) => {
+		const status = stock > 0 ? 'ACTIVE' : 'OUT_OF_STOCK'
 		const variant = await prisma.productVariant.create({
 			data: {
 				productId,
@@ -2817,7 +3776,8 @@ async function main() {
 				variantKey: `size=${size.value};color=${color.value}`,
 				stock,
 				price,
-				isAvailable: stock > 0
+				status,
+				isAvailable: status === 'ACTIVE'
 			}
 		})
 
@@ -2837,6 +3797,19 @@ async function main() {
 		})
 
 		return variant
+	}
+
+	for (const item of lumenExtraProducts) {
+		if (!item.variants?.length) {
+			continue
+		}
+
+		for (const variant of item.variants) {
+			await createVariant({
+				productId: item.product.id,
+				...variant
+			})
+		}
 	}
 
 	const variantTshirtSW = await createVariant({
@@ -3278,7 +4251,7 @@ async function main() {
 				type: 'PAGE_VIEW',
 				pageType: 'HOME',
 				url: `${baseUrl(catalogLumen)}/`,
-				title: 'Home',
+				title: 'Главная',
 				perf: { ttfb: 80, lcp: 1400 }
 			},
 			{
@@ -3375,10 +4348,10 @@ async function main() {
 				status: 'SUBMITTED',
 				productId: productTshirt.id,
 				categoryId: categoryTshirts.id,
-				name: 'John Doe',
+				name: 'Иван Иванов',
 				phone: '+1 555 030 0003',
 				email: 'john@example.com',
-				message: 'Interested in size M.',
+				message: 'Интересует размер M.',
 				meta: { source: 'product_page' }
 			},
 			{
@@ -3388,9 +4361,9 @@ async function main() {
 				status: 'QUALIFIED',
 				productId: productBurger.id,
 				categoryId: categoryBurgers.id,
-				name: 'Alex Green',
+				name: 'Алексей Грин',
 				phone: '+1 555 030 0004',
-				message: 'Need a catering order.',
+				message: 'Нужен заказ кейтеринга.',
 				qualifiedAt: new Date('2026-01-30T12:00:00.000Z'),
 				meta: { source: 'call_center' }
 			},
@@ -3402,9 +4375,9 @@ async function main() {
 				status: 'DISQUALIFIED',
 				productId: productPhone.id,
 				categoryId: categoryPhones.id,
-				name: 'Sam Tech',
+				name: 'Сэм Тех',
 				email: 'sam@example.com',
-				message: 'Question about shipping.',
+				message: 'Вопрос по доставке.',
 				meta: { source: 'support' }
 			}
 		]
@@ -3544,30 +4517,30 @@ async function main() {
 				entityId: catalogLumen.id,
 				urlPath: '/',
 				canonicalUrl: `${baseUrl(catalogLumen)}/`,
-				title: 'Lumen Apparel',
-				description: 'Modern basics for everyday wear.',
-				keywords: 'tshirts, jeans, basics',
-				h1: 'Lumen Apparel',
-				seoText: 'Shop modern basics and seasonal collections.',
+				title: 'Lumen Одежда',
+				description: 'Современные базовые вещи на каждый день.',
+				keywords: 'футболки, джинсы, база',
+				h1: 'Lumen Одежда',
+				seoText: 'Выбирайте базовые вещи и сезонные коллекции.',
 				robots: 'index,follow',
-				ogTitle: 'Lumen Apparel',
-				ogDescription: 'Modern basics for everyday wear.',
+				ogTitle: 'Lumen Одежда',
+				ogDescription: 'Современные базовые вещи на каждый день.',
 				ogImage: img('lumen-og', 1200, 630),
 				ogType: 'website',
 				ogUrl: `${baseUrl(catalogLumen)}/`,
-				ogSiteName: 'Lumen Apparel',
-				ogLocale: 'en_US',
+				ogSiteName: 'Lumen Одежда',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
-				twitterTitle: 'Lumen Apparel',
-				twitterDescription: 'Modern basics for everyday wear.',
+				twitterTitle: 'Lumen Одежда',
+				twitterDescription: 'Современные базовые вещи на каждый день.',
 				twitterImage: img('lumen-twitter', 1200, 630),
 				twitterSite: '@lumen',
 				twitterCreator: '@lumen',
-				hreflang: { en: `${baseUrl(catalogLumen)}/` },
+				hreflang: { ru: `${baseUrl(catalogLumen)}/` },
 				structuredData: {
 					'@context': 'https://schema.org',
 					'@type': 'Store',
-					name: 'Lumen Apparel'
+					name: 'Lumen Одежда'
 				},
 				extras: { seed: true },
 				sitemapPriority: 0.8,
@@ -3579,30 +4552,30 @@ async function main() {
 				entityId: categoryTshirts.id,
 				urlPath: '/category/t-shirts',
 				canonicalUrl: `${baseUrl(catalogLumen)}/category/t-shirts`,
-				title: 'T-Shirts',
-				description: 'Everyday tees and basics.',
-				keywords: 'tshirts, basics',
-				h1: 'T-Shirts',
-				seoText: 'Find your everyday tees.',
+				title: 'Футболки',
+				description: 'Футболки и базовые вещи на каждый день.',
+				keywords: 'футболки, база',
+				h1: 'Футболки',
+				seoText: 'Найдите футболку на каждый день.',
 				robots: 'index,follow',
-				ogTitle: 'T-Shirts',
-				ogDescription: 'Everyday tees and basics.',
+				ogTitle: 'Футболки',
+				ogDescription: 'Футболки и базовые вещи на каждый день.',
 				ogImage: img('tshirts-og', 1200, 630),
 				ogType: 'website',
 				ogUrl: `${baseUrl(catalogLumen)}/category/t-shirts`,
-				ogSiteName: 'Lumen Apparel',
-				ogLocale: 'en_US',
+				ogSiteName: 'Lumen Одежда',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
-				twitterTitle: 'T-Shirts',
-				twitterDescription: 'Everyday tees and basics.',
+				twitterTitle: 'Футболки',
+				twitterDescription: 'Футболки и базовые вещи на каждый день.',
 				twitterImage: img('tshirts-twitter', 1200, 630),
 				twitterSite: '@lumen',
 				twitterCreator: '@lumen',
-				hreflang: { en: `${baseUrl(catalogLumen)}/category/t-shirts` },
+				hreflang: { ru: `${baseUrl(catalogLumen)}/category/t-shirts` },
 				structuredData: {
 					'@context': 'https://schema.org',
 					'@type': 'CollectionPage',
-					name: 'T-Shirts'
+					name: 'Футболки'
 				},
 				extras: { seed: true },
 				sitemapPriority: 0.6,
@@ -3615,21 +4588,21 @@ async function main() {
 				urlPath: `/product/${productTshirt.slug}`,
 				canonicalUrl: `${baseUrl(catalogLumen)}/product/${productTshirt.slug}`,
 				title: productTshirt.name,
-				description: 'Soft cotton T-Shirt in classic colors.',
-				keywords: 'tshirt, cotton, basics',
+				description: 'Мягкая хлопковая футболка в классических цветах.',
+				keywords: 'футболка, хлопок, база',
 				h1: productTshirt.name,
-				seoText: 'Soft cotton tee for everyday wear.',
+				seoText: 'Мягкая хлопковая футболка на каждый день.',
 				robots: 'index,follow',
 				ogTitle: productTshirt.name,
-				ogDescription: 'Soft cotton T-Shirt in classic colors.',
+				ogDescription: 'Мягкая хлопковая футболка в классических цветах.',
 				ogImage: img('tshirt-og', 1200, 630),
 				ogType: 'product',
 				ogUrl: `${baseUrl(catalogLumen)}/product/${productTshirt.slug}`,
-				ogSiteName: 'Lumen Apparel',
-				ogLocale: 'en_US',
+				ogSiteName: 'Lumen Одежда',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
 				twitterTitle: productTshirt.name,
-				twitterDescription: 'Soft cotton T-Shirt in classic colors.',
+				twitterDescription: 'Мягкая хлопковая футболка в классических цветах.',
 				twitterImage: img('tshirt-twitter', 1200, 630),
 				twitterSite: '@lumen',
 				twitterCreator: '@lumen',
@@ -3651,22 +4624,22 @@ async function main() {
 				entityId: catalogLumenOutlet.id,
 				urlPath: '/',
 				canonicalUrl: `${baseUrl(catalogLumenOutlet)}/`,
-				title: 'Lumen Outlet',
-				description: 'Last season items and limited stock.',
-				keywords: 'outlet, sale, fashion',
-				h1: 'Lumen Outlet',
-				seoText: 'Shop outlet deals and limited stock.',
+				title: 'Lumen Аутлет',
+				description: 'Товары прошлых сезонов и ограниченные остатки.',
+				keywords: 'аутлет, распродажа, мода',
+				h1: 'Lumen Аутлет',
+				seoText: 'Покупайте аутлет и ограниченные остатки.',
 				robots: 'index,follow',
-				ogTitle: 'Lumen Outlet',
-				ogDescription: 'Last season items and limited stock.',
+				ogTitle: 'Lumen Аутлет',
+				ogDescription: 'Товары прошлых сезонов и ограниченные остатки.',
 				ogImage: img('lumen-outlet-og', 1200, 630),
 				ogType: 'website',
 				ogUrl: `${baseUrl(catalogLumenOutlet)}/`,
-				ogSiteName: 'Lumen Outlet',
-				ogLocale: 'en_US',
+				ogSiteName: 'Lumen Аутлет',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
-				twitterTitle: 'Lumen Outlet',
-				twitterDescription: 'Last season items and limited stock.',
+				twitterTitle: 'Lumen Аутлет',
+				twitterDescription: 'Товары прошлых сезонов и ограниченные остатки.',
 				twitterImage: img('lumen-outlet-twitter', 1200, 630),
 				twitterSite: '@lumen',
 				twitterCreator: '@lumen',
@@ -3680,22 +4653,22 @@ async function main() {
 				entityId: catalogGreen.id,
 				urlPath: '/',
 				canonicalUrl: `${baseUrl(catalogGreen)}/`,
-				title: 'Green Spoon',
-				description: 'Fresh food made daily.',
-				keywords: 'burgers, salads, cafe',
-				h1: 'Green Spoon',
-				seoText: 'Fresh food made daily.',
+				title: 'Грин Спун',
+				description: 'Свежая еда каждый день.',
+				keywords: 'бургеры, салаты, кафе',
+				h1: 'Грин Спун',
+				seoText: 'Свежая еда каждый день.',
 				robots: 'index,follow',
-				ogTitle: 'Green Spoon',
-				ogDescription: 'Fresh food made daily.',
+				ogTitle: 'Грин Спун',
+				ogDescription: 'Свежая еда каждый день.',
 				ogImage: img('greenspoon-og', 1200, 630),
 				ogType: 'website',
 				ogUrl: `${baseUrl(catalogGreen)}/`,
-				ogSiteName: 'Green Spoon',
-				ogLocale: 'en_US',
+				ogSiteName: 'Грин Спун',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
-				twitterTitle: 'Green Spoon',
-				twitterDescription: 'Fresh food made daily.',
+				twitterTitle: 'Грин Спун',
+				twitterDescription: 'Свежая еда каждый день.',
 				twitterImage: img('greenspoon-twitter', 1200, 630),
 				twitterSite: '@greenspoon',
 				twitterCreator: '@greenspoon',
@@ -3709,22 +4682,22 @@ async function main() {
 				entityId: categoryBurgers.id,
 				urlPath: '/category/burgers',
 				canonicalUrl: `${baseUrl(catalogGreen)}/category/burgers`,
-				title: 'Burgers',
-				description: 'Classic and signature burgers.',
-				keywords: 'burgers, grill',
-				h1: 'Burgers',
-				seoText: 'Explore our burger selection.',
+				title: 'Бургеры',
+				description: 'Классические и фирменные бургеры.',
+				keywords: 'бургеры, гриль',
+				h1: 'Бургеры',
+				seoText: 'Выберите бургер из нашей подборки.',
 				robots: 'index,follow',
-				ogTitle: 'Burgers',
-				ogDescription: 'Classic and signature burgers.',
+				ogTitle: 'Бургеры',
+				ogDescription: 'Классические и фирменные бургеры.',
 				ogImage: img('burgers-og', 1200, 630),
 				ogType: 'website',
 				ogUrl: `${baseUrl(catalogGreen)}/category/burgers`,
-				ogSiteName: 'Green Spoon',
-				ogLocale: 'en_US',
+				ogSiteName: 'Грин Спун',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
-				twitterTitle: 'Burgers',
-				twitterDescription: 'Classic and signature burgers.',
+				twitterTitle: 'Бургеры',
+				twitterDescription: 'Классические и фирменные бургеры.',
 				twitterImage: img('burgers-twitter', 1200, 630),
 				twitterSite: '@greenspoon',
 				twitterCreator: '@greenspoon',
@@ -3739,21 +4712,21 @@ async function main() {
 				urlPath: `/product/${productBurger.slug}`,
 				canonicalUrl: `${baseUrl(catalogGreen)}/product/${productBurger.slug}`,
 				title: productBurger.name,
-				description: 'Juicy burger with fresh toppings.',
-				keywords: 'burger, grill',
+				description: 'Сочный бургер со свежими ингредиентами.',
+				keywords: 'бургер, гриль',
 				h1: productBurger.name,
-				seoText: 'Juicy burger with fresh toppings.',
+				seoText: 'Сочный бургер со свежими ингредиентами.',
 				robots: 'index,follow',
 				ogTitle: productBurger.name,
-				ogDescription: 'Juicy burger with fresh toppings.',
+				ogDescription: 'Сочный бургер со свежими ингредиентами.',
 				ogImage: img('burger-og', 1200, 630),
 				ogType: 'product',
 				ogUrl: `${baseUrl(catalogGreen)}/product/${productBurger.slug}`,
-				ogSiteName: 'Green Spoon',
-				ogLocale: 'en_US',
+				ogSiteName: 'Грин Спун',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
 				twitterTitle: productBurger.name,
-				twitterDescription: 'Juicy burger with fresh toppings.',
+				twitterDescription: 'Сочный бургер со свежими ингредиентами.',
 				twitterImage: img('burger-twitter', 1200, 630),
 				twitterSite: '@greenspoon',
 				twitterCreator: '@greenspoon',
@@ -3767,20 +4740,20 @@ async function main() {
 				entityId: catalogUrban.id,
 				urlPath: '/',
 				canonicalUrl: `${baseUrl(catalogUrban)}/`,
-				title: 'Urban Cafe',
-				description: 'Coffee and pastries downtown.',
-				h1: 'Urban Cafe',
+				title: 'Урбан Кафе',
+				description: 'Кофе и выпечка в центре города.',
+				h1: 'Урбан Кафе',
 				robots: 'index,follow',
-				ogTitle: 'Urban Cafe',
-				ogDescription: 'Coffee and pastries downtown.',
+				ogTitle: 'Урбан Кафе',
+				ogDescription: 'Кофе и выпечка в центре города.',
 				ogImage: img('urban-og', 1200, 630),
 				ogType: 'website',
 				ogUrl: `${baseUrl(catalogUrban)}/`,
-				ogSiteName: 'Urban Cafe',
-				ogLocale: 'en_US',
+				ogSiteName: 'Урбан Кафе',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
-				twitterTitle: 'Urban Cafe',
-				twitterDescription: 'Coffee and pastries downtown.',
+				twitterTitle: 'Урбан Кафе',
+				twitterDescription: 'Кофе и выпечка в центре города.',
 				twitterImage: img('urban-twitter', 1200, 630),
 				extras: { seed: true },
 				sitemapPriority: 0.6,
@@ -3792,21 +4765,21 @@ async function main() {
 				entityId: catalogNova.id,
 				urlPath: '/',
 				canonicalUrl: `${baseUrl(catalogNova)}/`,
-				title: 'Nova Tech',
-				description: 'Devices and accessories for everyday life.',
-				keywords: 'phones, laptops, gadgets',
-				h1: 'Nova Tech',
+				title: 'Нова Тех',
+				description: 'Устройства и аксессуары для повседневной жизни.',
+				keywords: 'телефоны, ноутбуки, гаджеты',
+				h1: 'Нова Тех',
 				robots: 'index,follow',
-				ogTitle: 'Nova Tech',
-				ogDescription: 'Devices and accessories for everyday life.',
+				ogTitle: 'Нова Тех',
+				ogDescription: 'Устройства и аксессуары для повседневной жизни.',
 				ogImage: img('novatech-og', 1200, 630),
 				ogType: 'website',
 				ogUrl: `${baseUrl(catalogNova)}/`,
-				ogSiteName: 'Nova Tech',
-				ogLocale: 'en_US',
+				ogSiteName: 'Нова Тех',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
-				twitterTitle: 'Nova Tech',
-				twitterDescription: 'Devices and accessories for everyday life.',
+				twitterTitle: 'Нова Тех',
+				twitterDescription: 'Устройства и аксессуары для повседневной жизни.',
 				twitterImage: img('novatech-twitter', 1200, 630),
 				twitterSite: '@novatech',
 				twitterCreator: '@novatech',
@@ -3820,22 +4793,22 @@ async function main() {
 				entityId: categoryPhones.id,
 				urlPath: '/category/phones',
 				canonicalUrl: `${baseUrl(catalogNova)}/category/phones`,
-				title: 'Phones',
-				description: 'Smartphones and accessories.',
-				keywords: 'phones, smartphones',
-				h1: 'Phones',
-				seoText: 'Discover our smartphone lineup.',
+				title: 'Телефоны',
+				description: 'Смартфоны и аксессуары.',
+				keywords: 'телефоны, смартфоны',
+				h1: 'Телефоны',
+				seoText: 'Познакомьтесь с нашей линейкой смартфонов.',
 				robots: 'index,follow',
-				ogTitle: 'Phones',
-				ogDescription: 'Smartphones and accessories.',
+				ogTitle: 'Телефоны',
+				ogDescription: 'Смартфоны и аксессуары.',
 				ogImage: img('phones-og', 1200, 630),
 				ogType: 'website',
 				ogUrl: `${baseUrl(catalogNova)}/category/phones`,
-				ogSiteName: 'Nova Tech',
-				ogLocale: 'en_US',
+				ogSiteName: 'Нова Тех',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
-				twitterTitle: 'Phones',
-				twitterDescription: 'Smartphones and accessories.',
+				twitterTitle: 'Телефоны',
+				twitterDescription: 'Смартфоны и аксессуары.',
 				twitterImage: img('phones-twitter', 1200, 630),
 				twitterSite: '@novatech',
 				twitterCreator: '@novatech',
@@ -3850,21 +4823,21 @@ async function main() {
 				urlPath: `/product/${productPhone.slug}`,
 				canonicalUrl: `${baseUrl(catalogNova)}/product/${productPhone.slug}`,
 				title: productPhone.name,
-				description: 'Flagship phone with a stunning display.',
-				keywords: 'phone, smartphone',
+				description: 'Флагманский смартфон с впечатляющим экраном.',
+				keywords: 'телефон, смартфон',
 				h1: productPhone.name,
-				seoText: 'Flagship phone with a stunning display.',
+				seoText: 'Флагманский смартфон с впечатляющим экраном.',
 				robots: 'index,follow',
 				ogTitle: productPhone.name,
-				ogDescription: 'Flagship phone with a stunning display.',
+				ogDescription: 'Флагманский смартфон с впечатляющим экраном.',
 				ogImage: img('phone-og', 1200, 630),
 				ogType: 'product',
 				ogUrl: `${baseUrl(catalogNova)}/product/${productPhone.slug}`,
-				ogSiteName: 'Nova Tech',
-				ogLocale: 'en_US',
+				ogSiteName: 'Нова Тех',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
 				twitterTitle: productPhone.name,
-				twitterDescription: 'Flagship phone with a stunning display.',
+				twitterDescription: 'Флагманский смартфон с впечатляющим экраном.',
 				twitterImage: img('phone-twitter', 1200, 630),
 				twitterSite: '@novatech',
 				twitterCreator: '@novatech',
@@ -3878,21 +4851,21 @@ async function main() {
 				entityId: catalogGlow.id,
 				urlPath: '/',
 				canonicalUrl: `${baseUrl(catalogGlow)}/`,
-				title: 'Glow Beauty',
-				description: 'Skincare essentials and daily rituals.',
-				keywords: 'skincare, beauty',
-				h1: 'Glow Beauty',
+				title: 'Глоу Бьюти',
+				description: 'Базовый уход и ежедневные ритуалы.',
+				keywords: 'уход, красота',
+				h1: 'Глоу Бьюти',
 				robots: 'index,follow',
-				ogTitle: 'Glow Beauty',
-				ogDescription: 'Skincare essentials and daily rituals.',
+				ogTitle: 'Глоу Бьюти',
+				ogDescription: 'Базовый уход и ежедневные ритуалы.',
 				ogImage: img('glow-og', 1200, 630),
 				ogType: 'website',
 				ogUrl: `${baseUrl(catalogGlow)}/`,
-				ogSiteName: 'Glow Beauty',
-				ogLocale: 'en_US',
+				ogSiteName: 'Глоу Бьюти',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
-				twitterTitle: 'Glow Beauty',
-				twitterDescription: 'Skincare essentials and daily rituals.',
+				twitterTitle: 'Глоу Бьюти',
+				twitterDescription: 'Базовый уход и ежедневные ритуалы.',
 				twitterImage: img('glow-twitter', 1200, 630),
 				twitterSite: '@glowbeauty',
 				twitterCreator: '@glowbeauty',
@@ -3906,22 +4879,22 @@ async function main() {
 				entityId: categorySkincare.id,
 				urlPath: '/category/skincare',
 				canonicalUrl: `${baseUrl(catalogGlow)}/category/skincare`,
-				title: 'Skincare',
-				description: 'Skincare essentials for daily routines.',
-				keywords: 'skincare, routines',
-				h1: 'Skincare',
-				seoText: 'Skincare essentials for daily routines.',
+				title: 'Уход за кожей',
+				description: 'Базовый уход для ежедневных процедур.',
+				keywords: 'уход, процедуры',
+				h1: 'Уход за кожей',
+				seoText: 'Базовый уход для ежедневных процедур.',
 				robots: 'index,follow',
-				ogTitle: 'Skincare',
-				ogDescription: 'Skincare essentials for daily routines.',
+				ogTitle: 'Уход за кожей',
+				ogDescription: 'Базовый уход для ежедневных процедур.',
 				ogImage: img('skincare-og', 1200, 630),
 				ogType: 'website',
 				ogUrl: `${baseUrl(catalogGlow)}/category/skincare`,
-				ogSiteName: 'Glow Beauty',
-				ogLocale: 'en_US',
+				ogSiteName: 'Глоу Бьюти',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
-				twitterTitle: 'Skincare',
-				twitterDescription: 'Skincare essentials for daily routines.',
+				twitterTitle: 'Уход за кожей',
+				twitterDescription: 'Базовый уход для ежедневных процедур.',
 				twitterImage: img('skincare-twitter', 1200, 630),
 				twitterSite: '@glowbeauty',
 				twitterCreator: '@glowbeauty',
@@ -3936,21 +4909,21 @@ async function main() {
 				urlPath: `/product/${productSerum.slug}`,
 				canonicalUrl: `${baseUrl(catalogGlow)}/product/${productSerum.slug}`,
 				title: productSerum.name,
-				description: 'Hydrating serum for daily use.',
-				keywords: 'serum, skincare',
+				description: 'Увлажняющая сыворотка для ежедневного использования.',
+				keywords: 'сыворотка, уход',
 				h1: productSerum.name,
-				seoText: 'Hydrating serum for daily use.',
+				seoText: 'Увлажняющая сыворотка для ежедневного использования.',
 				robots: 'index,follow',
 				ogTitle: productSerum.name,
-				ogDescription: 'Hydrating serum for daily use.',
+				ogDescription: 'Увлажняющая сыворотка для ежедневного использования.',
 				ogImage: img('serum-og', 1200, 630),
 				ogType: 'product',
 				ogUrl: `${baseUrl(catalogGlow)}/product/${productSerum.slug}`,
-				ogSiteName: 'Glow Beauty',
-				ogLocale: 'en_US',
+				ogSiteName: 'Глоу Бьюти',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
 				twitterTitle: productSerum.name,
-				twitterDescription: 'Hydrating serum for daily use.',
+				twitterDescription: 'Увлажняющая сыворотка для ежедневного использования.',
 				twitterImage: img('serum-twitter', 1200, 630),
 				twitterSite: '@glowbeauty',
 				twitterCreator: '@glowbeauty',
@@ -3960,6 +4933,59 @@ async function main() {
 			}
 		]
 	})
+
+	const [categories, products, configs, seoSettings] = await prisma.$transaction([
+		prisma.category.findMany({
+			select: { catalogId: true, imageUrl: true }
+		}),
+		prisma.product.findMany({
+			select: { catalogId: true, imagesUrls: true }
+		}),
+		prisma.catalogConfig.findMany({
+			select: { catalogId: true, logoUrl: true, bgUrl: true }
+		}),
+		prisma.seoSetting.findMany({
+			select: { catalogId: true, ogImage: true, twitterImage: true }
+		})
+	])
+
+	const mediaUrlsByCatalog = new Map<string, Set<string>>()
+
+	for (const category of categories) {
+		addMediaUrl(mediaUrlsByCatalog, category.catalogId, category.imageUrl)
+	}
+	for (const product of products) {
+		for (const url of product.imagesUrls ?? []) {
+			addMediaUrl(mediaUrlsByCatalog, product.catalogId, url)
+		}
+	}
+	for (const config of configs) {
+		addMediaUrl(mediaUrlsByCatalog, config.catalogId, config.logoUrl)
+		addMediaUrl(mediaUrlsByCatalog, config.catalogId, config.bgUrl)
+	}
+	for (const seo of seoSettings) {
+		addMediaUrl(mediaUrlsByCatalog, seo.catalogId, seo.ogImage)
+		addMediaUrl(mediaUrlsByCatalog, seo.catalogId, seo.twitterImage)
+	}
+
+	const mediaTasks: Promise<Prisma.BatchPayload>[] = []
+	for (const [catalogId, urls] of mediaUrlsByCatalog) {
+		const data: Prisma.MediaCreateManyInput[] = Array.from(urls).map(url => {
+			const mimeType = guessMediaMime(url)
+			return {
+				catalogId,
+				originalName: buildMediaOriginalName(url, mimeType),
+				mimeType,
+				storage: 'url',
+				key: url,
+				status: 'READY'
+			}
+		})
+		if (data.length) {
+			mediaTasks.push(prisma.media.createMany({ data, skipDuplicates: true }))
+		}
+	}
+	await Promise.all(mediaTasks)
 
 	console.log('Seed completed:', {
 		users: [
@@ -3992,3 +5018,6 @@ main()
 	.finally(async () => {
 		await prisma.$disconnect()
 	})
+
+
+

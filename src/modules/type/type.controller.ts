@@ -46,7 +46,7 @@ export class TypeController {
 	})
 	@Delete('/:id')
 	@ApiParam({
-		description: 'Type id',
+		description: 'ID типа',
 		name: 'id'
 	})
 	@ApiOkResponse({ type: OkResponseDto })

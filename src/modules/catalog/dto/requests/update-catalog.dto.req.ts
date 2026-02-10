@@ -6,20 +6,28 @@ import {
 	IsEnum,
 	IsOptional,
 	IsString,
-	Matches
+	Matches,
+	MaxLength,
+	MinLength
 } from 'class-validator'
 
 const SLUG_PATTERN = /^[a-z0-9-]+$/
 const DOMAIN_PATTERN = /^[a-z0-9.-]+$/
+const SLUG_MIN_LENGTH = 2
+const SLUG_MAX_LENGTH = 63
 
 export class UpdateCatalogDtoReq {
 	@ApiPropertyOptional({ type: String, example: 'catalog' })
 	@IsOptional()
 	@IsString()
 	@Matches(SLUG_PATTERN)
-	@Transform(({ value }) =>
-		value === undefined ? value : String(value).trim().toLowerCase()
-	)
+	@MinLength(SLUG_MIN_LENGTH)
+	@MaxLength(SLUG_MAX_LENGTH)
+	@Transform(({ value }) => {
+		if (value === undefined || value === null) return value
+		const normalized = String(value).trim().toLowerCase()
+		return normalized.length ? normalized : undefined
+	})
 	slug?: string
 
 	@ApiPropertyOptional({
@@ -29,6 +37,7 @@ export class UpdateCatalogDtoReq {
 	})
 	@IsOptional()
 	@IsString()
+	@MaxLength(253)
 	@Matches(DOMAIN_PATTERN)
 	@Transform(({ value }) => {
 		if (value === undefined) return undefined

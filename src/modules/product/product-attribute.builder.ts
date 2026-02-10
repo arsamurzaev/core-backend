@@ -12,6 +12,7 @@ export type ProductAttributeValueData = {
 	valueInteger?: number | null
 	valueDecimal?: number | null
 	valueBoolean?: boolean | null
+	valueDateTime?: Date | null
 }
 
 type AttributeMeta = {
@@ -55,7 +56,7 @@ export class ProductAttributeBuilder {
 		const attributeIds = new Set<string>()
 		for (const input of inputs) {
 			if (attributeIds.has(input.attributeId)) {
-				throw new BadRequestException(`Duplicate attribute ${input.attributeId}`)
+				throw new BadRequestException(`Дубликат атрибута ${input.attributeId}`)
 			}
 			attributeIds.add(input.attributeId)
 		}
@@ -67,13 +68,13 @@ export class ProductAttributeBuilder {
 
 		if (attributeMap.size !== attributeIds.size) {
 			const missing = [...attributeIds].filter(id => !attributeMap.has(id))
-			throw new BadRequestException(`Unknown attributes: ${missing.join(', ')}`)
+			throw new BadRequestException(`Неизвестные атрибуты: ${missing.join(', ')}`)
 		}
 
 		for (const attribute of attributes) {
 			if (attribute.isVariantAttribute) {
 				throw new BadRequestException(
-					`Attribute ${attribute.key} is variant and cannot be assigned to product`
+					`Атрибут ${attribute.key} является вариантным и не может быть назначен товару`
 				)
 			}
 		}
@@ -140,7 +141,7 @@ export class ProductAttributeBuilder {
 		const missing = required.filter(attribute => !attributeIds.has(attribute.id))
 		if (missing.length) {
 			throw new BadRequestException(
-				`Missing required attributes: ${missing
+				`Отсутствуют обязательные атрибуты: ${missing
 					.map(attribute => attribute.key)
 					.join(', ')}`
 			)
@@ -169,7 +170,7 @@ export class ProductAttributeBuilder {
 
 		if (provided.length !== 1) {
 			throw new BadRequestException(
-				`Attribute ${attribute.key} must provide exactly one value`
+				`Атрибут ${attribute.key} должен содержать ровно одно значение`
 			)
 		}
 
@@ -177,12 +178,12 @@ export class ProductAttributeBuilder {
 			case DataType.STRING: {
 				if (provided[0] !== 'valueString') {
 					throw new BadRequestException(
-						`Attribute ${attribute.key} expects valueString`
+						`Атрибут ${attribute.key} ожидает valueString`
 					)
 				}
 				const value = (input.valueString ?? '').trim()
 				if (!value) {
-					throw new BadRequestException(`Attribute ${attribute.key} cannot be empty`)
+					throw new BadRequestException(`Атрибут ${attribute.key} не может быть пустым`)
 				}
 				return {
 					attributeId: attribute.id,
@@ -190,18 +191,19 @@ export class ProductAttributeBuilder {
 					valueString: value,
 					valueInteger: null,
 					valueDecimal: null,
-					valueBoolean: null
+					valueBoolean: null,
+					valueDateTime: null
 				}
 			}
 			case DataType.INTEGER: {
 				if (provided[0] !== 'valueInteger') {
 					throw new BadRequestException(
-						`Attribute ${attribute.key} expects valueInteger`
+						`Атрибут ${attribute.key} ожидает valueInteger`
 					)
 				}
 				if (!Number.isInteger(input.valueInteger)) {
 					throw new BadRequestException(
-						`Attribute ${attribute.key} must be an integer`
+						`Атрибут ${attribute.key} должен быть целым числом`
 					)
 				}
 				return {
@@ -210,18 +212,19 @@ export class ProductAttributeBuilder {
 					valueString: null,
 					valueInteger: input.valueInteger,
 					valueDecimal: null,
-					valueBoolean: null
+					valueBoolean: null,
+					valueDateTime: null
 				}
 			}
 			case DataType.DECIMAL: {
 				if (provided[0] !== 'valueDecimal') {
 					throw new BadRequestException(
-						`Attribute ${attribute.key} expects valueDecimal`
+						`Атрибут ${attribute.key} ожидает valueDecimal`
 					)
 				}
 				if (!Number.isFinite(input.valueDecimal)) {
 					throw new BadRequestException(
-						`Attribute ${attribute.key} must be a number`
+						`Атрибут ${attribute.key} должен быть числом`
 					)
 				}
 				return {
@@ -230,13 +233,14 @@ export class ProductAttributeBuilder {
 					valueString: null,
 					valueInteger: null,
 					valueDecimal: input.valueDecimal,
-					valueBoolean: null
+					valueBoolean: null,
+					valueDateTime: null
 				}
 			}
 			case DataType.BOOLEAN: {
 				if (provided[0] !== 'valueBoolean') {
 					throw new BadRequestException(
-						`Attribute ${attribute.key} expects valueBoolean`
+						`Атрибут ${attribute.key} ожидает valueBoolean`
 					)
 				}
 				return {
@@ -245,30 +249,59 @@ export class ProductAttributeBuilder {
 					valueString: null,
 					valueInteger: null,
 					valueDecimal: null,
-					valueBoolean: input.valueBoolean
+					valueBoolean: input.valueBoolean,
+					valueDateTime: null
+				}
+			}
+			case DataType.DATETIME: {
+				if (provided[0] !== 'valueDateTime') {
+					throw new BadRequestException(
+						`Атрибут ${attribute.key} ожидает valueDateTime`
+					)
+				}
+				const raw = input.valueDateTime?.trim()
+				if (!raw) {
+					throw new BadRequestException(
+						`Для атрибута ${attribute.key} требуется дата/время`
+					)
+				}
+				const date = new Date(raw)
+				if (Number.isNaN(date.getTime())) {
+					throw new BadRequestException(
+						`Атрибут ${attribute.key} должен быть валидной датой/временем`
+					)
+				}
+				return {
+					attributeId: attribute.id,
+					enumValueId: null,
+					valueString: null,
+					valueInteger: null,
+					valueDecimal: null,
+					valueBoolean: null,
+					valueDateTime: date
 				}
 			}
 			case DataType.ENUM: {
 				if (provided[0] !== 'enumValueId') {
 					throw new BadRequestException(
-						`Attribute ${attribute.key} expects enumValueId`
+						`Атрибут ${attribute.key} ожидает enumValueId`
 					)
 				}
 				const enumValueId = input.enumValueId?.trim()
 				if (!enumValueId) {
 					throw new BadRequestException(
-						`Attribute ${attribute.key} enum value is required`
+						`Для атрибута ${attribute.key} требуется enumValueId`
 					)
 				}
 				const ownerAttributeId = enumValueMap.get(enumValueId)
 				if (!ownerAttributeId) {
 					throw new BadRequestException(
-						`Attribute ${attribute.key} enum value not found`
+						`Значение enum для атрибута ${attribute.key} не найдено`
 					)
 				}
 				if (ownerAttributeId !== attribute.id) {
 					throw new BadRequestException(
-						`Enum value ${enumValueId} does not belong to attribute ${attribute.key}`
+						`Значение enum ${enumValueId} не относится к атрибуту ${attribute.key}`
 					)
 				}
 				return {
@@ -277,12 +310,13 @@ export class ProductAttributeBuilder {
 					valueString: null,
 					valueInteger: null,
 					valueDecimal: null,
-					valueBoolean: null
+					valueBoolean: null,
+					valueDateTime: null
 				}
 			}
 			default:
 				throw new BadRequestException(
-					`Unsupported data type for attribute ${attribute.key}`
+					`Неподдерживаемый тип данных для атрибута ${attribute.key}`
 				)
 		}
 	}
@@ -304,6 +338,9 @@ export class ProductAttributeBuilder {
 		}
 		if (input.valueBoolean !== undefined && input.valueBoolean !== null) {
 			provided.push('valueBoolean')
+		}
+		if (input.valueDateTime !== undefined && input.valueDateTime !== null) {
+			provided.push('valueDateTime')
 		}
 
 		return provided

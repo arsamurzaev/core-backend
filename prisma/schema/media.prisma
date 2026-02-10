@@ -6,6 +6,12 @@ model Media {
     width        Int?
     height       Int?
 
+    catalogId String @map("catalog_id") @db.Uuid
+    catalog   Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+
+    path     String? @db.VarChar(255)
+    entityId String? @map("entity_id") @db.VarChar(255)
+
     storage String // "s3", "local", ...
     key     String // path/storageKey
 
@@ -17,6 +23,8 @@ model Media {
     createdAt DateTime @default(now()) @map("created_at")
     updatedAt DateTime @updatedAt @map("updated_at")
 
+    @@unique([catalogId, key])
+    @@index([catalogId])
     @@map("media")
 }
 

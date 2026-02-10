@@ -29,6 +29,7 @@ import { CreateCatalogDtoReq } from './dto/requests/create-catalog.dto.req'
 import { UpdateCatalogDtoReq } from './dto/requests/update-catalog.dto.req'
 import {
 	CatalogCreateResponseDto,
+	CatalogCurrentDto,
 	CatalogDto
 } from './dto/responses/catalog.dto.res'
 
@@ -42,7 +43,7 @@ export class CatalogController {
 	@Get('/current')
 	@ApiOperation({ summary: 'Get current catalog' })
 	@Public()
-	@ApiOkResponse({ type: CatalogDto })
+	@ApiOkResponse({ type: CatalogCurrentDto })
 	async getCurrent() {
 		return this.catalogService.getCurrent()
 	}
@@ -69,7 +70,7 @@ export class CatalogController {
 	@ApiOperation({ summary: 'Get catalog by id' })
 	@ApiParam({
 		name: 'id',
-		description: 'Catalog id'
+		description: 'ID каталога'
 	})
 	@Roles(Role.ADMIN)
 	@SkipCatalog()
@@ -82,7 +83,7 @@ export class CatalogController {
 	@ApiOperation({ summary: 'Update catalog by id' })
 	@ApiParam({
 		name: 'id',
-		description: 'Catalog id'
+		description: 'ID каталога'
 	})
 	@Roles(Role.ADMIN)
 	@SkipCatalog()

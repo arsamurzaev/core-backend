@@ -90,9 +90,9 @@ export class SessionGuard implements CanActivate {
 				''
 
 			if (!csrfHeader || !csrfCookie)
-				throw new ForbiddenException('CSRF token missing')
+				throw new ForbiddenException('CSRF токен отсутствует')
 			if (csrfHeader !== csrfCookie || csrfHeader !== session.csrf) {
-				throw new ForbiddenException('CSRF token invalid')
+				throw new ForbiddenException('CSRF токен недействителен')
 			}
 		}
 

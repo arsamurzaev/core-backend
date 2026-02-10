@@ -5,6 +5,14 @@ import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
+type CategoryProductCursor = {
+	position: number
+	productId: string
+}
+
+const uuidRegex =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
 const categorySelect = {
 	id: true,
 	catalogId: true,
@@ -16,6 +24,60 @@ const categorySelect = {
 	discount: true,
 	createdAt: true,
 	updatedAt: true
+}
+
+const productSelect = {
+	id: true,
+	sku: true,
+	name: true,
+	slug: true,
+	price: true,
+	imagesUrls: true,
+	isPopular: true,
+	status: true,
+	position: true,
+	createdAt: true,
+	updatedAt: true
+}
+
+const productAttributeSelect = {
+	id: true,
+	attributeId: true,
+	enumValueId: true,
+	valueString: true,
+	valueInteger: true,
+	valueDecimal: true,
+	valueBoolean: true,
+	valueDateTime: true,
+	attribute: {
+		select: {
+			id: true,
+			key: true,
+			displayName: true,
+			dataType: true,
+			isRequired: true,
+			isVariantAttribute: true,
+			isFilterable: true,
+			displayOrder: true
+		}
+	},
+	enumValue: {
+		select: {
+			id: true,
+			value: true,
+			displayName: true,
+			displayOrder: true
+		}
+	}
+}
+
+const productSelectWithAttributes = {
+	...productSelect,
+	productAttributes: {
+		where: { deleteAt: null },
+		select: productAttributeSelect,
+		orderBy: { attributeId: SortOrder.asc }
+	}
 }
 
 const categorySelectWithRelations = {
@@ -33,10 +95,6 @@ const categorySelectWithRelations = {
 			imageUrl: true
 		},
 		orderBy: [{ position: SortOrder.asc }, { name: SortOrder.asc }]
-	},
-	categoryProducts: {
-		select: { productId: true, position: true },
-		orderBy: [{ position: SortOrder.asc }, { productId: SortOrder.asc }]
 	}
 }
 
@@ -117,5 +175,87 @@ export class CategoryRepository {
 			where: { id: { in: productIds }, catalogId, deleteAt: null },
 			select: { id: true }
 		})
+	}
+
+	async findCategoryProductsPage(
+		categoryId: string,
+		catalogId: string,
+		options: { cursor?: string; take: number }
+	) {
+		const { cursor, take } = options
+		const after = await this.resolveCursor(categoryId, catalogId, cursor)
+		const where: Prisma.CategoryProductWhereInput = {
+			categoryId,
+			category: { catalogId, deleteAt: null },
+			product: { catalogId, deleteAt: null }
+		}
+
+		if (after) {
+			where.OR = [
+				{ position: { gt: after.position } },
+				{
+					position: after.position,
+					productId: { gt: after.productId }
+				}
+			]
+		}
+
+		return this.prisma.categoryProduct.findMany({
+			where,
+			select: {
+				productId: true,
+				position: true,
+				product: { select: productSelectWithAttributes }
+			},
+			orderBy: [{ position: SortOrder.asc }, { productId: SortOrder.asc }],
+			take
+		})
+	}
+
+	private decodeCursor(value?: string): CategoryProductCursor | null {
+		if (!value) return null
+		try {
+			const decoded = Buffer.from(value, 'base64').toString('utf8')
+			const parsed = JSON.parse(decoded) as {
+				position?: unknown
+				productId?: unknown
+			}
+			const position =
+				typeof parsed.position === 'number' && Number.isFinite(parsed.position)
+					? Math.floor(parsed.position)
+					: null
+			const productId =
+				typeof parsed.productId === 'string' ? parsed.productId.trim() : ''
+
+			if (position === null || !productId) return null
+			return { position, productId }
+		} catch {
+			return null
+		}
+	}
+
+	private async resolveCursor(
+		categoryId: string,
+		catalogId: string,
+		cursor?: string
+	): Promise<CategoryProductCursor | null> {
+		if (!cursor) return null
+
+		const decoded = this.decodeCursor(cursor)
+		if (decoded) return decoded
+
+		if (!uuidRegex.test(cursor)) return null
+
+		const record = await this.prisma.categoryProduct.findFirst({
+			where: {
+				categoryId,
+				productId: cursor,
+				category: { catalogId, deleteAt: null },
+				product: { catalogId, deleteAt: null }
+			},
+			select: { productId: true, position: true }
+		})
+
+		return record ? { productId: record.productId, position: record.position } : null
 	}
 }

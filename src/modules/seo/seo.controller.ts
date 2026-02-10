@@ -45,11 +45,11 @@ export class SeoController {
 	@ApiOperation({ summary: 'Get seo setting by entity' })
 	@ApiParam({
 		name: 'entityType',
-		description: 'Entity type'
+		description: 'Тип сущности'
 	})
 	@ApiParam({
 		name: 'entityId',
-		description: 'Entity id'
+		description: 'ID сущности'
 	})
 	@ApiOkResponse({ type: SeoDto })
 	async getByEntity(
@@ -61,7 +61,7 @@ export class SeoController {
 
 	@Get('/:id')
 	@ApiOperation({ summary: 'Get seo setting by id' })
-	@ApiParam({ name: 'id', description: 'Seo setting id' })
+	@ApiParam({ name: 'id', description: 'ID SEO-настройки' })
 	@ApiOkResponse({ type: SeoDto })
 	async getById(@Param('id') id: string) {
 		return this.seoService.getById(id)
@@ -82,7 +82,7 @@ export class SeoController {
 	@ApiSecurity('csrf')
 	@UseGuards(SessionGuard, CatalogAccessGuard)
 	@Roles(Role.CATALOG)
-	@ApiParam({ name: 'id', description: 'Seo setting id' })
+	@ApiParam({ name: 'id', description: 'ID SEO-настройки' })
 	@ApiOkResponse({ type: SeoDto })
 	async update(@Param('id') id: string, @Body() dto: UpdateSeoDtoReq) {
 		return this.seoService.update(id, dto)
@@ -93,7 +93,7 @@ export class SeoController {
 	@ApiSecurity('csrf')
 	@UseGuards(SessionGuard, CatalogAccessGuard)
 	@Roles(Role.CATALOG)
-	@ApiParam({ name: 'id', description: 'Seo setting id' })
+	@ApiParam({ name: 'id', description: 'ID SEO-настройки' })
 	@ApiOkResponse({ type: OkResponseDto })
 	async remove(@Param('id') id: string) {
 		return this.seoService.remove(id)

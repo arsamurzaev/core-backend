@@ -69,7 +69,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 		const isDev = process.env.NODE_ENV !== 'production'
 
 		let status = HttpStatus.INTERNAL_SERVER_ERROR
-		let message: string | string[] = 'Internal Server Error'
+	let message: string | string[] = 'Внутренняя ошибка сервера'
 
 		console.log(exception)
 
@@ -104,7 +104,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 		// Any other error
 		else if (exception instanceof Error) {
 			status = HttpStatus.INTERNAL_SERVER_ERROR
-			message = isDev ? exception.message : 'Internal Server Error'
+			message = isDev ? exception.message : 'Внутренняя ошибка сервера'
 		}
 
 		const body: ErrorBody = {

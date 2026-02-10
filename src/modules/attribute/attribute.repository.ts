@@ -131,6 +131,22 @@ export class AttributeRepository {
 		})
 	}
 
+	async existsKey(typeId: string, key: string): Promise<boolean> {
+		const attribute = await this.prisma.attribute.findFirst({
+			where: { typeId, key },
+			select: { id: true }
+		})
+		return Boolean(attribute)
+	}
+
+	async existsEnumValue(attributeId: string, value: string): Promise<boolean> {
+		const enumValue = await this.prisma.attributeEnumValue.findFirst({
+			where: { attributeId, value },
+			select: { id: true }
+		})
+		return Boolean(enumValue)
+	}
+
 	async updateEnumValue(
 		id: string,
 		attributeId: string,

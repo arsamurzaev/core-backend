@@ -1,0 +1,32 @@
+import { ApiProperty } from '@nestjs/swagger'
+
+import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
+
+export class PresignPostUploadResponseDto extends OkResponseDto {
+	@ApiProperty({ example: 'uuid' })
+	mediaId: string
+
+	@ApiProperty({ example: 'https://s3.amazonaws.com/bucket' })
+	uploadUrl: string
+
+	@ApiProperty({
+		example: {
+			key: 'catalogs/uuid/products/2026/02/09/raw/uuid.jpg',
+			'Content-Type': 'image/jpeg',
+			acl: 'public-read'
+		}
+	})
+	fields: Record<string, string>
+
+	@ApiProperty({ example: 'catalogs/uuid/products/2026/02/09/raw/uuid.jpg' })
+	key: string
+
+	@ApiProperty({ example: 'https://cdn.example.com/.../raw/uuid.jpg' })
+	url: string
+
+	@ApiProperty({ example: 600 })
+	expiresIn: number
+
+	@ApiProperty({ example: 10485760 })
+	maxFileBytes: number
+}

@@ -60,6 +60,7 @@ model Catalog {
     category    Category[]
     order       Order[]
     cart        Cart[]
+    media       Media[]
 
     subscriptionEndsAt DateTime? @map("subscription_ends_at") // Дата окончания подписки
 

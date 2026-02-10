@@ -38,17 +38,17 @@ export class AdminSsoController {
 	@Get('/catalog/:catalogId')
 	@ApiParam({
 		name: 'catalogId',
-		description: 'Catalog id'
+		description: 'ID каталога'
 	})
 	@ApiQuery({
 		name: 'next',
 		required: false,
-		description: 'Path to redirect after SSO'
+		description: 'Путь для редиректа после SSO'
 	})
-	@ApiFoundResponse({ description: 'Redirects to the SSO URL' })
-	@ApiNotFoundResponse({ description: 'Catalog not found' })
-	@ApiUnauthorizedResponse({ description: 'Not authenticated' })
-	@ApiForbiddenResponse({ description: 'Not enough permissions' })
+	@ApiFoundResponse({ description: 'Редирект на URL SSO' })
+	@ApiNotFoundResponse({ description: 'Каталог не найден' })
+	@ApiUnauthorizedResponse({ description: 'Не авторизован' })
+	@ApiForbiddenResponse({ description: 'Недостаточно прав' })
 	async enter(
 		@Param('catalogId') catalogId: string,
 		@Query('next') next: string | undefined,
@@ -67,7 +67,7 @@ export class AdminSsoController {
 			where: { id: catalogId },
 			select: { slug: true, domain: true }
 		})
-		if (!catalog) return res.status(404).send('Catalog not found')
+		if (!catalog) return res.status(404).send('Каталог не найден')
 
 		const host = catalog.domain?.trim()
 			? catalog.domain.trim()

@@ -4,6 +4,7 @@ import { Transform, Type } from 'class-transformer'
 import {
 	IsArray,
 	IsBoolean,
+	IsEmpty,
 	IsEnum,
 	IsNotEmpty,
 	IsNumber,
@@ -11,6 +12,7 @@ import {
 	IsString,
 	Matches,
 	MaxLength,
+	MinLength,
 	ValidateNested
 } from 'class-validator'
 
@@ -20,12 +22,23 @@ const SLUG_PATTERN = /^[a-z0-9-]+$/
 const SKU_PATTERN = /^[A-Za-z0-9_-]+$/
 
 export class CreateProductDtoReq {
-	@ApiProperty({ type: String, example: 'TSHIRT-001' })
+	@ApiPropertyOptional({
+		type: String,
+		example: 'TSHIRT-001',
+		description: 'Если не указан, SKU будет сгенерирован автоматически'
+	})
+	@IsOptional()
 	@IsString()
 	@IsNotEmpty()
+	@MinLength(3)
+	@MaxLength(100)
 	@Matches(SKU_PATTERN)
-	@Transform(({ value }) => (value === undefined ? value : String(value).trim()))
-	sku: string
+	@Transform(({ value }) => {
+		if (value === undefined || value === null) return value
+		const trimmed = String(value).trim()
+		return trimmed || undefined
+	})
+	sku?: string
 
 	@ApiProperty({ type: String, example: 'Basic T-Shirt' })
 	@IsString()
@@ -33,14 +46,23 @@ export class CreateProductDtoReq {
 	@MaxLength(255)
 	name: string
 
-	@ApiProperty({ type: String, example: 'basic-tshirt' })
+	@ApiPropertyOptional({
+		type: String,
+		example: 'basic-tshirt',
+		description: 'Если не указан, slug будет сгенерирован автоматически'
+	})
+	@IsOptional()
 	@IsString()
 	@IsNotEmpty()
+	@MinLength(2)
+	@MaxLength(255)
 	@Matches(SLUG_PATTERN)
-	@Transform(({ value }) =>
-		value === undefined ? value : String(value).trim().toLowerCase()
-	)
-	slug: string
+	@Transform(({ value }) => {
+		if (value === undefined || value === null) return value
+		const trimmed = String(value).trim().toLowerCase()
+		return trimmed || undefined
+	})
+	slug?: string
 
 	@ApiProperty({ type: Number, example: 999.0 })
 	@Type(() => Number)
@@ -75,4 +97,12 @@ export class CreateProductDtoReq {
 	@ValidateNested({ each: true })
 	@Type(() => ProductAttributeValueDto)
 	attributes?: ProductAttributeValueDto[]
+
+	@ApiPropertyOptional({
+		description: 'Вариации товара создаются администратором'
+	})
+	@IsOptional()
+	@IsEmpty({ message: 'Вариации товара создаются администратором' })
+	variants?: unknown
+
 }

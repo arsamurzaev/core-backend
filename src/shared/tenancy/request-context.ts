@@ -30,7 +30,7 @@ export class RequestContext {
 		const store = this.get()
 		if (!store) {
 			throw new Error(
-				'RequestContext is not initialized. Did you forget to apply CatalogContextMiddleware globally?'
+				'RequestContext не инициализирован. Вы забыли применить CatalogContextMiddleware глобально?'
 			)
 		}
 		return store
