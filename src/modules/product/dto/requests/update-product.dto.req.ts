@@ -1,51 +1,27 @@
-import { ProductStatus } from '@generated/enums'
+﻿import { ProductStatus } from '@generated/enums'
 import { ApiPropertyOptional } from '@nestjs/swagger'
-import { Transform, Type } from 'class-transformer'
+import { Type } from 'class-transformer'
 import {
+	ArrayMaxSize,
 	IsArray,
 	IsBoolean,
 	IsEnum,
 	IsNumber,
 	IsOptional,
 	IsString,
-	Matches,
 	MaxLength,
-	MinLength,
 	ValidateNested
 } from 'class-validator'
 
 import { ProductAttributeValueDto } from './product-attribute.dto.req'
 import { ProductVariantUpdateDtoReq } from './product-variant-update.dto.req'
 
-const SLUG_PATTERN = /^[a-z0-9-]+$/
-const SKU_PATTERN = /^[A-Za-z0-9_-]+$/
-
 export class UpdateProductDtoReq {
-	@ApiPropertyOptional({ type: String, example: 'TSHIRT-001' })
-	@IsOptional()
-	@IsString()
-	@MinLength(3)
-	@MaxLength(100)
-	@Matches(SKU_PATTERN)
-	@Transform(({ value }) => (value === undefined ? value : String(value).trim()))
-	sku?: string
-
 	@ApiPropertyOptional({ type: String, example: 'Basic T-Shirt' })
 	@IsOptional()
 	@IsString()
 	@MaxLength(255)
 	name?: string
-
-	@ApiPropertyOptional({ type: String, example: 'basic-tshirt' })
-	@IsOptional()
-	@IsString()
-	@MinLength(2)
-	@MaxLength(255)
-	@Matches(SLUG_PATTERN)
-	@Transform(({ value }) =>
-		value === undefined ? value : String(value).trim().toLowerCase()
-	)
-	slug?: string
 
 	@ApiPropertyOptional({ type: Number, example: 999.0 })
 	@IsOptional()
@@ -53,11 +29,12 @@ export class UpdateProductDtoReq {
 	@IsNumber()
 	price?: number
 
-	@ApiPropertyOptional({ type: [String], example: ['https://cdn/img.png'] })
+	@ApiPropertyOptional({ type: [String], example: ['media-uuid'] })
 	@IsOptional()
 	@IsArray()
+	@ArrayMaxSize(12)
 	@IsString({ each: true })
-	imagesUrls?: string[]
+	mediaIds?: string[]
 
 	@ApiPropertyOptional({ type: Boolean, example: false })
 	@IsOptional()

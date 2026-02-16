@@ -2,6 +2,7 @@ import { DataType, ProductStatus, ProductVariantStatus } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
+import { MediaDto } from '@/shared/media/dto/media.dto.res'
 
 export class ProductAttributeEnumValueDto {
 	@ApiProperty({ type: String })
@@ -124,6 +125,17 @@ export class ProductVariantDto {
 	attributes: VariantAttributeDto[]
 }
 
+export class ProductMediaDto {
+	@ApiProperty({ type: Number })
+	position: number
+
+	@ApiPropertyOptional({ type: String, nullable: true })
+	kind?: string | null
+
+	@ApiProperty({ type: MediaDto })
+	media: MediaDto
+}
+
 export class ProductDto {
 	@ApiProperty({ type: String })
 	id: string
@@ -140,8 +152,8 @@ export class ProductDto {
 	@ApiProperty({ type: String, example: '999.00' })
 	price: string
 
-	@ApiProperty({ type: [String] })
-	imagesUrls: string[]
+	@ApiProperty({ type: [ProductMediaDto] })
+	media: ProductMediaDto[]
 
 	@ApiProperty({ type: Boolean })
 	isPopular: boolean

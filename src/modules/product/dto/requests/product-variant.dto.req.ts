@@ -1,8 +1,7 @@
-﻿import { ProductVariantStatus } from '@generated/enums'
+﻿﻿import { ProductVariantStatus } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {
-	ArrayMinSize,
 	IsArray,
 	IsBoolean,
 	IsEnum,
@@ -11,13 +10,10 @@ import {
 	IsNumber,
 	IsOptional,
 	IsString,
-	Matches,
 	MaxLength,
 	Min,
 	ValidateNested
 } from 'class-validator'
-
-const SKU_PATTERN = /^[A-Za-z0-9_-]+$/
 
 export class ProductVariantAttributeDtoReq {
 	@ApiProperty({ type: String, example: 'attribute-id' })
@@ -61,28 +57,6 @@ export class ProductVariantAttributeDtoReq {
 }
 
 export class ProductVariantDtoReq {
-	@ApiPropertyOptional({
-		type: String,
-		example: 'TSHIRT-001-S-WHT',
-		description: 'Если не указан, будет сгенерирован автоматически'
-	})
-	@IsOptional()
-	@IsString()
-	@IsNotEmpty()
-	@Matches(SKU_PATTERN)
-	@Transform(({ value }: { value: unknown }) => {
-		if (value === undefined || value === null) return undefined
-		if (typeof value === 'string') {
-			const trimmed = value.trim()
-			return trimmed.length ? trimmed : undefined
-		}
-		if (typeof value === 'number' || typeof value === 'boolean') {
-			return String(value).trim()
-		}
-		return undefined
-	})
-	sku?: string
-
 	@ApiPropertyOptional({ type: Number, example: 0 })
 	@IsOptional()
 	@Type(() => Number)
@@ -107,10 +81,10 @@ export class ProductVariantDtoReq {
 	@IsEnum(ProductVariantStatus)
 	status?: ProductVariantStatus
 
-	@ApiProperty({ type: [ProductVariantAttributeDtoReq] })
+	@ApiPropertyOptional({ type: [ProductVariantAttributeDtoReq] })
+	@IsOptional()
 	@IsArray()
-	@ArrayMinSize(1)
 	@ValidateNested({ each: true })
 	@Type(() => ProductVariantAttributeDtoReq)
-	attributes: ProductVariantAttributeDtoReq[]
+	attributes?: ProductVariantAttributeDtoReq[]
 }

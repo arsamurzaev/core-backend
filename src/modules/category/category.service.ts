@@ -1,10 +1,12 @@
-import { CategoryCreateInput, CategoryUpdateInput } from '@generated/models'
+﻿import { CategoryCreateInput, CategoryUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
 	Injectable,
 	NotFoundException
 } from '@nestjs/common'
 
+import { MediaRepository } from '@/shared/media/media.repository'
+import { MediaUrlService } from '@/shared/media/media-url.service'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 
 import { CategoryRepository } from './category.repository'
@@ -18,24 +20,25 @@ function normalizeName(value: string): string {
 	return value.trim()
 }
 
-function normalizeImageUrl(value: string): string {
-	return value.trim()
-}
-
 @Injectable()
 export class CategoryService {
-	constructor(private readonly repo: CategoryRepository) {}
+	constructor(
+		private readonly repo: CategoryRepository,
+		private readonly mediaRepo: MediaRepository,
+		private readonly mediaUrl: MediaUrlService
+	) {}
 
 	async getAll() {
 		const catalogId = mustCatalogId()
-		return this.repo.findAll(catalogId)
+		const categories = await this.repo.findAll(catalogId)
+		return categories.map(category => this.mapCategory(category))
 	}
 
 	async getById(id: string) {
 		const catalogId = mustCatalogId()
 		const category = await this.repo.findById(id, catalogId, true)
 		if (!category) throw new NotFoundException('Категория не найдена')
-		return category
+		return this.mapCategoryWithRelations(category)
 	}
 
 	async getProductsByCategory(
@@ -64,7 +67,13 @@ export class CategoryService {
 					})
 				: null
 
-		return { items: pageItems, nextCursor }
+		return {
+			items: pageItems.map(item => ({
+				...item,
+				product: this.mapProductMedia(item.product)
+			})),
+			nextCursor
+		}
 	}
 
 	async create(dto: CreateCategoryDtoReq) {
@@ -72,6 +81,7 @@ export class CategoryService {
 		const products = this.normalizeCategoryProducts(dto.products)
 		const productIds = products.map(product => product.productId)
 		const parentId = dto.parentId ?? null
+		const imageMediaId = this.normalizeOptionalId(dto.imageMediaId)
 
 		if (parentId) {
 			const parent = await this.repo.findById(parentId, catalogId)
@@ -83,13 +93,19 @@ export class CategoryService {
 			catalogId
 		)
 
+		if (imageMediaId) {
+			await this.ensureMediaInCatalog(imageMediaId, catalogId)
+		}
+
 		const data: CategoryCreateInput = {
 			name: normalizeName(dto.name),
-			imageUrl: dto.imageUrl ? normalizeImageUrl(dto.imageUrl) : '',
 			descriptor: dto.descriptor ?? null,
 			discount: dto.discount ?? null,
 			position: dto.position ?? 0,
-			catalog: { connect: { id: catalogId } }
+			catalog: { connect: { id: catalogId } },
+			...(imageMediaId
+				? { imageMedia: { connect: { id: imageMediaId } } }
+				: {})
 		}
 
 		if (parentId) {
@@ -119,8 +135,13 @@ export class CategoryService {
 		if (dto.name !== undefined) {
 			data.name = normalizeName(dto.name)
 		}
-		if (dto.imageUrl !== undefined) {
-			data.imageUrl = normalizeImageUrl(dto.imageUrl)
+		if (dto.imageMediaId !== undefined) {
+			const imageMediaId = this.normalizeRequiredId(
+				dto.imageMediaId,
+				'imageMediaId'
+			)
+			await this.ensureMediaInCatalog(imageMediaId, catalogId)
+			data.imageMedia = { connect: { id: imageMediaId } }
 		}
 		if (dto.descriptor !== undefined) {
 			data.descriptor = dto.descriptor ?? null
@@ -175,7 +196,7 @@ export class CategoryService {
 		const category = await this.repo.update(id, catalogId, data)
 		if (!category) throw new NotFoundException('Категория не найдена')
 
-		return category
+		return this.mapCategoryWithRelations(category)
 	}
 
 	async remove(id: string) {
@@ -184,6 +205,62 @@ export class CategoryService {
 		if (!category) throw new NotFoundException('Категория не найдена')
 
 		return { ok: true }
+	}
+
+	private mapCategory<T extends { imageMedia?: any | null }>(category: T) {
+		return {
+			...category,
+			imageMedia: category.imageMedia
+				? this.mediaUrl.mapMedia(category.imageMedia)
+				: null
+		}
+	}
+
+	private mapCategoryWithRelations(
+		category: { imageMedia?: any | null; children?: { imageMedia?: any | null }[] }
+	) {
+		return {
+			...this.mapCategory(category),
+			children: (category.children ?? []).map(child => this.mapCategory(child))
+		}
+	}
+
+	private mapProductMedia<T extends { media: { position: number; kind?: string | null; media: any }[] }>(
+		product: T
+	) {
+		return {
+			...product,
+			media: (product.media ?? []).map(item => ({
+				position: item.position,
+				kind: item.kind ?? null,
+				media: this.mediaUrl.mapMedia(item.media)
+			}))
+		}
+	}
+
+	private normalizeOptionalId(value?: string): string | undefined {
+		if (value === undefined) return undefined
+		const normalized = String(value).trim()
+		if (!normalized) return undefined
+		return normalized
+	}
+
+	private normalizeRequiredId(value: string, name: string): string {
+		const normalized = String(value).trim()
+		if (!normalized) {
+			throw new BadRequestException(`Поле ${name} обязательно`)
+		}
+		return normalized
+	}
+
+	private async ensureMediaInCatalog(
+		mediaId: string,
+		catalogId: string
+	): Promise<void> {
+		const existing = await this.mediaRepo.findById(mediaId, catalogId)
+		if (!existing) {
+			throw new BadRequestException(`Медиа ${mediaId} не найдено в каталоге`)
+		}
 	}
 
 	private normalizeCategoryProducts(

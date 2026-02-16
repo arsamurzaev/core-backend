@@ -1,4 +1,4 @@
-﻿import { ApiPropertyOptional } from '@nestjs/swagger'
+﻿﻿import { ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {
 	IsArray,
@@ -17,6 +17,26 @@ export class UploadFromS3ItemDtoReq {
 	@IsNotEmpty()
 	@MaxLength(400)
 	key: string
+
+	@ApiPropertyOptional({
+		example: 'uuid',
+		description: 'ID записи media (если есть в ответе presign)'
+	})
+	@IsOptional()
+	@IsString()
+	@IsNotEmpty()
+	@MaxLength(120)
+	mediaId?: string
+
+	@ApiPropertyOptional({
+		example: 'https://cdn.example.com/.../raw/uuid.jpg',
+		description: 'URL файла (если есть в ответе presign)'
+	})
+	@IsOptional()
+	@IsString()
+	@IsNotEmpty()
+	@MaxLength(1000)
+	url?: string
 }
 
 export class UploadFromS3DtoReq {

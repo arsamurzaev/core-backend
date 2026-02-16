@@ -1,5 +1,5 @@
 model Media {
-    id           String @id @default(uuid())
+    id           String @id @default(uuid()) @db.Uuid
     originalName String @map("original_name")
     mimeType     String @map("mime_type")
     size         Int?
@@ -20,6 +20,13 @@ model Media {
 
     variants MediaVariant[]
 
+    productMedia           ProductMedia[]
+    categoryImages         Category[]     @relation("CategoryImageMedia")
+    catalogConfigLogos     CatalogConfig[] @relation("CatalogConfigLogo")
+    catalogConfigBackgrounds CatalogConfig[] @relation("CatalogConfigBg")
+    seoOgMedia             SeoSetting[]   @relation("SeoOgMedia")
+    seoTwitterMedia        SeoSetting[]   @relation("SeoTwitterMedia")
+
     createdAt DateTime @default(now()) @map("created_at")
     updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -29,8 +36,8 @@ model Media {
 }
 
 model MediaVariant {
-    id      String @id @default(uuid())
-    mediaId String @map("media_id")
+    id      String @id @default(uuid()) @db.Uuid
+    mediaId String @map("media_id") @db.Uuid
     media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
 
     kind     String // "miniature" | "medium" | "large" | "webp" | "avif" | "square_256" ...

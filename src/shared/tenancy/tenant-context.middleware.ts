@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+﻿/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, NestMiddleware } from '@nestjs/common'
 import type { NextFunction, Request, Response } from 'express'
 import { randomUUID } from 'node:crypto'

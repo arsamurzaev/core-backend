@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing'
 
+import { MediaRepository } from '@/shared/media/media.repository'
+import { MediaUrlService } from '@/shared/media/media-url.service'
+
 import { SeoRepository } from './seo.repository'
 import { SeoService } from './seo.service'
 
@@ -19,6 +22,19 @@ describe('SeoService', () => {
 						create: jest.fn(),
 						update: jest.fn(),
 						softDelete: jest.fn()
+					}
+				},
+				{
+					provide: MediaRepository,
+					useValue: {
+						findById: jest.fn(),
+						findByIds: jest.fn()
+					}
+				},
+				{
+					provide: MediaUrlService,
+					useValue: {
+						mapMedia: jest.fn()
 					}
 				}
 			]

@@ -1,4 +1,5 @@
-﻿import { CatalogCreateInput, CatalogUpdateInput } from '@generated/models'
+﻿﻿/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
+import { CatalogCreateInput, CatalogUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
 	Injectable,
@@ -12,6 +13,9 @@ import {
 	CATALOG_CURRENT_CACHE_TTL_SEC,
 	CATALOG_TYPE_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
+import type { MediaDto } from '@/shared/media/dto/media.dto.res'
+import { MediaUrlService } from '@/shared/media/media-url.service'
+import { MediaRepository } from '@/shared/media/media.repository'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
 import { CatalogRepository } from './catalog.repository'
@@ -68,7 +72,17 @@ function applySuffix(base: string, suffix: number): string {
 	return `${head}${suffixPart}`
 }
 
-type CatalogCurrent = Awaited<ReturnType<CatalogRepository['getByIdWithType']>>
+type CatalogConfigMediaMapped<T> = T extends { config?: infer C }
+	? Omit<T, 'config'> & {
+			config:
+				| (C & { logoMedia?: MediaDto | null; bgMedia?: MediaDto | null })
+				| null
+		}
+	: T
+
+type CatalogCurrent = CatalogConfigMediaMapped<
+	Awaited<ReturnType<CatalogRepository['getByIdWithType']>>
+>
 
 @Injectable()
 export class CatalogService {
@@ -76,7 +90,9 @@ export class CatalogService {
 
 	constructor(
 		private readonly repo: CatalogRepository,
-		private readonly cache: CacheService
+		private readonly cache: CacheService,
+		private readonly mediaRepo: MediaRepository,
+		private readonly mediaUrl: MediaUrlService
 	) {}
 
 	async create(dto: CreateCatalogDtoReq) {
@@ -127,13 +143,14 @@ export class CatalogService {
 	}
 
 	async getAll() {
-		return this.repo.getAll()
+		const catalogs = await this.repo.getAll()
+		return catalogs.map(catalog => this.mapCatalog(catalog))
 	}
 
 	async getById(id: string) {
 		const catalog = await this.repo.getById(id)
 		if (!catalog) throw new NotFoundException('Каталог не найден')
-		return catalog
+		return this.mapCatalog(catalog)
 	}
 
 	async getCurrent() {
@@ -168,7 +185,7 @@ export class CatalogService {
 		)
 		const catalog = await this.repo.update(id, data)
 		await this.invalidateCatalogCache(id)
-		return catalog
+		return this.mapCatalog(catalog)
 	}
 
 	async updateCurrent(dto: UpdateCatalogDtoReq) {
@@ -186,7 +203,7 @@ export class CatalogService {
 		)
 		const catalog = await this.repo.update(store.catalogId, data)
 		await this.invalidateCatalogCache(store.catalogId)
-		return catalog
+		return this.mapCatalog(catalog)
 	}
 
 	private async buildUpdateData(
@@ -250,13 +267,17 @@ export class CatalogService {
 			configUpdate.currency = dto.currency
 			configCreate.currency = dto.currency
 		}
-		if (dto.logoUrl !== undefined) {
-			configUpdate.logoUrl = dto.logoUrl
-			configCreate.logoUrl = dto.logoUrl
+		if (dto.logoMediaId !== undefined) {
+			const logoMediaId = this.normalizeRequiredId(dto.logoMediaId, 'logoMediaId')
+			await this.ensureMediaInCatalog(logoMediaId, catalogId)
+			configUpdate.logoMediaId = logoMediaId
+			configCreate.logoMediaId = logoMediaId
 		}
-		if (dto.bgUrl !== undefined) {
-			configUpdate.bgUrl = dto.bgUrl
-			configCreate.bgUrl = dto.bgUrl
+		if (dto.bgMediaId !== undefined) {
+			const bgMediaId = this.normalizeRequiredId(dto.bgMediaId, 'bgMediaId')
+			await this.ensureMediaInCatalog(bgMediaId, catalogId)
+			configUpdate.bgMediaId = bgMediaId
+			configCreate.bgMediaId = bgMediaId
 		}
 		if (dto.note !== undefined) {
 			configUpdate.note = dto.note
@@ -309,13 +330,135 @@ export class CatalogService {
 	}
 
 	private async loadCurrentCatalog(catalogId: string) {
-		const catalog = await this.repo.getByIdWithType(catalogId, {
-			createdAt: false,
-			updatedAt: false,
-			deleteAt: false
-		})
-		if (!catalog) throw new NotFoundException('Каталог не найден')
-		return catalog
+		try {
+			const catalog = await this.repo.getByIdWithType(catalogId, {
+				createdAt: false,
+				updatedAt: false,
+				deleteAt: false
+			})
+			if (!catalog) throw new NotFoundException('Каталог не найден')
+			return this.mapCatalog(catalog)
+		} catch (error) {
+			if (this.isUnknownAttributeTypesError(error)) {
+				const catalog = await this.repo.getByIdWithType(catalogId, {
+					type: {
+						select: {
+							id: true,
+							code: true,
+							name: true,
+							attributes: {
+								where: { deleteAt: null },
+								select: {
+									id: true,
+									key: true,
+									displayName: true,
+									dataType: true,
+									isRequired: true,
+									isVariantAttribute: true,
+									isFilterable: true,
+									displayOrder: true,
+									createdAt: true,
+									updatedAt: true,
+									typeId: true,
+									enumValues: {
+										where: { deleteAt: null },
+										select: {
+											id: true,
+											attributeId: true,
+											value: true,
+											displayName: true,
+											displayOrder: true,
+											createdAt: true,
+											updatedAt: true
+										},
+										orderBy: [{ displayOrder: 'asc' as const }, { value: 'asc' as const }]
+									}
+								},
+								orderBy: [{ displayOrder: 'asc' as const }, { key: 'asc' as const }]
+							}
+						}
+					}
+				} as any)
+				if (!catalog) throw new NotFoundException('Каталог не найден')
+				return this.mapCatalog(catalog)
+			}
+			throw error
+		}
+	}
+
+	private mapCatalog<T extends { config?: any | null; type?: any }>(catalog: T) {
+		if (!catalog) return catalog
+		let result: any = catalog
+		if (catalog.config) {
+			const config = catalog.config as {
+				logoMedia?: any | null
+				bgMedia?: any | null
+			}
+			const hasLogo = Object.prototype.hasOwnProperty.call(config, 'logoMedia')
+			const hasBg = Object.prototype.hasOwnProperty.call(config, 'bgMedia')
+			if (hasLogo || hasBg) {
+				result = {
+					...result,
+					config: {
+						...config,
+						logoMedia: config.logoMedia
+							? this.mediaUrl.mapMedia(config.logoMedia)
+							: null,
+						bgMedia: config.bgMedia ? this.mediaUrl.mapMedia(config.bgMedia) : null
+					}
+				}
+			}
+		}
+
+		const type = result.type
+		if (type?.attributes?.length) {
+			const attributes = type.attributes.map((attribute: any) => {
+				const typeIds = Array.isArray(attribute.types)
+					? attribute.types.map((item: any) => item.id)
+					: attribute.typeId
+						? [attribute.typeId]
+						: []
+				const { types, typeId, ...rest } = attribute
+				return { ...rest, typeIds }
+			})
+			result = {
+				...result,
+				type: {
+					...type,
+					attributes
+				}
+			}
+		}
+
+		return result
+	}
+
+	private isUnknownAttributeTypesError(error: unknown): boolean {
+		const message =
+			typeof error === 'object' && error !== null && 'message' in error
+				? String((error as { message?: string }).message)
+				: ''
+		return message.includes(
+			'Unknown field `types` for select statement on model `Attribute`'
+		)
+	}
+
+	private normalizeRequiredId(value: string, name: string): string {
+		const normalized = String(value).trim()
+		if (!normalized) {
+			throw new BadRequestException(`Поле ${name} обязательно`)
+		}
+		return normalized
+	}
+
+	private async ensureMediaInCatalog(
+		mediaId: string,
+		catalogId: string
+	): Promise<void> {
+		const existing = await this.mediaRepo.findById(mediaId, catalogId)
+		if (!existing) {
+			throw new BadRequestException(`Медиа ${mediaId} не найдено в каталоге`)
+		}
 	}
 
 	private async generateCatalogSlug(name: string): Promise<string> {

@@ -1,4 +1,4 @@
-﻿import { createHash } from 'crypto'
+﻿﻿import { createHash } from 'crypto'
 
 import { DataType, ProductVariantStatus } from '@generated/enums'
 import { BadRequestException, Injectable } from '@nestjs/common'
@@ -29,12 +29,18 @@ type VariantAttributeMeta = {
 	key: string
 	displayOrder: number
 	dataType: DataType
+	isRequired: boolean
 }
 
 type EnumValueMeta = {
 	id: string
 	attributeId: string
 	value: string
+}
+
+type BuildOptions = {
+	variantAttributeId?: string
+	defaultPrice?: number
 }
 
 const SKU_MAX_LENGTH = 100
@@ -55,47 +61,96 @@ export class ProductVariantBuilder {
 	async build(
 		typeId: string,
 		inputs?: ProductVariantDtoReq[],
-		productSku?: string
+		productSku?: string,
+		options: BuildOptions = {}
 	): Promise<ProductVariantData[]> {
-		if (!inputs?.length) return []
-
+		const hasInputs = Boolean(inputs?.length)
 		const variantAttributes = await this.loadVariantAttributes(typeId)
 		if (!variantAttributes.length) {
+			if (!hasInputs) return []
 			throw new BadRequestException('У типа нет вариантных атрибутов')
 		}
 
-		const orderedAttributes = [...variantAttributes].sort((a, b) => {
+		const normalizedVariantAttributeId = options.variantAttributeId?.trim()
+		const selectedAttribute = normalizedVariantAttributeId
+			? variantAttributes.find(
+					attribute => attribute.id === normalizedVariantAttributeId
+				)
+			: null
+
+		if (normalizedVariantAttributeId && !selectedAttribute) {
+			throw new BadRequestException(
+				`Атрибут ${normalizedVariantAttributeId} не является вариантным для этого типа`
+			)
+		}
+
+		const scopedAttributes = selectedAttribute
+			? [selectedAttribute]
+			: variantAttributes
+
+		const orderedAttributes = [...scopedAttributes].sort((a, b) => {
 			if (a.displayOrder !== b.displayOrder) return a.displayOrder - b.displayOrder
 			return a.key.localeCompare(b.key)
 		})
 
+		const requiredVariantAttributes = scopedAttributes.filter(
+			attribute => attribute.isRequired
+		)
+		if (!hasInputs) {
+			if (requiredVariantAttributes.length > 0) {
+				const keys = requiredVariantAttributes.map(attribute => attribute.key)
+				throw new BadRequestException(
+					`Для обязательных вариантных атрибутов нужны вариации: ${keys.join(', ')}`
+				)
+			}
+			return []
+		}
 		const attributeMap = new Map(variantAttributes.map(attr => [attr.id, attr]))
-		const requiredAttributeIds = new Set(variantAttributes.map(attr => attr.id))
+		const requiredAttributeIds = new Set(
+			requiredVariantAttributes.map(attr => attr.id)
+		)
 		const skuSet = new Set<string>()
 		const enumValueIds = new Set<string>()
 		const valueAttributeIds = new Set<string>()
-		const baseSku = productSku?.trim()
-		const hasBaseSku = Boolean(baseSku)
+		const baseSku = productSku?.trim() ?? ''
+		const preparedInputs: {
+			input: ProductVariantDtoReq
+			status: ProductVariantStatus
+		}[] = []
 
-		for (const input of inputs) {
-			const rawSku = input.sku?.trim()
-			const skuLabel = rawSku ?? 'без SKU'
+		for (const [index, input] of inputs.entries()) {
+			const variantLabel = `варианта #${index + 1}`
+			const stock = input.stock ?? 0
+			const price = input.price ?? options.defaultPrice ?? 0
+			const status = this.resolveStatus(input, stock)
 
-			if (!rawSku && !hasBaseSku) {
+			if (!Number.isInteger(stock) || stock < 0) {
 				throw new BadRequestException(
-					'SKU варианта обязателен, если не указан SKU товара'
+					`Некорректный stock для ${variantLabel}`
+				)
+			}
+			if (!Number.isFinite(price) || price < 0) {
+				throw new BadRequestException(
+					`Некорректная цена для ${variantLabel}`
 				)
 			}
 
 			if (!input.attributes?.length) {
 				throw new BadRequestException(
-					`Для варианта ${skuLabel} не заданы атрибуты`
+					`Для ${variantLabel} не заданы атрибуты`
+				)
+			}
+			if (selectedAttribute && input.attributes.length !== 1) {
+				throw new BadRequestException(
+					`Для ${variantLabel} нужно указать ровно один атрибут`
 				)
 			}
 
+			preparedInputs.push({ input, status })
+
 			const providedIds = new Set<string>()
 
-			for (const attr of input.attributes) {
+			for (const attr of input.attributes ?? []) {
 				const attributeId = attr.attributeId?.trim()
 				const enumValueId = attr.enumValueId?.trim()
 				const valueLabel = attr.value?.trim()
@@ -103,17 +158,17 @@ export class ProductVariantBuilder {
 				const hasValue = Boolean(valueLabel)
 				if (!attributeId) {
 					throw new BadRequestException(
-						`attributeId обязателен для варианта ${skuLabel}`
+						`attributeId обязателен для ${variantLabel}`
 					)
 				}
 				if (!hasEnumValueId && !hasValue) {
 					throw new BadRequestException(
-						`Для варианта ${skuLabel} нужно указать enumValueId или value`
+						`Для ${variantLabel} нужно указать enumValueId или value`
 					)
 				}
 				if (hasEnumValueId && hasValue) {
 					throw new BadRequestException(
-						`Для варианта ${skuLabel} нельзя одновременно указывать enumValueId и value`
+						`Для ${variantLabel} нельзя одновременно указывать enumValueId и value`
 					)
 				}
 
@@ -123,6 +178,11 @@ export class ProductVariantBuilder {
 						`Атрибут ${attributeId} не является вариантным`
 					)
 				}
+				if (selectedAttribute && meta.id !== selectedAttribute.id) {
+					throw new BadRequestException(
+						`Для вариаций разрешён только атрибут ${selectedAttribute.key}`
+					)
+				}
 				if (meta.dataType !== DataType.ENUM) {
 					throw new BadRequestException(
 						`Вариантный атрибут ${meta.key} должен быть типа ENUM`
@@ -130,7 +190,7 @@ export class ProductVariantBuilder {
 				}
 				if (providedIds.has(attributeId)) {
 					throw new BadRequestException(
-						`Дубликат атрибута ${meta.key} в варианте ${skuLabel}`
+						`Дубликат атрибута ${meta.key} в ${variantLabel}`
 					)
 				}
 
@@ -142,42 +202,30 @@ export class ProductVariantBuilder {
 				}
 			}
 
-			if (providedIds.size !== requiredAttributeIds.size) {
+			if (requiredAttributeIds.size) {
 				const missing = [...requiredAttributeIds]
 					.filter(id => !providedIds.has(id))
 					.map(id => attributeMap.get(id)?.key ?? id)
-				throw new BadRequestException(
-					`Не указаны значения для атрибутов: ${missing.join(', ')}`
-				)
+				if (missing.length) {
+					throw new BadRequestException(
+						`Не указаны значения для атрибутов: ${missing.join(', ')}`
+					)
+				}
 			}
 		}
-
 		const enumValueMap = await this.loadEnumValues([...enumValueIds])
 		const enumValuesByAttribute = await this.loadEnumValuesByAttribute([
 			...valueAttributeIds
 		])
 		const variantKeySet = new Set<string>()
 
-		return inputs.map(input => {
-			const rawSku = input.sku?.trim()
-			const stock = input.stock ?? 0
-			const price = input.price ?? 0
-
-			if (!Number.isInteger(stock) || stock < 0) {
-				throw new BadRequestException(
-					`Некорректный stock для варианта ${rawSku ?? 'без SKU'}`
-				)
-			}
-			if (!Number.isFinite(price) || price < 0) {
-				throw new BadRequestException(
-					`Некорректная цена для варианта ${rawSku ?? 'без SKU'}`
-				)
-			}
-
+		return preparedInputs.map(({ input, status }) => {
 			const valueByAttribute = new Map<string, string>()
 			const preparedAttributes: ProductVariantAttributeInput[] = []
+			const shouldPersistAttributes =
+				status !== ProductVariantStatus.DISABLED
 
-			for (const attr of input.attributes) {
+			for (const attr of input.attributes ?? []) {
 				const attributeId = attr.attributeId.trim()
 				const enumValueId = attr.enumValueId?.trim()
 				const valueLabel = attr.value?.trim()
@@ -197,7 +245,9 @@ export class ProductVariantBuilder {
 					}
 
 					valueByAttribute.set(attributeId, enumValue.value)
-					preparedAttributes.push({ attributeId, enumValueId })
+					if (shouldPersistAttributes) {
+						preparedAttributes.push({ attributeId, enumValueId })
+					}
 					continue
 				}
 
@@ -228,14 +278,19 @@ export class ProductVariantBuilder {
 				}
 
 				valueByAttribute.set(attributeId, normalizedValue)
-				preparedAttributes.push({
-					attributeId,
-					value: normalizedValue,
-					displayName: normalizeEnumLabel(valueLabel)
-				})
+				if (shouldPersistAttributes) {
+					preparedAttributes.push({
+						attributeId,
+						value: normalizedValue,
+						displayName: normalizeEnumLabel(valueLabel)
+					})
+				}
 			}
 
-			const variantKey = orderedAttributes
+			const usedAttributes = orderedAttributes.filter(attr =>
+				valueByAttribute.has(attr.id)
+			)
+			const variantKey = usedAttributes
 				.map(attr => `${attr.key}=${valueByAttribute.get(attr.id)}`)
 				.join(';')
 
@@ -246,7 +301,12 @@ export class ProductVariantBuilder {
 			}
 			variantKeySet.add(variantKey)
 
-			const sku = rawSku || this.buildVariantSku(baseSku ?? '', orderedAttributes, valueByAttribute, variantKey)
+			const sku = this.buildVariantSku(
+				baseSku,
+				usedAttributes,
+				valueByAttribute,
+				variantKey
+			)
 			if (!sku) {
 				throw new BadRequestException('Не удалось сгенерировать SKU варианта')
 			}
@@ -255,15 +315,8 @@ export class ProductVariantBuilder {
 			}
 			skuSet.add(sku)
 
-			const status =
-				input.status ??
-				(input.isAvailable === false
-					? stock > 0
-						? ProductVariantStatus.DISABLED
-						: ProductVariantStatus.OUT_OF_STOCK
-					: stock > 0
-						? ProductVariantStatus.ACTIVE
-						: ProductVariantStatus.OUT_OF_STOCK)
+			const stock = input.stock ?? 0
+			const price = input.price ?? options.defaultPrice ?? 0
 
 			return {
 				sku,
@@ -312,18 +365,34 @@ export class ProductVariantBuilder {
 	private async loadVariantAttributes(typeId: string): Promise<VariantAttributeMeta[]> {
 		return this.prisma.attribute.findMany({
 			where: {
-				typeId,
 				deleteAt: null,
-				isVariantAttribute: true
+				isVariantAttribute: true,
+				types: { some: { id: typeId } }
 			},
 			select: {
 				id: true,
 				key: true,
 				displayOrder: true,
-				dataType: true
+				dataType: true,
+				isRequired: true
 			},
 			orderBy: [{ displayOrder: 'asc' }, { key: 'asc' }]
 		})
+	}
+
+	private resolveStatus(
+		input: ProductVariantDtoReq,
+		stock: number
+	): ProductVariantStatus {
+		if (input.status) return input.status
+		if (input.isAvailable === false) {
+			return stock > 0
+				? ProductVariantStatus.DISABLED
+				: ProductVariantStatus.OUT_OF_STOCK
+		}
+		return stock > 0
+			? ProductVariantStatus.ACTIVE
+			: ProductVariantStatus.OUT_OF_STOCK
 	}
 
 	private async loadEnumValues(

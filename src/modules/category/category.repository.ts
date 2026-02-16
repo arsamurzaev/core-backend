@@ -19,7 +19,32 @@ const categorySelect = {
 	parentId: true,
 	position: true,
 	name: true,
-	imageUrl: true,
+	imageMedia: {
+		select: {
+			id: true,
+			originalName: true,
+			mimeType: true,
+			size: true,
+			width: true,
+			height: true,
+			status: true,
+			storage: true,
+			key: true,
+			variants: {
+				select: {
+					id: true,
+					kind: true,
+					mimeType: true,
+					size: true,
+					width: true,
+					height: true,
+					storage: true,
+					key: true
+				},
+				orderBy: [{ width: 'desc' as const }, { kind: 'asc' as const }]
+			}
+		}
+	},
 	descriptor: true,
 	discount: true,
 	createdAt: true,
@@ -32,7 +57,39 @@ const productSelect = {
 	name: true,
 	slug: true,
 	price: true,
-	imagesUrls: true,
+	media: {
+		select: {
+			position: true,
+			kind: true,
+			media: {
+				select: {
+					id: true,
+					originalName: true,
+					mimeType: true,
+					size: true,
+					width: true,
+					height: true,
+					status: true,
+					storage: true,
+					key: true,
+					variants: {
+						select: {
+							id: true,
+							kind: true,
+							mimeType: true,
+							size: true,
+							width: true,
+							height: true,
+							storage: true,
+							key: true
+						},
+						orderBy: [{ width: 'desc' as const }, { kind: 'asc' as const }]
+					}
+				}
+			}
+		},
+		orderBy: { position: 'asc' as const }
+	},
 	isPopular: true,
 	status: true,
 	position: true,
@@ -92,7 +149,32 @@ const categorySelectWithRelations = {
 			parentId: true,
 			position: true,
 			name: true,
-			imageUrl: true
+			imageMedia: {
+				select: {
+					id: true,
+					originalName: true,
+					mimeType: true,
+					size: true,
+					width: true,
+					height: true,
+					status: true,
+					storage: true,
+					key: true,
+					variants: {
+						select: {
+							id: true,
+							kind: true,
+							mimeType: true,
+							size: true,
+							width: true,
+							height: true,
+							storage: true,
+							key: true
+						},
+						orderBy: [{ width: 'desc' as const }, { kind: 'asc' as const }]
+					}
+				}
+			}
 		},
 		orderBy: [{ position: SortOrder.asc }, { name: SortOrder.asc }]
 	}

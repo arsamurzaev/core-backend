@@ -6,7 +6,8 @@ model Category {
     position Int @default(0)
 
     name       String  @db.VarChar(255)
-    imageUrl   String  @default("") @map("image_url")
+    imageMediaId String? @map("image_media_id") @db.Uuid
+    imageMedia   Media?  @relation("CategoryImageMedia", fields: [imageMediaId], references: [id], onDelete: SetNull)
     descriptor String? @map("descriptor")
 
     discount Int?

@@ -1,4 +1,4 @@
-// под твой проект (у тебя client в @generated)
+﻿// под твой проект (у тебя client в @generated)
 import { Prisma } from '@generated/client'
 import {
 	ArgumentsHost,

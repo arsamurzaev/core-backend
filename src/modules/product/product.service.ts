@@ -1,4 +1,4 @@
-﻿import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
+﻿﻿import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
 	Injectable,
@@ -9,6 +9,9 @@ import slugify from 'slugify'
 
 import { CacheService } from '@/shared/cache/cache.service'
 import { CATALOG_TYPE_CACHE_VERSION } from '@/shared/cache/catalog-cache.constants'
+import type { MediaDto } from '@/shared/media/dto/media.dto.res'
+import { MediaRepository } from '@/shared/media/media.repository'
+import { MediaUrlService } from '@/shared/media/media-url.service'
 import { mustCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
 
 import { CreateProductDtoReq } from './dto/requests/create-product.dto.req'
@@ -19,8 +22,16 @@ import { ProductAttributeBuilder } from './product-attribute.builder'
 import { ProductVariantBuilder } from './product-variant.builder'
 import { ProductRepository } from './product.repository'
 
-type ProductList = Awaited<ReturnType<ProductRepository['findAll']>>
-type PopularProductList = Awaited<ReturnType<ProductRepository['findPopular']>>
+type ProductMediaMapped<T> = Omit<T, 'media'> & {
+	media: { position: number; kind?: string | null; media: MediaDto }[]
+}
+
+type ProductList = ProductMediaMapped<
+	Awaited<ReturnType<ProductRepository['findAll']>>[number]
+>[]
+type PopularProductList = ProductMediaMapped<
+	Awaited<ReturnType<ProductRepository['findPopular']>>[number]
+>[]
 
 const PRODUCTS_CACHE_TTL_SEC =
 	Number(process.env.CATALOG_PRODUCTS_CACHE_TTL_SEC ?? 0) || 0
@@ -34,7 +45,7 @@ function normalizeSlug(value: string): string {
 	return value.trim().toLowerCase()
 }
 
-function normalizeSku(value: string): string {
+function normalizeVariantKey(value: string): string {
 	return value.trim()
 }
 
@@ -78,13 +89,16 @@ export class ProductService {
 		private readonly repo: ProductRepository,
 		private readonly cache: CacheService,
 		private readonly attributeBuilder: ProductAttributeBuilder,
-		private readonly variantBuilder: ProductVariantBuilder
+		private readonly variantBuilder: ProductVariantBuilder,
+		private readonly mediaRepo: MediaRepository,
+		private readonly mediaUrl: MediaUrlService
 	) {}
 
 	async getAll() {
 		const catalogId = mustCatalogId()
 		if (!this.cacheTtlSec) {
-			return this.repo.findAll(catalogId)
+			const products = await this.repo.findAll(catalogId)
+			return products.map(product => this.mapProductMedia(product))
 		}
 
 		const cacheKey = await this.buildCatalogProductsCacheKey(catalogId)
@@ -92,14 +106,16 @@ export class ProductService {
 		if (cached !== null) return cached
 
 		const products = await this.repo.findAll(catalogId)
-		await this.cache.setJson(cacheKey, products, this.cacheTtlSec)
-		return products
+		const mapped = products.map(product => this.mapProductMedia(product))
+		await this.cache.setJson(cacheKey, mapped, this.cacheTtlSec)
+		return mapped
 	}
 
 	async getPopular() {
 		const catalogId = mustCatalogId()
 		if (!this.cacheTtlSec) {
-			return this.repo.findPopular(catalogId)
+			const products = await this.repo.findPopular(catalogId)
+			return products.map(product => this.mapProductMedia(product))
 		}
 
 		const cacheKey = await this.buildCatalogPopularProductsCacheKey(catalogId)
@@ -107,47 +123,50 @@ export class ProductService {
 		if (cached !== null) return cached
 
 		const products = await this.repo.findPopular(catalogId)
-		await this.cache.setJson(cacheKey, products, this.cacheTtlSec)
-		return products
+		const mapped = products.map(product => this.mapProductMedia(product))
+		await this.cache.setJson(cacheKey, mapped, this.cacheTtlSec)
+		return mapped
 	}
 
 	async getById(id: string) {
 		const catalogId = mustCatalogId()
 		const product = await this.repo.findById(id, catalogId)
 		if (!product) throw new NotFoundException('Товар не найден')
-		return product
+		return this.mapProductMedia(product)
 	}
 
 	async getBySlug(slug: string) {
 		const catalogId = mustCatalogId()
 		const product = await this.repo.findBySlug(normalizeSlug(slug), catalogId)
 		if (!product) throw new NotFoundException('Товар не найден')
-		return product
+		return this.mapProductMedia(product)
 	}
 
 	async create(dto: CreateProductDtoReq) {
-		const { imagesUrls, slug, sku, attributes, ...rest } = dto
+		const { mediaIds, attributes, ...rest } = dto
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
-		const normalizedSlug = slug ? normalizeSlug(slug) : undefined
-		if (normalizedSlug) {
-			await this.ensureSlugAvailable(normalizedSlug, catalogId)
-		}
-		const normalizedSku = sku ? normalizeSku(sku) : undefined
-		if (normalizedSku) {
-			await this.ensureSkuAvailable(normalizedSku)
-		}
+		const resolvedSlug = await this.generateProductSlug(dto.name, catalogId)
+		const resolvedSku = await this.generateProductSku(dto.name)
 
-		const resolvedSlug =
-			normalizedSlug ?? (await this.generateProductSlug(dto.name, catalogId))
-		const resolvedSku = normalizedSku ?? (await this.generateProductSku(dto.name))
+		const normalizedMediaIds = this.normalizeMediaIds(mediaIds)
+		await this.ensureMediaIds(normalizedMediaIds, catalogId)
 
 		const data: ProductCreateInput = {
 			...rest,
 			slug: resolvedSlug,
 			sku: resolvedSku,
-			imagesUrls: imagesUrls ?? [],
-			catalog: { connect: { id: catalogId } }
+			catalog: { connect: { id: catalogId } },
+			...(normalizedMediaIds.length
+				? {
+						media: {
+							create: normalizedMediaIds.map((mediaId, index) => ({
+								position: index,
+								media: { connect: { id: mediaId } }
+							}))
+						}
+					}
+				: {})
 		}
 
 		const builtAttributes = await this.attributeBuilder.buildForCreate(
@@ -162,22 +181,14 @@ export class ProductService {
 
 	async update(id: string, dto: UpdateProductDtoReq) {
 		const data: ProductUpdateInput = {}
+		const mediaIds =
+			dto.mediaIds !== undefined ? this.normalizeMediaIds(dto.mediaIds) : undefined
 
-		if (dto.slug !== undefined) {
-			data.slug = normalizeSlug(dto.slug)
-		}
-		const updatedSku = dto.sku !== undefined ? normalizeSku(dto.sku) : undefined
-		if (updatedSku !== undefined) {
-			data.sku = updatedSku
-		}
 		if (dto.name !== undefined) {
 			data.name = dto.name
 		}
 		if (dto.price !== undefined) {
 			data.price = dto.price
-		}
-		if (dto.imagesUrls !== undefined) {
-			data.imagesUrls = dto.imagesUrls
 		}
 		if (dto.isPopular !== undefined) {
 			data.isPopular = dto.isPopular
@@ -191,23 +202,21 @@ export class ProductService {
 
 		const hasAttributeChanges = dto.attributes !== undefined
 		const hasVariantChanges = dto.variants !== undefined
+		const hasMediaChanges = mediaIds !== undefined
 		if (
 			Object.keys(data).length === 0 &&
 			!hasAttributeChanges &&
-			!hasVariantChanges
+			!hasVariantChanges &&
+			!hasMediaChanges
 		) {
 			throw new BadRequestException('Нет полей для обновления')
 		}
 
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
-		if (typeof data.slug === 'string') {
-			await this.ensureSlugAvailable(data.slug, catalogId, id)
+		if (mediaIds !== undefined) {
+			await this.ensureMediaIds(mediaIds, catalogId)
 		}
-		if (typeof data.sku === 'string') {
-			await this.ensureSkuAvailable(data.sku, id)
-		}
-
 		const attributes = hasAttributeChanges
 			? await this.attributeBuilder.buildForUpdate(typeId, dto.attributes ?? [])
 			: undefined
@@ -220,12 +229,13 @@ export class ProductService {
 			data,
 			catalogId,
 			attributes,
-			variants
+			variants,
+			mediaIds
 		)
 		if (!product) throw new NotFoundException('Товар не найден')
 
 		await this.invalidateCatalogProductsCache(catalogId)
-		return { ok: true, ...product }
+		return { ok: true, ...this.mapProductMedia(product) }
 	}
 
 	async setVariants(id: string, dto: SetProductVariantsDtoReq) {
@@ -235,10 +245,33 @@ export class ProductService {
 		const product = await this.repo.findSkuById(id, catalogId)
 		if (!product) throw new NotFoundException('Товар не найден')
 
+		const variantAttributeId = String(dto.variantAttributeId).trim()
+		if (!variantAttributeId) {
+			throw new BadRequestException('variantAttributeId обязателен')
+		}
+
+		const productPrice =
+			typeof product.price === 'number' ? product.price : Number(product.price)
+		const defaultPrice = Number.isFinite(productPrice) ? productPrice : undefined
+
+		const inputs = (dto.items ?? []).map(item => ({
+			price: item.price,
+			stock: item.stock,
+			status: item.status,
+			attributes: [
+				{
+					attributeId: variantAttributeId,
+					enumValueId: item.enumValueId,
+					value: item.value
+				}
+			]
+		}))
+
 		const variants = await this.variantBuilder.build(
 			typeId,
-			dto.variants,
-			product.sku
+			inputs,
+			product.sku,
+			{ variantAttributeId, defaultPrice }
 		)
 		const hasCustomVariantValues = variants.some(variant =>
 			variant.attributes.some(attribute => Boolean(attribute.value))
@@ -250,7 +283,7 @@ export class ProductService {
 		if (hasCustomVariantValues) {
 			await this.cache.bumpVersion(CATALOG_TYPE_CACHE_VERSION, typeId)
 		}
-		return { ok: true, ...updated }
+		return { ok: true, ...this.mapProductMedia(updated) }
 	}
 
 	async remove(id: string) {
@@ -262,22 +295,62 @@ export class ProductService {
 		return { ok: true }
 	}
 
+	private mapProductMedia<T extends { media: { position: number; kind?: string | null; media: any }[] }>(
+		product: T
+	) {
+		return {
+			...product,
+			media: (product.media ?? []).map(item => ({
+				position: item.position,
+				kind: item.kind ?? null,
+				media: this.mediaUrl.mapMedia(item.media)
+			}))
+		}
+	}
+
+	private normalizeMediaIds(value?: string[]): string[] {
+		if (!value) return []
+		const normalized = value.map(item => String(item).trim())
+		if (normalized.some(item => item.length === 0)) {
+			throw new BadRequestException('mediaId не может быть пустым')
+		}
+		const unique = new Set(normalized)
+		if (unique.size !== normalized.length) {
+			throw new BadRequestException('Нельзя передавать дублирующиеся mediaId')
+		}
+		return normalized
+	}
+
+	private async ensureMediaIds(ids: string[], catalogId: string): Promise<void> {
+		if (!ids.length) return
+		const found = await this.mediaRepo.findByIds(ids, catalogId)
+		const foundSet = new Set(found.map(item => item.id))
+		const missing = ids.filter(id => !foundSet.has(id))
+		if (missing.length) {
+			throw new BadRequestException(
+				`Медиа не найдены в каталоге: ${missing.join(', ')}`
+			)
+		}
+	}
+
 	private prepareVariantUpdates(variants: ProductVariantUpdateDtoReq[]): {
-		sku: string
+		variantKey: string
 		price?: number
 		stock?: number
 		status?: ProductVariantUpdateDtoReq['status']
 	}[] {
 		if (!variants.length) return []
 
-		const skuSet = new Set<string>()
+		const keySet = new Set<string>()
 
 		return variants.map(variant => {
-			const sku = normalizeSku(variant.sku)
-			if (skuSet.has(sku)) {
-				throw new BadRequestException(`Дублирующийся SKU варианта: ${sku}`)
+			const variantKey = normalizeVariantKey(variant.variantKey)
+			if (keySet.has(variantKey)) {
+				throw new BadRequestException(
+					`Дублирующийся ключ варианта: ${variantKey}`
+				)
 			}
-			skuSet.add(sku)
+			keySet.add(variantKey)
 
 			if (
 				variant.price === undefined &&
@@ -285,12 +358,12 @@ export class ProductService {
 				variant.status === undefined
 			) {
 				throw new BadRequestException(
-					`Для варианта ${sku} нужно указать цену, остаток или статус`
+					`Для варианта ${variantKey} нужно указать цену, остаток или статус`
 				)
 			}
 
 			return {
-				sku,
+				variantKey,
 				price: variant.price,
 				stock: variant.stock,
 				status: variant.status

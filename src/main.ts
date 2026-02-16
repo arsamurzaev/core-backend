@@ -42,7 +42,7 @@ async function bootstrap() {
 
 	await app.listen(port)
 
-	logger.log(`🚀 Gateway Service running at ${host}`)
-	logger.log(`📂 Swagger Service running at ${host}/docs`)
+	logger.log(`Сервис запущен на ${host}`)
+	logger.log(`Swagger доступен на ${host}/docs`)
 }
 bootstrap()

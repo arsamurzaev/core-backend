@@ -1,4 +1,4 @@
-﻿import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+﻿﻿import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 

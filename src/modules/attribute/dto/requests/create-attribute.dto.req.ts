@@ -1,7 +1,9 @@
-import { DataType } from '@generated/enums'
+﻿import { DataType } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {
+	ArrayMinSize,
+	IsArray,
 	IsBoolean,
 	IsEnum,
 	IsInt,
@@ -17,10 +19,26 @@ import {
 const KEY_PATTERN = /^[a-z0-9_-]+$/
 
 export class CreateAttributeDtoReq {
-	@ApiProperty({ type: String, example: 'type-id' })
+	@ApiPropertyOptional({
+		type: [String],
+		example: ['type-id'],
+		description: 'Список типов, где будет доступен атрибут'
+	})
+	@IsOptional()
+	@IsArray()
+	@ArrayMinSize(1)
+	@IsString({ each: true })
+	typeIds?: string[]
+
+	@ApiPropertyOptional({
+		type: String,
+		example: 'type-id',
+		description: 'Один тип (устаревшее поле, используйте typeIds)'
+	})
+	@IsOptional()
 	@IsString()
 	@IsNotEmpty()
-	typeId: string
+	typeId?: string
 
 	@ApiPropertyOptional({
 		type: String,

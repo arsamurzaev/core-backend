@@ -6,6 +6,10 @@ model Cart {
     userId String? @map("user_id") @db.Uuid
     token  String?
 
+    publicKey   String?   @unique @map("public_key")
+    checkoutKey String?   @map("checkout_key")
+    checkoutAt  DateTime? @map("checkout_at")
+
     catalog   Catalog @relation(fields: [catalogId], references: [id])
     catalogId String  @map("catalog_id") @db.Uuid
 

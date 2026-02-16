@@ -12,6 +12,7 @@ import { AttributeModule } from '@/modules/attribute/attribute.module'
 import { AuthModule } from '@/modules/auth/auth.module'
 import { CatalogModule } from '@/modules/catalog/catalog.module'
 import { CategoryModule } from '@/modules/category/category.module'
+import { CartModule } from '@/modules/cart/cart.module'
 import { ProductModule } from '@/modules/product/product.module'
 import { SeoModule } from '@/modules/seo/seo.module'
 import { S3Module } from '@/modules/s3/s3.module'
@@ -42,6 +43,7 @@ import { databaseEnv, httpEnv, redisEnv, s3Env } from './config/env'
 		UserModule,
 		CatalogModule,
 		CategoryModule,
+		CartModule,
 		ProductModule,
 		S3Module,
 		SeoModule

@@ -22,7 +22,7 @@ model SeoSetting {
 
     ogTitle       String? @map("og_title") @db.VarChar(255)
     ogDescription String? @map("og_description") @db.VarChar(500)
-    ogImage       String? @map("og_image") @db.VarChar(2048)
+    ogMediaId     String? @map("og_media_id") @db.Uuid
     ogType        String? @map("og_type") @db.VarChar(100)
     ogUrl         String? @map("og_url") @db.VarChar(2048)
     ogSiteName    String? @map("og_site_name") @db.VarChar(255)
@@ -31,7 +31,10 @@ model SeoSetting {
     twitterCard        String? @map("twitter_card") @db.VarChar(50)
     twitterTitle       String? @map("twitter_title") @db.VarChar(255)
     twitterDescription String? @map("twitter_description") @db.VarChar(500)
-    twitterImage       String? @map("twitter_image") @db.VarChar(2048)
+    twitterMediaId     String? @map("twitter_media_id") @db.Uuid
+
+    ogMedia      Media? @relation("SeoOgMedia", fields: [ogMediaId], references: [id], onDelete: SetNull)
+    twitterMedia Media? @relation("SeoTwitterMedia", fields: [twitterMediaId], references: [id], onDelete: SetNull)
     twitterSite        String? @map("twitter_site") @db.VarChar(100)
     twitterCreator     String? @map("twitter_creator") @db.VarChar(100)
 

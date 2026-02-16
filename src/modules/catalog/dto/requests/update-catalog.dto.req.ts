@@ -109,19 +109,19 @@ export class UpdateCatalogDtoReq {
 
 	@ApiPropertyOptional({
 		type: String,
-		example: 'https://cdn.example/logo.png'
+		example: 'media-uuid'
 	})
 	@IsOptional()
 	@IsString()
-	logoUrl?: string
+	logoMediaId?: string
 
 	@ApiPropertyOptional({
 		type: String,
-		example: 'https://cdn.example/bg.png'
+		example: 'media-uuid'
 	})
 	@IsOptional()
 	@IsString()
-	bgUrl?: string
+	bgMediaId?: string
 
 	@ApiPropertyOptional({ type: String, example: 'Note' })
 	@IsOptional()

@@ -1,4 +1,4 @@
-﻿import {
+﻿﻿import {
 	AbortMultipartUploadCommand,
 	CompleteMultipartUploadCommand,
 	CreateMultipartUploadCommand,
@@ -31,11 +31,11 @@ import { AllInterfaces } from '@/core/config'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 
-const DEFAULT_VARIANT_WIDTHS = [1600, 900, 400]
-const DEFAULT_IMAGE_FORMATS = ['webp', 'avif']
+const DEFAULT_VARIANT_WIDTHS = [1200, 800, 400]
+const DEFAULT_IMAGE_FORMATS = ['webp']
 const DEFAULT_VARIANT_NAMES = new Map<number, string>([
-	[1600, 'xl'],
-	[900, 'md'],
+	[1200, 'xl'],
+	[800, 'md'],
 	[400, 'sm']
 ])
 const RAW_SEGMENT = 'raw'

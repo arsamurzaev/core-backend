@@ -21,9 +21,6 @@ model Attribute {
     // Уникальный идентификатор определения атрибута
     id String @id @default(uuid()) @db.Uuid
 
-    // FK на тип каталога — атрибут принадлежит этому типу
-    typeId String @map("type_id") @db.Uuid
-
     // Программный ключ атрибута (используется в коде, API)
     // Пример: "size", "color", "brand", "ingredients", "calories"
     key String @db.VarChar(100)
@@ -56,7 +53,8 @@ model Attribute {
     displayOrder Int @default(0) @map("display_order")
 
     // ─── Связи ───
-    type              Type                 @relation(fields: [typeId], references: [id], onDelete: Cascade)
+    // Типы каталога, где доступен этот атрибут
+    types             Type[]
     // Допустимые значения для ENUM-атрибутов
     enumValues        AttributeEnumValue[]
     // Значения этого атрибута у товаров
@@ -69,9 +67,8 @@ model Attribute {
     updatedAt DateTime  @updatedAt @map("updated_at")
 
     // ─── Ограничения ───
-    // Ключ атрибута уникален в рамках типа каталога
-    // Нельзя создать два атрибута "size" для clothing
-    @@unique([typeId, key])
+    // Уникальность ключа по типу контролируется на уровне приложения
+    @@index([key])
     @@map("attributes")
 }
 

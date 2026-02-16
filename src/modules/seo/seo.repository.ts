@@ -4,6 +4,31 @@ import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
+const mediaSelect = {
+	id: true,
+	originalName: true,
+	mimeType: true,
+	size: true,
+	width: true,
+	height: true,
+	status: true,
+	storage: true,
+	key: true,
+	variants: {
+		select: {
+			id: true,
+			kind: true,
+			mimeType: true,
+			size: true,
+			width: true,
+			height: true,
+			storage: true,
+			key: true
+		},
+		orderBy: [{ width: 'desc' as const }, { kind: 'asc' as const }]
+	}
+}
+
 const seoSelect = {
 	id: true,
 	catalogId: true,
@@ -21,7 +46,7 @@ const seoSelect = {
 	isFollowable: true,
 	ogTitle: true,
 	ogDescription: true,
-	ogImage: true,
+	ogMedia: { select: mediaSelect },
 	ogType: true,
 	ogUrl: true,
 	ogSiteName: true,
@@ -29,7 +54,7 @@ const seoSelect = {
 	twitterCard: true,
 	twitterTitle: true,
 	twitterDescription: true,
-	twitterImage: true,
+	twitterMedia: { select: mediaSelect },
 	twitterSite: true,
 	twitterCreator: true,
 	hreflang: true,

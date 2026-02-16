@@ -1,6 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing'
 import { NotFoundException } from '@nestjs/common'
 
+import { MediaRepository } from '@/shared/media/media.repository'
+import { MediaUrlService } from '@/shared/media/media-url.service'
+
 import { CategoryRepository } from './category.repository'
 import { CategoryService } from './category.service'
 import { RequestContext } from '../../shared/tenancy/request-context'
@@ -34,6 +37,19 @@ describe('CategoryService', () => {
 						findProductsByIds: jest.fn(),
 						findCategoryProductsPage: jest.fn()
 					}
+				},
+				{
+					provide: MediaRepository,
+					useValue: {
+						findById: jest.fn(),
+						findByIds: jest.fn()
+					}
+				},
+				{
+					provide: MediaUrlService,
+					useValue: {
+						mapMedia: jest.fn()
+					}
 				}
 			]
 		}).compile()
@@ -49,9 +65,9 @@ describe('CategoryService', () => {
 	it('returns page and nextCursor when more items exist', async () => {
 		repo.findById.mockResolvedValue({ id: 'cat-1', catalogId: 'catalog-1' } as any)
 		repo.findCategoryProductsPage.mockResolvedValue([
-			{ productId: 'p1', position: 0, product: { id: 'p1' } },
-			{ productId: 'p2', position: 1, product: { id: 'p2' } },
-			{ productId: 'p3', position: 2, product: { id: 'p3' } }
+			{ productId: 'p1', position: 0, product: { id: 'p1', media: [] } },
+			{ productId: 'p2', position: 1, product: { id: 'p2', media: [] } },
+			{ productId: 'p3', position: 2, product: { id: 'p3', media: [] } }
 		] as any)
 
 		const result = await runWithCatalog(() =>
@@ -74,8 +90,8 @@ describe('CategoryService', () => {
 	it('returns null nextCursor when last page', async () => {
 		repo.findById.mockResolvedValue({ id: 'cat-1', catalogId: 'catalog-1' } as any)
 		repo.findCategoryProductsPage.mockResolvedValue([
-			{ productId: 'p1', position: 0, product: { id: 'p1' } },
-			{ productId: 'p2', position: 1, product: { id: 'p2' } }
+			{ productId: 'p1', position: 0, product: { id: 'p1', media: [] } },
+			{ productId: 'p2', position: 1, product: { id: 'p2', media: [] } }
 		] as any)
 
 		const result = await runWithCatalog(() =>

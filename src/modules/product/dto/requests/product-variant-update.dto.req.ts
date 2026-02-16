@@ -1,4 +1,4 @@
-import { ProductVariantStatus } from '@generated/enums'
+﻿import { ProductVariantStatus } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {
@@ -8,29 +8,28 @@ import {
 	IsNumber,
 	IsOptional,
 	IsString,
-	Matches,
+	MaxLength,
 	Min
 } from 'class-validator'
 
-const SKU_PATTERN = /^[A-Za-z0-9_-]+$/
-
 export class ProductVariantUpdateDtoReq {
-	@ApiProperty({ type: String, example: 'TSHIRT-001-S-WHT' })
+	@ApiProperty({
+		type: String,
+		example: 'size=xs;color=white',
+		description: 'Ключ варианта, приходит из ответа товара'
+	})
 	@IsString()
 	@IsNotEmpty()
-	@Matches(SKU_PATTERN)
+	@MaxLength(300)
 	@Transform(({ value }: { value: unknown }) => {
 		if (value === undefined || value === null) return undefined
 		if (typeof value === 'string') {
 			const trimmed = value.trim()
 			return trimmed.length ? trimmed : undefined
 		}
-		if (typeof value === 'number' || typeof value === 'boolean') {
-			return String(value).trim()
-		}
 		return undefined
 	})
-	sku: string
+	variantKey: string
 
 	@ApiPropertyOptional({ type: Number, example: 0 })
 	@IsOptional()

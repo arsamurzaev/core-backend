@@ -28,8 +28,8 @@ export class AttributeDto {
 	@ApiProperty({ type: String })
 	id: string
 
-	@ApiProperty({ type: String })
-	typeId: string
+	@ApiProperty({ type: [String] })
+	typeIds: string[]
 
 	@ApiProperty({ type: String })
 	key: string

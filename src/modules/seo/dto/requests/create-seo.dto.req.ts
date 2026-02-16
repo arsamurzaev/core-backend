@@ -97,12 +97,12 @@ export class CreateSeoDtoReq {
 
 	@ApiPropertyOptional({
 		type: String,
-		example: 'https://cdn.example/og.png'
+		example: 'media-uuid'
 	})
 	@IsOptional()
 	@IsString()
-	@MaxLength(2048)
-	ogImage?: string | null
+	@MaxLength(120)
+	ogMediaId?: string | null
 
 	@ApiPropertyOptional({ type: String, example: 'website' })
 	@IsOptional()
@@ -151,12 +151,12 @@ export class CreateSeoDtoReq {
 
 	@ApiPropertyOptional({
 		type: String,
-		example: 'https://cdn.example/twitter.png'
+		example: 'media-uuid'
 	})
 	@IsOptional()
 	@IsString()
-	@MaxLength(2048)
-	twitterImage?: string | null
+	@MaxLength(120)
+	twitterMediaId?: string | null
 
 	@ApiPropertyOptional({ type: String, example: '@catalog' })
 	@IsOptional()

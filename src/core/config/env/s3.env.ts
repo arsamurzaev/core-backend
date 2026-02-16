@@ -1,14 +1,14 @@
-﻿import { registerAs } from '@nestjs/config'
+﻿﻿import { registerAs } from '@nestjs/config'
 
 import { validateEnv } from '@/shared/utils'
 
 import { S3Interface } from '../interfaces/s3.interface'
 import { S3Validator } from '../validators'
 
-const DEFAULT_IMAGE_VARIANTS = [1600, 900, 400]
+const DEFAULT_IMAGE_VARIANTS = [1200, 800, 400]
 const DEFAULT_IMAGE_QUALITY = 82
-const DEFAULT_MAX_FILE_MB = 10
-const DEFAULT_IMAGE_FORMATS = ['webp', 'avif']
+const DEFAULT_MAX_FILE_MB = 25
+const DEFAULT_IMAGE_FORMATS = ['webp']
 const DEFAULT_PRESIGN_EXPIRES_SEC = 600
 const ALLOWED_IMAGE_FORMATS = new Set(['webp', 'avif'])
 

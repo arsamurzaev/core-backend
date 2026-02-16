@@ -1,4 +1,4 @@
-import { DataType } from '@generated/enums'
+﻿import { DataType } from '@generated/enums'
 import { BadRequestException, Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
@@ -111,8 +111,8 @@ export class ProductAttributeBuilder {
 		return this.prisma.attribute.findMany({
 			where: {
 				id: { in: [...attributeIds] },
-				typeId,
-				deleteAt: null
+				deleteAt: null,
+				types: { some: { id: typeId } }
 			},
 			select: {
 				id: true,
@@ -130,10 +130,10 @@ export class ProductAttributeBuilder {
 	): Promise<void> {
 		const required = await this.prisma.attribute.findMany({
 			where: {
-				typeId,
 				deleteAt: null,
 				isRequired: true,
-				isVariantAttribute: false
+				isVariantAttribute: false,
+				types: { some: { id: typeId } }
 			},
 			select: { id: true, key: true }
 		})

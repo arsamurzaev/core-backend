@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common'
+﻿import { BadRequestException, Injectable } from '@nestjs/common'
 import slugify from 'slugify'
 
 import { CreateTypeDtoReq } from './dto/req/create-type.dto.req'

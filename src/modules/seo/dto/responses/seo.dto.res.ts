@@ -1,6 +1,8 @@
 import { SeoChangeFreq, SeoEntityType } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
+import { MediaDto } from '@/shared/media/dto/media.dto.res'
+
 export class SeoDto {
 	@ApiProperty({ type: String })
 	id: string
@@ -50,8 +52,8 @@ export class SeoDto {
 	@ApiPropertyOptional({ type: String, nullable: true })
 	ogDescription?: string | null
 
-	@ApiPropertyOptional({ type: String, nullable: true })
-	ogImage?: string | null
+	@ApiPropertyOptional({ type: MediaDto, nullable: true })
+	ogMedia?: MediaDto | null
 
 	@ApiPropertyOptional({ type: String, nullable: true })
 	ogType?: string | null
@@ -74,8 +76,8 @@ export class SeoDto {
 	@ApiPropertyOptional({ type: String, nullable: true })
 	twitterDescription?: string | null
 
-	@ApiPropertyOptional({ type: String, nullable: true })
-	twitterImage?: string | null
+	@ApiPropertyOptional({ type: MediaDto, nullable: true })
+	twitterMedia?: MediaDto | null
 
 	@ApiPropertyOptional({ type: String, nullable: true })
 	twitterSite?: string | null

@@ -1,7 +1,8 @@
-import { ProductStatus } from '@generated/enums'
+﻿﻿import { ProductStatus } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
-import { Transform, Type } from 'class-transformer'
+import { Type } from 'class-transformer'
 import {
+	ArrayMaxSize,
 	IsArray,
 	IsBoolean,
 	IsEmpty,
@@ -10,70 +11,30 @@ import {
 	IsNumber,
 	IsOptional,
 	IsString,
-	Matches,
 	MaxLength,
-	MinLength,
 	ValidateNested
 } from 'class-validator'
 
 import { ProductAttributeValueDto } from './product-attribute.dto.req'
 
-const SLUG_PATTERN = /^[a-z0-9-]+$/
-const SKU_PATTERN = /^[A-Za-z0-9_-]+$/
-
 export class CreateProductDtoReq {
-	@ApiPropertyOptional({
-		type: String,
-		example: 'TSHIRT-001',
-		description: 'Если не указан, SKU будет сгенерирован автоматически'
-	})
-	@IsOptional()
-	@IsString()
-	@IsNotEmpty()
-	@MinLength(3)
-	@MaxLength(100)
-	@Matches(SKU_PATTERN)
-	@Transform(({ value }) => {
-		if (value === undefined || value === null) return value
-		const trimmed = String(value).trim()
-		return trimmed || undefined
-	})
-	sku?: string
-
 	@ApiProperty({ type: String, example: 'Basic T-Shirt' })
 	@IsString()
 	@IsNotEmpty()
 	@MaxLength(255)
 	name: string
 
-	@ApiPropertyOptional({
-		type: String,
-		example: 'basic-tshirt',
-		description: 'Если не указан, slug будет сгенерирован автоматически'
-	})
-	@IsOptional()
-	@IsString()
-	@IsNotEmpty()
-	@MinLength(2)
-	@MaxLength(255)
-	@Matches(SLUG_PATTERN)
-	@Transform(({ value }) => {
-		if (value === undefined || value === null) return value
-		const trimmed = String(value).trim().toLowerCase()
-		return trimmed || undefined
-	})
-	slug?: string
-
 	@ApiProperty({ type: Number, example: 999.0 })
 	@Type(() => Number)
 	@IsNumber()
 	price: number
 
-	@ApiPropertyOptional({ type: [String], example: ['https://cdn/img.png'] })
+	@ApiPropertyOptional({ type: [String], example: ['media-uuid'] })
 	@IsOptional()
 	@IsArray()
+	@ArrayMaxSize(12)
 	@IsString({ each: true })
-	imagesUrls?: string[]
+	mediaIds?: string[]
 
 	@ApiPropertyOptional({ type: Boolean, example: false })
 	@IsOptional()
@@ -104,5 +65,4 @@ export class CreateProductDtoReq {
 	@IsOptional()
 	@IsEmpty({ message: 'Вариации товара создаются администратором' })
 	variants?: unknown
-
 }

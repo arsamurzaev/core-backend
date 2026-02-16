@@ -6,6 +6,7 @@
 	"private": true,
 	"license": "UNLICENSED",
 	"scripts": {
+		"prebuild": "prisma generate",
 		"build": "nest build",
 		"format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
 		"start": "nest start",
@@ -19,7 +20,8 @@
 		"test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
 		"test:e2e": "jest --config ./test/jest-e2e.json",
 		"prisma:push": "prisma db push",
-		"prisma:generate": "prisma generate"
+		"prisma:generate": "prisma generate",
+		"prisma:disable-color-variant": "node --loader ts-node/esm prisma/scripts/disable-color-variant.ts"
 	},
 	"prisma": {
 		"seed": "node --loader ts-node/esm prisma/seed.ts"

@@ -86,8 +86,11 @@ model CatalogConfig {
 
     currency String @default("₽")
 
-    logoUrl String @default("") @map("logo_url")
-    bgUrl   String @default("") @map("bg_url")
+    logoMediaId String? @map("logo_media_id") @db.Uuid
+    bgMediaId   String? @map("bg_media_id") @db.Uuid
+
+    logoMedia Media? @relation("CatalogConfigLogo", fields: [logoMediaId], references: [id], onDelete: SetNull)
+    bgMedia   Media? @relation("CatalogConfigBg", fields: [bgMediaId], references: [id], onDelete: SetNull)
 
     status CatalogStatus @default(PROPOSAL)
 

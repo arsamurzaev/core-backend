@@ -1,4 +1,4 @@
-import { Role } from '@generated/client'
+﻿import { Role } from '@generated/client'
 import { ForbiddenException, Injectable } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
 

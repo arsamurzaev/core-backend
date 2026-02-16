@@ -3,6 +3,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
 import { AttributeDto } from '@/modules/attribute/dto/responses/attribute.dto.res'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
+import { MediaDto } from '@/shared/media/dto/media.dto.res'
 
 export class CatalogConfigDto {
 	@ApiProperty({ enum: CatalogStatus })
@@ -17,11 +18,11 @@ export class CatalogConfigDto {
 	@ApiPropertyOptional({ type: String, nullable: true })
 	currency?: string | null
 
-	@ApiPropertyOptional({ type: String, nullable: true })
-	logoUrl?: string | null
+	@ApiPropertyOptional({ type: MediaDto, nullable: true })
+	logoMedia?: MediaDto | null
 
-	@ApiPropertyOptional({ type: String, nullable: true })
-	bgUrl?: string | null
+	@ApiPropertyOptional({ type: MediaDto, nullable: true })
+	bgMedia?: MediaDto | null
 
 	@ApiPropertyOptional({ type: String, nullable: true })
 	note?: string | null

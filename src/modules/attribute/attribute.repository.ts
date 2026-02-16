@@ -10,7 +10,6 @@ import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
 const attributeSelect = {
 	id: true,
-	typeId: true,
 	key: true,
 	displayName: true,
 	dataType: true,
@@ -19,7 +18,10 @@ const attributeSelect = {
 	isFilterable: true,
 	displayOrder: true,
 	createdAt: true,
-	updatedAt: true
+	updatedAt: true,
+	types: {
+		select: { id: true }
+	}
 }
 
 const enumValueSelect = {
@@ -80,7 +82,10 @@ export class AttributeRepository {
 		if (!resolvedTypeId) return []
 
 		return this.prisma.attribute.findMany({
-			where: { typeId: resolvedTypeId, deleteAt: null },
+			where: {
+				deleteAt: null,
+				types: { some: { id: resolvedTypeId } }
+			},
 			select: withEnums ? attributeSelectWithEnums : attributeSelect,
 			orderBy: [{ displayOrder: 'asc' }, { key: 'asc' }]
 		})
@@ -90,29 +95,82 @@ export class AttributeRepository {
 		return this.prisma.attribute.create({ data, select: attributeSelect })
 	}
 
-	async update(id: string, data: AttributeUpdateInput) {
-		const result = await this.prisma.attribute.updateMany({
-			where: { id, deleteAt: null },
-			data
-		})
-		if (!result.count) return null
+	async update(id: string, data: AttributeUpdateInput, typeIds?: string[]) {
+		return this.prisma.$transaction(async tx => {
+			const hasData = Object.keys(data).length > 0
+			if (hasData) {
+				const result = await tx.attribute.updateMany({
+					where: { id, deleteAt: null },
+					data
+				})
+				if (!result.count) return null
+			} else {
+				const existing = await tx.attribute.findFirst({
+					where: { id, deleteAt: null },
+					select: { id: true }
+				})
+				if (!existing) return null
+			}
 
-		return this.prisma.attribute.findFirst({
-			where: { id, deleteAt: null },
-			select: attributeSelect
+			if (typeIds) {
+				await tx.attribute.update({
+					where: { id },
+					data: {
+						types: {
+							set: typeIds.map(typeId => ({ id: typeId }))
+						}
+					}
+				})
+			}
+
+			return tx.attribute.findFirst({
+				where: { id, deleteAt: null },
+				select: attributeSelect
+			})
 		})
 	}
 
 	async softDelete(id: string) {
-		const result = await this.prisma.attribute.updateMany({
-			where: { id, deleteAt: null },
-			data: { deleteAt: new Date() }
-		})
-		if (!result.count) return null
+		return this.prisma.$transaction(async tx => {
+			const attribute = await tx.attribute.findFirst({
+				where: { id, deleteAt: null },
+				select: attributeSelect
+			})
+			if (!attribute) return null
 
-		return this.prisma.attribute.findFirst({
-			where: { id },
-			select: attributeSelect
+			const now = new Date()
+
+			await tx.attribute.update({
+				where: { id },
+				data: { deleteAt: now }
+			})
+
+			await tx.attributeEnumValue.updateMany({
+				where: { attributeId: id, deleteAt: null },
+				data: { deleteAt: now }
+			})
+
+			await tx.productAttribute.updateMany({
+				where: { attributeId: id, deleteAt: null },
+				data: { deleteAt: now }
+			})
+
+			if (attribute.isVariantAttribute) {
+				await tx.productVariant.updateMany({
+					where: {
+						deleteAt: null,
+						attributes: { some: { attributeId: id, deleteAt: null } }
+					},
+					data: { deleteAt: now }
+				})
+
+				await tx.variantAttribute.updateMany({
+					where: { attributeId: id, deleteAt: null },
+					data: { deleteAt: now }
+				})
+			}
+
+			return attribute
 		})
 	}
 
@@ -131,9 +189,32 @@ export class AttributeRepository {
 		})
 	}
 
-	async existsKey(typeId: string, key: string): Promise<boolean> {
+	async existsKey(typeId: string, key: string, excludeId?: string): Promise<boolean> {
 		const attribute = await this.prisma.attribute.findFirst({
-			where: { typeId, key },
+			where: {
+				key,
+				deleteAt: null,
+				types: { some: { id: typeId } },
+				...(excludeId ? { id: { not: excludeId } } : {})
+			},
+			select: { id: true }
+		})
+		return Boolean(attribute)
+	}
+
+	async existsKeyInTypes(
+		typeIds: string[],
+		key: string,
+		excludeId?: string
+	): Promise<boolean> {
+		if (!typeIds.length) return false
+		const attribute = await this.prisma.attribute.findFirst({
+			where: {
+				key,
+				deleteAt: null,
+				types: { some: { id: { in: typeIds } } },
+				...(excludeId ? { id: { not: excludeId } } : {})
+			},
 			select: { id: true }
 		})
 		return Boolean(attribute)

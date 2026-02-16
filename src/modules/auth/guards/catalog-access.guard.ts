@@ -1,4 +1,4 @@
-import { Role } from '@generated/enums'
+﻿import { Role } from '@generated/enums'
 // у тебя так
 import {
 	CanActivate,

@@ -4,6 +4,31 @@ import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
+const mediaSelect = {
+	id: true,
+	originalName: true,
+	mimeType: true,
+	size: true,
+	width: true,
+	height: true,
+	status: true,
+	storage: true,
+	key: true,
+	variants: {
+		select: {
+			id: true,
+			kind: true,
+			mimeType: true,
+			size: true,
+			width: true,
+			height: true,
+			storage: true,
+			key: true
+		},
+		orderBy: [{ width: 'desc' as const }, { kind: 'asc' as const }]
+	}
+}
+
 const enumValueSelect = {
 	id: true,
 	attributeId: true,
@@ -16,7 +41,6 @@ const enumValueSelect = {
 
 const attributeSelect = {
 	id: true,
-	typeId: true,
 	key: true,
 	displayName: true,
 	dataType: true,
@@ -25,7 +49,10 @@ const attributeSelect = {
 	isFilterable: true,
 	displayOrder: true,
 	createdAt: true,
-	updatedAt: true
+	updatedAt: true,
+	types: {
+		select: { id: true }
+	}
 }
 
 const attributeSelectWithEnums = {
@@ -65,8 +92,8 @@ const catalogSelect = {
 			about: true,
 			description: true,
 			currency: true,
-			logoUrl: true,
-			bgUrl: true
+			logoMedia: { select: mediaSelect },
+			bgMedia: { select: mediaSelect }
 		}
 	},
 	settings: {

@@ -1,4 +1,4 @@
-﻿import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+﻿﻿import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
 import {
 	IsNotEmpty,
@@ -25,8 +25,8 @@ export class CreateTypeDtoReq {
 		description: 'Если не указан, будет сгенерирован автоматически'
 	})
 	@IsOptional()
-	@IsString({ message: 'РџСЂРѕРіСЂР°РјРјРЅС‹Р№ РєРѕРґ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ СЃС‚СЂРѕРєРѕРёМ†' })
-	@IsNotEmpty({ message: 'РџСЂРѕРіСЂР°РјРјРЅС‹Р№ РєРѕРґ С‚РёРїР° РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј' })
+	@IsString({ message: 'Программный код должен быть строкой' })
+	@IsNotEmpty({ message: 'Программный код типа не может быть пустым' })
 	@MinLength(2)
 	@MaxLength(50)
 	@Matches(CODE_PATTERN)

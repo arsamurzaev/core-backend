@@ -1,4 +1,4 @@
-import { DataType } from '@generated/enums'
+﻿import { DataType } from '@generated/enums'
 import {
 	AttributeCreateInput,
 	AttributeEnumValueCreateInput,
@@ -63,21 +63,31 @@ export class AttributeService {
 	) {}
 
 	async getByType(typeId: string) {
-		return this.repo.findByType(typeId, true)
+		const attributes = await this.repo.findByType(typeId, true)
+		return attributes.map(attribute => this.mapAttribute(attribute))
 	}
 
 	async getById(id: string) {
 		const attribute = await this.repo.findById(id, true)
 		if (!attribute) throw new NotFoundException('Атрибут не найден')
-		return attribute
+		return this.mapAttribute(attribute)
 	}
 
 	async create(dto: CreateAttributeDtoReq) {
 		this.ensureVariantRules(dto.dataType, dto.isVariantAttribute)
+		const typeIds = this.normalizeTypeIds(dto.typeIds, dto.typeId)
 
 		const key = dto.key
 			? normalizeKey(dto.key)
-			: await this.generateAttributeKey(dto.typeId, dto.displayName)
+			: await this.generateAttributeKey(typeIds, dto.displayName)
+		if (dto.key) {
+			const exists = await this.repo.existsKeyInTypes(typeIds, key)
+			if (exists) {
+				throw new BadRequestException(
+					'Ключ атрибута уже используется в выбранном типе'
+				)
+			}
+		}
 
 		const data: AttributeCreateInput = {
 			key,
@@ -87,19 +97,26 @@ export class AttributeService {
 			isVariantAttribute: dto.isVariantAttribute ?? false,
 			isFilterable: dto.isFilterable ?? false,
 			displayOrder: dto.displayOrder ?? 0,
-			type: { connect: { id: dto.typeId } }
+			types: {
+				connect: typeIds.map(typeId => ({ id: typeId }))
+			}
 		}
 
 		const attribute = await this.repo.create(data)
-		await this.invalidateTypeCache(attribute.typeId)
-		return attribute
+		await this.invalidateTypeCache(typeIds)
+		return this.mapAttribute(attribute)
 	}
 
 	async update(id: string, dto: UpdateAttributeDtoReq) {
 		const data: AttributeUpdateInput = {}
+		const nextTypeIds =
+			dto.typeIds !== undefined
+				? this.normalizeTypeIds(dto.typeIds)
+				: undefined
 
-		if (dto.key !== undefined) {
-			data.key = normalizeKey(dto.key)
+		const nextKey = dto.key !== undefined ? normalizeKey(dto.key) : undefined
+		if (nextKey !== undefined) {
+			data.key = nextKey
 		}
 		if (dto.displayName !== undefined) {
 			data.displayName = normalizeLabel(dto.displayName)
@@ -120,32 +137,55 @@ export class AttributeService {
 			data.displayOrder = dto.displayOrder
 		}
 
-		if (Object.keys(data).length === 0) {
+		if (Object.keys(data).length === 0 && nextTypeIds === undefined) {
 			throw new BadRequestException('Нет полей для обновления')
 		}
 
-		if (dto.dataType !== undefined || dto.isVariantAttribute !== undefined) {
-			const current = await this.repo.findById(id)
-			if (!current) throw new NotFoundException('Атрибут не найден')
+		const current = await this.repo.findById(id)
+		if (!current) throw new NotFoundException('Атрибут не найден')
 
+		const currentTypeIds = current.types?.map(type => type.id) ?? []
+		const finalTypeIds = nextTypeIds ?? currentTypeIds
+
+		if (nextKey !== undefined || nextTypeIds !== undefined) {
+			const keyToCheck = nextKey ?? current.key
+			const exists = await this.repo.existsKeyInTypes(
+				finalTypeIds,
+				keyToCheck,
+				id
+			)
+			if (exists) {
+				throw new BadRequestException(
+					'Ключ атрибута уже используется в выбранном типе'
+				)
+			}
+		}
+
+		if (dto.dataType !== undefined || dto.isVariantAttribute !== undefined) {
 			const nextType = dto.dataType ?? current.dataType
 			const nextVariant = dto.isVariantAttribute ?? current.isVariantAttribute
 
 			this.ensureVariantRules(nextType, nextVariant)
 		}
 
-		const attribute = await this.repo.update(id, data)
+		const attribute = await this.repo.update(id, data, nextTypeIds)
 		if (!attribute) throw new NotFoundException('Атрибут не найден')
 
-		await this.invalidateTypeCache(attribute.typeId)
-		return attribute
+		const updatedTypeIds =
+			attribute.types?.map(type => type.id) ?? finalTypeIds
+		await this.invalidateTypeCache(
+			Array.from(new Set([...currentTypeIds, ...updatedTypeIds]))
+		)
+		return this.mapAttribute(attribute)
 	}
 
 	async remove(id: string) {
 		const attribute = await this.repo.softDelete(id)
 		if (!attribute) throw new NotFoundException('Атрибут не найден')
 
-		await this.invalidateTypeCache(attribute.typeId)
+		await this.invalidateTypeCache(
+			attribute.types?.map(type => type.id) ?? []
+		)
 		return { ok: true }
 	}
 
@@ -170,7 +210,9 @@ export class AttributeService {
 		}
 
 		const enumValue = await this.repo.createEnumValue(data)
-		await this.invalidateTypeCache(attribute.typeId)
+		await this.invalidateTypeCache(
+			attribute.types?.map(type => type.id) ?? []
+		)
 		return enumValue
 	}
 
@@ -200,7 +242,9 @@ export class AttributeService {
 		const enumValue = await this.repo.updateEnumValue(id, attributeId, data)
 		if (!enumValue) throw new NotFoundException('Значение перечисления не найдено')
 
-		await this.invalidateTypeCache(attribute.typeId)
+		await this.invalidateTypeCache(
+			attribute.types?.map(type => type.id) ?? []
+		)
 		return enumValue
 	}
 
@@ -210,7 +254,9 @@ export class AttributeService {
 		const enumValue = await this.repo.softDeleteEnumValue(id, attributeId)
 		if (!enumValue) throw new NotFoundException('Значение перечисления не найдено')
 
-		await this.invalidateTypeCache(attribute.typeId)
+		await this.invalidateTypeCache(
+			attribute.types?.map(type => type.id) ?? []
+		)
 		return { ok: true }
 	}
 
@@ -229,19 +275,36 @@ export class AttributeService {
 		return attribute
 	}
 
-	private async invalidateTypeCache(typeId: string): Promise<void> {
+	private async invalidateTypeCache(typeIds: string[]): Promise<void> {
 		if (!this.cacheTtlSec) return
-		await this.cache.bumpVersion(CATALOG_TYPE_CACHE_VERSION, typeId)
+		const unique = Array.from(new Set(typeIds)).filter(Boolean)
+		await Promise.all(
+			unique.map(typeId =>
+				this.cache.bumpVersion(CATALOG_TYPE_CACHE_VERSION, typeId)
+			)
+		)
 	}
 
 	private async generateAttributeKey(
-		typeId: string,
+		typeIds: string[],
 		displayName: string
 	): Promise<string> {
 		const base = buildKeyFromLabel(displayName) || ATTRIBUTE_KEY_FALLBACK
 		return this.ensureUniqueKey(base, ATTRIBUTE_KEY_MAX_LENGTH, key =>
-			this.repo.existsKey(typeId, key)
+			this.repo.existsKeyInTypes(typeIds, key)
 		)
+	}
+
+	private normalizeTypeIds(typeIds?: string[], typeId?: string): string[] {
+		const list = [
+			...(typeIds ?? []),
+			...(typeId ? [typeId] : [])
+		].map(value => String(value).trim())
+		const unique = Array.from(new Set(list)).filter(Boolean)
+		if (!unique.length) {
+			throw new BadRequestException('Нужно указать typeIds или typeId')
+		}
+		return unique
 	}
 
 	private async generateEnumValue(
@@ -259,6 +322,14 @@ export class AttributeService {
 		return this.ensureUniqueKey(base, ENUM_VALUE_MAX_LENGTH, value =>
 			this.repo.existsEnumValue(attributeId, value)
 		)
+	}
+
+	private mapAttribute<T extends { types?: { id: string }[] }>(
+		attribute: T
+	) {
+		const typeIds = attribute.types?.map(type => type.id) ?? []
+		const { types, ...rest } = attribute as T & { types?: { id: string }[] }
+		return { ...rest, typeIds }
 	}
 
 	private async ensureUniqueKey(

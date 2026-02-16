@@ -20,10 +20,10 @@ export class CreateCategoryDtoReq {
 	@MaxLength(255)
 	name: string
 
-	@ApiPropertyOptional({ type: String, example: 'https://cdn/img.png' })
+	@ApiPropertyOptional({ type: String, example: 'media-uuid' })
 	@IsOptional()
 	@IsString()
-	imageUrl?: string
+	imageMediaId?: string
 
 	@ApiPropertyOptional({ type: String, example: 'Short description' })
 	@IsOptional()

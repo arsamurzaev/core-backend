@@ -1,4 +1,4 @@
-﻿import type { Prisma } from '@generated/client'
+﻿﻿import type { Prisma } from '@generated/client'
 import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import { BadRequestException, Injectable } from '@nestjs/common'
 
@@ -13,7 +13,7 @@ import type {
 } from './product-variant.builder'
 
 export type ProductVariantUpdateData = {
-	sku: string
+	variantKey: string
 	price?: number
 	stock?: number
 	status?: ProductVariantStatus
@@ -25,7 +25,39 @@ const productSelect = {
 	name: true,
 	slug: true,
 	price: true,
-	imagesUrls: true,
+	media: {
+		select: {
+			position: true,
+			kind: true,
+			media: {
+				select: {
+					id: true,
+					originalName: true,
+					mimeType: true,
+					size: true,
+					width: true,
+					height: true,
+					status: true,
+					storage: true,
+					key: true,
+					variants: {
+						select: {
+							id: true,
+							kind: true,
+							mimeType: true,
+							size: true,
+							width: true,
+							height: true,
+							storage: true,
+							key: true
+						},
+						orderBy: [{ width: 'desc' as const }, { kind: 'asc' as const }]
+					}
+				}
+			}
+		},
+		orderBy: { position: 'asc' as const }
+	},
 	isPopular: true,
 	status: true,
 	position: true,
@@ -152,7 +184,7 @@ export class ProductRepository {
 	findSkuById(id: string, catalogId: string) {
 		return this.prisma.product.findFirst({
 			where: { id, catalogId, deleteAt: null },
-			select: { id: true, sku: true }
+			select: { id: true, sku: true, price: true }
 		})
 	}
 
@@ -221,12 +253,14 @@ export class ProductRepository {
 		data: ProductUpdateInput,
 		catalogId: string,
 		attributes?: ProductAttributeValueData[],
-		variantUpdates?: ProductVariantUpdateData[]
+		variantUpdates?: ProductVariantUpdateData[],
+		mediaIds?: string[]
 	) {
 		const hasVariantChanges = variantUpdates !== undefined
 		const hasAttributeChanges = attributes !== undefined
+		const hasMediaChanges = mediaIds !== undefined
 
-		if (!hasAttributeChanges && !hasVariantChanges) {
+		if (!hasAttributeChanges && !hasVariantChanges && !hasMediaChanges) {
 			const result = await this.prisma.product.updateMany({
 				where: { id, catalogId, deleteAt: null },
 				data
@@ -272,6 +306,19 @@ export class ProductRepository {
 							...attribute,
 							deleteAt: null
 						}
+					})
+				}
+			}
+
+			if (mediaIds) {
+				await tx.productMedia.deleteMany({ where: { productId: id } })
+				if (mediaIds.length) {
+					await tx.productMedia.createMany({
+						data: mediaIds.map((mediaId, index) => ({
+							productId: id,
+							mediaId,
+							position: index
+						}))
 					})
 				}
 			}
@@ -542,29 +589,26 @@ export class ProductRepository {
 	): Promise<void> {
 		if (!variants.length) return
 
-		const skus = variants.map(variant => variant.sku)
+		const variantKeys = variants.map(variant => variant.variantKey)
 		const existing = await tx.productVariant.findMany({
-			where: { sku: { in: skus }, deleteAt: null },
-			select: { id: true, sku: true, productId: true, status: true }
+			where: { productId, variantKey: { in: variantKeys }, deleteAt: null },
+			select: { id: true, variantKey: true, status: true }
 		})
 		const existingMap = new Map(
-			existing.map(variant => [variant.sku, variant])
+			existing.map(variant => [variant.variantKey, variant])
 		)
 
-		for (const sku of skus) {
-			const current = existingMap.get(sku)
+		for (const variantKey of variantKeys) {
+			const current = existingMap.get(variantKey)
 			if (!current) {
-				throw new BadRequestException(`Вариант со SKU ${sku} не найден`)
-			}
-			if (current.productId !== productId) {
 				throw new BadRequestException(
-					`SKU варианта ${sku} уже используется другим товаром`
+					`Вариант с ключом ${variantKey} не найден`
 				)
 			}
 		}
 
 		for (const variant of variants) {
-			const current = existingMap.get(variant.sku)
+			const current = existingMap.get(variant.variantKey)
 			if (!current) continue
 
 			const data: Prisma.ProductVariantUpdateInput = {}
