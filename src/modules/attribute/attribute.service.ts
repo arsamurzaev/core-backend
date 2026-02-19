@@ -12,11 +12,11 @@ import {
 } from '@nestjs/common'
 import slugify from 'slugify'
 
+import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_CURRENT_CACHE_TTL_SEC,
 	CATALOG_TYPE_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
-import { CacheService } from '@/shared/cache/cache.service'
 
 import { AttributeRepository } from './attribute.repository'
 import { CreateAttributeEnumDtoReq } from './dto/requests/create-attribute-enum.dto.req'
@@ -97,6 +97,7 @@ export class AttributeService {
 			isVariantAttribute: dto.isVariantAttribute ?? false,
 			isFilterable: dto.isFilterable ?? false,
 			displayOrder: dto.displayOrder ?? 0,
+			isHidden: dto.isHidden ?? false,
 			types: {
 				connect: typeIds.map(typeId => ({ id: typeId }))
 			}
@@ -110,9 +111,7 @@ export class AttributeService {
 	async update(id: string, dto: UpdateAttributeDtoReq) {
 		const data: AttributeUpdateInput = {}
 		const nextTypeIds =
-			dto.typeIds !== undefined
-				? this.normalizeTypeIds(dto.typeIds)
-				: undefined
+			dto.typeIds !== undefined ? this.normalizeTypeIds(dto.typeIds) : undefined
 
 		const nextKey = dto.key !== undefined ? normalizeKey(dto.key) : undefined
 		if (nextKey !== undefined) {
@@ -136,6 +135,9 @@ export class AttributeService {
 		if (dto.displayOrder !== undefined) {
 			data.displayOrder = dto.displayOrder
 		}
+		if (dto.isHidden !== undefined) {
+			data.isHidden = dto.isHidden
+		}
 
 		if (Object.keys(data).length === 0 && nextTypeIds === undefined) {
 			throw new BadRequestException('Нет полей для обновления')
@@ -149,11 +151,7 @@ export class AttributeService {
 
 		if (nextKey !== undefined || nextTypeIds !== undefined) {
 			const keyToCheck = nextKey ?? current.key
-			const exists = await this.repo.existsKeyInTypes(
-				finalTypeIds,
-				keyToCheck,
-				id
-			)
+			const exists = await this.repo.existsKeyInTypes(finalTypeIds, keyToCheck, id)
 			if (exists) {
 				throw new BadRequestException(
 					'Ключ атрибута уже используется в выбранном типе'
@@ -171,8 +169,7 @@ export class AttributeService {
 		const attribute = await this.repo.update(id, data, nextTypeIds)
 		if (!attribute) throw new NotFoundException('Атрибут не найден')
 
-		const updatedTypeIds =
-			attribute.types?.map(type => type.id) ?? finalTypeIds
+		const updatedTypeIds = attribute.types?.map(type => type.id) ?? finalTypeIds
 		await this.invalidateTypeCache(
 			Array.from(new Set([...currentTypeIds, ...updatedTypeIds]))
 		)
@@ -183,9 +180,7 @@ export class AttributeService {
 		const attribute = await this.repo.softDelete(id)
 		if (!attribute) throw new NotFoundException('Атрибут не найден')
 
-		await this.invalidateTypeCache(
-			attribute.types?.map(type => type.id) ?? []
-		)
+		await this.invalidateTypeCache(attribute.types?.map(type => type.id) ?? [])
 		return { ok: true }
 	}
 
@@ -206,13 +201,12 @@ export class AttributeService {
 			displayName:
 				dto.displayName === undefined ? null : normalizeLabel(dto.displayName),
 			displayOrder: dto.displayOrder ?? 0,
+			businessId: dto.businessId?.trim() || null,
 			attribute: { connect: { id: attributeId } }
 		}
 
 		const enumValue = await this.repo.createEnumValue(data)
-		await this.invalidateTypeCache(
-			attribute.types?.map(type => type.id) ?? []
-		)
+		await this.invalidateTypeCache(attribute.types?.map(type => type.id) ?? [])
 		return enumValue
 	}
 
@@ -234,17 +228,19 @@ export class AttributeService {
 		if (dto.displayOrder !== undefined) {
 			data.displayOrder = dto.displayOrder
 		}
+		if (dto.businessId !== undefined) {
+			data.businessId = dto.businessId?.trim() || null
+		}
 
 		if (Object.keys(data).length === 0) {
 			throw new BadRequestException('Нет полей для обновления')
 		}
 
 		const enumValue = await this.repo.updateEnumValue(id, attributeId, data)
-		if (!enumValue) throw new NotFoundException('Значение перечисления не найдено')
+		if (!enumValue)
+			throw new NotFoundException('Значение перечисления не найдено')
 
-		await this.invalidateTypeCache(
-			attribute.types?.map(type => type.id) ?? []
-		)
+		await this.invalidateTypeCache(attribute.types?.map(type => type.id) ?? [])
 		return enumValue
 	}
 
@@ -252,11 +248,10 @@ export class AttributeService {
 		const attribute = await this.requireEnumAttribute(attributeId)
 
 		const enumValue = await this.repo.softDeleteEnumValue(id, attributeId)
-		if (!enumValue) throw new NotFoundException('Значение перечисления не найдено')
+		if (!enumValue)
+			throw new NotFoundException('Значение перечисления не найдено')
 
-		await this.invalidateTypeCache(
-			attribute.types?.map(type => type.id) ?? []
-		)
+		await this.invalidateTypeCache(attribute.types?.map(type => type.id) ?? [])
 		return { ok: true }
 	}
 
@@ -296,10 +291,9 @@ export class AttributeService {
 	}
 
 	private normalizeTypeIds(typeIds?: string[], typeId?: string): string[] {
-		const list = [
-			...(typeIds ?? []),
-			...(typeId ? [typeId] : [])
-		].map(value => String(value).trim())
+		const list = [...(typeIds ?? []), ...(typeId ? [typeId] : [])].map(value =>
+			String(value).trim()
+		)
 		const unique = Array.from(new Set(list)).filter(Boolean)
 		if (!unique.length) {
 			throw new BadRequestException('Нужно указать typeIds или typeId')
@@ -324,11 +318,11 @@ export class AttributeService {
 		)
 	}
 
-	private mapAttribute<T extends { types?: { id: string }[] }>(
-		attribute: T
-	) {
-		const typeIds = attribute.types?.map(type => type.id) ?? []
-		const { types, ...rest } = attribute as T & { types?: { id: string }[] }
+	private mapAttribute<T extends { types?: { id: string }[] }>(attribute: T) {
+		const attributeWithTypes = attribute as T & { types?: { id: string }[] }
+		const typeIds = attributeWithTypes.types?.map(type => type.id) ?? []
+		const rest = { ...attributeWithTypes }
+		delete (rest as { types?: { id: string }[] }).types
 		return { ...rest, typeIds }
 	}
 

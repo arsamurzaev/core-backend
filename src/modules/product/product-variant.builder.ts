@@ -1,7 +1,6 @@
-﻿﻿import { createHash } from 'crypto'
-
 import { DataType, ProductVariantStatus } from '@generated/enums'
 import { BadRequestException, Injectable } from '@nestjs/common'
+import { createHash } from 'crypto'
 import slugify from 'slugify'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
@@ -125,20 +124,14 @@ export class ProductVariantBuilder {
 			const status = this.resolveStatus(input, stock)
 
 			if (!Number.isInteger(stock) || stock < 0) {
-				throw new BadRequestException(
-					`Некорректный stock для ${variantLabel}`
-				)
+				throw new BadRequestException(`Некорректный stock для ${variantLabel}`)
 			}
 			if (!Number.isFinite(price) || price < 0) {
-				throw new BadRequestException(
-					`Некорректная цена для ${variantLabel}`
-				)
+				throw new BadRequestException(`Некорректная цена для ${variantLabel}`)
 			}
 
 			if (!input.attributes?.length) {
-				throw new BadRequestException(
-					`Для ${variantLabel} не заданы атрибуты`
-				)
+				throw new BadRequestException(`Для ${variantLabel} не заданы атрибуты`)
 			}
 			if (selectedAttribute && input.attributes.length !== 1) {
 				throw new BadRequestException(
@@ -157,9 +150,7 @@ export class ProductVariantBuilder {
 				const hasEnumValueId = Boolean(enumValueId)
 				const hasValue = Boolean(valueLabel)
 				if (!attributeId) {
-					throw new BadRequestException(
-						`attributeId обязателен для ${variantLabel}`
-					)
+					throw new BadRequestException(`attributeId обязателен для ${variantLabel}`)
 				}
 				if (!hasEnumValueId && !hasValue) {
 					throw new BadRequestException(
@@ -196,7 +187,7 @@ export class ProductVariantBuilder {
 
 				providedIds.add(attributeId)
 				if (hasEnumValueId) {
-					enumValueIds.add(enumValueId!)
+					enumValueIds.add(enumValueId)
 				} else {
 					valueAttributeIds.add(attributeId)
 				}
@@ -222,8 +213,7 @@ export class ProductVariantBuilder {
 		return preparedInputs.map(({ input, status }) => {
 			const valueByAttribute = new Map<string, string>()
 			const preparedAttributes: ProductVariantAttributeInput[] = []
-			const shouldPersistAttributes =
-				status !== ProductVariantStatus.DISABLED
+			const shouldPersistAttributes = status !== ProductVariantStatus.DISABLED
 
 			for (const attr of input.attributes ?? []) {
 				const attributeId = attr.attributeId.trim()
@@ -362,7 +352,9 @@ export class ProductVariantBuilder {
 		return `${head}${separator}${hash}`
 	}
 
-	private async loadVariantAttributes(typeId: string): Promise<VariantAttributeMeta[]> {
+	private async loadVariantAttributes(
+		typeId: string
+	): Promise<VariantAttributeMeta[]> {
 		return this.prisma.attribute.findMany({
 			where: {
 				deleteAt: null,
@@ -431,4 +423,3 @@ export class ProductVariantBuilder {
 		return result
 	}
 }
-

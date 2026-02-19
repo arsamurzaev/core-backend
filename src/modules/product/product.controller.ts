@@ -32,7 +32,6 @@ import {
 	ProductDto,
 	ProductUpdateResponseDto,
 	ProductVariantsResponseDto,
-	ProductWithAttributesDto,
 	ProductWithDetailsDto
 } from './dto/responses/product.dto.res'
 import { ProductService } from './product.service'
@@ -51,7 +50,7 @@ export class ProductController {
 
 	@Get('/popular')
 	@ApiOperation({ summary: 'Список популярных товаров' })
-	@ApiOkResponse({ type: ProductWithAttributesDto, isArray: true })
+	@ApiOkResponse({ type: ProductWithDetailsDto, isArray: true })
 	async getPopular() {
 		return this.productService.getPopular()
 	}

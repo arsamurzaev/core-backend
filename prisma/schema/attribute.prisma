@@ -52,6 +52,8 @@ model Attribute {
     // Пример: brand=1, size=2, color=3, material=4
     displayOrder Int @default(0) @map("display_order")
 
+    isHidden Boolean @default(false) @map("is_hidden")
+
     // ─── Связи ───
     // Типы каталога, где доступен этот атрибут
     types             Type[]
@@ -112,6 +114,8 @@ model AttributeEnumValue {
     // Порядок в списке (для селектов, кнопок размеров)
     // Пример: XS=1, S=2, M=3, L=4, XL=5
     displayOrder Int @default(0) @map("display_order")
+
+    businessId String? @map("business_id")
 
     // ─── Связи ───
     attribute         Attribute          @relation(fields: [attributeId], references: [id], onDelete: Cascade)

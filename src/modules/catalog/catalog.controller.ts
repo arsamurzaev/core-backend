@@ -44,8 +44,8 @@ export class CatalogController {
 	@ApiOperation({ summary: 'Get current catalog' })
 	@Public()
 	@ApiOkResponse({ type: CatalogCurrentDto })
-	async getCurrent() {
-		return this.catalogService.getCurrent()
+	async getCurrent(): Promise<CatalogCurrentDto> {
+		return this.catalogService.getCurrent() as Promise<CatalogCurrentDto>
 	}
 
 	@Patch('/current')
@@ -53,8 +53,8 @@ export class CatalogController {
 	@Roles(Role.CATALOG)
 	@UseGuards(CatalogAccessGuard)
 	@ApiOkResponse({ type: CatalogDto })
-	async updateCurrent(@Body() dto: UpdateCatalogDtoReq) {
-		return this.catalogService.updateCurrent(dto)
+	async updateCurrent(@Body() dto: UpdateCatalogDtoReq): Promise<CatalogDto> {
+		return this.catalogService.updateCurrent(dto) as Promise<CatalogDto>
 	}
 
 	@Get()
@@ -62,8 +62,8 @@ export class CatalogController {
 	@Roles(Role.ADMIN)
 	@SkipCatalog()
 	@ApiOkResponse({ type: CatalogDto, isArray: true })
-	async getAll() {
-		return this.catalogService.getAll()
+	async getAll(): Promise<CatalogDto[]> {
+		return this.catalogService.getAll() as Promise<CatalogDto[]>
 	}
 
 	@Get('/:id')
@@ -75,8 +75,8 @@ export class CatalogController {
 	@Roles(Role.ADMIN)
 	@SkipCatalog()
 	@ApiOkResponse({ type: CatalogDto })
-	async getById(@Param('id') id: string) {
-		return this.catalogService.getById(id)
+	async getById(@Param('id') id: string): Promise<CatalogDto> {
+		return this.catalogService.getById(id) as Promise<CatalogDto>
 	}
 
 	@Patch('/:id')
@@ -88,8 +88,11 @@ export class CatalogController {
 	@Roles(Role.ADMIN)
 	@SkipCatalog()
 	@ApiOkResponse({ type: CatalogDto })
-	async updateById(@Param('id') id: string, @Body() dto: UpdateCatalogDtoReq) {
-		return this.catalogService.updateById(id, dto)
+	async updateById(
+		@Param('id') id: string,
+		@Body() dto: UpdateCatalogDtoReq
+	): Promise<CatalogDto> {
+		return this.catalogService.updateById(id, dto) as Promise<CatalogDto>
 	}
 
 	@Post()
@@ -97,7 +100,9 @@ export class CatalogController {
 	@Roles(Role.ADMIN)
 	@SkipCatalog()
 	@ApiCreatedResponse({ type: CatalogCreateResponseDto })
-	async create(@Body() dto: CreateCatalogDtoReq) {
-		return this.catalogService.create(dto)
+	async create(
+		@Body() dto: CreateCatalogDtoReq
+	): Promise<CatalogCreateResponseDto> {
+		return this.catalogService.create(dto) as Promise<CatalogCreateResponseDto>
 	}
 }

@@ -1,4 +1,10 @@
-﻿﻿/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
+﻿/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
 import { CatalogCreateInput, CatalogUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
@@ -303,14 +309,6 @@ export class CatalogService {
 		if (dto.isActive !== undefined) {
 			settingsUpdate.isActive = dto.isActive
 			settingsCreate.isActive = dto.isActive
-		}
-		if (dto.isCommerceEnabled !== undefined) {
-			settingsUpdate.isCommerceEnabled = dto.isCommerceEnabled
-			settingsCreate.isCommerceEnabled = dto.isCommerceEnabled
-		}
-		if (dto.productsDisplayMode !== undefined) {
-			settingsUpdate.productsDisplayMode = dto.productsDisplayMode
-			settingsCreate.productsDisplayMode = dto.productsDisplayMode
 		}
 
 		if (Object.keys(settingsUpdate).length > 0) {

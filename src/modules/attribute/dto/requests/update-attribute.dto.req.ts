@@ -16,6 +16,19 @@ import {
 
 const KEY_PATTERN = /^[a-z0-9_-]+$/
 
+function normalizeOptionalString(value: unknown): string | undefined {
+	if (value === undefined) return undefined
+	if (
+		typeof value === 'string' ||
+		typeof value === 'number' ||
+		typeof value === 'boolean' ||
+		typeof value === 'bigint'
+	) {
+		return String(value).trim()
+	}
+	return undefined
+}
+
 export class UpdateAttributeDtoReq {
 	@ApiPropertyOptional({
 		type: [String],
@@ -30,9 +43,10 @@ export class UpdateAttributeDtoReq {
 
 	@ApiPropertyOptional({ type: String, example: 'brand' })
 	@IsOptional()
-	@Transform(({ value }) =>
-		value === undefined ? value : String(value).trim().toLowerCase()
-	)
+	@Transform(({ value }: { value: unknown }) => {
+		const normalized = normalizeOptionalString(value)
+		return normalized === undefined ? undefined : normalized.toLowerCase()
+	})
 	@IsString()
 	@MaxLength(100)
 	@Matches(KEY_PATTERN)
@@ -40,7 +54,7 @@ export class UpdateAttributeDtoReq {
 
 	@ApiPropertyOptional({ type: String, example: 'Brand' })
 	@IsOptional()
-	@Transform(({ value }) => (value === undefined ? value : String(value).trim()))
+	@Transform(({ value }: { value: unknown }) => normalizeOptionalString(value))
 	@IsString()
 	@MaxLength(255)
 	displayName?: string
@@ -71,4 +85,13 @@ export class UpdateAttributeDtoReq {
 	@IsInt()
 	@Min(0)
 	displayOrder?: number
+
+	@ApiPropertyOptional({
+		type: Boolean,
+		example: false,
+		description: 'Скрытый атрибут не участвует в создании и редактировании товара'
+	})
+	@IsOptional()
+	@IsBoolean()
+	isHidden?: boolean
 }

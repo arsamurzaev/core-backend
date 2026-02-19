@@ -18,6 +18,7 @@ import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { Roles } from '../auth/decorators/roles.decorator'
 import { SessionGuard } from '../auth/guards/session.guard'
 import { HandoffService } from '../auth/handoff/handoff.service'
+import type { AuthRequest } from '../auth/types/auth-request'
 
 // Тут поставь guard админ-панели, который уже делает req.user
 @ApiTags('Admin')
@@ -54,7 +55,12 @@ export class AdminSsoController {
 		@Query('next') next: string | undefined,
 		@Res() res: Response
 	) {
-		const currentUser = (res.req as any).user as { id: string; role: Role }
+		const currentUser = (res.req as AuthRequest).user as
+			| { id: string; role: Role }
+			| undefined
+		if (!currentUser) {
+			return res.status(401).send('Пользователь не найден')
+		}
 
 		const token = await this.handoff.createForCatalog({
 			userId: currentUser.id,

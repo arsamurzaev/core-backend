@@ -14,9 +14,14 @@ const CODE_PATTERN = /^[a-z0-9-]+$/
 export class CreateTypeDtoReq {
 	@ApiProperty({ type: String, example: 'РўРёРї' })
 	@IsString({ message: 'РўРёРї РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ СЃС‚СЂРѕРєРѕРёМ†' })
-	@IsNotEmpty({ message: 'РРјСЏ С‚РёРїР° РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј' })
+	@IsNotEmpty({
+		message: 'РРјСЏ С‚РёРїР° РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј'
+	})
 	@MaxLength(255)
-	@Transform(({ value }) => String(value).trim().toLowerCase())
+	@Transform(({ value }: { value: unknown }) => {
+		if (typeof value !== 'string') return value
+		return value.trim().toLowerCase()
+	})
 	name: string
 
 	@ApiPropertyOptional({
@@ -30,9 +35,10 @@ export class CreateTypeDtoReq {
 	@MinLength(2)
 	@MaxLength(50)
 	@Matches(CODE_PATTERN)
-	@Transform(({ value }) => {
+	@Transform(({ value }: { value: unknown }) => {
 		if (value === undefined || value === null) return value
-		const normalized = String(value).trim().toLowerCase()
+		if (typeof value !== 'string') return value
+		const normalized = value.trim().toLowerCase()
 		return normalized.length ? normalized : undefined
 	})
 	code?: string

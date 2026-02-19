@@ -115,7 +115,8 @@ const productAttributeSelect = {
 			isRequired: true,
 			isVariantAttribute: true,
 			isFilterable: true,
-			displayOrder: true
+			displayOrder: true,
+			isHidden: true
 		}
 	},
 	enumValue: {
@@ -123,7 +124,8 @@ const productAttributeSelect = {
 			id: true,
 			value: true,
 			displayName: true,
-			displayOrder: true
+			displayOrder: true,
+			businessId: true
 		}
 	}
 }
@@ -338,6 +340,8 @@ export class CategoryRepository {
 			select: { productId: true, position: true }
 		})
 
-		return record ? { productId: record.productId, position: record.position } : null
+		return record
+			? { productId: record.productId, position: record.position }
+			: null
 	}
 }

@@ -54,8 +54,7 @@ export class AuthService {
 		if (!session?.userId) return null
 		if (session.userId !== userId) return null
 
-		const existingCatalogId =
-			session.context?.catalogId ?? (session as any).catalogId ?? null
+		const existingCatalogId = session.context?.catalogId ?? null
 		if (existingCatalogId !== (catalogId ?? null)) return null
 
 		await this.sessions.touch(sid, userId)

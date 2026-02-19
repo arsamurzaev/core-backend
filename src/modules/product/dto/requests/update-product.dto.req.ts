@@ -52,7 +52,10 @@ export class UpdateProductDtoReq {
 	@IsNumber()
 	position?: number
 
-	@ApiPropertyOptional({ type: [ProductAttributeValueDto] })
+	@ApiPropertyOptional({
+		type: [ProductAttributeValueDto],
+		description: 'Только видимые атрибуты (isHidden=false)'
+	})
 	@IsOptional()
 	@IsArray()
 	@ValidateNested({ each: true })

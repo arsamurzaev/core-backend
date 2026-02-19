@@ -1,12 +1,13 @@
-import { Test, TestingModule } from '@nestjs/testing'
 import { NotFoundException } from '@nestjs/common'
+import { Test, TestingModule } from '@nestjs/testing'
 
-import { MediaRepository } from '@/shared/media/media.repository'
 import { MediaUrlService } from '@/shared/media/media-url.service'
+import { MediaRepository } from '@/shared/media/media.repository'
+
+import { RequestContext } from '../../shared/tenancy/request-context'
 
 import { CategoryRepository } from './category.repository'
 import { CategoryService } from './category.service'
-import { RequestContext } from '../../shared/tenancy/request-context'
 
 describe('CategoryService', () => {
 	let service: CategoryService
@@ -55,7 +56,7 @@ describe('CategoryService', () => {
 		}).compile()
 
 		service = module.get<CategoryService>(CategoryService)
-		repo = module.get(CategoryRepository) as jest.Mocked<CategoryRepository>
+		repo = module.get(CategoryRepository)
 	})
 
 	it('should be defined', () => {
@@ -63,7 +64,10 @@ describe('CategoryService', () => {
 	})
 
 	it('returns page and nextCursor when more items exist', async () => {
-		repo.findById.mockResolvedValue({ id: 'cat-1', catalogId: 'catalog-1' } as any)
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
 		repo.findCategoryProductsPage.mockResolvedValue([
 			{ productId: 'p1', position: 0, product: { id: 'p1', media: [] } },
 			{ productId: 'p2', position: 1, product: { id: 'p2', media: [] } },
@@ -78,17 +82,20 @@ describe('CategoryService', () => {
 			JSON.stringify({ position: 1, productId: 'p2' })
 		).toString('base64')
 
-		expect(repo.findCategoryProductsPage).toHaveBeenCalledWith(
+		expect(repo.findCategoryProductsPage.mock.calls).toContainEqual([
 			'cat-1',
 			'catalog-1',
 			{ cursor: undefined, take: 3 }
-		)
+		])
 		expect(result.items.map(item => item.productId)).toEqual(['p1', 'p2'])
 		expect(result.nextCursor).toBe(expectedCursor)
 	})
 
 	it('returns null nextCursor when last page', async () => {
-		repo.findById.mockResolvedValue({ id: 'cat-1', catalogId: 'catalog-1' } as any)
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
 		repo.findCategoryProductsPage.mockResolvedValue([
 			{ productId: 'p1', position: 0, product: { id: 'p1', media: [] } },
 			{ productId: 'p2', position: 1, product: { id: 'p2', media: [] } }

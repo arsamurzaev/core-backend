@@ -22,17 +22,24 @@ export class CreateCatalogDtoReq {
 		example: 'catalog',
 		description: 'Если не указан, будет сгенерирован автоматически'
 	})
-	@Transform(({ value }) => {
+	@Transform(({ value }: { value: unknown }) => {
 		if (value === undefined || value === null) return value
-		const normalized = String(value).trim().toLowerCase()
+		if (typeof value !== 'string') return value
+		const normalized = value.trim().toLowerCase()
 		return normalized.length ? normalized : undefined
 	})
 	@IsOptional()
 	@Matches(SLUG_PATTERN)
 	@MinLength(SLUG_MIN_LENGTH)
 	@MaxLength(SLUG_MAX_LENGTH)
-	@IsString({ message: 'РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РєР°С‚Р°Р»РѕРіР° РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ СЃС‚СЂРѕРєРѕРёМ†' })
-	@IsNotEmpty({ message: 'РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РєР°С‚Р°Р»РѕРіР° РЅРµ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј' })
+	@IsString({
+		message:
+			'РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РєР°С‚Р°Р»РѕРіР° РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ СЃС‚СЂРѕРєРѕРёМ†'
+	})
+	@IsNotEmpty({
+		message:
+			'РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РєР°С‚Р°Р»РѕРіР° РЅРµ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј'
+	})
 	slug?: string
 
 	@ApiPropertyOptional({
@@ -44,10 +51,11 @@ export class CreateCatalogDtoReq {
 	@IsString()
 	@MaxLength(253)
 	@Matches(DOMAIN_PATTERN)
-	@Transform(({ value }) => {
+	@Transform(({ value }: { value: unknown }) => {
 		if (value === undefined) return undefined
 		if (value === null) return null
-		const normalized = String(value).trim().toLowerCase()
+		if (typeof value !== 'string') return value
+		const normalized = value.trim().toLowerCase()
 		return normalized.length ? normalized : null
 	})
 	domain?: string | null
@@ -64,10 +72,11 @@ export class CreateCatalogDtoReq {
 	})
 	@IsOptional()
 	@IsString()
-	@Transform(({ value }) => {
+	@Transform(({ value }: { value: unknown }) => {
 		if (value === undefined) return undefined
 		if (value === null) return null
-		const normalized = String(value).trim()
+		if (typeof value !== 'string') return value
+		const normalized = value.trim()
 		return normalized.length ? normalized : null
 	})
 	parentId?: string | null
@@ -79,10 +88,11 @@ export class CreateCatalogDtoReq {
 	})
 	@IsOptional()
 	@IsString()
-	@Transform(({ value }) => {
+	@Transform(({ value }: { value: unknown }) => {
 		if (value === undefined) return undefined
 		if (value === null) return null
-		const normalized = String(value).trim()
+		if (typeof value !== 'string') return value
+		const normalized = value.trim()
 		return normalized.length ? normalized : null
 	})
 	userId?: string | null

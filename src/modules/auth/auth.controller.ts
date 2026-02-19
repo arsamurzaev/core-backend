@@ -25,6 +25,7 @@ import { LoginDtoReq } from './dto/requests/login.dto.req'
 import { AuthLoginResponseDto } from './dto/responses/auth-login.dto.res'
 import { SessionGuard } from './guards/session.guard'
 import { SessionService } from './session/session.service'
+import type { AuthRequest } from './types/auth-request'
 
 const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
 const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
@@ -33,9 +34,6 @@ const isProd = process.env.NODE_ENV === 'production'
 const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7
 
 function getCookie(req: Request, name: string): string | undefined {
-	const direct = (req as any).cookies?.[name]
-	if (typeof direct === 'string' && direct) return direct
-
 	const header = req.headers.cookie
 	if (!header) return undefined
 	for (const part of header.split(';')) {
@@ -106,7 +104,7 @@ export class AuthController {
 	})
 	@ApiUnauthorizedResponse({ description: 'Не авторизован' })
 	me(@Req() req: Request) {
-		return { ok: true, user: (req as any).user }
+		return { ok: true, user: (req as AuthRequest).user }
 	}
 
 	@UseGuards(SessionGuard)
@@ -116,7 +114,7 @@ export class AuthController {
 	@ApiOkResponse({ description: 'Сессия очищена', type: OkResponseDto })
 	@ApiUnauthorizedResponse({ description: 'Не авторизован' })
 	async logout(@Res({ passthrough: true }) res: Response) {
-		const sid = (res.req as any).sessionId as string | undefined
+		const sid = (res.req as AuthRequest).sessionId
 		if (sid) await this.sessions.destroy(sid)
 
 		res.setHeader('Cache-Control', 'no-store')

@@ -30,9 +30,6 @@ const isProd = process.env.NODE_ENV === 'production'
 const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7
 
 function getCookie(req: Request, name: string): string | undefined {
-	const direct = (req as any).cookies?.[name]
-	if (typeof direct === 'string' && direct) return direct
-
 	const header = req.headers.cookie
 	if (!header) return undefined
 	for (const part of header.split(';')) {

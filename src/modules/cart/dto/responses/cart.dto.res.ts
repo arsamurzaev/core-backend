@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+import { ApiProperty } from '@nestjs/swagger'
 
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 
@@ -23,7 +23,7 @@ export class CartItemDto {
 	@ApiProperty({ type: String, format: 'uuid' })
 	productId: string
 
-	@ApiPropertyOptional({ type: String, format: 'uuid', nullable: true })
+	@ApiProperty({ type: String, format: 'uuid', nullable: true })
 	variantId: string | null
 
 	@ApiProperty({ type: Number, example: 2 })
@@ -57,14 +57,14 @@ export class CartDto {
 	@ApiProperty({ type: String, format: 'uuid' })
 	catalogId: string
 
-	@ApiPropertyOptional({
+	@ApiProperty({
 		type: String,
 		nullable: true,
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	publicKey: string | null
 
-	@ApiPropertyOptional({
+	@ApiProperty({
 		type: String,
 		format: 'date-time',
 		nullable: true

@@ -58,6 +58,12 @@ type CreateSessionOptions = {
 	loginsTtlSeconds?: number
 }
 
+type GeoLookupRecord = {
+	ll?: unknown
+	city?: unknown
+	region?: unknown
+}
+
 const DEV_GEO: SessionGeo = {
 	city: 'Moscow',
 	region: 'Moscow',
@@ -99,6 +105,10 @@ const BLINK_BROWSERS = new Set([
 	'Brave',
 	'Yandex'
 ])
+
+function isGeoLookupRecord(value: unknown): value is GeoLookupRecord {
+	return Boolean(value) && typeof value === 'object'
+}
 
 @Injectable()
 export class SessionService {
@@ -248,22 +258,33 @@ export class SessionService {
 		}
 	}
 
-	private async resolveGeo(ip: string | null): Promise<SessionGeo | null> {
+	private resolveGeo(ip: string | null): SessionGeo | null {
 		if (this.isDev) return DEV_GEO
 		if (!ip) return null
 
 		try {
-			const data = geoip.lookup(ip)
-			if (!data) {
+			const geoipLookup = (
+				geoip as unknown as {
+					lookup?: (value: string) => unknown
+				}
+			).lookup
+			if (!geoipLookup) {
+				return null
+			}
+			const lookup = geoipLookup(ip)
+			if (!isGeoLookupRecord(lookup)) {
 				return null
 			}
 
-			const latitude = this.parseNumber(data.ll?.[0])
-			const longitude = this.parseNumber(data.ll?.[1])
+			const coordinates = Array.isArray(lookup.ll) ? lookup.ll : []
+			const latitude = this.parseNumber(coordinates[0])
+			const longitude = this.parseNumber(coordinates[1])
+			const city = typeof lookup.city === 'string' ? lookup.city : null
+			const region = typeof lookup.region === 'string' ? lookup.region : null
 
 			return {
-				city: data.city ?? null,
-				region: data.region ?? null,
+				city,
+				region,
 				latitude,
 				longitude
 			}
@@ -278,11 +299,11 @@ export class SessionService {
 		}
 	}
 
-	private async buildClient(meta: SessionMeta): Promise<SessionClient> {
+	private buildClient(meta: SessionMeta): SessionClient {
 		const ip = this.normalizeIp(meta.ip)
 		const userAgentRaw = this.clean(meta.userAgent)
 		const userAgent = this.parseUserAgent(userAgentRaw)
-		const geo = await this.resolveGeo(ip)
+		const geo = this.resolveGeo(ip)
 
 		return { ip, userAgent, geo }
 	}
@@ -298,7 +319,7 @@ export class SessionService {
 
 		const ttlSeconds = options.ttlSeconds ?? this.ttlSeconds
 		const meta = options.meta ?? {}
-		const client = await this.buildClient(meta)
+		const client = this.buildClient(meta)
 		const context = this.buildContext(meta)
 
 		const sid = randomUUID()

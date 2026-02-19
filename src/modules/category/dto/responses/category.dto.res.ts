@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+import { ApiProperty } from '@nestjs/swagger'
 
 import { ProductWithAttributesDto } from '@/modules/product/dto/responses/product.dto.res'
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
@@ -19,8 +19,8 @@ export class CategoryDto {
 	@ApiProperty({ type: String })
 	name: string
 
-	@ApiPropertyOptional({ type: MediaDto, nullable: true })
-	imageMedia?: MediaDto | null
+	@ApiProperty({ type: MediaDto, nullable: true })
+	imageMedia: MediaDto | null
 
 	@ApiProperty({ type: String, nullable: true })
 	descriptor: string | null
@@ -56,8 +56,8 @@ export class CategoryChildDto {
 	@ApiProperty({ type: String })
 	name: string
 
-	@ApiPropertyOptional({ type: MediaDto, nullable: true })
-	imageMedia?: MediaDto | null
+	@ApiProperty({ type: MediaDto, nullable: true })
+	imageMedia: MediaDto | null
 }
 
 export class CategoryProductDto {
@@ -82,8 +82,8 @@ export class CategoryProductsPageDto {
 }
 
 export class CategoryWithRelationsDto extends CategoryDto {
-	@ApiPropertyOptional({ type: CategoryParentDto, nullable: true })
-	parent?: CategoryParentDto | null
+	@ApiProperty({ type: CategoryParentDto, nullable: true })
+	parent: CategoryParentDto | null
 
 	@ApiProperty({ type: [CategoryChildDto] })
 	children: CategoryChildDto[]

@@ -1,4 +1,4 @@
-﻿﻿import { ApiPropertyOptional } from '@nestjs/swagger'
+import { ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {
 	IsArray,
@@ -8,6 +8,20 @@ import {
 	MaxLength,
 	ValidateNested
 } from 'class-validator'
+
+function parseUnknownArray(value: unknown): unknown {
+	if (value === undefined || value === null) return undefined
+	if (Array.isArray(value)) return value as unknown[]
+	if (typeof value !== 'string') return value
+	const trimmed = value.trim()
+	if (!trimmed) return undefined
+
+	try {
+		return JSON.parse(trimmed) as unknown
+	} catch {
+		return value
+	}
+}
 
 export class UploadImageBatchItemDtoReq {
 	@ApiPropertyOptional({ example: 'products/seo' })
@@ -38,20 +52,7 @@ export class UploadImageBatchDtoReq {
 			'JSON-массив с настройками для каждого файла (по индексу в массиве files)'
 	})
 	@IsOptional()
-	@Transform(({ value }: { value: unknown }) => {
-		if (value === undefined || value === null) return undefined
-		if (Array.isArray(value)) return value
-		if (typeof value === 'string') {
-			const trimmed = value.trim()
-			if (!trimmed) return undefined
-			try {
-				return JSON.parse(trimmed)
-			} catch {
-				return value
-			}
-		}
-		return value
-	})
+	@Transform(({ value }: { value: unknown }) => parseUnknownArray(value))
 	@IsArray()
 	@ValidateNested({ each: true })
 	@Type(() => UploadImageBatchItemDtoReq)

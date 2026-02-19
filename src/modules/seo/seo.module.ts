@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common'
 
 import { PrismaModule } from '@/infrastructure/prisma/prisma.module'
-import { MediaRepository } from '@/shared/media/media.repository'
 import { MediaUrlService } from '@/shared/media/media-url.service'
+import { MediaRepository } from '@/shared/media/media.repository'
 
 import { SeoController } from './seo.controller'
 import { SeoRepository } from './seo.repository'

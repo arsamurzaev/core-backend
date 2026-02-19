@@ -12,11 +12,24 @@ import {
 	IsString,
 	Matches,
 	MaxLength,
-	MinLength,
-	Min
+	Min,
+	MinLength
 } from 'class-validator'
 
 const KEY_PATTERN = /^[a-z0-9_-]+$/
+
+function normalizeOptionalString(value: unknown): string | undefined {
+	if (value === undefined) return undefined
+	if (
+		typeof value === 'string' ||
+		typeof value === 'number' ||
+		typeof value === 'boolean' ||
+		typeof value === 'bigint'
+	) {
+		return String(value).trim()
+	}
+	return undefined
+}
 
 export class CreateAttributeDtoReq {
 	@ApiPropertyOptional({
@@ -45,9 +58,10 @@ export class CreateAttributeDtoReq {
 		example: 'brand',
 		description: 'Если не указан, ключ будет сгенерирован из названия'
 	})
-	@Transform(({ value }) =>
-		value === undefined ? value : String(value).trim().toLowerCase()
-	)
+	@Transform(({ value }: { value: unknown }) => {
+		const normalized = normalizeOptionalString(value)
+		return normalized === undefined ? undefined : normalized.toLowerCase()
+	})
 	@IsOptional()
 	@IsString()
 	@IsNotEmpty()
@@ -57,7 +71,7 @@ export class CreateAttributeDtoReq {
 	key?: string
 
 	@ApiProperty({ type: String, example: 'Brand' })
-	@Transform(({ value }) => (value === undefined ? value : String(value).trim()))
+	@Transform(({ value }: { value: unknown }) => normalizeOptionalString(value))
 	@IsString()
 	@IsNotEmpty()
 	@MaxLength(255)
@@ -88,4 +102,13 @@ export class CreateAttributeDtoReq {
 	@IsInt()
 	@Min(0)
 	displayOrder?: number
+
+	@ApiPropertyOptional({
+		type: Boolean,
+		example: false,
+		description: 'Скрытый атрибут не участвует в создании и редактировании товара'
+	})
+	@IsOptional()
+	@IsBoolean()
+	isHidden?: boolean
 }

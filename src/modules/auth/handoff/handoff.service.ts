@@ -75,15 +75,18 @@ export class HandoffService {
 	async consume(token: string): Promise<HandoffPayload | null> {
 		if (!token) return null
 		const key = this.key(token)
+		const redisWithGetDel = this.redis as RedisService & {
+			getdel?: (key: string) => Promise<string | null>
+		}
 
 		// атомарно одноразово (Redis 6.2+)
-		const raw = (this.redis as any).getdel
-			? await (this.redis as any).getdel(key)
+		const raw = redisWithGetDel.getdel
+			? await redisWithGetDel.getdel(key)
 			: await this.redis.get(key)
 
 		if (!raw) return null
 
-		if (!(this.redis as any).getdel) {
+		if (!redisWithGetDel.getdel) {
 			await this.redis.del(key)
 		}
 

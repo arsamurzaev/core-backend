@@ -5,8 +5,9 @@ import {
 	NotFoundException
 } from '@nestjs/common'
 
-import { MediaRepository } from '@/shared/media/media.repository'
+import type { MediaRecord } from '@/shared/media/media-url.service'
 import { MediaUrlService } from '@/shared/media/media-url.service'
+import { MediaRepository } from '@/shared/media/media.repository'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 
 import { CategoryRepository } from './category.repository'
@@ -85,7 +86,8 @@ export class CategoryService {
 
 		if (parentId) {
 			const parent = await this.repo.findById(parentId, catalogId)
-			if (!parent) throw new BadRequestException('Родительская категория не найдена')
+			if (!parent)
+				throw new BadRequestException('Родительская категория не найдена')
 		}
 
 		const validProductIds = await this.ensureProductsInCatalog(
@@ -103,9 +105,7 @@ export class CategoryService {
 			discount: dto.discount ?? null,
 			position: dto.position ?? 0,
 			catalog: { connect: { id: catalogId } },
-			...(imageMediaId
-				? { imageMedia: { connect: { id: imageMediaId } } }
-				: {})
+			...(imageMediaId ? { imageMedia: { connect: { id: imageMediaId } } } : {})
 		}
 
 		if (parentId) {
@@ -158,7 +158,9 @@ export class CategoryService {
 				data.parent = { disconnect: true }
 			} else {
 				if (dto.parentId === id) {
-					throw new BadRequestException('Категория не может быть сама себе родителем')
+					throw new BadRequestException(
+						'Категория не может быть сама себе родителем'
+					)
 				}
 				const parent = await this.repo.findById(dto.parentId, catalogId)
 				if (!parent)
@@ -207,7 +209,9 @@ export class CategoryService {
 		return { ok: true }
 	}
 
-	private mapCategory<T extends { imageMedia?: any | null }>(category: T) {
+	private mapCategory<T extends { imageMedia?: MediaRecord | null }>(
+		category: T
+	) {
 		return {
 			...category,
 			imageMedia: category.imageMedia
@@ -216,18 +220,21 @@ export class CategoryService {
 		}
 	}
 
-	private mapCategoryWithRelations(
-		category: { imageMedia?: any | null; children?: { imageMedia?: any | null }[] }
-	) {
+	private mapCategoryWithRelations(category: {
+		imageMedia?: MediaRecord | null
+		children?: { imageMedia?: MediaRecord | null }[]
+	}) {
 		return {
 			...this.mapCategory(category),
 			children: (category.children ?? []).map(child => this.mapCategory(child))
 		}
 	}
 
-	private mapProductMedia<T extends { media: { position: number; kind?: string | null; media: any }[] }>(
-		product: T
-	) {
+	private mapProductMedia<
+		T extends {
+			media: { position: number; kind?: string | null; media: MediaRecord }[]
+		}
+	>(product: T) {
 		return {
 			...product,
 			media: (product.media ?? []).map(item => ({
@@ -302,8 +309,7 @@ export class CategoryService {
 	}
 
 	private normalizeLimit(value?: number | string): number {
-		const raw =
-			typeof value === 'string' ? Number(value.trim()) : (value as number)
+		const raw = typeof value === 'string' ? Number(value.trim()) : value
 		if (!Number.isFinite(raw)) return CATEGORY_PRODUCTS_DEFAULT_LIMIT
 		const normalized = Math.floor(raw)
 		if (normalized <= 0) return CATEGORY_PRODUCTS_DEFAULT_LIMIT

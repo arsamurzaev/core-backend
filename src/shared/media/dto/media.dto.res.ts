@@ -1,6 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
-
 import { MediaStatus } from '@generated/enums'
+import { ApiProperty } from '@nestjs/swagger'
 
 export class MediaVariantDto {
 	@ApiProperty({ type: String })
@@ -9,17 +8,17 @@ export class MediaVariantDto {
 	@ApiProperty({ type: String })
 	kind: string
 
-	@ApiPropertyOptional({ type: String, nullable: true })
-	mimeType?: string | null
+	@ApiProperty({ type: String, nullable: true })
+	mimeType: string | null
 
-	@ApiPropertyOptional({ type: Number, nullable: true })
-	size?: number | null
+	@ApiProperty({ type: Number, nullable: true })
+	size: number | null
 
-	@ApiPropertyOptional({ type: Number, nullable: true })
-	width?: number | null
+	@ApiProperty({ type: Number, nullable: true })
+	width: number | null
 
-	@ApiPropertyOptional({ type: Number, nullable: true })
-	height?: number | null
+	@ApiProperty({ type: Number, nullable: true })
+	height: number | null
 
 	@ApiProperty({ type: String })
 	key: string
@@ -38,14 +37,14 @@ export class MediaDto {
 	@ApiProperty({ type: String })
 	mimeType: string
 
-	@ApiPropertyOptional({ type: Number, nullable: true })
-	size?: number | null
+	@ApiProperty({ type: Number, nullable: true })
+	size: number | null
 
-	@ApiPropertyOptional({ type: Number, nullable: true })
-	width?: number | null
+	@ApiProperty({ type: Number, nullable: true })
+	width: number | null
 
-	@ApiPropertyOptional({ type: Number, nullable: true })
-	height?: number | null
+	@ApiProperty({ type: Number, nullable: true })
+	height: number | null
 
 	@ApiProperty({ enum: MediaStatus })
 	status: MediaStatus

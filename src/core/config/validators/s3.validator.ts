@@ -1,4 +1,11 @@
-﻿import { IsBooleanString, IsInt, IsOptional, IsString, Max, Min } from 'class-validator'
+﻿import {
+	IsBooleanString,
+	IsInt,
+	IsOptional,
+	IsString,
+	Max,
+	Min
+} from 'class-validator'
 
 export class S3Validator {
 	@IsOptional()

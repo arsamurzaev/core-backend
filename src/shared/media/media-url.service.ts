@@ -5,7 +5,7 @@ import { AllInterfaces } from '@/core/config'
 
 import { MediaDto, MediaVariantDto } from './dto/media.dto.res'
 
-type MediaRecord = {
+export type MediaRecord = {
 	id: string
 	originalName: string
 	mimeType: string
@@ -18,7 +18,7 @@ type MediaRecord = {
 	variants?: MediaVariantRecord[] | null
 }
 
-type MediaVariantRecord = {
+export type MediaVariantRecord = {
 	id: string
 	kind: string
 	mimeType?: string | null

@@ -1,4 +1,4 @@
-import { CatalogStatus, ProductsDisplayMode } from '@generated/enums'
+import { CatalogStatus } from '@generated/enums'
 import { ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
 import {
@@ -23,9 +23,10 @@ export class UpdateCatalogDtoReq {
 	@Matches(SLUG_PATTERN)
 	@MinLength(SLUG_MIN_LENGTH)
 	@MaxLength(SLUG_MAX_LENGTH)
-	@Transform(({ value }) => {
+	@Transform(({ value }: { value: unknown }) => {
 		if (value === undefined || value === null) return value
-		const normalized = String(value).trim().toLowerCase()
+		if (typeof value !== 'string') return value
+		const normalized = value.trim().toLowerCase()
 		return normalized.length ? normalized : undefined
 	})
 	slug?: string
@@ -39,10 +40,11 @@ export class UpdateCatalogDtoReq {
 	@IsString()
 	@MaxLength(253)
 	@Matches(DOMAIN_PATTERN)
-	@Transform(({ value }) => {
+	@Transform(({ value }: { value: unknown }) => {
 		if (value === undefined) return undefined
 		if (value === null) return null
-		const normalized = String(value).trim().toLowerCase()
+		if (typeof value !== 'string') return value
+		const normalized = value.trim().toLowerCase()
 		return normalized.length ? normalized : null
 	})
 	domain?: string | null
@@ -69,10 +71,11 @@ export class UpdateCatalogDtoReq {
 	})
 	@IsOptional()
 	@IsString()
-	@Transform(({ value }) => {
+	@Transform(({ value }: { value: unknown }) => {
 		if (value === undefined) return undefined
 		if (value === null) return null
-		const normalized = String(value).trim()
+		if (typeof value !== 'string') return value
+		const normalized = value.trim()
 		return normalized.length ? normalized : null
 	})
 	parentId?: string | null
@@ -84,10 +87,11 @@ export class UpdateCatalogDtoReq {
 	})
 	@IsOptional()
 	@IsString()
-	@Transform(({ value }) => {
+	@Transform(({ value }: { value: unknown }) => {
 		if (value === undefined) return undefined
 		if (value === null) return null
-		const normalized = String(value).trim()
+		if (typeof value !== 'string') return value
+		const normalized = value.trim()
 		return normalized.length ? normalized : null
 	})
 	userId?: string | null
@@ -132,14 +136,4 @@ export class UpdateCatalogDtoReq {
 	@IsOptional()
 	@IsBoolean()
 	isActive?: boolean
-
-	@ApiPropertyOptional({ type: Boolean, example: true })
-	@IsOptional()
-	@IsBoolean()
-	isCommerceEnabled?: boolean
-
-	@ApiPropertyOptional({ type: String, example: ProductsDisplayMode.LIST })
-	@IsOptional()
-	@IsEnum(ProductsDisplayMode)
-	productsDisplayMode?: ProductsDisplayMode
 }

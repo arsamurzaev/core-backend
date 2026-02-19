@@ -1,4 +1,4 @@
-import { CatalogStatus, ProductsDisplayMode } from '@generated/enums'
+import { CatalogStatus } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
 import { AttributeDto } from '@/modules/attribute/dto/responses/attribute.dto.res'
@@ -9,34 +9,28 @@ export class CatalogConfigDto {
 	@ApiProperty({ enum: CatalogStatus })
 	status: CatalogStatus
 
-	@ApiPropertyOptional({ type: String, nullable: true })
-	about?: string | null
+	@ApiProperty({ type: String })
+	about: string
 
-	@ApiPropertyOptional({ type: String, nullable: true })
-	description?: string | null
+	@ApiProperty({ type: String, nullable: true })
+	description: string | null
 
-	@ApiPropertyOptional({ type: String, nullable: true })
-	currency?: string | null
+	@ApiProperty({ type: String })
+	currency: string
 
-	@ApiPropertyOptional({ type: MediaDto, nullable: true })
-	logoMedia?: MediaDto | null
+	@ApiProperty({ type: MediaDto, nullable: true })
+	logoMedia: MediaDto | null
 
-	@ApiPropertyOptional({ type: MediaDto, nullable: true })
-	bgMedia?: MediaDto | null
+	@ApiProperty({ type: MediaDto, nullable: true })
+	bgMedia: MediaDto | null
 
-	@ApiPropertyOptional({ type: String, nullable: true })
-	note?: string | null
+	@ApiProperty({ type: String, nullable: true })
+	note: string | null
 }
 
 export class CatalogSettingsDto {
 	@ApiProperty({ type: Boolean })
 	isActive: boolean
-
-	@ApiProperty({ type: Boolean })
-	isCommerceEnabled: boolean
-
-	@ApiProperty({ enum: ProductsDisplayMode })
-	productsDisplayMode: ProductsDisplayMode
 }
 
 export class CatalogTypeDto {
@@ -84,11 +78,11 @@ export class CatalogDto {
 	@ApiPropertyOptional({ type: String, format: 'date-time' })
 	updatedAt?: string
 
-	@ApiProperty({ type: CatalogConfigDto })
-	config: CatalogConfigDto
+	@ApiProperty({ type: CatalogConfigDto, nullable: true })
+	config: CatalogConfigDto | null
 
-	@ApiProperty({ type: CatalogSettingsDto })
-	settings: CatalogSettingsDto
+	@ApiProperty({ type: CatalogSettingsDto, nullable: true })
+	settings: CatalogSettingsDto | null
 }
 
 export class CatalogCurrentDto extends CatalogDto {

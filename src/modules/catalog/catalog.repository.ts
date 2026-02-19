@@ -35,6 +35,7 @@ const enumValueSelect = {
 	value: true,
 	displayName: true,
 	displayOrder: true,
+	businessId: true,
 	createdAt: true,
 	updatedAt: true
 }
@@ -48,6 +49,7 @@ const attributeSelect = {
 	isVariantAttribute: true,
 	isFilterable: true,
 	displayOrder: true,
+	isHidden: true,
 	createdAt: true,
 	updatedAt: true,
 	types: {
@@ -93,7 +95,8 @@ const catalogSelect = {
 			description: true,
 			currency: true,
 			logoMedia: { select: mediaSelect },
-			bgMedia: { select: mediaSelect }
+			bgMedia: { select: mediaSelect },
+			note: true
 		}
 	},
 	settings: {

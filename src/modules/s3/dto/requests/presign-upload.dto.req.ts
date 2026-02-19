@@ -1,6 +1,13 @@
-﻿﻿import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
 import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator'
+
+function normalizeOptionalString(value: unknown): unknown {
+	if (value === undefined || value === null) return undefined
+	if (typeof value !== 'string') return value
+	const trimmed = value.trim()
+	return trimmed.length ? trimmed : undefined
+}
 
 export class PresignUploadDtoReq {
 	@ApiProperty({
@@ -19,11 +26,7 @@ export class PresignUploadDtoReq {
 	@IsString()
 	@IsNotEmpty()
 	@MaxLength(200)
-	@Transform(({ value }: { value: unknown }) => {
-		if (value === undefined || value === null) return undefined
-		const trimmed = String(value).trim()
-		return trimmed.length ? trimmed : undefined
-	})
+	@Transform(({ value }: { value: unknown }) => normalizeOptionalString(value))
 	path?: string
 
 	@ApiPropertyOptional({ example: 'products' })

@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing'
 
-import { MediaRepository } from '@/shared/media/media.repository'
 import { MediaUrlService } from '@/shared/media/media-url.service'
+import { MediaRepository } from '@/shared/media/media.repository'
 
 import { SeoRepository } from './seo.repository'
 import { SeoService } from './seo.service'

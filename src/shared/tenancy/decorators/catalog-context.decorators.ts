@@ -10,9 +10,10 @@ type CatalogCtxKey =
 	| 'requestId'
 
 export const CatalogCtx = createParamDecorator(
-	(data: CatalogCtxKey | undefined, _ctx: ExecutionContext) => {
+	(data: CatalogCtxKey | undefined, ctx: ExecutionContext) => {
+		void ctx
 		const store = RequestContext.mustGet()
-		return data ? (store as any)[data] : store
+		return data ? store[data] : store
 	}
 )
 

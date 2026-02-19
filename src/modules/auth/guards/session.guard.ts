@@ -1,5 +1,3 @@
-п»ї/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Role } from '@generated/client'
 import {
 	CanActivate,
@@ -9,13 +7,14 @@ import {
 	UnauthorizedException
 } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
-import type { Request, Response } from 'express'
+import type { Response } from 'express'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { IS_PUBLIC_KEY } from '@/shared/http/decorators/public.decorator'
 
 import { ROLES_KEY } from '../decorators/roles.decorator'
 import { SessionService } from '../session/session.service'
+import type { AuthRequest } from '../types/auth-request'
 
 const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
 const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
@@ -40,7 +39,7 @@ function isUnsafeMethod(method: string | undefined) {
 	return m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE'
 }
 
-// РРµСЂР°СЂС…РёСЏ: ADMIN > CATALOG > USER
+// Иерархия: ADMIN > CATALOG > USER
 const ROLE_RANK: Record<Role, number> = {
 	ADMIN: 3,
 	CATALOG: 2,
@@ -48,7 +47,7 @@ const ROLE_RANK: Record<Role, number> = {
 }
 
 function requiredRank(required: Role[]) {
-	// С‚СЂРµР±СѓРµРј вЂњСЃР°РјРѕРµ СЃС‚СЂРѕРіРѕРµвЂќ РёР· РїРµСЂРµС‡РёСЃР»РµРЅРЅС‹С…
+	// требуем “самое строгое” из перечисленных
 	return Math.max(...required.map(r => ROLE_RANK[r] ?? 999))
 }
 
@@ -68,31 +67,26 @@ export class SessionGuard implements CanActivate {
 		if (isPublic) return true
 
 		const http = context.switchToHttp()
-		const req = http.getRequest<Request>()
+		const req = http.getRequest<AuthRequest>()
 		const res = http.getResponse<Response>()
 
-		const sid =
-			(req as any).cookies?.[SID_COOKIE] ??
-			parseCookie(req.headers.cookie, SID_COOKIE)
+		const sid = parseCookie(req.headers.cookie, SID_COOKIE)
 
-		if (!sid) throw new UnauthorizedException('РќРµ Р°РІС‚РѕСЂРёР·РѕРІР°РЅ')
+		if (!sid) throw new UnauthorizedException('Не авторизован')
 
 		const session = await this.sessions.get(sid)
 		if (!session?.userId)
-			throw new UnauthorizedException('РЎРµСЃСЃРёСЏ РЅРµРґРµР№СЃС‚РІРёС‚РµР»СЊРЅР°')
+			throw new UnauthorizedException('Сессия недействительна')
 
-		// CSRF (С‚РѕР»СЊРєРѕ unsafe РјРµС‚РѕРґС‹)
+		// CSRF (только unsafe методы)
 		if (isUnsafeMethod(req.method)) {
 			const csrfHeader = String(req.headers['x-csrf-token'] ?? '')
-			const csrfCookie =
-				(req as any).cookies?.[CSRF_COOKIE] ??
-				parseCookie(req.headers.cookie, CSRF_COOKIE) ??
-				''
+			const csrfCookie = parseCookie(req.headers.cookie, CSRF_COOKIE) ?? ''
 
 			if (!csrfHeader || !csrfCookie)
-				throw new ForbiddenException('CSRF С‚РѕРєРµРЅ РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚')
+				throw new ForbiddenException('CSRF токен отсутствует')
 			if (csrfHeader !== csrfCookie || csrfHeader !== session.csrf) {
-				throw new ForbiddenException('CSRF С‚РѕРєРµРЅ РЅРµРґРµР№СЃС‚РІРёС‚РµР»РµРЅ')
+				throw new ForbiddenException('CSRF токен недействителен')
 			}
 		}
 
@@ -100,11 +94,11 @@ export class SessionGuard implements CanActivate {
 			where: { id: session.userId, deleteAt: null },
 			select: { id: true, role: true, login: true, name: true }
 		})
-		if (!user) throw new UnauthorizedException('РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ')
-		;(req as any).user = user
-		;(req as any).sessionId = sid
+		if (!user) throw new UnauthorizedException('Пользователь не найден')
+		req.user = user
+		req.sessionId = sid
 
-		// Roles(...) СЃ РёРµСЂР°СЂС…РёРµР№
+		// Roles(...) с иерархией
 		const required =
 			this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
 				context.getHandler(),
@@ -114,7 +108,7 @@ export class SessionGuard implements CanActivate {
 		if (required.length > 0) {
 			const need = requiredRank(required)
 			const have = ROLE_RANK[user.role]
-			if (have < need) throw new ForbiddenException('РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ')
+			if (have < need) throw new ForbiddenException('Недостаточно прав')
 		}
 		try {
 			await this.sessions.touch(sid, session.userId)

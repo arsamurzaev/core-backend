@@ -1,4 +1,4 @@
-﻿﻿import { Role } from '@generated/enums'
+import { Role } from '@generated/enums'
 import {
 	BadRequestException,
 	Body,
@@ -27,18 +27,18 @@ import { Roles } from '../auth/decorators/roles.decorator'
 import { CatalogAccessGuard } from '../auth/guards/catalog-access.guard'
 import { SessionGuard } from '../auth/guards/session.guard'
 
-import { PresignUploadDtoReq } from './dto/requests/presign-upload.dto.req'
-import { PresignPostUploadDtoReq } from './dto/requests/presign-post-upload.dto.req'
-import { MultipartStartDtoReq } from './dto/requests/multipart-start.dto.req'
-import { MultipartPartDtoReq } from './dto/requests/multipart-part.dto.req'
-import { MultipartCompleteDtoReq } from './dto/requests/multipart-complete.dto.req'
 import { MultipartAbortDtoReq } from './dto/requests/multipart-abort.dto.req'
+import { MultipartCompleteDtoReq } from './dto/requests/multipart-complete.dto.req'
+import { MultipartPartDtoReq } from './dto/requests/multipart-part.dto.req'
+import { MultipartStartDtoReq } from './dto/requests/multipart-start.dto.req'
+import { PresignPostUploadDtoReq } from './dto/requests/presign-post-upload.dto.req'
+import { PresignUploadDtoReq } from './dto/requests/presign-upload.dto.req'
 import { UploadFromS3DtoReq } from './dto/requests/upload-from-s3.dto.req'
-import { PresignUploadResponseDto } from './dto/responses/presign-upload.dto.res'
-import { PresignPostUploadResponseDto } from './dto/responses/presign-post-upload.dto.res'
-import { MultipartStartResponseDto } from './dto/responses/multipart-start.dto.res'
-import { MultipartPartResponseDto } from './dto/responses/multipart-part.dto.res'
 import { MultipartCompleteResponseDto } from './dto/responses/multipart-complete.dto.res'
+import { MultipartPartResponseDto } from './dto/responses/multipart-part.dto.res'
+import { MultipartStartResponseDto } from './dto/responses/multipart-start.dto.res'
+import { PresignPostUploadResponseDto } from './dto/responses/presign-post-upload.dto.res'
+import { PresignUploadResponseDto } from './dto/responses/presign-upload.dto.res'
 import {
 	UploadQueueResponseDto,
 	UploadQueueStatusDto
@@ -199,13 +199,10 @@ export class S3Controller {
 			startWith(0),
 			switchMap(() => from(this.s3Service.getUploadStatus(id))),
 			map(status => ({ data: status }) as MessageEvent),
-			takeWhile(
-				event => {
-					const status = (event.data as UploadQueueStatusDto).status
-					return status !== 'completed' && status !== 'failed'
-				},
-				true
-			)
+			takeWhile(event => {
+				const status = (event.data as UploadQueueStatusDto).status
+				return status !== 'completed' && status !== 'failed'
+			}, true)
 		)
 	}
 }

@@ -1,5 +1,5 @@
 import { DataType, ProductStatus, ProductVariantStatus } from '@generated/enums'
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+import { ApiProperty } from '@nestjs/swagger'
 
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
@@ -16,6 +16,9 @@ export class ProductAttributeEnumValueDto {
 
 	@ApiProperty({ type: Number })
 	displayOrder: number
+
+	@ApiProperty({ type: String, nullable: true })
+	businessId: string | null
 }
 
 export class ProductAttributeRefDto {
@@ -42,6 +45,9 @@ export class ProductAttributeRefDto {
 
 	@ApiProperty({ type: Number })
 	displayOrder: number
+
+	@ApiProperty({ type: Boolean })
+	isHidden: boolean
 }
 
 export class ProductAttributeDto {
@@ -54,26 +60,26 @@ export class ProductAttributeDto {
 	@ApiProperty({ type: String, nullable: true })
 	enumValueId: string | null
 
-	@ApiPropertyOptional({ type: String, nullable: true })
-	valueString?: string | null
+	@ApiProperty({ type: String, nullable: true })
+	valueString: string | null
 
-	@ApiPropertyOptional({ type: Number, nullable: true })
-	valueInteger?: number | null
+	@ApiProperty({ type: Number, nullable: true })
+	valueInteger: number | null
 
-	@ApiPropertyOptional({ type: String, nullable: true })
-	valueDecimal?: string | null
+	@ApiProperty({ type: String, nullable: true })
+	valueDecimal: string | null
 
-	@ApiPropertyOptional({ type: Boolean, nullable: true })
-	valueBoolean?: boolean | null
+	@ApiProperty({ type: Boolean, nullable: true })
+	valueBoolean: boolean | null
 
-	@ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
-	valueDateTime?: string | null
+	@ApiProperty({ type: String, format: 'date-time', nullable: true })
+	valueDateTime: string | null
 
 	@ApiProperty({ type: ProductAttributeRefDto })
 	attribute: ProductAttributeRefDto
 
-	@ApiPropertyOptional({ type: ProductAttributeEnumValueDto, nullable: true })
-	enumValue?: ProductAttributeEnumValueDto | null
+	@ApiProperty({ type: ProductAttributeEnumValueDto, nullable: true })
+	enumValue: ProductAttributeEnumValueDto | null
 }
 
 export class VariantAttributeDto {
@@ -129,8 +135,8 @@ export class ProductMediaDto {
 	@ApiProperty({ type: Number })
 	position: number
 
-	@ApiPropertyOptional({ type: String, nullable: true })
-	kind?: string | null
+	@ApiProperty({ type: String, nullable: true })
+	kind: string | null
 
 	@ApiProperty({ type: MediaDto })
 	media: MediaDto

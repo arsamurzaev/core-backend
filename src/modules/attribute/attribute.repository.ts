@@ -17,6 +17,7 @@ const attributeSelect = {
 	isVariantAttribute: true,
 	isFilterable: true,
 	displayOrder: true,
+	isHidden: true,
 	createdAt: true,
 	updatedAt: true,
 	types: {
@@ -30,6 +31,7 @@ const enumValueSelect = {
 	value: true,
 	displayName: true,
 	displayOrder: true,
+	businessId: true,
 	createdAt: true,
 	updatedAt: true
 }
@@ -189,7 +191,11 @@ export class AttributeRepository {
 		})
 	}
 
-	async existsKey(typeId: string, key: string, excludeId?: string): Promise<boolean> {
+	async existsKey(
+		typeId: string,
+		key: string,
+		excludeId?: string
+	): Promise<boolean> {
 		const attribute = await this.prisma.attribute.findFirst({
 			where: {
 				key,

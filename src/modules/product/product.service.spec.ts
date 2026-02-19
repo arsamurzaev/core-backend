@@ -1,13 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing'
 
 import { CacheService } from '@/shared/cache/cache.service'
-import { MediaRepository } from '@/shared/media/media.repository'
 import { MediaUrlService } from '@/shared/media/media-url.service'
+import { MediaRepository } from '@/shared/media/media.repository'
 
 import { ProductAttributeBuilder } from './product-attribute.builder'
+import { ProductVariantBuilder } from './product-variant.builder'
 import { ProductRepository } from './product.repository'
 import { ProductService } from './product.service'
-import { ProductVariantBuilder } from './product-variant.builder'
 
 describe('ProductService', () => {
 	let service: ProductService

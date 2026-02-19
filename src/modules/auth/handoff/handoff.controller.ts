@@ -61,7 +61,8 @@ export class HandoffController {
 		description: 'Переопределение пути редиректа'
 	})
 	@ApiFoundResponse({
-		description: 'Р РµРґРёСЂРµРєС‚ РЅР° С†РµР»РµРІРѕР№ РїСѓС‚СЊ Рё СѓСЃС‚Р°РЅРѕРІРєР° cookies СЃРµСЃСЃРёРё'
+		description:
+			'Р РµРґРёСЂРµРєС‚ РЅР° С†РµР»РµРІРѕР№ РїСѓС‚СЊ Рё СѓСЃС‚Р°РЅРѕРІРєР° cookies СЃРµСЃСЃРёРё'
 	})
 	@ApiUnauthorizedResponse({ description: 'Токен недействителен или истёк' })
 	@ApiForbiddenResponse({ description: 'Токен не для этого каталога' })
@@ -72,14 +73,19 @@ export class HandoffController {
 		@Res() res: Response
 	) {
 		const store = RequestContext.mustGet()
-		if (!store.catalogId) throw new ForbiddenException('РќРµС‚ РєРѕРЅС‚РµРєСЃС‚Р° РєР°С‚Р°Р»РѕРіР°')
+		if (!store.catalogId)
+			throw new ForbiddenException('РќРµС‚ РєРѕРЅС‚РµРєСЃС‚Р° РєР°С‚Р°Р»РѕРіР°')
 
 		const payload = await this.handoff.consume(token)
 		if (!payload)
-			throw new UnauthorizedException('РўРѕРєРµРЅ РЅРµРґРµР№СЃС‚РІРёС‚РµР»РµРЅ РёР»Рё РёСЃС‚С‘Рє')
+			throw new UnauthorizedException(
+				'РўРѕРєРµРЅ РЅРµРґРµР№СЃС‚РІРёС‚РµР»РµРЅ РёР»Рё РёСЃС‚С‘Рє'
+			)
 
 		if (payload.catalogId !== store.catalogId) {
-			throw new ForbiddenException('РўРѕРєРµРЅ РЅРµ РґР»СЏ СЌС‚РѕРіРѕ РєР°С‚Р°Р»РѕРіР°')
+			throw new ForbiddenException(
+				'РўРѕРєРµРЅ РЅРµ РґР»СЏ СЌС‚РѕРіРѕ РєР°С‚Р°Р»РѕРіР°'
+			)
 		}
 
 		// РµСЃР»Рё РЅРµ ADMIN вЂ” РїРµСЂРµРїСЂРѕРІРµСЂСЏРµРј РІР»Р°РґРµРЅРёРµ РєР°С‚Р°Р»РѕРіРѕРј
@@ -94,7 +100,9 @@ export class HandoffController {
 				)?.userId
 
 			if (!ownerId || ownerId !== payload.userId) {
-				throw new ForbiddenException('РќРµС‚ РїСЂР°РІ РЅР° РІС…РѕРґ РІ СЌС‚РѕС‚ РєР°С‚Р°Р»РѕРі')
+				throw new ForbiddenException(
+					'РќРµС‚ РїСЂР°РІ РЅР° РІС…РѕРґ РІ СЌС‚РѕС‚ РєР°С‚Р°Р»РѕРі'
+				)
 			}
 		}
 
@@ -126,4 +134,3 @@ export class HandoffController {
 		return res.redirect(302, sanitizeNext(next ?? payload.next))
 	}
 }
-

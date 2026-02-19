@@ -31,6 +31,7 @@ const prisma = new PrismaClient({
 type EnumValueSeed = {
 	value: string
 	displayName: string
+	businessId?: string | null
 }
 
 type AttributeSeed = {
@@ -41,6 +42,7 @@ type AttributeSeed = {
 	isVariantAttribute: boolean
 	isFilterable: boolean
 	displayOrder: number
+	isHidden?: boolean
 	enumValues?: EnumValueSeed[]
 }
 
@@ -68,7 +70,8 @@ const commonProductAttributes: AttributeSeed[] = [
 		isRequired: false,
 		isVariantAttribute: false,
 		isFilterable: false,
-		displayOrder: 81
+		displayOrder: 81,
+		isHidden: true
 	},
 	{
 		key: 'about',
@@ -77,7 +80,8 @@ const commonProductAttributes: AttributeSeed[] = [
 		isRequired: false,
 		isVariantAttribute: false,
 		isFilterable: false,
-		displayOrder: 82
+		displayOrder: 82,
+		isHidden: true
 	},
 	{
 		key: 'description',
@@ -86,7 +90,8 @@ const commonProductAttributes: AttributeSeed[] = [
 		isRequired: false,
 		isVariantAttribute: false,
 		isFilterable: false,
-		displayOrder: 83
+		displayOrder: 83,
+		isHidden: true
 	},
 	{
 		key: 'discount',
@@ -95,7 +100,8 @@ const commonProductAttributes: AttributeSeed[] = [
 		isRequired: false,
 		isVariantAttribute: false,
 		isFilterable: false,
-		displayOrder: 84
+		displayOrder: 84,
+		isHidden: true
 	},
 	{
 		key: 'discountedPrice',
@@ -104,7 +110,8 @@ const commonProductAttributes: AttributeSeed[] = [
 		isRequired: false,
 		isVariantAttribute: false,
 		isFilterable: false,
-		displayOrder: 85
+		displayOrder: 85,
+		isHidden: true
 	},
 	{
 		key: 'discountStartAt',
@@ -113,7 +120,8 @@ const commonProductAttributes: AttributeSeed[] = [
 		isRequired: false,
 		isVariantAttribute: false,
 		isFilterable: false,
-		displayOrder: 86
+		displayOrder: 86,
+		isHidden: true
 	},
 	{
 		key: 'discountEndAt',
@@ -122,7 +130,8 @@ const commonProductAttributes: AttributeSeed[] = [
 		isRequired: false,
 		isVariantAttribute: false,
 		isFilterable: false,
-		displayOrder: 87
+		displayOrder: 87,
+		isHidden: true
 	}
 ]
 
@@ -411,6 +420,7 @@ async function createCommonAttributes(typeIds: string[]) {
 					isVariantAttribute: attribute.isVariantAttribute,
 					isFilterable: attribute.isFilterable,
 					displayOrder: attribute.displayOrder,
+					isHidden: attribute.isHidden ?? false,
 					types: {
 						connect: typeIds.map(id => ({ id }))
 					}
@@ -479,7 +489,8 @@ async function main() {
 			attributeId: commonAttributes.brand.id,
 			value: item.value,
 			displayName: item.displayName,
-			displayOrder: index + 1
+			displayOrder: index + 1,
+			businessId: item.businessId ?? null
 		}))
 	})
 
@@ -507,6 +518,7 @@ async function main() {
 				isVariantAttribute: false,
 				isFilterable: typeSeed.uniqueAttribute.isFilterable,
 				displayOrder: typeSeed.uniqueAttribute.displayOrder,
+				isHidden: typeSeed.uniqueAttribute.isHidden ?? false,
 				types: { connect: [{ id: type.id }] }
 			}
 		})
@@ -520,6 +532,7 @@ async function main() {
 				isVariantAttribute: true,
 				isFilterable: typeSeed.variantAttribute.isFilterable,
 				displayOrder: typeSeed.variantAttribute.displayOrder,
+				isHidden: typeSeed.variantAttribute.isHidden ?? false,
 				types: { connect: [{ id: type.id }] }
 			}
 		})
@@ -536,7 +549,8 @@ async function main() {
 				attributeId: variantAttribute.id,
 				value: item.value,
 				displayName: item.displayName,
-				displayOrder: enumIndex + 1
+				displayOrder: enumIndex + 1,
+				businessId: item.businessId ?? null
 			}))
 		})
 

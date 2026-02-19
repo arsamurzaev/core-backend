@@ -33,13 +33,13 @@ export class PrismaService
 		super({ adapter })
 	}
 
-	onModuleInit() {
+	async onModuleInit() {
 		const start = Date.now()
 
 		this.logger.log('Подключение к базе данных backend_auth...')
 
 		try {
-			this.$connect()
+			await this.$connect()
 
 			const ms = Date.now() - start
 			this.logger.log(

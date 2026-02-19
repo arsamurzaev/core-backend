@@ -19,6 +19,38 @@ type ErrorBody = {
 	timestamp: string
 }
 
+function extractMetaTarget(meta: unknown): string | null {
+	if (!meta || typeof meta !== 'object') return null
+	if (!('target' in meta)) return null
+
+	const target = (meta as { target?: unknown }).target
+	if (Array.isArray(target)) {
+		const fields = target.filter(
+			(field): field is string => typeof field === 'string'
+		)
+		return fields.length ? fields.join(', ') : null
+	}
+	if (typeof target === 'string') return target
+	return null
+}
+
+function extractHttpMessage(
+	response: unknown,
+	fallback: string
+): string | string[] {
+	if (typeof response === 'string') return response
+	if (!response || typeof response !== 'object') return fallback
+
+	const payload = response as { message?: unknown; error?: unknown }
+	if (typeof payload.message === 'string' || Array.isArray(payload.message)) {
+		return payload.message
+	}
+	if (typeof payload.error === 'string') {
+		return payload.error
+	}
+	return fallback
+}
+
 function prismaToHttp(exception: Prisma.PrismaClientKnownRequestError): {
 	status: number
 	message: string
@@ -26,8 +58,7 @@ function prismaToHttp(exception: Prisma.PrismaClientKnownRequestError): {
 	switch (exception.code) {
 		case 'P2002': {
 			// Unique constraint failed
-			const target = (exception.meta as any)?.target
-			const fields = Array.isArray(target) ? target.join(', ') : target
+			const fields = extractMetaTarget(exception.meta)
 			return {
 				status: HttpStatus.CONFLICT,
 				message: fields ? `Уже существует: ${fields}` : 'Уже существует'
@@ -69,7 +100,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 		const isDev = process.env.NODE_ENV !== 'production'
 
 		let status = HttpStatus.INTERNAL_SERVER_ERROR
-	let message: string | string[] = 'Внутренняя ошибка сервера'
+		let message: string | string[] = 'Внутренняя ошибка сервера'
 
 		console.log(exception)
 
@@ -78,14 +109,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 			status = exception.getStatus()
 
 			const response = exception.getResponse()
-			if (typeof response === 'string') {
-				message = response
-			} else if (response && typeof response === 'object') {
-				const m = (response as any).message
-				message = m ?? (response as any).error ?? exception.message
-			} else {
-				message = exception.message
-			}
+			message = extractHttpMessage(response, exception.message)
 		}
 		// Prisma known errors
 		else if (exception instanceof Prisma.PrismaClientKnownRequestError) {

@@ -9,11 +9,13 @@ import {
 
 import { RequestContext } from '@/shared/tenancy/request-context'
 
+import type { AuthRequest } from '../types/auth-request'
+
 @Injectable()
 export class CatalogAccessGuard implements CanActivate {
 	canActivate(ctx: ExecutionContext): boolean {
-		const req = ctx.switchToHttp().getRequest()
-		const user = req.user as { id: string; role: Role } | undefined
+		const req = ctx.switchToHttp().getRequest<AuthRequest>()
+		const user = req.user
 		if (!user) throw new ForbiddenException('Нет пользователя в запросе')
 
 		const store = RequestContext.get()

@@ -45,4 +45,4 @@ async function bootstrap() {
 	logger.log(`Сервис запущен на ${host}`)
 	logger.log(`Swagger доступен на ${host}/docs`)
 }
-bootstrap()
+void bootstrap()

@@ -1,4 +1,4 @@
-﻿﻿import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
+import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
 	Injectable,
@@ -10,8 +10,9 @@ import slugify from 'slugify'
 import { CacheService } from '@/shared/cache/cache.service'
 import { CATALOG_TYPE_CACHE_VERSION } from '@/shared/cache/catalog-cache.constants'
 import type { MediaDto } from '@/shared/media/dto/media.dto.res'
-import { MediaRepository } from '@/shared/media/media.repository'
+import type { MediaRecord } from '@/shared/media/media-url.service'
 import { MediaUrlService } from '@/shared/media/media-url.service'
+import { MediaRepository } from '@/shared/media/media.repository'
 import { mustCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
 
 import { CreateProductDtoReq } from './dto/requests/create-product.dto.req'
@@ -295,9 +296,11 @@ export class ProductService {
 		return { ok: true }
 	}
 
-	private mapProductMedia<T extends { media: { position: number; kind?: string | null; media: any }[] }>(
-		product: T
-	) {
+	private mapProductMedia<
+		T extends {
+			media: { position: number; kind?: string | null; media: MediaRecord }[]
+		}
+	>(product: T) {
 		return {
 			...product,
 			media: (product.media ?? []).map(item => ({
@@ -346,9 +349,7 @@ export class ProductService {
 		return variants.map(variant => {
 			const variantKey = normalizeVariantKey(variant.variantKey)
 			if (keySet.has(variantKey)) {
-				throw new BadRequestException(
-					`Дублирующийся ключ варианта: ${variantKey}`
-				)
+				throw new BadRequestException(`Дублирующийся ключ варианта: ${variantKey}`)
 			}
 			keySet.add(variantKey)
 
@@ -407,27 +408,6 @@ export class ProductService {
 			suffix += 1
 		}
 		return candidate
-	}
-
-	private async ensureSlugAvailable(
-		slug: string,
-		catalogId: string,
-		excludeId?: string
-	): Promise<void> {
-		const exists = await this.repo.existsSlug(slug, catalogId, excludeId)
-		if (exists) {
-			throw new BadRequestException('Слаг товара уже используется')
-		}
-	}
-
-	private async ensureSkuAvailable(
-		sku: string,
-		excludeId?: string
-	): Promise<void> {
-		const exists = await this.repo.existsSku(sku, excludeId)
-		if (exists) {
-			throw new BadRequestException('SKU товара уже используется')
-		}
 	}
 
 	private async buildCatalogProductsCacheKey(

@@ -1,10 +1,9 @@
 ﻿﻿import type { Prisma } from '@generated/client'
+import { ProductVariantStatus } from '@generated/enums'
 import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import { BadRequestException, Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
-
-import { ProductVariantStatus } from '@generated/enums'
 
 import type { ProductAttributeValueData } from './product-attribute.builder'
 import type {
@@ -73,14 +72,16 @@ const attributeRefSelect = {
 	isRequired: true,
 	isVariantAttribute: true,
 	isFilterable: true,
-	displayOrder: true
+	displayOrder: true,
+	isHidden: true
 }
 
 const attributeEnumValueSelect = {
 	id: true,
 	value: true,
 	displayName: true,
-	displayOrder: true
+	displayOrder: true,
+	businessId: true
 }
 
 const productAttributeSelect = {
@@ -162,7 +163,7 @@ export class ProductRepository {
 	findPopular(catalogId: string) {
 		return this.prisma.product.findMany({
 			where: { deleteAt: null, catalogId, isPopular: true },
-			select: productSelectWithAttributes,
+			select: productSelectWithDetails,
 			orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }]
 		})
 	}
@@ -559,9 +560,7 @@ export class ProductRepository {
 					where: { id: existing.id },
 					data: {
 						deleteAt: null,
-						...(normalizedDisplayName
-							? { displayName: normalizedDisplayName }
-							: {})
+						...(normalizedDisplayName ? { displayName: normalizedDisplayName } : {})
 					}
 				})
 			}
@@ -601,9 +600,7 @@ export class ProductRepository {
 		for (const variantKey of variantKeys) {
 			const current = existingMap.get(variantKey)
 			if (!current) {
-				throw new BadRequestException(
-					`Вариант с ключом ${variantKey} не найден`
-				)
+				throw new BadRequestException(`Вариант с ключом ${variantKey} не найден`)
 			}
 		}
 
@@ -638,4 +635,3 @@ export class ProductRepository {
 		}
 	}
 }
-

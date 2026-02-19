@@ -66,10 +66,8 @@ export class RedisService
 
 			this.logger.log('Отключение от Redis успешно выполнено')
 		} catch (error) {
-			this.on('error', error => {
-				this.logger.error('Отключение от Redis не удалось', {
-					error: error.message ?? error
-				})
+			this.logger.error('Отключение от Redis не удалось', {
+				error: error instanceof Error ? error.message : String(error)
 			})
 		}
 	}

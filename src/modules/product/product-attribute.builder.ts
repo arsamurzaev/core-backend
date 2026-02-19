@@ -21,6 +21,7 @@ type AttributeMeta = {
 	dataType: DataType
 	isRequired: boolean
 	isVariantAttribute: boolean
+	isHidden: boolean
 }
 
 @Injectable()
@@ -112,6 +113,7 @@ export class ProductAttributeBuilder {
 			where: {
 				id: { in: [...attributeIds] },
 				deleteAt: null,
+				isHidden: false,
 				types: { some: { id: typeId } }
 			},
 			select: {
@@ -119,7 +121,8 @@ export class ProductAttributeBuilder {
 				key: true,
 				dataType: true,
 				isRequired: true,
-				isVariantAttribute: true
+				isVariantAttribute: true,
+				isHidden: true
 			}
 		})
 	}
@@ -131,6 +134,7 @@ export class ProductAttributeBuilder {
 		const required = await this.prisma.attribute.findMany({
 			where: {
 				deleteAt: null,
+				isHidden: false,
 				isRequired: true,
 				isVariantAttribute: false,
 				types: { some: { id: typeId } }
@@ -183,7 +187,9 @@ export class ProductAttributeBuilder {
 				}
 				const value = (input.valueString ?? '').trim()
 				if (!value) {
-					throw new BadRequestException(`Атрибут ${attribute.key} не может быть пустым`)
+					throw new BadRequestException(
+						`Атрибут ${attribute.key} не может быть пустым`
+					)
 				}
 				return {
 					attributeId: attribute.id,

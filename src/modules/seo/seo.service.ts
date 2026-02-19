@@ -1,5 +1,4 @@
-﻿/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
-import { SeoEntityType } from '@generated/enums'
+﻿import { SeoEntityType } from '@generated/enums'
 import { SeoSettingCreateInput, SeoSettingUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
@@ -7,6 +6,7 @@ import {
 	NotFoundException
 } from '@nestjs/common'
 
+import type { MediaRecord } from '@/shared/media/media-url.service'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
@@ -261,9 +261,9 @@ export class SeoService {
 		return { ok: true }
 	}
 
-	private mapSeo<T extends { ogMedia?: any | null; twitterMedia?: any | null }>(
-		seo: T
-	) {
+	private mapSeo<
+		T extends { ogMedia?: MediaRecord | null; twitterMedia?: MediaRecord | null }
+	>(seo: T) {
 		return {
 			...seo,
 			ogMedia: seo.ogMedia ? this.mediaUrl.mapMedia(seo.ogMedia) : null,

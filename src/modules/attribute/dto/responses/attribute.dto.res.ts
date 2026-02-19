@@ -17,6 +17,9 @@ export class AttributeEnumValueDto {
 	@ApiProperty({ type: Number })
 	displayOrder: number
 
+	@ApiProperty({ type: String, nullable: true })
+	businessId: string | null
+
 	@ApiProperty({ type: String, format: 'date-time' })
 	createdAt: string
 
@@ -51,6 +54,9 @@ export class AttributeDto {
 
 	@ApiProperty({ type: Number })
 	displayOrder: number
+
+	@ApiProperty({ type: Boolean })
+	isHidden: boolean
 
 	@ApiProperty({ type: String, format: 'date-time' })
 	createdAt: string
