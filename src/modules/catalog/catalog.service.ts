@@ -310,6 +310,14 @@ export class CatalogService {
 			settingsUpdate.isActive = dto.isActive
 			settingsCreate.isActive = dto.isActive
 		}
+		if (dto.googleVerification !== undefined) {
+			settingsUpdate.googleVerification = dto.googleVerification
+			settingsCreate.googleVerification = dto.googleVerification
+		}
+		if (dto.yandexVerification !== undefined) {
+			settingsUpdate.yandexVerification = dto.yandexVerification
+			settingsCreate.yandexVerification = dto.yandexVerification
+		}
 
 		if (Object.keys(settingsUpdate).length > 0) {
 			data.settings = {

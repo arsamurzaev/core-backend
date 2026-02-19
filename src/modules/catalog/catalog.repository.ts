@@ -101,7 +101,9 @@ const catalogSelect = {
 	},
 	settings: {
 		select: {
-			isActive: true
+			isActive: true,
+			googleVerification: true,
+			yandexVerification: true
 		}
 	}
 }

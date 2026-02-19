@@ -31,6 +31,12 @@ export class CatalogConfigDto {
 export class CatalogSettingsDto {
 	@ApiProperty({ type: Boolean })
 	isActive: boolean
+
+	@ApiProperty({ type: String, nullable: true })
+	googleVerification: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	yandexVerification: string | null
 }
 
 export class CatalogTypeDto {

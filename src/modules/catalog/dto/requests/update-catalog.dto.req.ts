@@ -136,4 +136,36 @@ export class UpdateCatalogDtoReq {
 	@IsOptional()
 	@IsBoolean()
 	isActive?: boolean
+
+	@ApiPropertyOptional({
+		type: String,
+		example: 'google-site-verification=abc123',
+		nullable: true
+	})
+	@IsOptional()
+	@IsString()
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		if (typeof value !== 'string') return value
+		const normalized = value.trim()
+		return normalized.length ? normalized : null
+	})
+	googleVerification?: string | null
+
+	@ApiPropertyOptional({
+		type: String,
+		example: 'yandex-verification: abc123',
+		nullable: true
+	})
+	@IsOptional()
+	@IsString()
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		if (typeof value !== 'string') return value
+		const normalized = value.trim()
+		return normalized.length ? normalized : null
+	})
+	yandexVerification?: string | null
 }
