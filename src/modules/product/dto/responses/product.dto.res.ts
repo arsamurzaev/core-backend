@@ -142,6 +142,17 @@ export class ProductMediaDto {
 	media: MediaDto
 }
 
+export class ProductBrandDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	name: string
+
+	@ApiProperty({ type: String })
+	slug: string
+}
+
 export class ProductDto {
 	@ApiProperty({ type: String })
 	id: string
@@ -160,6 +171,9 @@ export class ProductDto {
 
 	@ApiProperty({ type: [ProductMediaDto] })
 	media: ProductMediaDto[]
+
+	@ApiProperty({ type: ProductBrandDto, nullable: true })
+	brand: ProductBrandDto | null
 
 	@ApiProperty({ type: Boolean })
 	isPopular: boolean

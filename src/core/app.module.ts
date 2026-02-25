@@ -10,6 +10,7 @@ import { APP_FILTER, APP_GUARD, APP_PIPE } from '@nestjs/core'
 import { AdminModule } from '@/modules/admin/admin.module'
 import { AttributeModule } from '@/modules/attribute/attribute.module'
 import { AuthModule } from '@/modules/auth/auth.module'
+import { BrandModule } from '@/modules/brand/brand.module'
 import { CartModule } from '@/modules/cart/cart.module'
 import { CatalogModule } from '@/modules/catalog/catalog.module'
 import { CategoryModule } from '@/modules/category/category.module'
@@ -40,6 +41,7 @@ import { databaseEnv, httpEnv, redisEnv, s3Env } from './config/env'
 		AuthModule,
 		AdminModule,
 		AttributeModule,
+		BrandModule,
 		UserModule,
 		CatalogModule,
 		CategoryModule,

@@ -1,6 +1,6 @@
 ﻿import { ProductStatus } from '@generated/enums'
 import { ApiPropertyOptional } from '@nestjs/swagger'
-import { Type } from 'class-transformer'
+import { Transform, Type } from 'class-transformer'
 import {
 	ArrayMaxSize,
 	IsArray,
@@ -51,6 +51,22 @@ export class UpdateProductDtoReq {
 	@Type(() => Number)
 	@IsNumber()
 	position?: number
+
+	@ApiPropertyOptional({
+		type: String,
+		example: 'brand-uuid',
+		nullable: true
+	})
+	@IsOptional()
+	@IsString()
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		if (typeof value !== 'string') return value
+		const normalized = value.trim()
+		return normalized.length ? normalized : null
+	})
+	brandId?: string | null
 
 	@ApiPropertyOptional({
 		type: [ProductAttributeValueDto],

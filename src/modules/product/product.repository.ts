@@ -1,4 +1,4 @@
-﻿﻿import type { Prisma } from '@generated/client'
+﻿import type { Prisma } from '@generated/client'
 import { ProductVariantStatus } from '@generated/enums'
 import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import { BadRequestException, Injectable } from '@nestjs/common'
@@ -24,6 +24,13 @@ const productSelect = {
 	name: true,
 	slug: true,
 	price: true,
+	brand: {
+		select: {
+			id: true,
+			name: true,
+			slug: true
+		}
+	},
 	media: {
 		select: {
 			position: true,
@@ -189,6 +196,25 @@ export class ProductRepository {
 		})
 	}
 
+	findBrandById(id: string, catalogId: string) {
+		return this.prisma.brand.findFirst({
+			where: { id, catalogId, deleteAt: null },
+			select: { id: true }
+		})
+	}
+
+	findProductByBrandId(brandId: string, catalogId: string, excludeId?: string) {
+		return this.prisma.product.findFirst({
+			where: {
+				brandId,
+				catalogId,
+				deleteAt: null,
+				...(excludeId ? { id: { not: excludeId } } : {})
+			},
+			select: { id: true }
+		})
+	}
+
 	async existsSlug(
 		slug: string,
 		catalogId: string,
@@ -260,8 +286,14 @@ export class ProductRepository {
 		const hasVariantChanges = variantUpdates !== undefined
 		const hasAttributeChanges = attributes !== undefined
 		const hasMediaChanges = mediaIds !== undefined
+		const hasBrandChanges = Object.hasOwn(data, 'brand')
 
-		if (!hasAttributeChanges && !hasVariantChanges && !hasMediaChanges) {
+		if (
+			!hasAttributeChanges &&
+			!hasVariantChanges &&
+			!hasMediaChanges &&
+			!hasBrandChanges
+		) {
 			const result = await this.prisma.product.updateMany({
 				where: { id, catalogId, deleteAt: null },
 				data
@@ -276,18 +308,17 @@ export class ProductRepository {
 
 		return this.prisma.$transaction(async tx => {
 			const hasData = Object.keys(data).length > 0
+			const existing = await tx.product.findFirst({
+				where: { id, catalogId, deleteAt: null },
+				select: { id: true }
+			})
+			if (!existing) return null
+
 			if (hasData) {
-				const result = await tx.product.updateMany({
-					where: { id, catalogId, deleteAt: null },
+				await tx.product.update({
+					where: { id },
 					data
 				})
-				if (!result.count) return null
-			} else {
-				const existing = await tx.product.findFirst({
-					where: { id, catalogId, deleteAt: null },
-					select: { id: true }
-				})
-				if (!existing) return null
 			}
 
 			if (attributes?.length) {
@@ -338,7 +369,7 @@ export class ProductRepository {
 	async softDelete(id: string, catalogId: string) {
 		const result = await this.prisma.product.updateMany({
 			where: { id, catalogId, deleteAt: null },
-			data: { deleteAt: new Date() }
+			data: { deleteAt: new Date(), brandId: null }
 		})
 		if (!result.count) return null
 

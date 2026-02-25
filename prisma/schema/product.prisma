@@ -18,7 +18,8 @@ model Product {
     id String @id @default(uuid()) @db.Uuid
 
     // FK на каталог (H&M, KFC) — через каталог определяется тип и атрибуты
-    catalogId String @map("catalog_id") @db.Uuid
+    catalogId String  @map("catalog_id") @db.Uuid
+    brandId   String? @unique @map("brand_id") @db.Uuid
 
     // Артикул товара (уникален глобально)
     // Пример: "HM-TSHIRT-001", "KFC-BUCKET-001"
@@ -53,6 +54,7 @@ model Product {
 
     // ─── Связи ───
     catalog           Catalog            @relation(fields: [catalogId], references: [id])
+    brand             Brand?             @relation(fields: [brandId], references: [id], onDelete: SetNull)
     // Варианты товара (S+белый, M+чёрный)
     variants          ProductVariant[]
     media             ProductMedia[]

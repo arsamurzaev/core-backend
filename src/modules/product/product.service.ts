@@ -144,7 +144,7 @@ export class ProductService {
 	}
 
 	async create(dto: CreateProductDtoReq) {
-		const { mediaIds, attributes, ...rest } = dto
+		const { mediaIds, attributes, brandId, ...rest } = dto
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
 		const resolvedSlug = await this.generateProductSlug(dto.name, catalogId)
@@ -152,12 +152,19 @@ export class ProductService {
 
 		const normalizedMediaIds = this.normalizeMediaIds(mediaIds)
 		await this.ensureMediaIds(normalizedMediaIds, catalogId)
+		const normalizedBrandId = this.normalizeOptionalId(brandId)
+		if (normalizedBrandId) {
+			await this.ensureBrandAvailable(normalizedBrandId, catalogId)
+		}
 
 		const data: ProductCreateInput = {
 			...rest,
 			slug: resolvedSlug,
 			sku: resolvedSku,
 			catalog: { connect: { id: catalogId } },
+			...(normalizedBrandId
+				? { brand: { connect: { id: normalizedBrandId } } }
+				: {}),
 			...(normalizedMediaIds.length
 				? {
 						media: {
@@ -182,6 +189,8 @@ export class ProductService {
 
 	async update(id: string, dto: UpdateProductDtoReq) {
 		const data: ProductUpdateInput = {}
+		const catalogId = mustCatalogId()
+		const typeId = mustTypeId()
 		const mediaIds =
 			dto.mediaIds !== undefined ? this.normalizeMediaIds(dto.mediaIds) : undefined
 
@@ -200,6 +209,15 @@ export class ProductService {
 		if (dto.position !== undefined) {
 			data.position = dto.position
 		}
+		if (dto.brandId !== undefined) {
+			if (dto.brandId === null) {
+				data.brand = { disconnect: true }
+			} else {
+				const brandId = this.normalizeRequiredId(dto.brandId, 'brandId')
+				await this.ensureBrandAvailable(brandId, catalogId, id)
+				data.brand = { connect: { id: brandId } }
+			}
+		}
 
 		const hasAttributeChanges = dto.attributes !== undefined
 		const hasVariantChanges = dto.variants !== undefined
@@ -213,8 +231,6 @@ export class ProductService {
 			throw new BadRequestException('Нет полей для обновления')
 		}
 
-		const catalogId = mustCatalogId()
-		const typeId = mustTypeId()
 		if (mediaIds !== undefined) {
 			await this.ensureMediaIds(mediaIds, catalogId)
 		}
@@ -333,6 +349,41 @@ export class ProductService {
 			throw new BadRequestException(
 				`Медиа не найдены в каталоге: ${missing.join(', ')}`
 			)
+		}
+	}
+
+	private normalizeOptionalId(value?: string): string | undefined {
+		if (value === undefined) return undefined
+		const normalized = String(value).trim()
+		if (!normalized) return undefined
+		return normalized
+	}
+
+	private normalizeRequiredId(value: string, field: string): string {
+		const normalized = String(value).trim()
+		if (!normalized) {
+			throw new BadRequestException(`Поле ${field} обязательно`)
+		}
+		return normalized
+	}
+
+	private async ensureBrandAvailable(
+		brandId: string,
+		catalogId: string,
+		excludeProductId?: string
+	): Promise<void> {
+		const brand = await this.repo.findBrandById(brandId, catalogId)
+		if (!brand) {
+			throw new BadRequestException(`Бренд ${brandId} не найден в каталоге`)
+		}
+
+		const product = await this.repo.findProductByBrandId(
+			brandId,
+			catalogId,
+			excludeProductId
+		)
+		if (product) {
+			throw new BadRequestException('Бренд уже привязан к другому товару')
 		}
 	}
 

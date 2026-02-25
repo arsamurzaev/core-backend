@@ -58,6 +58,7 @@ model Catalog {
     contacts    CatalogContact[]
     products    Product[]
     category    Category[]
+    brands      Brand[]
     order       Order[]
     cart        Cart[]
     media       Media[]

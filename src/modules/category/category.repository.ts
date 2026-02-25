@@ -57,6 +57,13 @@ const productSelect = {
 	name: true,
 	slug: true,
 	price: true,
+	brand: {
+		select: {
+			id: true,
+			name: true,
+			slug: true
+		}
+	},
 	media: {
 		select: {
 			position: true,
