@@ -1,4 +1,4 @@
-import { PrismaPg } from '@prisma/adapter-pg'
+﻿import { PrismaPg } from '@prisma/adapter-pg'
 import { hash } from 'argon2'
 import 'dotenv/config'
 
@@ -34,6 +34,11 @@ type EnumValueSeed = {
 	value: string
 	displayName: string
 	businessId?: string | null
+}
+
+type BrandSeed = {
+	value: string
+	displayName: string
 }
 
 type AttributeSeed = {
@@ -106,93 +111,74 @@ type TypeContext = {
 
 const commonProductAttributes: AttributeSeed[] = [
 	{
-		key: 'brand',
-		displayName: 'Brand',
-		dataType: DataType.ENUM,
-		isRequired: true,
-		isVariantAttribute: false,
-		isFilterable: true,
-		displayOrder: 80
-	},
-	{
 		key: 'subtitle',
-		displayName: 'Subtitle',
+		displayName: 'Подзаголовок',
 		dataType: DataType.STRING,
 		isRequired: false,
 		isVariantAttribute: false,
 		isFilterable: false,
-		displayOrder: 81,
-		isHidden: true
+		displayOrder: 80,
+		isHidden: false
 	},
 	{
-		key: 'about',
-		displayName: 'About',
+		key: 'description',
+		displayName: 'Описание',
 		dataType: DataType.STRING,
 		isRequired: false,
 		isVariantAttribute: false,
 		isFilterable: false,
 		displayOrder: 82,
-		isHidden: true
-	},
-	{
-		key: 'description',
-		displayName: 'Description',
-		dataType: DataType.STRING,
-		isRequired: false,
-		isVariantAttribute: false,
-		isFilterable: false,
-		displayOrder: 83,
-		isHidden: true
+		isHidden: false
 	},
 	{
 		key: 'discount',
-		displayName: 'Discount',
+		displayName: 'Скидка',
 		dataType: DataType.INTEGER,
 		isRequired: false,
 		isVariantAttribute: false,
 		isFilterable: false,
-		displayOrder: 84,
-		isHidden: true
+		displayOrder: 83,
+		isHidden: false
 	},
 	{
 		key: 'discountedPrice',
-		displayName: 'Discounted price',
+		displayName: 'Цена со скидкой',
 		dataType: DataType.DECIMAL,
 		isRequired: false,
 		isVariantAttribute: false,
 		isFilterable: false,
-		displayOrder: 85,
-		isHidden: true
+		displayOrder: 84,
+		isHidden: false
 	},
 	{
 		key: 'discountStartAt',
-		displayName: 'Discount starts at',
+		displayName: 'Начало скидки',
+		dataType: DataType.DATETIME,
+		isRequired: false,
+		isVariantAttribute: false,
+		isFilterable: false,
+		displayOrder: 85,
+		isHidden: false
+	},
+	{
+		key: 'discountEndAt',
+		displayName: 'Конец скидки',
 		dataType: DataType.DATETIME,
 		isRequired: false,
 		isVariantAttribute: false,
 		isFilterable: false,
 		displayOrder: 86,
-		isHidden: true
-	},
-	{
-		key: 'discountEndAt',
-		displayName: 'Discount ends at',
-		dataType: DataType.DATETIME,
-		isRequired: false,
-		isVariantAttribute: false,
-		isFilterable: false,
-		displayOrder: 87,
-		isHidden: true
+		isHidden: false
 	}
 ]
 
 const catalogTypeSeeds: CatalogTypeSeed[] = [
 	{
 		code: 'restaurant',
-		name: 'Restaurants',
+		name: 'Рестораны',
 		uniqueAttribute: {
 			key: 'restaurant_cuisine',
-			displayName: 'Cuisine',
+			displayName: 'Кухня',
 			dataType: DataType.STRING,
 			isRequired: false,
 			isVariantAttribute: false,
@@ -201,25 +187,25 @@ const catalogTypeSeeds: CatalogTypeSeed[] = [
 		},
 		variantAttribute: {
 			key: 'restaurant_portion_size',
-			displayName: 'Portion size',
+			displayName: 'Размер порции',
 			dataType: DataType.ENUM,
 			isRequired: true,
 			isVariantAttribute: true,
 			isFilterable: true,
 			displayOrder: 2,
 			enumValues: [
-				{ value: 'small', displayName: 'Small' },
-				{ value: 'regular', displayName: 'Regular' },
-				{ value: 'family', displayName: 'Family' }
+				{ value: 'small', displayName: 'Маленький' },
+				{ value: 'regular', displayName: 'Обычный' },
+				{ value: 'family', displayName: 'Семейный' }
 			]
 		}
 	},
 	{
 		code: 'clothing',
-		name: 'Clothing',
+		name: 'Одежда',
 		uniqueAttribute: {
 			key: 'clothing_material',
-			displayName: 'Material',
+			displayName: 'Материал',
 			dataType: DataType.STRING,
 			isRequired: false,
 			isVariantAttribute: false,
@@ -228,7 +214,7 @@ const catalogTypeSeeds: CatalogTypeSeed[] = [
 		},
 		variantAttribute: {
 			key: 'clothing_size',
-			displayName: 'Size',
+			displayName: 'Размерный ряд верхней одежды',
 			dataType: DataType.ENUM,
 			isRequired: true,
 			isVariantAttribute: true,
@@ -244,13 +230,18 @@ const catalogTypeSeeds: CatalogTypeSeed[] = [
 	}
 ]
 
-const brandEnumValues: EnumValueSeed[] = [
+const brandSeeds: BrandSeed[] = [
 	{ value: 'urban-thread', displayName: 'Urban Thread' },
 	{ value: 'denim-lab', displayName: 'Denim Lab' },
 	{ value: 'city-burger', displayName: 'City Burger' },
 	{ value: 'pizza-yard', displayName: 'Pizza Yard' },
 	{ value: 'fresh-sip', displayName: 'Fresh Sip' }
 ]
+
+const MAX_POPULAR_PRODUCTS_PER_CATALOG = 8
+const MAX_BRANDS_IN_SEED = 5
+const DEFAULT_PRODUCTS_PER_CATEGORY_IN_SEED = 6
+const MAX_PRODUCTS_PER_CATEGORY_IN_SEED = 8
 
 function buildOpenSourcePhotoUrl(
 	seed: string,
@@ -266,7 +257,10 @@ function buildMediaGallery(seedPrefix: string, count: number): string[] {
 	)
 }
 
-function defaultBrandByCategory(typeCode: string, categorySlug: string): string {
+function defaultBrandByCategory(
+	typeCode: string,
+	categorySlug: string
+): string {
 	if (typeCode === 'restaurant') {
 		if (categorySlug === 'drinks') return 'fresh-sip'
 		if (categorySlug === 'pizza') return 'pizza-yard'
@@ -277,7 +271,11 @@ function defaultBrandByCategory(typeCode: string, categorySlug: string): string 
 	return 'urban-thread'
 }
 
-function defaultPrice(typeCode: string, categorySlug: string, order: number): string {
+function defaultPrice(
+	typeCode: string,
+	categorySlug: string,
+	order: number
+): string {
 	const restaurantBase: Record<string, number> = {
 		burgers: 520,
 		pizza: 760,
@@ -296,6 +294,29 @@ function defaultPrice(typeCode: string, categorySlug: string, order: number): st
 			: (clothingBase[categorySlug] ?? 1290)
 
 	return (base + order * 30).toFixed(2)
+}
+
+function trimToLength(value: string, maxLength: number): string {
+	if (value.length <= maxLength) return value
+	return value.slice(0, maxLength)
+}
+
+function normalizeSlug(value: string): string {
+	const normalized = value
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/-+/g, '-')
+		.replace(/^-+|-+$/g, '')
+
+	return normalized.length ? normalized : 'brand'
+}
+
+function buildBrandName(displayName: string): string {
+	return trimToLength(displayName.trim(), 255)
+}
+
+function buildBrandSlug(brandValue: string): string {
+	return trimToLength(normalizeSlug(brandValue), 255)
 }
 
 function ensureProductsPerCategory(
@@ -337,8 +358,10 @@ function ensureProductsPerCategory(
 					skuSuffix += 1
 				}
 
-				const readableCategoryName = category.name.replace(/[^a-zA-Z0-9]+/g, ' ').trim()
-				const productName = `${readableCategoryName} Item ${nextOrder}`
+				const readableCategoryName = category.name
+					.replace(/[^a-zA-Z0-9а-яА-ЯёЁ]+/g, ' ')
+					.trim()
+				const productName = `${readableCategoryName} товар ${nextOrder}`
 				const seedPrefix = `${catalog.typeCode}-${catalog.slug}-${category.slug}-${nextOrder}`
 
 				products.push({
@@ -348,13 +371,15 @@ function ensureProductsPerCategory(
 					categorySlug: category.slug,
 					price: defaultPrice(catalog.typeCode, category.slug, nextOrder),
 					brandValue: defaultBrandByCategory(catalog.typeCode, category.slug),
-					subtitle: `${productName} for seed data`,
-					about: `Auto-generated product for ${category.name} category.`,
-					description: `Generated product ${nextOrder} in category ${category.name}.`,
+					subtitle: `${productName} для демонстрации`,
+					about: `Автосгенерированный товар для категории «${category.name}».`,
+					description: `Демонстрационный товар №${nextOrder} в категории «${category.name}».`,
 					uniqueValue:
 						catalog.typeCode === 'restaurant'
-							? `${category.name} cuisine`
-							: `${category.name} material`,
+							? `Авторская кухня (${category.name})`
+							: category.slug === 'jeans' || category.slug === 'jackets'
+								? 'Деним'
+								: 'Хлопок',
 					discountPercent: (nextOrder % 3) * 5,
 					isPopular: nextOrder % 2 === 0,
 					mediaUrls: buildMediaGallery(`${seedPrefix}-media`, 2)
@@ -376,109 +401,130 @@ const baseCatalogSeeds: CatalogSeed[] = [
 		slug: 'city-kitchen',
 		domain: 'city-kitchen.catalog.local',
 		name: 'City Kitchen',
-		about: 'Demo restaurant catalog with burgers, pizza and drinks.',
-		description: 'Seed dataset for testing restaurant category and products.',
+		about: 'Демо-каталог ресторана с бургерами, пиццей и напитками.',
+		description:
+			'Набор данных для тестирования категорий и карточек товаров ресторана.',
 		currency: 'RUB',
 		logoUrl: buildOpenSourcePhotoUrl('restaurant-city-kitchen-logo'),
 		bgUrl: buildOpenSourcePhotoUrl('restaurant-city-kitchen-bg'),
 		categories: [
 			{
 				slug: 'burgers',
-				name: 'Burgers',
+				name: 'Бургеры',
 				position: 0,
-				descriptor: 'Grilled burgers and combos',
+				descriptor: 'Бургеры на гриле и комбо-наборы',
 				discount: 8,
-				imageUrl: buildOpenSourcePhotoUrl('restaurant-city-kitchen-category-burgers')
+				imageUrl: buildOpenSourcePhotoUrl(
+					'restaurant-city-kitchen-category-burgers'
+				)
 			},
 			{
 				slug: 'pizza',
-				name: 'Pizza',
+				name: 'Пицца',
 				position: 1,
-				descriptor: 'Wood-fired pizza',
+				descriptor: 'Пицца из дровяной печи',
 				discount: 10,
 				imageUrl: buildOpenSourcePhotoUrl('restaurant-city-kitchen-category-pizza')
 			},
 			{
 				slug: 'drinks',
-				name: 'Drinks',
+				name: 'Напитки',
 				position: 2,
-				descriptor: 'Cold beverages',
+				descriptor: 'Освежающие холодные напитки',
 				imageUrl: buildOpenSourcePhotoUrl('restaurant-city-kitchen-category-drinks')
 			}
 		],
 		products: [
 			{
 				sku: 'RSTR-BURGER-001',
-				name: 'Classic Beef Burger',
+				name: 'Классический бургер с говядиной',
 				slug: 'classic-beef-burger',
 				categorySlug: 'burgers',
 				price: '590.00',
 				brandValue: 'city-burger',
-				subtitle: 'Juicy beef patty with cheddar',
-				about: 'Signature burger with fresh vegetables and house sauce.',
-				description: 'Classic beef burger with cheddar, pickles and brioche bun.',
-				uniqueValue: 'American',
+				subtitle: 'Сочная говяжья котлета с чеддером',
+				about: 'Фирменный бургер со свежими овощами и соусом шефа.',
+				description:
+					'Классический бургер с чеддером, маринованными огурцами и булочкой бриошь.',
+				uniqueValue: 'Американская',
 				discountPercent: 5,
 				isPopular: true,
-				mediaUrls: buildMediaGallery('restaurant-city-kitchen-product-classic-beef-burger', 2)
+				mediaUrls: buildMediaGallery(
+					'restaurant-city-kitchen-product-classic-beef-burger',
+					2
+				)
 			},
 			{
 				sku: 'RSTR-BURGER-002',
-				name: 'Chicken Crispy Burger',
+				name: 'Криспи бургер с курицей',
 				slug: 'chicken-crispy-burger',
 				categorySlug: 'burgers',
 				price: '540.00',
 				brandValue: 'city-burger',
-				subtitle: 'Crispy chicken and spicy mayo',
-				about: 'Crunchy chicken burger with lettuce and jalapeno sauce.',
+				subtitle: 'Хрустящая курица и острый майонез',
+				about: 'Хрустящий бургер с курицей, салатом и соусом халапеньо.',
 				description:
-					'Breaded chicken fillet, lettuce, onions and spicy mayo in brioche bun.',
-				uniqueValue: 'American',
+					'Куриное филе в панировке, салат, лук и острый майонез в булочке бриошь.',
+				uniqueValue: 'Американская',
 				discountPercent: 7,
-				mediaUrls: buildMediaGallery('restaurant-city-kitchen-product-chicken-crispy-burger', 2)
+				mediaUrls: buildMediaGallery(
+					'restaurant-city-kitchen-product-chicken-crispy-burger',
+					2
+				)
 			},
 			{
 				sku: 'RSTR-PIZZA-001',
-				name: 'Margherita Pizza',
+				name: 'Пицца Маргарита',
 				slug: 'margherita-pizza',
 				categorySlug: 'pizza',
 				price: '790.00',
 				brandValue: 'pizza-yard',
-				subtitle: 'Tomato sauce, mozzarella, basil',
-				about: 'Classic margherita with soft dough and fresh basil.',
-				description: 'Neapolitan-style margherita pizza with mozzarella and basil.',
-				uniqueValue: 'Italian',
+				subtitle: 'Томатный соус, моцарелла, базилик',
+				about: 'Классическая маргарита с мягким тестом и свежим базиликом.',
+				description:
+					'Пицца в неаполитанском стиле с моцареллой и ароматным базиликом.',
+				uniqueValue: 'Итальянская',
 				discountPercent: 10,
 				isPopular: true,
-				mediaUrls: buildMediaGallery('restaurant-city-kitchen-product-margherita-pizza', 2)
+				mediaUrls: buildMediaGallery(
+					'restaurant-city-kitchen-product-margherita-pizza',
+					2
+				)
 			},
 			{
 				sku: 'RSTR-PIZZA-002',
-				name: 'Pepperoni Pizza',
+				name: 'Пицца Пепперони',
 				slug: 'pepperoni-pizza',
 				categorySlug: 'pizza',
 				price: '890.00',
 				brandValue: 'pizza-yard',
-				subtitle: 'Pepperoni and mozzarella',
-				about: 'Spicy pepperoni pizza with extra cheese.',
-				description: 'Pepperoni pizza with tomato base and mozzarella cheese.',
-				uniqueValue: 'Italian',
+				subtitle: 'Пепперони и моцарелла',
+				about: 'Пикантная пицца с пепперони и увеличенной порцией сыра.',
+				description:
+					'Пицца с томатной основой, колбасой пепперони и тянущейся моцареллой.',
+				uniqueValue: 'Итальянская',
 				discountPercent: 10,
-				mediaUrls: buildMediaGallery('restaurant-city-kitchen-product-pepperoni-pizza', 2)
+				mediaUrls: buildMediaGallery(
+					'restaurant-city-kitchen-product-pepperoni-pizza',
+					2
+				)
 			},
 			{
 				sku: 'RSTR-DRINK-001',
-				name: 'Citrus Lemonade',
+				name: 'Цитрусовый лимонад',
 				slug: 'citrus-lemonade',
 				categorySlug: 'drinks',
 				price: '220.00',
 				brandValue: 'fresh-sip',
-				subtitle: 'House lemonade',
-				about: 'Refreshing citrus lemonade with mint and ice.',
-				description: 'Fresh lemonade made with lemon, orange and mint.',
-				uniqueValue: 'Beverage',
+				subtitle: 'Фирменный домашний лимонад',
+				about: 'Освежающий цитрусовый лимонад с мятой и льдом.',
+				description: 'Свежий лимонад из лимона, апельсина и мяты.',
+				uniqueValue: 'Напиток',
 				discountPercent: 0,
-				mediaUrls: buildMediaGallery('restaurant-city-kitchen-product-citrus-lemonade', 2)
+				mediaUrls: buildMediaGallery(
+					'restaurant-city-kitchen-product-citrus-lemonade',
+					2
+				)
 			}
 		]
 	},
@@ -487,106 +533,136 @@ const baseCatalogSeeds: CatalogSeed[] = [
 		slug: 'urban-style',
 		domain: 'urban-style.catalog.local',
 		name: 'Urban Style',
-		about: 'Demo clothing catalog for t-shirts, hoodies, jeans and jackets.',
-		description: 'Seed dataset for clothing categories and product pages.',
+		about: 'Демо-каталог одежды: футболки, худи, джинсы и куртки.',
+		description:
+			'Набор данных для тестирования категорий одежды и карточек товаров.',
 		currency: 'RUB',
 		logoUrl: buildOpenSourcePhotoUrl('clothing-urban-style-logo'),
 		bgUrl: buildOpenSourcePhotoUrl('clothing-urban-style-bg'),
 		categories: [
 			{
 				slug: 'tshirts',
-				name: 'T-Shirts',
+				name: 'Футболки',
 				position: 0,
-				descriptor: 'Everyday cotton basics',
+				descriptor: 'Базовые хлопковые модели на каждый день',
 				discount: 12,
 				imageUrl: buildOpenSourcePhotoUrl('clothing-urban-style-category-tshirts')
 			},
 			{
 				slug: 'hoodies',
-				name: 'Hoodies',
+				name: 'Худи',
 				position: 1,
-				descriptor: 'Oversized and warm',
+				descriptor: 'Теплые худи свободного кроя',
 				discount: 10,
 				imageUrl: buildOpenSourcePhotoUrl('clothing-urban-style-category-hoodies')
 			},
 			{
 				slug: 'jeans',
-				name: 'Jeans',
+				name: 'Джинсы',
 				position: 2,
-				descriptor: 'Classic denim fits',
+				descriptor: 'Классические фасоны из денима',
 				imageUrl: buildOpenSourcePhotoUrl('clothing-urban-style-category-jeans')
 			},
 			{
 				slug: 'jackets',
-				name: 'Jackets',
+				name: 'Куртки',
 				position: 3,
-				descriptor: 'Outerwear and layers',
+				descriptor: 'Верхняя одежда и сезонные слои',
 				imageUrl: buildOpenSourcePhotoUrl('clothing-urban-style-category-jackets')
 			}
 		],
 		products: [
 			{
 				sku: 'CLTH-TSHIRT-001',
-				name: 'Basic Cotton Tee',
+				name: 'Базовая хлопковая футболка',
 				slug: 'basic-cotton-tee',
 				categorySlug: 'tshirts',
 				price: '1290.00',
 				brandValue: 'urban-thread',
-				subtitle: 'Soft cotton everyday t-shirt',
-				about: 'A minimalist t-shirt for daily wear.',
-				description: 'Regular fit t-shirt made from breathable cotton fabric.',
-				uniqueValue: '100% cotton',
+				subtitle: 'Мягкая повседневная футболка из хлопка',
+				about: 'Минималистичная футболка для повседневных образов.',
+				description: 'Футболка прямого кроя из дышащего хлопкового трикотажа.',
+				uniqueValue: '100% хлопок',
 				discountPercent: 15,
 				isPopular: true,
-				mediaUrls: buildMediaGallery('clothing-urban-style-product-basic-cotton-tee', 2)
+				mediaUrls: buildMediaGallery(
+					'clothing-urban-style-product-basic-cotton-tee',
+					2
+				)
 			},
 			{
 				sku: 'CLTH-HOODIE-001',
-				name: 'Oversized Hoodie',
+				name: 'Оверсайз худи',
 				slug: 'oversized-hoodie',
 				categorySlug: 'hoodies',
 				price: '2890.00',
 				brandValue: 'urban-thread',
-				subtitle: 'Relaxed fit hoodie',
-				about: 'Warm hoodie with brushed inner layer and kangaroo pocket.',
-				description: 'Oversized hoodie designed for casual streetwear looks.',
-				uniqueValue: 'Cotton fleece',
+				subtitle: 'Худи свободного кроя',
+				about: 'Теплое худи с мягким начесом внутри и карманом-кенгуру.',
+				description:
+					'Объемное худи для комфортных повседневных и streetwear-образов.',
+				uniqueValue: 'Хлопковый футер',
 				discountPercent: 10,
-				mediaUrls: buildMediaGallery('clothing-urban-style-product-oversized-hoodie', 2)
+				mediaUrls: buildMediaGallery(
+					'clothing-urban-style-product-oversized-hoodie',
+					2
+				)
 			},
 			{
 				sku: 'CLTH-JEANS-001',
-				name: 'Slim Fit Jeans',
+				name: 'Джинсы slim fit',
 				slug: 'slim-fit-jeans',
 				categorySlug: 'jeans',
 				price: '3590.00',
 				brandValue: 'denim-lab',
-				subtitle: 'Stretch denim',
-				about: 'Comfortable slim fit jeans for daily use.',
-				description: 'Mid-rise slim jeans made from durable stretch denim.',
-				uniqueValue: 'Denim',
+				subtitle: 'Эластичный деним',
+				about: 'Удобные джинсы slim fit для ежедневной носки.',
+				description:
+					'Джинсы средней посадки из плотного денима с комфортной растяжимостью.',
+				uniqueValue: 'Деним',
 				discountPercent: 12,
-				mediaUrls: buildMediaGallery('clothing-urban-style-product-slim-fit-jeans', 2)
+				mediaUrls: buildMediaGallery(
+					'clothing-urban-style-product-slim-fit-jeans',
+					2
+				)
 			},
 			{
 				sku: 'CLTH-JACKET-001',
-				name: 'City Bomber Jacket',
+				name: 'Городская куртка-бомбер',
 				slug: 'city-bomber-jacket',
 				categorySlug: 'jackets',
 				price: '4990.00',
 				brandValue: 'denim-lab',
-				subtitle: 'Lightweight jacket',
-				about: 'Bomber jacket for spring and autumn weather.',
-				description: 'Street-style bomber jacket with zip front and rib cuffs.',
-				uniqueValue: 'Polyester blend',
+				subtitle: 'Легкая демисезонная куртка',
+				about: 'Бомбер для прохладной весенней и осенней погоды.',
+				description:
+					'Куртка-бомбер в городском стиле с молнией и трикотажными манжетами.',
+				uniqueValue: 'Смесовый полиэстер',
 				discountPercent: 20,
-				mediaUrls: buildMediaGallery('clothing-urban-style-product-city-bomber-jacket', 2)
+				mediaUrls: buildMediaGallery(
+					'clothing-urban-style-product-city-bomber-jacket',
+					2
+				)
 			}
 		]
 	}
 ]
 
-const catalogSeeds: CatalogSeed[] = ensureProductsPerCategory(baseCatalogSeeds, 4)
+function resolveProductsPerCategoryTarget(): number {
+	const raw = process.env.SEED_PRODUCTS_PER_CATEGORY
+	if (!raw) return DEFAULT_PRODUCTS_PER_CATEGORY_IN_SEED
+
+	const parsed = Number.parseInt(raw, 10)
+	if (!Number.isFinite(parsed) || parsed < 1) {
+		return DEFAULT_PRODUCTS_PER_CATEGORY_IN_SEED
+	}
+	return Math.min(parsed, MAX_PRODUCTS_PER_CATEGORY_IN_SEED)
+}
+
+const catalogSeeds: CatalogSeed[] = ensureProductsPerCategory(
+	baseCatalogSeeds,
+	resolveProductsPerCategoryTarget()
+)
 
 async function clearDatabase() {
 	await prisma.$transaction([
@@ -607,6 +683,7 @@ async function clearDatabase() {
 		prisma.categoryProduct.deleteMany(),
 		prisma.productMedia.deleteMany(),
 		prisma.product.deleteMany(),
+		prisma.brand.deleteMany(),
 		prisma.category.deleteMany(),
 		prisma.seoSetting.deleteMany(),
 		prisma.catalogContact.deleteMany(),
@@ -753,12 +830,12 @@ async function main() {
 	const passwordHash = await hash('password')
 
 	const defaultRegion = await prisma.regionality.create({
-		data: { code: 'RU-MOW', name: 'Moscow' }
+		data: { code: 'RU-MOW', name: 'Москва' }
 	})
 
 	const admin = await prisma.user.create({
 		data: {
-			name: 'Administrator',
+			name: 'Администратор',
 			login: 'admin',
 			password: passwordHash,
 			role: Role.ADMIN,
@@ -769,7 +846,7 @@ async function main() {
 
 	const catalogOwner = await prisma.user.create({
 		data: {
-			name: 'Catalog Owner',
+			name: 'Владелец каталога',
 			login: 'catalog-owner',
 			password: passwordHash,
 			role: Role.CATALOG,
@@ -779,7 +856,7 @@ async function main() {
 	})
 
 	const activity = await prisma.activity.create({
-		data: { name: 'Online catalog' }
+		data: { name: 'Онлайн-каталог' }
 	})
 
 	const types = await Promise.all(
@@ -798,22 +875,9 @@ async function main() {
 	const commonAttributes = await createCommonAttributes(
 		types.map(type => type.id)
 	)
-
-	await prisma.attributeEnumValue.createMany({
-		data: brandEnumValues.map((item, index) => ({
-			attributeId: commonAttributes.brand.id,
-			value: item.value,
-			displayName: item.displayName,
-			displayOrder: index + 1,
-			businessId: item.businessId ?? null
-		}))
-	})
-
-	const brandValues = await prisma.attributeEnumValue.findMany({
-		where: { attributeId: commonAttributes.brand.id },
-		orderBy: { displayOrder: 'asc' }
-	})
-	const brandByValue = new Map(brandValues.map(item => [item.value, item]))
+	const brandByValue = new Map(brandSeeds.map(item => [item.value, item]))
+	const createdBrandValues = new Set<string>()
+	let createdBrandsCount = 0
 
 	const typeContexts = new Map<string, TypeContext>()
 
@@ -950,17 +1014,17 @@ async function main() {
 				entityId: catalog.id,
 				urlPath: '/',
 				canonicalUrl: catalogUrl,
-				title: `${catalogSeed.name} catalog`,
+				title: `${catalogSeed.name} - каталог`,
 				description: catalogSeed.description,
-				ogTitle: `${catalogSeed.name} catalog`,
+				ogTitle: `${catalogSeed.name} - каталог`,
 				ogDescription: catalogSeed.about,
 				ogMediaId: logoMediaId,
 				ogType: 'website',
 				ogUrl: catalogUrl,
 				ogSiteName: catalogSeed.name,
-				ogLocale: 'en_US',
+				ogLocale: 'ru_RU',
 				twitterCard: 'summary_large_image',
-				twitterTitle: `${catalogSeed.name} catalog`,
+				twitterTitle: `${catalogSeed.name} - каталог`,
 				twitterDescription: catalogSeed.about,
 				twitterMediaId: bgMediaId
 			}
@@ -1003,19 +1067,19 @@ async function main() {
 					urlPath: `/categories/${categorySeed.slug}`,
 					title: `${categorySeed.name} | ${catalogSeed.name}`,
 					description:
-						categorySeed.descriptor ?? `Catalog section ${categorySeed.name}`,
+						categorySeed.descriptor ?? `Раздел каталога: ${categorySeed.name}`,
 					ogTitle: `${categorySeed.name} | ${catalogSeed.name}`,
 					ogDescription:
-						categorySeed.descriptor ?? `Catalog section ${categorySeed.name}`,
+						categorySeed.descriptor ?? `Раздел каталога: ${categorySeed.name}`,
 					ogMediaId: imageMediaId,
 					ogType: 'website',
 					ogUrl: `${catalogUrl}/categories/${categorySeed.slug}`,
 					ogSiteName: catalogSeed.name,
-					ogLocale: 'en_US',
+					ogLocale: 'ru_RU',
 					twitterCard: 'summary_large_image',
 					twitterTitle: `${categorySeed.name} | ${catalogSeed.name}`,
 					twitterDescription:
-						categorySeed.descriptor ?? `Catalog section ${categorySeed.name}`,
+						categorySeed.descriptor ?? `Раздел каталога: ${categorySeed.name}`,
 					twitterMediaId: imageMediaId
 				}
 			})
@@ -1023,6 +1087,7 @@ async function main() {
 
 		const categoryProductPosition = new Map<string, number>()
 		let productPosition = 0
+		let popularProductsCount = 0
 
 		for (const productSeed of catalogSeed.products) {
 			const category = categoryBySlug.get(productSeed.categorySlug)
@@ -1038,16 +1103,48 @@ async function main() {
 				.mul(new Prisma.Decimal(100 - discount))
 				.div(100)
 				.toDecimalPlaces(2)
+			const selectedBrand = brandByValue.get(productSeed.brandValue)
+			if (!selectedBrand) {
+				throw new Error(
+					`Brand enum value "${productSeed.brandValue}" is not defined`
+				)
+			}
+
+			let productBrandId: string | null = null
+			const shouldCreateBrand =
+				createdBrandsCount < MAX_BRANDS_IN_SEED &&
+				!createdBrandValues.has(selectedBrand.value)
+
+			if (shouldCreateBrand) {
+				const brand = await prisma.brand.create({
+					data: {
+						catalogId: catalog.id,
+						name: buildBrandName(selectedBrand.displayName ?? selectedBrand.value),
+						slug: buildBrandSlug(selectedBrand.value)
+					}
+				})
+				productBrandId = brand.id
+				createdBrandValues.add(selectedBrand.value)
+				createdBrandsCount += 1
+			}
+
+			const isPopular =
+				(productSeed.isPopular ?? false) &&
+				popularProductsCount < MAX_POPULAR_PRODUCTS_PER_CATALOG
+			if (isPopular) {
+				popularProductsCount += 1
+			}
 
 			const product = await prisma.product.create({
 				data: {
 					catalogId: catalog.id,
+					brandId: productBrandId,
 					sku: productSeed.sku,
 					name: productSeed.name,
 					slug: productSeed.slug,
 					price: basePrice,
 					status: ProductStatus.ACTIVE,
-					isPopular: productSeed.isPopular ?? false,
+					isPopular,
 					position: productPosition
 				}
 			})
@@ -1068,34 +1165,11 @@ async function main() {
 				currentCategoryPosition + 1
 			)
 
-			const selectedBrand = brandByValue.get(productSeed.brandValue)
-			if (!selectedBrand) {
-				throw new Error(
-					`Brand enum value "${productSeed.brandValue}" is not defined`
-				)
-			}
-
-			await prisma.productAttribute.create({
-				data: {
-					productId: product.id,
-					attributeId: commonAttributes.brand.id,
-					enumValueId: selectedBrand.id
-				}
-			})
-
 			await prisma.productAttribute.create({
 				data: {
 					productId: product.id,
 					attributeId: commonAttributes.subtitle.id,
 					valueString: productSeed.subtitle
-				}
-			})
-
-			await prisma.productAttribute.create({
-				data: {
-					productId: product.id,
-					attributeId: commonAttributes.about.id,
-					valueString: productSeed.about
 				}
 			})
 
@@ -1208,7 +1282,7 @@ async function main() {
 					ogType: 'product',
 					ogUrl: `${catalogUrl}/products/${product.slug}`,
 					ogSiteName: catalogSeed.name,
-					ogLocale: 'en_US',
+					ogLocale: 'ru_RU',
 					twitterCard: 'summary_large_image',
 					twitterTitle: `${product.name} | ${catalogSeed.name}`,
 					twitterDescription: productSeed.about,
@@ -1218,7 +1292,7 @@ async function main() {
 		}
 	}
 
-	console.log('Seed completed:', {
+	console.log('Сидирование завершено:', {
 		users: [admin.login, catalogOwner.login],
 		types: catalogTypeSeeds.map(type => type.code),
 		catalogs: createdCatalogs
@@ -1227,7 +1301,7 @@ async function main() {
 
 main()
 	.catch(error => {
-		console.error('Seed failed:', error)
+		console.error('Ошибка сидирования:', error)
 		process.exitCode = 1
 	})
 	.finally(async () => {

@@ -1,8 +1,13 @@
-import { Test, TestingModule } from '@nestjs/testing'
+﻿import { Test, TestingModule } from '@nestjs/testing'
 
 import { CacheService } from '@/shared/cache/cache.service'
+import {
+	CATEGORY_PRODUCTS_CACHE_VERSION,
+	PRODUCTS_CACHE_VERSION
+} from '@/shared/cache/catalog-cache.constants'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
+import { RequestContext } from '@/shared/tenancy/request-context'
 
 import { ProductAttributeBuilder } from './product-attribute.builder'
 import { ProductVariantBuilder } from './product-variant.builder'
@@ -11,6 +16,20 @@ import { ProductService } from './product.service'
 
 describe('ProductService', () => {
 	let service: ProductService
+	let repo: jest.Mocked<ProductRepository>
+	let attributeBuilder: jest.Mocked<ProductAttributeBuilder>
+	let cache: jest.Mocked<CacheService>
+
+	const runWithCatalog = <T>(fn: () => Promise<T>) =>
+		RequestContext.run(
+			{
+				requestId: 'req-1',
+				host: 'example.test',
+				catalogId: 'catalog-1',
+				typeId: 'type-1'
+			},
+			fn
+		)
 
 	beforeEach(async () => {
 		const module: TestingModule = await Test.createTestingModule({
@@ -44,11 +63,19 @@ describe('ProductService', () => {
 					provide: ProductRepository,
 					useValue: {
 						findAll: jest.fn(),
+						findPopular: jest.fn(),
 						findById: jest.fn(),
 						findBySlug: jest.fn(),
+						findBrandById: jest.fn(),
+						findCategoryById: jest.fn(),
+						findCategoriesByIds: jest.fn(),
+						existsSlug: jest.fn(),
+						existsName: jest.fn(),
+						existsSku: jest.fn(),
 						create: jest.fn(),
 						update: jest.fn(),
-						softDelete: jest.fn()
+						softDelete: jest.fn(),
+						upsertCategoryProductPosition: jest.fn()
 					}
 				},
 				{
@@ -68,9 +95,159 @@ describe('ProductService', () => {
 		}).compile()
 
 		service = module.get<ProductService>(ProductService)
+		repo = module.get(ProductRepository)
+		attributeBuilder = module.get(ProductAttributeBuilder)
+		cache = module.get(CacheService)
 	})
 
 	it('should be defined', () => {
 		expect(service).toBeDefined()
+	})
+
+	it('allows using one brand for multiple products', async () => {
+		repo.findBrandById.mockResolvedValue({ id: 'brand-1' } as any)
+		repo.existsSlug.mockResolvedValue(false)
+		repo.existsName.mockResolvedValue(false)
+		repo.existsSku.mockResolvedValue(false)
+		repo.create
+			.mockResolvedValueOnce({ id: 'product-1', slug: 'first' } as any)
+			.mockResolvedValueOnce({ id: 'product-2', slug: 'second' } as any)
+		attributeBuilder.buildForCreate.mockResolvedValue([])
+
+		await expect(
+			runWithCatalog(() =>
+				service.create({
+					name: 'First Product',
+					price: 100,
+					brandId: 'brand-1'
+				})
+			)
+		).resolves.toEqual({ ok: true, id: 'product-1', slug: 'first' })
+
+		await expect(
+			runWithCatalog(() =>
+				service.create({
+					name: 'Second Product',
+					price: 120,
+					brandId: 'brand-1'
+				})
+			)
+		).resolves.toEqual({ ok: true, id: 'product-2', slug: 'second' })
+
+		expect(repo.findBrandById).toHaveBeenCalledTimes(2)
+	})
+
+	it('rejects duplicate product name in catalog', async () => {
+		repo.existsName.mockResolvedValue(true)
+
+		await expect(
+			runWithCatalog(() =>
+				service.create({
+					name: 'Duplicate Product',
+					price: 100
+				})
+			)
+		).rejects.toThrow('РўРѕРІР°СЂ СЃ С‚Р°РєРёРј РЅР°Р·РІР°РЅРёРµРј СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚')
+	})
+
+	it('adds created product to categories with first position', async () => {
+		repo.existsSlug.mockResolvedValue(false)
+		repo.existsName.mockResolvedValue(false)
+		repo.existsSku.mockResolvedValue(false)
+		repo.findCategoriesByIds.mockResolvedValue([
+			{ id: 'category-1' },
+			{ id: 'category-2' }
+		] as any)
+		repo.create.mockResolvedValue({ id: 'product-1', slug: 'first' } as any)
+		attributeBuilder.buildForCreate.mockResolvedValue([])
+
+		await expect(
+			runWithCatalog(() =>
+				service.create({
+					name: 'Product in Category',
+					price: 100,
+					categories: ['category-1', 'category-2']
+				})
+			)
+		).resolves.toEqual({ ok: true, id: 'product-1', slug: 'first' })
+
+		expect(repo.upsertCategoryProductPosition).toHaveBeenCalledWith(
+			'product-1',
+			'category-1',
+			'catalog-1',
+			0
+		)
+		expect(repo.upsertCategoryProductPosition).toHaveBeenCalledWith(
+			'product-1',
+			'category-2',
+			'catalog-1',
+			0
+		)
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			CATEGORY_PRODUCTS_CACHE_VERSION,
+			'catalog-1'
+		)
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			PRODUCTS_CACHE_VERSION,
+			'catalog-1'
+		)
+	})
+
+	it('updates category position when categoryId and categoryPosition are passed', async () => {
+		repo.findCategoryById.mockResolvedValue({ id: 'category-1' } as any)
+		repo.update.mockResolvedValue({ id: 'product-1', media: [] } as any)
+
+		await expect(
+			runWithCatalog(() =>
+				service.update('product-1', {
+					categoryId: 'category-1',
+					categoryPosition: 3
+				})
+			)
+		).resolves.toMatchObject({ ok: true, id: 'product-1' })
+
+		expect(repo.upsertCategoryProductPosition).toHaveBeenCalledWith(
+			'product-1',
+			'category-1',
+			'catalog-1',
+			3
+		)
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			CATEGORY_PRODUCTS_CACHE_VERSION,
+			'catalog-1'
+		)
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			PRODUCTS_CACHE_VERSION,
+			'catalog-1'
+		)
+	})
+
+	it('rejects categoryPosition without categoryId', async () => {
+		await expect(
+			runWithCatalog(() =>
+				service.update('product-1', {
+					categoryPosition: 2
+				})
+			)
+		).rejects.toThrow(
+			'categoryPosition можно передать только вместе с categoryId'
+		)
+	})
+
+	it('invalidates category products cache on remove', async () => {
+		repo.softDelete.mockResolvedValue({ id: 'product-1' } as any)
+
+		await expect(
+			runWithCatalog(() => service.remove('product-1'))
+		).resolves.toEqual({ ok: true })
+
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			CATEGORY_PRODUCTS_CACHE_VERSION,
+			'catalog-1'
+		)
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			PRODUCTS_CACHE_VERSION,
+			'catalog-1'
+		)
 	})
 })

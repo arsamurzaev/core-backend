@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common'
 
 import { mustCatalogId } from '@/shared/tenancy/ctx'
+import { assertHasUpdateFields, normalizeRequiredString } from '@/shared/utils'
 
 import { BrandRepository } from './brand.repository'
 import { CreateBrandDtoReq } from './dto/requests/create-brand.dto.req'
@@ -31,7 +32,7 @@ export class BrandService {
 
 	async create(dto: CreateBrandDtoReq) {
 		const catalogId = mustCatalogId()
-		const name = this.normalizeRequired(dto.name, 'name')
+		const name = normalizeRequiredString(dto.name, 'name')
 		const slug = this.normalizeSlug(dto.slug)
 		await this.ensureSlugAvailable(catalogId, slug)
 
@@ -48,7 +49,7 @@ export class BrandService {
 		const data: BrandUpdateInput = {}
 
 		if (dto.name !== undefined) {
-			data.name = this.normalizeRequired(dto.name, 'name')
+			data.name = normalizeRequiredString(dto.name, 'name')
 		}
 		if (dto.slug !== undefined) {
 			const slug = this.normalizeSlug(dto.slug)
@@ -56,9 +57,7 @@ export class BrandService {
 			data.slug = slug
 		}
 
-		if (Object.keys(data).length === 0) {
-			throw new BadRequestException('Нет полей для обновления')
-		}
+		assertHasUpdateFields(data)
 
 		const brand = await this.repo.update(id, catalogId, data)
 		if (!brand) throw new NotFoundException('Бренд не найден')
@@ -74,16 +73,8 @@ export class BrandService {
 		return { ok: true }
 	}
 
-	private normalizeRequired(value: string, name: string): string {
-		const normalized = String(value).trim()
-		if (!normalized) {
-			throw new BadRequestException(`Поле ${name} обязательно`)
-		}
-		return normalized
-	}
-
 	private normalizeSlug(value: string): string {
-		const normalized = this.normalizeRequired(value, 'slug').toLowerCase()
+		const normalized = normalizeRequiredString(value, 'slug').toLowerCase()
 		if (!BRAND_SLUG_PATTERN.test(normalized)) {
 			throw new BadRequestException(
 				'slug должен содержать только латиницу в нижнем регистре, цифры и дефисы'

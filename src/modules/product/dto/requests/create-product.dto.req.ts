@@ -60,6 +60,24 @@ export class CreateProductDtoReq {
 	)
 	brandId?: string
 
+	@ApiPropertyOptional({
+		type: [String],
+		example: ['category-uuid-1', 'category-uuid-2'],
+		description:
+			'Список категорий. Товар будет добавлен в начало (position=0) каждой категории.',
+		uniqueItems: true
+	})
+	@IsOptional()
+	@IsArray()
+	@ArrayMaxSize(50)
+	@IsString({ each: true })
+	@Transform(({ value }: { value: unknown }) =>
+		Array.isArray(value)
+			? value.map(item => (typeof item === 'string' ? item.trim() : item))
+			: value
+	)
+	categories?: string[]
+
 	@ApiPropertyOptional({ type: [ProductAttributeValueDto] })
 	@IsOptional()
 	@IsArray()

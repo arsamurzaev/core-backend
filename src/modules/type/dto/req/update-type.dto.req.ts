@@ -10,9 +10,9 @@ import {
 const CODE_PATTERN = /^[a-z0-9-]+$/
 
 export class UpdateTypeDtoReq {
-	@IsString({ message: 'РўРёРї РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ СЃС‚СЂРѕРєРѕРёМ†' })
+	@IsString({ message: 'Тип должен быть строкой' })
 	@IsNotEmpty({
-		message: 'РРјСЏ С‚РёРїР° РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј'
+		message: 'Имя типа не может быть пустым'
 	})
 	@MaxLength(255)
 	@Transform(({ value }: { value: unknown }) => {

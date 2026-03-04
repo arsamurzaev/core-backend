@@ -7,7 +7,7 @@ model Brand {
     name String @db.VarChar(255)
     slug String @db.VarChar(255)
 
-    product Product?
+    products Product[]
 
     deleteAt  DateTime? @map("delete_at")
     createdAt DateTime  @default(now()) @map("created_at")

@@ -6,10 +6,12 @@ import {
 	IsArray,
 	IsBoolean,
 	IsEnum,
+	IsInt,
 	IsNumber,
 	IsOptional,
 	IsString,
 	MaxLength,
+	Min,
 	ValidateNested
 } from 'class-validator'
 
@@ -67,6 +69,34 @@ export class UpdateProductDtoReq {
 		return normalized.length ? normalized : null
 	})
 	brandId?: string | null
+
+	@ApiPropertyOptional({
+		type: String,
+		example: 'category-uuid',
+		description:
+			'ID категории, в которой нужно изменить/установить позицию товара'
+	})
+	@IsOptional()
+	@IsString()
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined) return undefined
+		if (typeof value !== 'string') return value
+		return value.trim()
+	})
+	categoryId?: string
+
+	@ApiPropertyOptional({
+		type: Number,
+		example: 0,
+		description:
+			'Позиция товара внутри категории (передавать только вместе с categoryId)',
+		minimum: 0
+	})
+	@IsOptional()
+	@Type(() => Number)
+	@IsInt()
+	@Min(0)
+	categoryPosition?: number
 
 	@ApiPropertyOptional({
 		type: [ProductAttributeValueDto],

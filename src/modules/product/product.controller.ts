@@ -81,7 +81,11 @@ export class ProductController {
 	@ApiSecurity('csrf')
 	@UseGuards(SessionGuard, CatalogAccessGuard)
 	@Roles(Role.CATALOG)
-	@ApiOperation({ summary: 'Создать товар' })
+	@ApiOperation({
+		summary: 'Создать товар',
+		description:
+			'Для привязки к категориям передайте массив categories (товар добавится в начало каждой категории).'
+	})
 	@ApiCreatedResponse({ type: ProductCreateResponseDto })
 	async create(@Body() dto: CreateProductDtoReq) {
 		return this.productService.create(dto)
@@ -91,7 +95,11 @@ export class ProductController {
 	@ApiSecurity('csrf')
 	@UseGuards(SessionGuard, CatalogAccessGuard)
 	@Roles(Role.CATALOG)
-	@ApiOperation({ summary: 'Обновить товар' })
+	@ApiOperation({
+		summary: 'Обновить товар',
+		description:
+			'Для изменения позиции товара в категории передайте categoryId и categoryPosition.'
+	})
 	@ApiParam({
 		name: 'id',
 		description: 'ID товара'

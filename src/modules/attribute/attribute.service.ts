@@ -17,6 +17,7 @@ import {
 	CATALOG_CURRENT_CACHE_TTL_SEC,
 	CATALOG_TYPE_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
+import { assertHasUpdateFields } from '@/shared/utils'
 
 import { AttributeRepository } from './attribute.repository'
 import { CreateAttributeEnumDtoReq } from './dto/requests/create-attribute-enum.dto.req'
@@ -139,8 +140,8 @@ export class AttributeService {
 			data.isHidden = dto.isHidden
 		}
 
-		if (Object.keys(data).length === 0 && nextTypeIds === undefined) {
-			throw new BadRequestException('Нет полей для обновления')
+		if (nextTypeIds === undefined) {
+			assertHasUpdateFields(data)
 		}
 
 		const current = await this.repo.findById(id)
@@ -232,9 +233,7 @@ export class AttributeService {
 			data.businessId = dto.businessId?.trim() || null
 		}
 
-		if (Object.keys(data).length === 0) {
-			throw new BadRequestException('Нет полей для обновления')
-		}
+		assertHasUpdateFields(data)
 
 		const enumValue = await this.repo.updateEnumValue(id, attributeId, data)
 		if (!enumValue)

@@ -33,12 +33,10 @@ export class CreateCatalogDtoReq {
 	@MinLength(SLUG_MIN_LENGTH)
 	@MaxLength(SLUG_MAX_LENGTH)
 	@IsString({
-		message:
-			'РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РєР°С‚Р°Р»РѕРіР° РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ СЃС‚СЂРѕРєРѕРёМ†'
+		message: 'Идентификатор каталога должен быть строкой'
 	})
 	@IsNotEmpty({
-		message:
-			'РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РєР°С‚Р°Р»РѕРіР° РЅРµ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј'
+		message: 'Идентификатор каталога не должен быть пустым'
 	})
 	slug?: string
 

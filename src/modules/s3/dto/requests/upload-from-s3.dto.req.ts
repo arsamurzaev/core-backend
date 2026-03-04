@@ -1,4 +1,4 @@
-import { ApiPropertyOptional } from '@nestjs/swagger'
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {
 	IsArray,
@@ -24,7 +24,7 @@ function parseUnknownArray(value: unknown): unknown {
 }
 
 export class UploadFromS3ItemDtoReq {
-	@ApiPropertyOptional({
+	@ApiProperty({
 		example: 'catalogs/catalog-id/products/2026/02/09/raw/uuid.jpg'
 	})
 	@IsString()
@@ -55,7 +55,20 @@ export class UploadFromS3ItemDtoReq {
 
 export class UploadFromS3DtoReq {
 	@ApiPropertyOptional({
-		description: 'JSON-массив объектов с ключами загруженных файлов'
+		example: 'catalogs/catalog-id/products/2026/02/09/raw/uuid.jpg',
+		description:
+			'Один ключ загруженного файла. Можно передать вместо массива items.'
+	})
+	@IsOptional()
+	@IsString()
+	@IsNotEmpty()
+	@MaxLength(400)
+	key?: string
+
+	@ApiPropertyOptional({
+		type: [UploadFromS3ItemDtoReq],
+		description:
+			'JSON-массив объектов с ключами загруженных файлов. Можно передать вместо key.'
 	})
 	@IsOptional()
 	@Transform(({ value }: { value: unknown }) => parseUnknownArray(value))

@@ -268,6 +268,24 @@ export class CategoryRepository {
 		})
 	}
 
+	async findCategoryProductPositions(
+		categoryId: string,
+		catalogId: string,
+		productIds: string[]
+	) {
+		if (!productIds.length) return []
+
+		return this.prisma.categoryProduct.findMany({
+			where: {
+				categoryId,
+				productId: { in: productIds },
+				category: { catalogId, deleteAt: null },
+				product: { catalogId, deleteAt: null }
+			},
+			select: { productId: true, position: true }
+		})
+	}
+
 	async findCategoryProductsPage(
 		categoryId: string,
 		catalogId: string,

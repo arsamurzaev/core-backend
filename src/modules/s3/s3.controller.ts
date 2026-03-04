@@ -11,14 +11,17 @@ import {
 	UseGuards
 } from '@nestjs/common'
 import {
+	ApiBody,
 	ApiBadRequestResponse,
 	ApiCreatedResponse,
+	ApiExtraModels,
 	ApiForbiddenResponse,
 	ApiOkResponse,
 	ApiOperation,
 	ApiParam,
 	ApiSecurity,
-	ApiTags
+	ApiTags,
+	getSchemaPath
 } from '@nestjs/swagger'
 import { from, interval, type Observable } from 'rxjs'
 import { map, startWith, switchMap, takeWhile } from 'rxjs/operators'
@@ -33,7 +36,10 @@ import { MultipartPartDtoReq } from './dto/requests/multipart-part.dto.req'
 import { MultipartStartDtoReq } from './dto/requests/multipart-start.dto.req'
 import { PresignPostUploadDtoReq } from './dto/requests/presign-post-upload.dto.req'
 import { PresignUploadDtoReq } from './dto/requests/presign-upload.dto.req'
-import { UploadFromS3DtoReq } from './dto/requests/upload-from-s3.dto.req'
+import {
+	UploadFromS3DtoReq,
+	UploadFromS3ItemDtoReq
+} from './dto/requests/upload-from-s3.dto.req'
 import { MultipartCompleteResponseDto } from './dto/responses/multipart-complete.dto.res'
 import { MultipartPartResponseDto } from './dto/responses/multipart-part.dto.res'
 import { MultipartStartResponseDto } from './dto/responses/multipart-start.dto.res'
@@ -153,7 +159,37 @@ export class S3Controller {
 	@ApiSecurity('csrf')
 	@UseGuards(SessionGuard, CatalogAccessGuard)
 	@Roles(Role.CATALOG)
-	@ApiOperation({ summary: 'Поставить в очередь обработку загруженных файлов' })
+	@ApiOperation({
+		summary: 'Поставить в очередь обработку загруженных файлов',
+		description: 'Поддерживаются оба формата тела запроса: key или items.'
+	})
+	@ApiExtraModels(UploadFromS3ItemDtoReq)
+	@ApiBody({
+		schema: {
+			oneOf: [
+				{
+					type: 'object',
+					required: ['key'],
+					properties: {
+						key: {
+							type: 'string',
+							example: 'catalogs/catalog-id/products/2026/02/09/raw/uuid.jpg'
+						}
+					}
+				},
+				{
+					type: 'object',
+					required: ['items'],
+					properties: {
+						items: {
+							type: 'array',
+							items: { $ref: getSchemaPath(UploadFromS3ItemDtoReq) }
+						}
+					}
+				}
+			]
+		}
+	})
 	@ApiCreatedResponse({
 		description: 'Задания в очереди созданы',
 		type: UploadQueueResponseDto
@@ -161,7 +197,11 @@ export class S3Controller {
 	@ApiBadRequestResponse({ description: 'Ошибка запроса' })
 	@ApiForbiddenResponse({ description: 'Доступ запрещён' })
 	async enqueueFromS3(@Body() dto: UploadFromS3DtoReq) {
-		const items = dto.items ?? []
+		const key = dto.key?.trim()
+		const items = [...(dto.items ?? [])]
+		if (key) {
+			items.unshift({ key })
+		}
 		if (!items.length) {
 			throw new BadRequestException('Список ключей пуст')
 		}

@@ -12,10 +12,10 @@ import {
 const CODE_PATTERN = /^[a-z0-9-]+$/
 
 export class CreateTypeDtoReq {
-	@ApiProperty({ type: String, example: 'РўРёРї' })
-	@IsString({ message: 'РўРёРї РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ СЃС‚СЂРѕРєРѕРёМ†' })
+	@ApiProperty({ type: String, example: 'Тип' })
+	@IsString({ message: 'Тип должен быть строкой' })
 	@IsNotEmpty({
-		message: 'РРјСЏ С‚РёРїР° РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј'
+		message: 'Имя типа не может быть пустым'
 	})
 	@MaxLength(255)
 	@Transform(({ value }: { value: unknown }) => {

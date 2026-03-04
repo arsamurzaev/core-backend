@@ -1,4 +1,4 @@
-import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
+﻿import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
 	Injectable,
@@ -8,12 +8,21 @@ import { createHash } from 'crypto'
 import slugify from 'slugify'
 
 import { CacheService } from '@/shared/cache/cache.service'
-import { CATALOG_TYPE_CACHE_VERSION } from '@/shared/cache/catalog-cache.constants'
+import {
+	CATEGORY_PRODUCTS_CACHE_VERSION,
+	CATALOG_TYPE_CACHE_VERSION,
+	PRODUCTS_CACHE_VERSION
+} from '@/shared/cache/catalog-cache.constants'
 import type { MediaDto } from '@/shared/media/dto/media.dto.res'
 import type { MediaRecord } from '@/shared/media/media-url.service'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { mustCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
+import {
+	assertHasUpdateFields,
+	normalizeOptionalId,
+	normalizeRequiredString
+} from '@/shared/utils'
 
 import { CreateProductDtoReq } from './dto/requests/create-product.dto.req'
 import { ProductVariantUpdateDtoReq } from './dto/requests/product-variant-update.dto.req'
@@ -36,7 +45,6 @@ type PopularProductList = ProductMediaMapped<
 
 const PRODUCTS_CACHE_TTL_SEC =
 	Number(process.env.CATALOG_PRODUCTS_CACHE_TTL_SEC ?? 0) || 0
-const PRODUCTS_CACHE_VERSION = 'products'
 const SLUG_MAX_LENGTH = 255
 const SKU_MAX_LENGTH = 100
 const PRODUCT_SLUG_FALLBACK = 'product'
@@ -144,21 +152,25 @@ export class ProductService {
 	}
 
 	async create(dto: CreateProductDtoReq) {
-		const { mediaIds, attributes, brandId, ...rest } = dto
+		const { mediaIds, attributes, brandId, categories, ...rest } = dto
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
-		const resolvedSlug = await this.generateProductSlug(dto.name, catalogId)
-		const resolvedSku = await this.generateProductSku(dto.name)
+		const normalizedName = normalizeRequiredString(dto.name, 'name')
+		const resolvedSlug = await this.generateProductSlug(normalizedName, catalogId)
+		const resolvedSku = await this.generateProductSku(normalizedName)
 
 		const normalizedMediaIds = this.normalizeMediaIds(mediaIds)
 		await this.ensureMediaIds(normalizedMediaIds, catalogId)
-		const normalizedBrandId = this.normalizeOptionalId(brandId)
+		const normalizedBrandId = normalizeOptionalId(brandId)
 		if (normalizedBrandId) {
-			await this.ensureBrandAvailable(normalizedBrandId, catalogId)
+			await this.ensureBrandExists(normalizedBrandId, catalogId)
 		}
+		const normalizedCategoryIds = this.normalizeCategoryIds(categories)
+		await this.ensureCategoriesExist(normalizedCategoryIds, catalogId)
 
 		const data: ProductCreateInput = {
 			...rest,
+			name: normalizedName,
 			slug: resolvedSlug,
 			sku: resolvedSku,
 			catalog: { connect: { id: catalogId } },
@@ -183,7 +195,20 @@ export class ProductService {
 		)
 
 		const product = await this.repo.create(data, builtAttributes)
+		if (normalizedCategoryIds.length) {
+			await Promise.all(
+				normalizedCategoryIds.map(categoryId =>
+					this.repo.upsertCategoryProductPosition(
+						product.id,
+						categoryId,
+						catalogId,
+						0
+					)
+				)
+			)
+		}
 		await this.invalidateCatalogProductsCache(catalogId)
+		await this.invalidateCategoryProductsCache(catalogId)
 		return { ok: true, id: product.id, slug: product.slug }
 	}
 
@@ -193,9 +218,25 @@ export class ProductService {
 		const typeId = mustTypeId()
 		const mediaIds =
 			dto.mediaIds !== undefined ? this.normalizeMediaIds(dto.mediaIds) : undefined
+		const hasCategoryChanges = dto.categoryId !== undefined
+
+		if (dto.categoryPosition !== undefined && !hasCategoryChanges) {
+			throw new BadRequestException(
+				'categoryPosition можно передать только вместе с categoryId'
+			)
+		}
+
+		const normalizedCategoryId = hasCategoryChanges
+			? normalizeRequiredString(dto.categoryId ?? '', 'categoryId')
+			: undefined
+		if (normalizedCategoryId) {
+			await this.ensureCategoryExists(normalizedCategoryId, catalogId)
+		}
 
 		if (dto.name !== undefined) {
-			data.name = dto.name
+			const normalizedName = normalizeRequiredString(dto.name, 'name')
+			await this.ensureUniqueName(normalizedName, catalogId, id)
+			data.name = normalizedName
 		}
 		if (dto.price !== undefined) {
 			data.price = dto.price
@@ -213,8 +254,8 @@ export class ProductService {
 			if (dto.brandId === null) {
 				data.brand = { disconnect: true }
 			} else {
-				const brandId = this.normalizeRequiredId(dto.brandId, 'brandId')
-				await this.ensureBrandAvailable(brandId, catalogId, id)
+				const brandId = normalizeRequiredString(dto.brandId, 'brandId')
+				await this.ensureBrandExists(brandId, catalogId)
 				data.brand = { connect: { id: brandId } }
 			}
 		}
@@ -223,12 +264,12 @@ export class ProductService {
 		const hasVariantChanges = dto.variants !== undefined
 		const hasMediaChanges = mediaIds !== undefined
 		if (
-			Object.keys(data).length === 0 &&
 			!hasAttributeChanges &&
 			!hasVariantChanges &&
-			!hasMediaChanges
+			!hasMediaChanges &&
+			!hasCategoryChanges
 		) {
-			throw new BadRequestException('Нет полей для обновления')
+			assertHasUpdateFields(data)
 		}
 
 		if (mediaIds !== undefined) {
@@ -251,7 +292,17 @@ export class ProductService {
 		)
 		if (!product) throw new NotFoundException('Товар не найден')
 
+		if (normalizedCategoryId) {
+			await this.repo.upsertCategoryProductPosition(
+				id,
+				normalizedCategoryId,
+				catalogId,
+				dto.categoryPosition ?? 0
+			)
+		}
+
 		await this.invalidateCatalogProductsCache(catalogId)
+		await this.invalidateCategoryProductsCache(catalogId)
 		return { ok: true, ...this.mapProductMedia(product) }
 	}
 
@@ -309,6 +360,7 @@ export class ProductService {
 		if (!product) throw new NotFoundException('Товар не найден')
 
 		await this.invalidateCatalogProductsCache(catalogId)
+		await this.invalidateCategoryProductsCache(catalogId)
 		return { ok: true }
 	}
 
@@ -340,6 +392,23 @@ export class ProductService {
 		return normalized
 	}
 
+	private normalizeCategoryIds(value?: string[]): string[] {
+		if (!value) return []
+		const normalized = value.map(item => String(item).trim())
+		if (normalized.some(item => item.length === 0)) {
+			throw new BadRequestException(
+				'Массив categories не может содержать пустые значения'
+			)
+		}
+		const unique = new Set(normalized)
+		if (unique.size !== normalized.length) {
+			throw new BadRequestException(
+				'Нельзя передавать дублирующиеся значения в categories'
+			)
+		}
+		return normalized
+	}
+
 	private async ensureMediaIds(ids: string[], catalogId: string): Promise<void> {
 		if (!ids.length) return
 		const found = await this.mediaRepo.findByIds(ids, catalogId)
@@ -352,38 +421,51 @@ export class ProductService {
 		}
 	}
 
-	private normalizeOptionalId(value?: string): string | undefined {
-		if (value === undefined) return undefined
-		const normalized = String(value).trim()
-		if (!normalized) return undefined
-		return normalized
-	}
-
-	private normalizeRequiredId(value: string, field: string): string {
-		const normalized = String(value).trim()
-		if (!normalized) {
-			throw new BadRequestException(`Поле ${field} обязательно`)
-		}
-		return normalized
-	}
-
-	private async ensureBrandAvailable(
-		brandId: string,
+	private async ensureUniqueName(
+		name: string,
 		catalogId: string,
 		excludeProductId?: string
+	): Promise<void> {
+		const exists = await this.repo.existsName(name, catalogId, excludeProductId)
+		if (exists) {
+			throw new BadRequestException('Товар с таким названием уже существует')
+		}
+	}
+
+	private async ensureBrandExists(
+		brandId: string,
+		catalogId: string
 	): Promise<void> {
 		const brand = await this.repo.findBrandById(brandId, catalogId)
 		if (!brand) {
 			throw new BadRequestException(`Бренд ${brandId} не найден в каталоге`)
 		}
+	}
 
-		const product = await this.repo.findProductByBrandId(
-			brandId,
-			catalogId,
-			excludeProductId
-		)
-		if (product) {
-			throw new BadRequestException('Бренд уже привязан к другому товару')
+	private async ensureCategoryExists(
+		categoryId: string,
+		catalogId: string
+	): Promise<void> {
+		const category = await this.repo.findCategoryById(categoryId, catalogId)
+		if (!category) {
+			throw new BadRequestException(
+				`Категория ${categoryId} не найдена в каталоге`
+			)
+		}
+	}
+
+	private async ensureCategoriesExist(
+		categoryIds: string[],
+		catalogId: string
+	): Promise<void> {
+		if (!categoryIds.length) return
+		const found = await this.repo.findCategoriesByIds(categoryIds, catalogId)
+		const foundSet = new Set(found.map(item => item.id))
+		const missing = categoryIds.filter(id => !foundSet.has(id))
+		if (missing.length) {
+			throw new BadRequestException(
+				`Категории не найдены в каталоге: ${missing.join(', ')}`
+			)
 		}
 	}
 
@@ -490,7 +572,12 @@ export class ProductService {
 	private async invalidateCatalogProductsCache(
 		catalogId: string
 	): Promise<void> {
-		if (!this.cacheTtlSec) return
 		await this.cache.bumpVersion(PRODUCTS_CACHE_VERSION, catalogId)
+	}
+
+	private async invalidateCategoryProductsCache(
+		catalogId: string
+	): Promise<void> {
+		await this.cache.bumpVersion(CATEGORY_PRODUCTS_CACHE_VERSION, catalogId)
 	}
 }

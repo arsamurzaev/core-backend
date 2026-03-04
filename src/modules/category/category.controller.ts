@@ -83,8 +83,8 @@ export class CategoryController {
 	@ApiQuery({
 		name: 'limit',
 		required: false,
-		description: 'Размер страницы (1-100)',
-		schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 }
+		description: 'Размер страницы (1-50)',
+		schema: { type: 'integer', minimum: 1, maximum: 50, default: 24 }
 	})
 	@ApiOkResponse({
 		description: 'Страница товаров категории',

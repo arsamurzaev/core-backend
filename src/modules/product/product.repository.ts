@@ -203,14 +203,21 @@ export class ProductRepository {
 		})
 	}
 
-	findProductByBrandId(brandId: string, catalogId: string, excludeId?: string) {
-		return this.prisma.product.findFirst({
-			where: {
-				brandId,
-				catalogId,
-				deleteAt: null,
-				...(excludeId ? { id: { not: excludeId } } : {})
-			},
+	findCategoryById(id: string, catalogId: string) {
+		return this.prisma.category.findFirst({
+			where: { id, catalogId, deleteAt: null },
+			select: { id: true }
+		})
+	}
+
+	findCategoriesByIds(
+		ids: string[],
+		catalogId: string
+	): Promise<{ id: string }[] | []> {
+		if (!ids.length) return Promise.resolve([])
+
+		return this.prisma.category.findMany({
+			where: { id: { in: ids }, catalogId, deleteAt: null },
 			select: { id: true }
 		})
 	}
@@ -223,6 +230,22 @@ export class ProductRepository {
 		const product = await this.prisma.product.findFirst({
 			where: {
 				slug,
+				catalogId,
+				...(excludeId ? { id: { not: excludeId } } : {})
+			},
+			select: { id: true }
+		})
+		return Boolean(product)
+	}
+
+	async existsName(
+		name: string,
+		catalogId: string,
+		excludeId?: string
+	): Promise<boolean> {
+		const product = await this.prisma.product.findFirst({
+			where: {
+				name,
 				catalogId,
 				...(excludeId ? { id: { not: excludeId } } : {})
 			},
@@ -287,6 +310,7 @@ export class ProductRepository {
 		const hasAttributeChanges = attributes !== undefined
 		const hasMediaChanges = mediaIds !== undefined
 		const hasBrandChanges = Object.hasOwn(data, 'brand')
+		const hasData = Object.keys(data).length > 0
 
 		if (
 			!hasAttributeChanges &&
@@ -294,11 +318,19 @@ export class ProductRepository {
 			!hasMediaChanges &&
 			!hasBrandChanges
 		) {
-			const result = await this.prisma.product.updateMany({
-				where: { id, catalogId, deleteAt: null },
-				data
-			})
-			if (!result.count) return null
+			if (hasData) {
+				const result = await this.prisma.product.updateMany({
+					where: { id, catalogId, deleteAt: null },
+					data
+				})
+				if (!result.count) return null
+			} else {
+				const existing = await this.prisma.product.findFirst({
+					where: { id, catalogId, deleteAt: null },
+					select: { id: true }
+				})
+				if (!existing) return null
+			}
 
 			return this.prisma.product.findFirst({
 				where: { id, catalogId, deleteAt: null },
@@ -307,7 +339,6 @@ export class ProductRepository {
 		}
 
 		return this.prisma.$transaction(async tx => {
-			const hasData = Object.keys(data).length > 0
 			const existing = await tx.product.findFirst({
 				where: { id, catalogId, deleteAt: null },
 				select: { id: true }
@@ -396,6 +427,94 @@ export class ProductRepository {
 			return tx.product.findFirst({
 				where: { id, catalogId, deleteAt: null },
 				select: productSelectWithDetails
+			})
+		})
+	}
+
+	async upsertCategoryProductPosition(
+		productId: string,
+		categoryId: string,
+		catalogId: string,
+		position: number
+	) {
+		const normalizedPosition =
+			Number.isInteger(position) && position >= 0 ? position : 0
+
+		await this.prisma.$transaction(async tx => {
+			const [category, product] = await Promise.all([
+				tx.category.findFirst({
+					where: { id: categoryId, catalogId, deleteAt: null },
+					select: { id: true }
+				}),
+				tx.product.findFirst({
+					where: { id: productId, catalogId, deleteAt: null },
+					select: { id: true }
+				})
+			])
+
+			if (!category) {
+				throw new BadRequestException('Категория не найдена')
+			}
+			if (!product) {
+				throw new BadRequestException('Товар не найден')
+			}
+
+			const current = await tx.categoryProduct.findUnique({
+				where: {
+					categoryId_productId: {
+						categoryId,
+						productId
+					}
+				},
+				select: { position: true }
+			})
+			const siblingCount = await tx.categoryProduct.count({
+				where: {
+					categoryId,
+					...(current ? { productId: { not: productId } } : {})
+				}
+			})
+			const targetPosition = Math.min(normalizedPosition, siblingCount)
+
+			if (!current) {
+				await tx.categoryProduct.updateMany({
+					where: { categoryId, position: { gte: targetPosition } },
+					data: { position: { increment: 1 } }
+				})
+				await tx.categoryProduct.create({
+					data: { categoryId, productId, position: targetPosition }
+				})
+				return
+			}
+
+			if (current.position === targetPosition) return
+
+			if (current.position < targetPosition) {
+				await tx.categoryProduct.updateMany({
+					where: {
+						categoryId,
+						position: { gt: current.position, lte: targetPosition }
+					},
+					data: { position: { decrement: 1 } }
+				})
+			} else {
+				await tx.categoryProduct.updateMany({
+					where: {
+						categoryId,
+						position: { gte: targetPosition, lt: current.position }
+					},
+					data: { position: { increment: 1 } }
+				})
+			}
+
+			await tx.categoryProduct.update({
+				where: {
+					categoryId_productId: {
+						categoryId,
+						productId
+					}
+				},
+				data: { position: targetPosition }
 			})
 		})
 	}

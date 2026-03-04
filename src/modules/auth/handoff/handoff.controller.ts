@@ -53,7 +53,7 @@ export class HandoffController {
 	@ApiQuery({
 		name: 'token',
 		required: true,
-		description: 'Handoff-С‚РѕРєРµРЅ'
+		description: 'Handoff-токен'
 	})
 	@ApiQuery({
 		name: 'next',
@@ -61,8 +61,7 @@ export class HandoffController {
 		description: 'Переопределение пути редиректа'
 	})
 	@ApiFoundResponse({
-		description:
-			'Р РµРґРёСЂРµРєС‚ РЅР° С†РµР»РµРІРѕР№ РїСѓС‚СЊ Рё СѓСЃС‚Р°РЅРѕРІРєР° cookies СЃРµСЃСЃРёРё'
+		description: 'Редирект на целевой путь и установка cookies сессии'
 	})
 	@ApiUnauthorizedResponse({ description: 'Токен недействителен или истёк' })
 	@ApiForbiddenResponse({ description: 'Токен не для этого каталога' })
@@ -74,21 +73,17 @@ export class HandoffController {
 	) {
 		const store = RequestContext.mustGet()
 		if (!store.catalogId)
-			throw new ForbiddenException('РќРµС‚ РєРѕРЅС‚РµРєСЃС‚Р° РєР°С‚Р°Р»РѕРіР°')
+			throw new ForbiddenException('Нет контекста каталога')
 
 		const payload = await this.handoff.consume(token)
 		if (!payload)
-			throw new UnauthorizedException(
-				'РўРѕРєРµРЅ РЅРµРґРµР№СЃС‚РІРёС‚РµР»РµРЅ РёР»Рё РёСЃС‚С‘Рє'
-			)
+			throw new UnauthorizedException('Токен недействителен или истёк')
 
 		if (payload.catalogId !== store.catalogId) {
-			throw new ForbiddenException(
-				'РўРѕРєРµРЅ РЅРµ РґР»СЏ СЌС‚РѕРіРѕ РєР°С‚Р°Р»РѕРіР°'
-			)
+			throw new ForbiddenException('Токен не для этого каталога')
 		}
 
-		// РµСЃР»Рё РЅРµ ADMIN вЂ” РїРµСЂРµРїСЂРѕРІРµСЂСЏРµРј РІР»Р°РґРµРЅРёРµ РєР°С‚Р°Р»РѕРіРѕРј
+		// если не ADMIN, перепроверяем владение каталогом
 		if (payload.role !== Role.ADMIN) {
 			const ownerId =
 				store.ownerUserId ??
@@ -100,9 +95,7 @@ export class HandoffController {
 				)?.userId
 
 			if (!ownerId || ownerId !== payload.userId) {
-				throw new ForbiddenException(
-					'РќРµС‚ РїСЂР°РІ РЅР° РІС…РѕРґ РІ СЌС‚РѕС‚ РєР°С‚Р°Р»РѕРі'
-				)
+				throw new ForbiddenException('Нет прав на вход в этот каталог')
 			}
 		}
 

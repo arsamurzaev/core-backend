@@ -20,9 +20,11 @@ import {
 	CATALOG_TYPE_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
 import type { MediaDto } from '@/shared/media/dto/media.dto.res'
+import { ensureMediaInCatalog } from '@/shared/media/media.validation'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { RequestContext } from '@/shared/tenancy/request-context'
+import { assertHasUpdateFields, normalizeRequiredString } from '@/shared/utils'
 
 import { CatalogRepository } from './catalog.repository'
 import { CreateCatalogDtoReq } from './dto/requests/create-catalog.dto.req'
@@ -274,14 +276,14 @@ export class CatalogService {
 			configCreate.currency = dto.currency
 		}
 		if (dto.logoMediaId !== undefined) {
-			const logoMediaId = this.normalizeRequiredId(dto.logoMediaId, 'logoMediaId')
-			await this.ensureMediaInCatalog(logoMediaId, catalogId)
+			const logoMediaId = normalizeRequiredString(dto.logoMediaId, 'logoMediaId')
+			await ensureMediaInCatalog(this.mediaRepo, logoMediaId, catalogId)
 			configUpdate.logoMediaId = logoMediaId
 			configCreate.logoMediaId = logoMediaId
 		}
 		if (dto.bgMediaId !== undefined) {
-			const bgMediaId = this.normalizeRequiredId(dto.bgMediaId, 'bgMediaId')
-			await this.ensureMediaInCatalog(bgMediaId, catalogId)
+			const bgMediaId = normalizeRequiredString(dto.bgMediaId, 'bgMediaId')
+			await ensureMediaInCatalog(this.mediaRepo, bgMediaId, catalogId)
 			configUpdate.bgMediaId = bgMediaId
 			configCreate.bgMediaId = bgMediaId
 		}
@@ -328,9 +330,7 @@ export class CatalogService {
 			}
 		}
 
-		if (Object.keys(data).length === 0) {
-			throw new BadRequestException('Нет полей для обновления')
-		}
+		assertHasUpdateFields(data)
 
 		return data
 	}
@@ -447,24 +447,6 @@ export class CatalogService {
 		return message.includes(
 			'Unknown field `types` for select statement on model `Attribute`'
 		)
-	}
-
-	private normalizeRequiredId(value: string, name: string): string {
-		const normalized = String(value).trim()
-		if (!normalized) {
-			throw new BadRequestException(`Поле ${name} обязательно`)
-		}
-		return normalized
-	}
-
-	private async ensureMediaInCatalog(
-		mediaId: string,
-		catalogId: string
-	): Promise<void> {
-		const existing = await this.mediaRepo.findById(mediaId, catalogId)
-		if (!existing) {
-			throw new BadRequestException(`Медиа ${mediaId} не найдено в каталоге`)
-		}
 	}
 
 	private async generateCatalogSlug(name: string): Promise<string> {

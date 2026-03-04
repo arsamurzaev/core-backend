@@ -19,7 +19,7 @@ model Product {
 
     // FK на каталог (H&M, KFC) — через каталог определяется тип и атрибуты
     catalogId String  @map("catalog_id") @db.Uuid
-    brandId   String? @unique @map("brand_id") @db.Uuid
+    brandId   String? @map("brand_id") @db.Uuid
 
     // Артикул товара (уникален глобально)
     // Пример: "HM-TSHIRT-001", "KFC-BUCKET-001"
@@ -72,6 +72,7 @@ model Product {
     @@unique([catalogId, slug])
     @@index([catalogId, status])
     @@index([catalogId]) // Быстрый листинг товаров каталога
+    @@index([brandId])
     @@index([status]) // Фильтр по статусу (только активные)
     @@index([slug]) // Поиск по slug
     @@map("products")
@@ -226,7 +227,7 @@ model ProductMedia {
     productId String @map("product_id") @db.Uuid
     mediaId   String @map("media_id") @db.Uuid
 
-    position Int @default(0)
+    position Int     @default(0)
     kind     String? @db.VarChar(50)
 
     product Product @relation(fields: [productId], references: [id], onDelete: Cascade)

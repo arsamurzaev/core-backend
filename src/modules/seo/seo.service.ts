@@ -7,30 +7,20 @@ import {
 } from '@nestjs/common'
 
 import type { MediaRecord } from '@/shared/media/media-url.service'
+import { ensureMediaInCatalog } from '@/shared/media/media.validation'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
+import {
+	assertHasUpdateFields,
+	normalizeNullableTrimmedString,
+	normalizeOptionalNonEmptyString,
+	normalizeRequiredString
+} from '@/shared/utils'
 
 import { CreateSeoDtoReq } from './dto/requests/create-seo.dto.req'
 import { UpdateSeoDtoReq } from './dto/requests/update-seo.dto.req'
 import { SeoRepository } from './seo.repository'
-
-function normalizeOptionalString(
-	value?: string | null
-): string | null | undefined {
-	if (value === undefined) return undefined
-	if (value === null) return null
-	const normalized = value.trim()
-	return normalized.length ? normalized : null
-}
-
-function normalizeRequiredString(value: string, name: string): string {
-	const normalized = value.trim()
-	if (!normalized) {
-		throw new BadRequestException(`Поле ${name} обязательно`)
-	}
-	return normalized
-}
 
 @Injectable()
 export class SeoService {
@@ -68,46 +58,49 @@ export class SeoService {
 	async create(dto: CreateSeoDtoReq) {
 		const catalogId = mustCatalogId()
 		const entityId = normalizeRequiredString(dto.entityId, 'entityId')
-		const ogMediaId = this.normalizeOptionalId(dto.ogMediaId, 'ogMediaId')
-		const twitterMediaId = this.normalizeOptionalId(
+		const ogMediaId = normalizeOptionalNonEmptyString(
+			dto.ogMediaId,
+			'ogMediaId'
+		)
+		const twitterMediaId = normalizeOptionalNonEmptyString(
 			dto.twitterMediaId,
 			'twitterMediaId'
 		)
 
 		if (ogMediaId) {
-			await this.ensureMediaInCatalog(ogMediaId, catalogId)
+			await ensureMediaInCatalog(this.mediaRepo, ogMediaId, catalogId)
 		}
 		if (twitterMediaId) {
-			await this.ensureMediaInCatalog(twitterMediaId, catalogId)
+			await ensureMediaInCatalog(this.mediaRepo, twitterMediaId, catalogId)
 		}
 
 		const data: SeoSettingCreateInput = {
 			catalog: { connect: { id: catalogId } },
 			entityType: dto.entityType,
 			entityId,
-			urlPath: normalizeOptionalString(dto.urlPath),
-			canonicalUrl: normalizeOptionalString(dto.canonicalUrl),
-			title: normalizeOptionalString(dto.title),
-			description: normalizeOptionalString(dto.description),
-			keywords: normalizeOptionalString(dto.keywords),
-			h1: normalizeOptionalString(dto.h1),
-			seoText: normalizeOptionalString(dto.seoText),
-			robots: normalizeOptionalString(dto.robots),
-			ogTitle: normalizeOptionalString(dto.ogTitle),
-			ogDescription: normalizeOptionalString(dto.ogDescription),
+			urlPath: normalizeNullableTrimmedString(dto.urlPath),
+			canonicalUrl: normalizeNullableTrimmedString(dto.canonicalUrl),
+			title: normalizeNullableTrimmedString(dto.title),
+			description: normalizeNullableTrimmedString(dto.description),
+			keywords: normalizeNullableTrimmedString(dto.keywords),
+			h1: normalizeNullableTrimmedString(dto.h1),
+			seoText: normalizeNullableTrimmedString(dto.seoText),
+			robots: normalizeNullableTrimmedString(dto.robots),
+			ogTitle: normalizeNullableTrimmedString(dto.ogTitle),
+			ogDescription: normalizeNullableTrimmedString(dto.ogDescription),
 			...(ogMediaId ? { ogMedia: { connect: { id: ogMediaId } } } : {}),
-			ogType: normalizeOptionalString(dto.ogType),
-			ogUrl: normalizeOptionalString(dto.ogUrl),
-			ogSiteName: normalizeOptionalString(dto.ogSiteName),
-			ogLocale: normalizeOptionalString(dto.ogLocale),
-			twitterCard: normalizeOptionalString(dto.twitterCard),
-			twitterTitle: normalizeOptionalString(dto.twitterTitle),
-			twitterDescription: normalizeOptionalString(dto.twitterDescription),
+			ogType: normalizeNullableTrimmedString(dto.ogType),
+			ogUrl: normalizeNullableTrimmedString(dto.ogUrl),
+			ogSiteName: normalizeNullableTrimmedString(dto.ogSiteName),
+			ogLocale: normalizeNullableTrimmedString(dto.ogLocale),
+			twitterCard: normalizeNullableTrimmedString(dto.twitterCard),
+			twitterTitle: normalizeNullableTrimmedString(dto.twitterTitle),
+			twitterDescription: normalizeNullableTrimmedString(dto.twitterDescription),
 			...(twitterMediaId
 				? { twitterMedia: { connect: { id: twitterMediaId } } }
 				: {}),
-			twitterSite: normalizeOptionalString(dto.twitterSite),
-			twitterCreator: normalizeOptionalString(dto.twitterCreator),
+			twitterSite: normalizeNullableTrimmedString(dto.twitterSite),
+			twitterCreator: normalizeNullableTrimmedString(dto.twitterCreator),
 			hreflang: dto.hreflang ?? undefined,
 			structuredData: dto.structuredData
 				? JSON.stringify(dto.structuredData)
@@ -142,82 +135,87 @@ export class SeoService {
 			data.entityId = normalizeRequiredString(dto.entityId, 'entityId')
 		}
 		if (dto.urlPath !== undefined) {
-			data.urlPath = normalizeOptionalString(dto.urlPath)
+			data.urlPath = normalizeNullableTrimmedString(dto.urlPath)
 		}
 		if (dto.canonicalUrl !== undefined) {
-			data.canonicalUrl = normalizeOptionalString(dto.canonicalUrl)
+			data.canonicalUrl = normalizeNullableTrimmedString(dto.canonicalUrl)
 		}
 		if (dto.title !== undefined) {
-			data.title = normalizeOptionalString(dto.title)
+			data.title = normalizeNullableTrimmedString(dto.title)
 		}
 		if (dto.description !== undefined) {
-			data.description = normalizeOptionalString(dto.description)
+			data.description = normalizeNullableTrimmedString(dto.description)
 		}
 		if (dto.keywords !== undefined) {
-			data.keywords = normalizeOptionalString(dto.keywords)
+			data.keywords = normalizeNullableTrimmedString(dto.keywords)
 		}
 		if (dto.h1 !== undefined) {
-			data.h1 = normalizeOptionalString(dto.h1)
+			data.h1 = normalizeNullableTrimmedString(dto.h1)
 		}
 		if (dto.seoText !== undefined) {
-			data.seoText = normalizeOptionalString(dto.seoText)
+			data.seoText = normalizeNullableTrimmedString(dto.seoText)
 		}
 		if (dto.robots !== undefined) {
-			data.robots = normalizeOptionalString(dto.robots)
+			data.robots = normalizeNullableTrimmedString(dto.robots)
 		}
 		if (dto.ogTitle !== undefined) {
-			data.ogTitle = normalizeOptionalString(dto.ogTitle)
+			data.ogTitle = normalizeNullableTrimmedString(dto.ogTitle)
 		}
 		if (dto.ogDescription !== undefined) {
-			data.ogDescription = normalizeOptionalString(dto.ogDescription)
+			data.ogDescription = normalizeNullableTrimmedString(dto.ogDescription)
 		}
 		if (dto.ogMediaId !== undefined) {
-			const ogMediaId = this.normalizeOptionalId(dto.ogMediaId, 'ogMediaId')
+			const ogMediaId = normalizeOptionalNonEmptyString(
+				dto.ogMediaId,
+				'ogMediaId'
+			)
 			if (ogMediaId) {
-				await this.ensureMediaInCatalog(ogMediaId, catalogId)
+				await ensureMediaInCatalog(this.mediaRepo, ogMediaId, catalogId)
 				data.ogMedia = { connect: { id: ogMediaId } }
 			} else {
 				data.ogMedia = { disconnect: true }
 			}
 		}
 		if (dto.ogType !== undefined) {
-			data.ogType = normalizeOptionalString(dto.ogType)
+			data.ogType = normalizeNullableTrimmedString(dto.ogType)
 		}
 		if (dto.ogUrl !== undefined) {
-			data.ogUrl = normalizeOptionalString(dto.ogUrl)
+			data.ogUrl = normalizeNullableTrimmedString(dto.ogUrl)
 		}
 		if (dto.ogSiteName !== undefined) {
-			data.ogSiteName = normalizeOptionalString(dto.ogSiteName)
+			data.ogSiteName = normalizeNullableTrimmedString(dto.ogSiteName)
 		}
 		if (dto.ogLocale !== undefined) {
-			data.ogLocale = normalizeOptionalString(dto.ogLocale)
+			data.ogLocale = normalizeNullableTrimmedString(dto.ogLocale)
 		}
 		if (dto.twitterCard !== undefined) {
-			data.twitterCard = normalizeOptionalString(dto.twitterCard)
+			data.twitterCard = normalizeNullableTrimmedString(dto.twitterCard)
 		}
 		if (dto.twitterTitle !== undefined) {
-			data.twitterTitle = normalizeOptionalString(dto.twitterTitle)
+			data.twitterTitle = normalizeNullableTrimmedString(dto.twitterTitle)
 		}
 		if (dto.twitterDescription !== undefined) {
-			data.twitterDescription = normalizeOptionalString(dto.twitterDescription)
+			data.twitterDescription = normalizeNullableTrimmedString(
+				dto.twitterDescription
+			)
 		}
 		if (dto.twitterMediaId !== undefined) {
-			const twitterMediaId = this.normalizeOptionalId(
+			const twitterMediaId = normalizeOptionalNonEmptyString(
 				dto.twitterMediaId,
 				'twitterMediaId'
 			)
 			if (twitterMediaId) {
-				await this.ensureMediaInCatalog(twitterMediaId, catalogId)
+				await ensureMediaInCatalog(this.mediaRepo, twitterMediaId, catalogId)
 				data.twitterMedia = { connect: { id: twitterMediaId } }
 			} else {
 				data.twitterMedia = { disconnect: true }
 			}
 		}
 		if (dto.twitterSite !== undefined) {
-			data.twitterSite = normalizeOptionalString(dto.twitterSite)
+			data.twitterSite = normalizeNullableTrimmedString(dto.twitterSite)
 		}
 		if (dto.twitterCreator !== undefined) {
-			data.twitterCreator = normalizeOptionalString(dto.twitterCreator)
+			data.twitterCreator = normalizeNullableTrimmedString(dto.twitterCreator)
 		}
 		if (dto.hreflang !== undefined) {
 			data.hreflang = dto.hreflang
@@ -244,9 +242,7 @@ export class SeoService {
 			data.isFollowable = dto.isFollowable
 		}
 
-		if (Object.keys(data).length === 0) {
-			throw new BadRequestException('Нет полей для обновления')
-		}
+		assertHasUpdateFields(data)
 
 		const seo = await this.repo.update(id, catalogId, data)
 		if (!seo) throw new NotFoundException('SEO-настройка не найдена')
@@ -273,25 +269,4 @@ export class SeoService {
 		}
 	}
 
-	private normalizeOptionalId(
-		value?: string | null,
-		name?: string
-	): string | null | undefined {
-		if (value === undefined || value === null) return value
-		const normalized = String(value).trim()
-		if (!normalized) {
-			throw new BadRequestException(`Поле ${name ?? 'mediaId'} обязательно`)
-		}
-		return normalized
-	}
-
-	private async ensureMediaInCatalog(
-		mediaId: string,
-		catalogId: string
-	): Promise<void> {
-		const existing = await this.mediaRepo.findById(mediaId, catalogId)
-		if (!existing) {
-			throw new BadRequestException(`Медиа ${mediaId} не найдено в каталоге`)
-		}
-	}
 }

@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 
+import { CacheService } from '@/shared/cache/cache.service'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 
@@ -12,6 +13,7 @@ import { CategoryService } from './category.service'
 describe('CategoryService', () => {
 	let service: CategoryService
 	let repo: jest.Mocked<CategoryRepository>
+	let cache: jest.Mocked<CacheService>
 
 	const runWithCatalog = <T>(fn: () => Promise<T>) =>
 		RequestContext.run(
@@ -36,7 +38,19 @@ describe('CategoryService', () => {
 						update: jest.fn(),
 						softDelete: jest.fn(),
 						findProductsByIds: jest.fn(),
+						findCategoryProductPositions: jest.fn(),
 						findCategoryProductsPage: jest.fn()
+					}
+				},
+				{
+					provide: CacheService,
+					useValue: {
+						buildKey: jest.fn(),
+						getVersion: jest.fn(),
+						bumpVersion: jest.fn(),
+						getJson: jest.fn(),
+						setJson: jest.fn(),
+						del: jest.fn()
 					}
 				},
 				{
@@ -57,6 +71,20 @@ describe('CategoryService', () => {
 
 		service = module.get<CategoryService>(CategoryService)
 		repo = module.get(CategoryRepository)
+		cache = module.get(CacheService)
+
+		cache.buildKey.mockImplementation(parts =>
+			parts
+				.filter(part => part !== undefined && part !== null && part !== '')
+				.map(part => String(part))
+				.join(':')
+		)
+		cache.getVersion.mockResolvedValue(0)
+		cache.getJson.mockResolvedValue(null)
+		cache.setJson.mockResolvedValue(undefined)
+
+		;(service as any).firstPageCacheTtlSec = 0
+		;(service as any).nextPageCacheTtlSec = 0
 	})
 
 	it('should be defined', () => {
@@ -115,5 +143,108 @@ describe('CategoryService', () => {
 		await expect(
 			runWithCatalog(() => service.getProductsByCategory('cat-1'))
 		).rejects.toBeInstanceOf(NotFoundException)
+	})
+
+	it('returns cached page for category products when cache is warm', async () => {
+		;(service as any).firstPageCacheTtlSec = 120
+
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
+
+		const cached = {
+			items: [{ productId: 'p1', position: 0, product: { id: 'p1', media: [] } }],
+			nextCursor: null
+		}
+		cache.getJson.mockResolvedValue(cached as any)
+
+		const result = await runWithCatalog(() =>
+			service.getProductsByCategory('cat-1', { limit: 2 })
+		)
+
+		expect(result).toEqual(cached)
+		expect(repo.findCategoryProductsPage).not.toHaveBeenCalled()
+		expect(cache.getJson).toHaveBeenCalled()
+	})
+
+	it('appends new products to the end of category when positions are omitted', async () => {
+		repo.findProductsByIds.mockResolvedValue([
+			{ id: 'p1' },
+			{ id: 'p2' },
+			{ id: 'p3' },
+			{ id: 'p4' }
+		] as any)
+		repo.findCategoryProductPositions.mockResolvedValue([
+			{ productId: 'p1', position: 10 },
+			{ productId: 'p2', position: 12 }
+		] as any)
+		repo.update.mockResolvedValue({
+			id: 'cat-1',
+			imageMedia: null,
+			children: []
+		} as any)
+
+		await runWithCatalog(() =>
+			service.update('cat-1', {
+				products: [
+					{ productId: 'p1' },
+					{ productId: 'p2' },
+					{ productId: 'p3' },
+					{ productId: 'p4' }
+				]
+			})
+		)
+
+		expect(repo.update).toHaveBeenCalledWith(
+			'cat-1',
+			'catalog-1',
+			expect.objectContaining({
+				categoryProducts: {
+					deleteMany: {},
+					create: [
+						{ product: { connect: { id: 'p1' } }, position: 10 },
+						{ product: { connect: { id: 'p2' } }, position: 12 },
+						{ product: { connect: { id: 'p3' } }, position: 13 },
+						{ product: { connect: { id: 'p4' } }, position: 14 }
+					]
+				}
+			})
+		)
+	})
+
+	it('builds category products for create using explicit and appended positions', async () => {
+		repo.findProductsByIds.mockResolvedValue([
+			{ id: 'p1' },
+			{ id: 'p2' },
+			{ id: 'p3' }
+		] as any)
+		repo.create.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
+
+		await runWithCatalog(() =>
+			service.create({
+				name: 'Test category',
+				products: [
+					{ productId: 'p1', position: 5 },
+					{ productId: 'p2' },
+					{ productId: 'p3' }
+				]
+			} as any)
+		)
+
+		expect(repo.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				categoryProducts: {
+					create: [
+						{ product: { connect: { id: 'p1' } }, position: 5 },
+						{ product: { connect: { id: 'p2' } }, position: 6 },
+						{ product: { connect: { id: 'p3' } }, position: 7 }
+					]
+				}
+			})
+		)
 	})
 })
