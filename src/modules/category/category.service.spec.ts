@@ -12,6 +12,10 @@ import { CategoryService } from './category.service'
 
 describe('CategoryService', () => {
 	let service: CategoryService
+	let serviceState: {
+		firstPageCacheTtlSec: number
+		nextPageCacheTtlSec: number
+	}
 	let repo: jest.Mocked<CategoryRepository>
 	let cache: jest.Mocked<CacheService>
 
@@ -70,6 +74,10 @@ describe('CategoryService', () => {
 		}).compile()
 
 		service = module.get<CategoryService>(CategoryService)
+		serviceState = service as unknown as {
+			firstPageCacheTtlSec: number
+			nextPageCacheTtlSec: number
+		}
 		repo = module.get(CategoryRepository)
 		cache = module.get(CacheService)
 
@@ -82,9 +90,8 @@ describe('CategoryService', () => {
 		cache.getVersion.mockResolvedValue(0)
 		cache.getJson.mockResolvedValue(null)
 		cache.setJson.mockResolvedValue(undefined)
-
-		;(service as any).firstPageCacheTtlSec = 0
-		;(service as any).nextPageCacheTtlSec = 0
+		serviceState.firstPageCacheTtlSec = 0
+		serviceState.nextPageCacheTtlSec = 0
 	})
 
 	it('should be defined', () => {
@@ -146,7 +153,7 @@ describe('CategoryService', () => {
 	})
 
 	it('returns cached page for category products when cache is warm', async () => {
-		;(service as any).firstPageCacheTtlSec = 120
+		serviceState.firstPageCacheTtlSec = 120
 
 		repo.findById.mockResolvedValue({
 			id: 'cat-1',
@@ -164,8 +171,8 @@ describe('CategoryService', () => {
 		)
 
 		expect(result).toEqual(cached)
-		expect(repo.findCategoryProductsPage).not.toHaveBeenCalled()
-		expect(cache.getJson).toHaveBeenCalled()
+		expect(repo.findCategoryProductsPage.mock.calls).toHaveLength(0)
+		expect(cache.getJson.mock.calls.length).toBeGreaterThan(0)
 	})
 
 	it('appends new products to the end of category when positions are omitted', async () => {
@@ -196,7 +203,7 @@ describe('CategoryService', () => {
 			})
 		)
 
-		expect(repo.update).toHaveBeenCalledWith(
+		expect(repo.update.mock.calls[0]).toEqual([
 			'cat-1',
 			'catalog-1',
 			expect.objectContaining({
@@ -210,7 +217,7 @@ describe('CategoryService', () => {
 					]
 				}
 			})
-		)
+		])
 	})
 
 	it('builds category products for create using explicit and appended positions', async () => {
@@ -235,7 +242,7 @@ describe('CategoryService', () => {
 			} as any)
 		)
 
-		expect(repo.create).toHaveBeenCalledWith(
+		expect(repo.create.mock.calls[0]).toEqual([
 			expect.objectContaining({
 				categoryProducts: {
 					create: [
@@ -245,6 +252,6 @@ describe('CategoryService', () => {
 					]
 				}
 			})
-		)
+		])
 	})
 })

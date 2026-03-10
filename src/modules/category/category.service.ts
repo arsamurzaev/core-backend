@@ -44,8 +44,10 @@ function normalizeName(value: string): string {
 
 @Injectable()
 export class CategoryService {
-	private readonly firstPageCacheTtlSec = CATEGORY_PRODUCTS_FIRST_PAGE_CACHE_TTL_SEC
-	private readonly nextPageCacheTtlSec = CATEGORY_PRODUCTS_NEXT_PAGE_CACHE_TTL_SEC
+	private readonly firstPageCacheTtlSec =
+		CATEGORY_PRODUCTS_FIRST_PAGE_CACHE_TTL_SEC
+	private readonly nextPageCacheTtlSec =
+		CATEGORY_PRODUCTS_NEXT_PAGE_CACHE_TTL_SEC
 
 	constructor(
 		private readonly repo: CategoryRepository,

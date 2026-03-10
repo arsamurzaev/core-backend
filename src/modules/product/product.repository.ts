@@ -238,6 +238,18 @@ const productSelectWithDetails = {
 	}
 }
 
+export type ProductListItem = Prisma.ProductGetPayload<{
+	select: typeof productSelect
+}>
+
+export type ProductWithAttributesItem = Prisma.ProductGetPayload<{
+	select: typeof productSelectWithAttributes
+}>
+
+export type ProductDetailsItem = Prisma.ProductGetPayload<{
+	select: typeof productSelectWithDetails
+}>
+
 function escapeLikePattern(value: string): string {
 	return value.replace(/[\\%_]/g, char => `\\${char}`)
 }
@@ -246,7 +258,7 @@ function escapeLikePattern(value: string): string {
 export class ProductRepository {
 	constructor(private readonly prisma: PrismaService) {}
 
-	findAll(catalogId: string) {
+	findAll(catalogId: string): Promise<ProductListItem[]> {
 		return this.prisma.product.findMany({
 			where: { deleteAt: null, catalogId },
 			select: productSelect,
@@ -254,7 +266,7 @@ export class ProductRepository {
 		})
 	}
 
-	findPopular(catalogId: string) {
+	findPopular(catalogId: string): Promise<ProductDetailsItem[]> {
 		return this.prisma.product.findMany({
 			where: { deleteAt: null, catalogId, isPopular: true },
 			select: productSelectWithDetails,
@@ -262,22 +274,28 @@ export class ProductRepository {
 		})
 	}
 
-	findById(id: string, catalogId: string) {
+	findById(id: string, catalogId: string): Promise<ProductDetailsItem | null> {
 		return this.prisma.product.findFirst({
 			where: { id, catalogId, deleteAt: null },
 			select: productSelectWithDetails
 		})
 	}
 
-	findBySlug(slug: string, catalogId: string) {
+	findBySlug(
+		slug: string,
+		catalogId: string
+	): Promise<ProductDetailsItem | null> {
 		return this.prisma.product.findFirst({
 			where: { slug, catalogId, deleteAt: null },
 			select: productSelectWithDetails
 		})
 	}
 
-	findByIdsWithAttributes(ids: string[], catalogId: string) {
-		if (!ids.length) return Promise.resolve([])
+	findByIdsWithAttributes(
+		ids: string[],
+		catalogId: string
+	): Promise<ProductWithAttributesItem[]> {
+		if (!ids.length) return Promise.resolve<ProductWithAttributesItem[]>([])
 
 		return this.prisma.product.findMany({
 			where: {
@@ -290,8 +308,11 @@ export class ProductRepository {
 		})
 	}
 
-	findAttributesByTypeAndKeys(typeId: string, keys: string[]) {
-		if (!keys.length) return Promise.resolve([])
+	findAttributesByTypeAndKeys(
+		typeId: string,
+		keys: string[]
+	): Promise<AttributeFilterMeta[]> {
+		if (!keys.length) return Promise.resolve<AttributeFilterMeta[]>([])
 		const byKey = keys.map(key => key.trim()).filter(Boolean)
 
 		return this.prisma.attribute.findMany({
@@ -315,7 +336,7 @@ export class ProductRepository {
 
 	findFilteredProductIdsPageDefault(
 		query: ProductFilterQueryBase & { cursor?: ProductDefaultPageCursor }
-	) {
+	): Promise<Array<{ id: string; updatedAt: Date }>> {
 		const whereClauses = this.buildBaseFilterClauses(query)
 
 		if (query.cursor) {
@@ -344,7 +365,7 @@ export class ProductRepository {
 			seed: string
 			cursor?: ProductSeededPageCursor
 		}
-	) {
+	): Promise<Array<{ id: string; score: string }>> {
 		const whereClauses = this.buildBaseFilterClauses(query)
 		const scoreExpr = PrismaSql.sql`md5(${query.seed} || p.id::text)`
 

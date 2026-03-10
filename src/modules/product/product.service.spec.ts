@@ -130,7 +130,7 @@ describe('ProductService', () => {
 		expect(result.items).toHaveLength(2)
 		expect(result.seed).toBe('seed-1')
 		expect(result.nextCursor).toEqual(expect.any(String))
-		expect(repo.findFilteredProductIdsPageSeeded).toHaveBeenCalledWith(
+		expect(repo.findFilteredProductIdsPageSeeded.mock.calls[0]?.[0]).toEqual(
 			expect.objectContaining({
 				catalogId: 'catalog-1',
 				seed: 'seed-1',
@@ -169,7 +169,7 @@ describe('ProductService', () => {
 			)
 		).resolves.toEqual({ ok: true, id: 'product-2', slug: 'second' })
 
-		expect(repo.findBrandById).toHaveBeenCalledTimes(2)
+		expect(repo.findBrandById.mock.calls).toHaveLength(2)
 	})
 
 	it('rejects duplicate product name in catalog', async () => {
@@ -182,7 +182,9 @@ describe('ProductService', () => {
 					price: 100
 				})
 			)
-		).rejects.toThrow('РўРѕРІР°СЂ СЃ С‚Р°РєРёРј РЅР°Р·РІР°РЅРёРµРј СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚')
+		).rejects.toThrow(
+			'РўРѕРІР°СЂ СЃ С‚Р°РєРёРј РЅР°Р·РІР°РЅРёРµРј СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚'
+		)
 	})
 
 	it('adds created product to categories with first position', async () => {
@@ -206,26 +208,26 @@ describe('ProductService', () => {
 			)
 		).resolves.toEqual({ ok: true, id: 'product-1', slug: 'first' })
 
-		expect(repo.upsertCategoryProductPosition).toHaveBeenCalledWith(
+		expect(repo.upsertCategoryProductPosition.mock.calls).toContainEqual([
 			'product-1',
 			'category-1',
 			'catalog-1',
 			0
-		)
-		expect(repo.upsertCategoryProductPosition).toHaveBeenCalledWith(
+		])
+		expect(repo.upsertCategoryProductPosition.mock.calls).toContainEqual([
 			'product-1',
 			'category-2',
 			'catalog-1',
 			0
-		)
-		expect(cache.bumpVersion).toHaveBeenCalledWith(
+		])
+		expect(cache.bumpVersion.mock.calls).toContainEqual([
 			CATEGORY_PRODUCTS_CACHE_VERSION,
 			'catalog-1'
-		)
-		expect(cache.bumpVersion).toHaveBeenCalledWith(
+		])
+		expect(cache.bumpVersion.mock.calls).toContainEqual([
 			PRODUCTS_CACHE_VERSION,
 			'catalog-1'
-		)
+		])
 	})
 
 	it('updates category position when categoryId and categoryPosition are passed', async () => {
@@ -241,20 +243,20 @@ describe('ProductService', () => {
 			)
 		).resolves.toMatchObject({ ok: true, id: 'product-1' })
 
-		expect(repo.upsertCategoryProductPosition).toHaveBeenCalledWith(
+		expect(repo.upsertCategoryProductPosition.mock.calls).toContainEqual([
 			'product-1',
 			'category-1',
 			'catalog-1',
 			3
-		)
-		expect(cache.bumpVersion).toHaveBeenCalledWith(
+		])
+		expect(cache.bumpVersion.mock.calls).toContainEqual([
 			CATEGORY_PRODUCTS_CACHE_VERSION,
 			'catalog-1'
-		)
-		expect(cache.bumpVersion).toHaveBeenCalledWith(
+		])
+		expect(cache.bumpVersion.mock.calls).toContainEqual([
 			PRODUCTS_CACHE_VERSION,
 			'catalog-1'
-		)
+		])
 	})
 
 	it('rejects categoryPosition without categoryId', async () => {
@@ -276,13 +278,13 @@ describe('ProductService', () => {
 			runWithCatalog(() => service.remove('product-1'))
 		).resolves.toEqual({ ok: true })
 
-		expect(cache.bumpVersion).toHaveBeenCalledWith(
+		expect(cache.bumpVersion.mock.calls).toContainEqual([
 			CATEGORY_PRODUCTS_CACHE_VERSION,
 			'catalog-1'
-		)
-		expect(cache.bumpVersion).toHaveBeenCalledWith(
+		])
+		expect(cache.bumpVersion.mock.calls).toContainEqual([
 			PRODUCTS_CACHE_VERSION,
 			'catalog-1'
-		)
+		])
 	})
 })

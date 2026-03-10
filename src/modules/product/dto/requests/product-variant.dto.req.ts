@@ -1,4 +1,4 @@
-﻿﻿import { ProductVariantStatus } from '@generated/enums'
+﻿import { ProductVariantStatus } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {

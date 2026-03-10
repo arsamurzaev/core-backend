@@ -1,4 +1,4 @@
-﻿﻿import { Role } from '@generated/enums'
+﻿import { Role } from '@generated/enums'
 import {
 	Body,
 	Controller,
@@ -202,8 +202,7 @@ export class ProductController {
 	@Roles(Role.CATALOG)
 	@ApiOperation({
 		summary: 'Создать/заменить вариации товара',
-		description:
-			'В ответе media.variants возвращаются варианты thumb и detail.'
+		description: 'В ответе media.variants возвращаются варианты thumb и detail.'
 	})
 	@ApiParam({
 		name: 'id',

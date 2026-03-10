@@ -46,7 +46,7 @@ describe('S3Controller', () => {
 			key: ' catalogs/catalog-1/products/2026/02/09/raw/file.jpg '
 		} as any)
 
-		expect(s3Service.enqueueFromS3).toHaveBeenCalledWith([
+		expect(s3Service.enqueueFromS3.mock.calls).toContainEqual([
 			{ key: 'catalogs/catalog-1/products/2026/02/09/raw/file.jpg' }
 		])
 	})
@@ -63,7 +63,7 @@ describe('S3Controller', () => {
 			items: [{ key: 'catalogs/catalog-1/products/2026/02/09/raw/second.jpg' }]
 		} as any)
 
-		expect(s3Service.enqueueFromS3).toHaveBeenCalledWith([
+		expect(s3Service.enqueueFromS3.mock.calls).toContainEqual([
 			{ key: 'catalogs/catalog-1/products/2026/02/09/raw/first.jpg' },
 			{ key: 'catalogs/catalog-1/products/2026/02/09/raw/second.jpg' }
 		])

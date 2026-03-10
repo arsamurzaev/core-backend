@@ -36,6 +36,7 @@ import { UpdateProductDtoReq } from './dto/requests/update-product.dto.req'
 import { ProductAttributeBuilder } from './product-attribute.builder'
 import { ProductVariantBuilder } from './product-variant.builder'
 import {
+	type AttributeFilterMeta,
 	type DiscountAttributeIds,
 	type ProductAttributeFilter,
 	type ProductDefaultPageCursor,
@@ -53,6 +54,13 @@ type ProductList = ProductMediaMapped<
 type PopularProductList = ProductMediaMapped<
 	Awaited<ReturnType<ProductRepository['findPopular']>>[number]
 >[]
+type ProductInfiniteDefaultRow = Awaited<
+	ReturnType<ProductRepository['findFilteredProductIdsPageDefault']>
+>[number]
+type ProductInfiniteSeededRow = Awaited<
+	ReturnType<ProductRepository['findFilteredProductIdsPageSeeded']>
+>[number]
+type ProductInfiniteRow = ProductInfiniteDefaultRow | ProductInfiniteSeededRow
 
 type ParsedAttributeFilter = {
 	key: string
@@ -102,6 +110,23 @@ const SLUG_MAX_LENGTH = 255
 const SKU_MAX_LENGTH = 100
 const PRODUCT_SLUG_FALLBACK = 'product'
 const PRODUCT_SKU_FALLBACK = 'SKU'
+
+function isScalarQueryValue(
+	value: unknown
+): value is string | number | boolean | bigint {
+	return (
+		typeof value === 'string' ||
+		typeof value === 'number' ||
+		typeof value === 'boolean' ||
+		typeof value === 'bigint'
+	)
+}
+
+function normalizeScalarQueryValue(
+	value: string | number | boolean | bigint
+): string {
+	return String(value).trim()
+}
 
 function normalizeSlug(value: string): string {
 	return value.trim().toLowerCase()
@@ -232,7 +257,7 @@ export class ProductService {
 			take
 		}
 
-		const rows = seed
+		const rows: ProductInfiniteRow[] = seed
 			? await this.repo.findFilteredProductIdsPageSeeded({
 					...baseQuery,
 					seed,
@@ -249,14 +274,17 @@ export class ProductService {
 
 		const hasMore = rows.length > parsed.limit
 		const pageRows = hasMore ? rows.slice(0, parsed.limit) : rows
-		const ids = pageRows.map(row => row.id)
+		const ids: string[] = pageRows.map(row => row.id)
 
 		const products = await this.repo.findByIdsWithAttributes(ids, catalogId)
 		const productById = new Map(
-			products.map(product => [
-				product.id,
-				this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
-			])
+			products.map(
+				product =>
+					[
+						product.id,
+						this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
+					] as const
+			)
 		)
 		const items = ids
 			.map(id => productById.get(id))
@@ -646,8 +674,11 @@ export class ProductService {
 		if (!filters.length) return []
 
 		const keys = this.uniqueNonEmpty(filters.map(filter => filter.key))
-		const meta = await this.repo.findAttributesByTypeAndKeys(typeId, keys)
-		const metaByKey = new Map(meta.map(item => [item.key.toLowerCase(), item]))
+		const meta: AttributeFilterMeta[] =
+			await this.repo.findAttributesByTypeAndKeys(typeId, keys)
+		const metaByKey = new Map<string, AttributeFilterMeta>(
+			meta.map(item => [item.key.toLowerCase(), item] as const)
+		)
 
 		const missing = keys.filter(key => !metaByKey.has(key))
 		if (missing.length) {
@@ -842,12 +873,15 @@ export class ProductService {
 	private async resolveDiscountAttributeIds(
 		typeId: string
 	): Promise<DiscountAttributeIds> {
-		const attrs = await this.repo.findAttributesByTypeAndKeys(typeId, [
-			'discount',
-			'discountStartAt',
-			'discountEndAt'
-		])
-		const byKey = new Map(attrs.map(attr => [attr.key.toLowerCase(), attr.id]))
+		const attrs: AttributeFilterMeta[] =
+			await this.repo.findAttributesByTypeAndKeys(typeId, [
+				'discount',
+				'discountStartAt',
+				'discountEndAt'
+			])
+		const byKey = new Map<string, string>(
+			attrs.map(attr => [attr.key.toLowerCase(), attr.id] as const)
+		)
 
 		return {
 			discountId: byKey.get('discount'),
@@ -943,8 +977,8 @@ export class ProductService {
 			}
 			return undefined
 		}
-		if (raw === undefined || raw === null) return undefined
-		const normalized = String(raw).trim()
+		if (!isScalarQueryValue(raw)) return undefined
+		const normalized = normalizeScalarQueryValue(raw)
 		return normalized || undefined
 	}
 
@@ -952,9 +986,9 @@ export class ProductService {
 		if (Array.isArray(raw)) {
 			return this.uniqueNonEmpty(raw.flatMap(item => this.extractCsvValues(item)))
 		}
-		if (raw === undefined || raw === null) return []
+		if (!isScalarQueryValue(raw)) return []
 		return this.uniqueNonEmpty(
-			String(raw)
+			normalizeScalarQueryValue(raw)
 				.split(',')
 				.map(item => item.trim())
 		)
@@ -1040,7 +1074,11 @@ export class ProductService {
 		if (Array.isArray(value)) {
 			state.values.push(
 				...value
-					.map(item => (item === null || item === undefined ? '' : String(item)))
+					.map(item =>
+						item === null || item === undefined || !isScalarQueryValue(item)
+							? ''
+							: normalizeScalarQueryValue(item)
+					)
 					.filter(Boolean)
 			)
 			return
@@ -1072,16 +1110,31 @@ export class ProductService {
 				state.values.push(...this.extractCsvValues(payload.value))
 			}
 			if (payload.min !== undefined && payload.min !== null) {
-				state.min = String(payload.min)
+				const min = this.getSingleQueryValue(payload.min)
+				if (min === undefined) {
+					throw new BadRequestException(
+						'Поле attributes.min должно быть строкой, числом или boolean'
+					)
+				}
+				state.min = min
 			}
 			if (payload.max !== undefined && payload.max !== null) {
-				state.max = String(payload.max)
+				const max = this.getSingleQueryValue(payload.max)
+				if (max === undefined) {
+					throw new BadRequestException(
+						'Поле attributes.max должно быть строкой, числом или boolean'
+					)
+				}
+				state.max = max
 			}
 			if (payload.bool !== undefined && payload.bool !== null) {
-				state.bool = this.parseBooleanStrict(
-					String(payload.bool),
-					'attributes.bool'
-				)
+				const bool = this.getSingleQueryValue(payload.bool)
+				if (bool === undefined) {
+					throw new BadRequestException(
+						'Поле attributes.bool должно быть строкой, числом или boolean'
+					)
+				}
+				state.bool = this.parseBooleanStrict(bool, 'attributes.bool')
 			}
 		}
 	}
@@ -1185,7 +1238,10 @@ export class ProductService {
 		catalogId: string
 	): Promise<void> {
 		if (!categoryIds.length) return
-		const found = await this.repo.findCategoriesByIds(categoryIds, catalogId)
+		const found: { id: string }[] = await this.repo.findCategoriesByIds(
+			categoryIds,
+			catalogId
+		)
 		const foundSet = new Set(found.map(item => item.id))
 		const missing = categoryIds.filter(id => !foundSet.has(id))
 		if (missing.length) {

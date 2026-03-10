@@ -71,11 +71,12 @@ export class CreateProductDtoReq {
 	@IsArray()
 	@ArrayMaxSize(50)
 	@IsString({ each: true })
-	@Transform(({ value }: { value: unknown }) =>
-		Array.isArray(value)
-			? value.map(item => (typeof item === 'string' ? item.trim() : item))
-			: value
-	)
+	@Transform(({ value }: { value: unknown }) => {
+		if (!Array.isArray(value)) return value
+
+		const items = value as unknown[]
+		return items.map(item => (typeof item === 'string' ? item.trim() : item))
+	})
 	categories?: string[]
 
 	@ApiPropertyOptional({ type: [ProductAttributeValueDto] })

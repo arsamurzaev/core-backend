@@ -72,8 +72,7 @@ export class HandoffController {
 		@Res() res: Response
 	) {
 		const store = RequestContext.mustGet()
-		if (!store.catalogId)
-			throw new ForbiddenException('Нет контекста каталога')
+		if (!store.catalogId) throw new ForbiddenException('Нет контекста каталога')
 
 		const payload = await this.handoff.consume(token)
 		if (!payload)

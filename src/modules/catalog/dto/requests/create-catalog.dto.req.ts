@@ -1,4 +1,4 @@
-﻿﻿import { CatalogStatus } from '@generated/enums'
+import { CatalogStatus } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
 import {

@@ -7,9 +7,9 @@ import {
 } from '@nestjs/common'
 
 import type { MediaRecord } from '@/shared/media/media-url.service'
-import { ensureMediaInCatalog } from '@/shared/media/media.validation'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
+import { ensureMediaInCatalog } from '@/shared/media/media.validation'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import {
 	assertHasUpdateFields,
@@ -58,10 +58,7 @@ export class SeoService {
 	async create(dto: CreateSeoDtoReq) {
 		const catalogId = mustCatalogId()
 		const entityId = normalizeRequiredString(dto.entityId, 'entityId')
-		const ogMediaId = normalizeOptionalNonEmptyString(
-			dto.ogMediaId,
-			'ogMediaId'
-		)
+		const ogMediaId = normalizeOptionalNonEmptyString(dto.ogMediaId, 'ogMediaId')
 		const twitterMediaId = normalizeOptionalNonEmptyString(
 			dto.twitterMediaId,
 			'twitterMediaId'
@@ -165,10 +162,7 @@ export class SeoService {
 			data.ogDescription = normalizeNullableTrimmedString(dto.ogDescription)
 		}
 		if (dto.ogMediaId !== undefined) {
-			const ogMediaId = normalizeOptionalNonEmptyString(
-				dto.ogMediaId,
-				'ogMediaId'
-			)
+			const ogMediaId = normalizeOptionalNonEmptyString(dto.ogMediaId, 'ogMediaId')
 			if (ogMediaId) {
 				await ensureMediaInCatalog(this.mediaRepo, ogMediaId, catalogId)
 				data.ogMedia = { connect: { id: ogMediaId } }
@@ -268,5 +262,4 @@ export class SeoService {
 				: null
 		}
 	}
-
 }

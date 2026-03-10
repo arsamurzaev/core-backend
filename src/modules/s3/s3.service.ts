@@ -1,4 +1,4 @@
-﻿﻿import {
+﻿import {
 	AbortMultipartUploadCommand,
 	CompleteMultipartUploadCommand,
 	CreateMultipartUploadCommand,
@@ -976,8 +976,7 @@ export class S3Service implements OnModuleDestroy {
 
 		const primary =
 			responseVariants.find(
-				variant =>
-					variant.name === 'detail' && variant.contentType === 'image/webp'
+				variant => variant.name === 'detail' && variant.contentType === 'image/webp'
 			) ??
 			responseVariants.find(variant => variant.name === 'detail') ??
 			responseVariants.find(
