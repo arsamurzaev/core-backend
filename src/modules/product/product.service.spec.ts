@@ -66,6 +66,10 @@ describe('ProductService', () => {
 						findPopular: jest.fn(),
 						findById: jest.fn(),
 						findBySlug: jest.fn(),
+						findByIdsWithAttributes: jest.fn(),
+						findFilteredProductIdsPageDefault: jest.fn(),
+						findFilteredProductIdsPageSeeded: jest.fn(),
+						findAttributesByTypeAndKeys: jest.fn(),
 						findBrandById: jest.fn(),
 						findCategoryById: jest.fn(),
 						findCategoriesByIds: jest.fn(),
@@ -102,6 +106,37 @@ describe('ProductService', () => {
 
 	it('should be defined', () => {
 		expect(service).toBeDefined()
+	})
+
+	it('returns seeded infinite page with next cursor', async () => {
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
+		repo.findFilteredProductIdsPageSeeded.mockResolvedValue([
+			{ id: 'product-1', score: '001' },
+			{ id: 'product-2', score: '010' },
+			{ id: 'product-3', score: '100' }
+		] as any)
+		repo.findByIdsWithAttributes.mockResolvedValue([
+			{ id: 'product-1', media: [] },
+			{ id: 'product-2', media: [] }
+		] as any)
+
+		const result = await runWithCatalog(() =>
+			service.getInfinite({
+				limit: '2',
+				seed: 'seed-1'
+			})
+		)
+
+		expect(result.items).toHaveLength(2)
+		expect(result.seed).toBe('seed-1')
+		expect(result.nextCursor).toEqual(expect.any(String))
+		expect(repo.findFilteredProductIdsPageSeeded).toHaveBeenCalledWith(
+			expect.objectContaining({
+				catalogId: 'catalog-1',
+				seed: 'seed-1',
+				take: 3
+			})
+		)
 	})
 
 	it('allows using one brand for multiple products', async () => {

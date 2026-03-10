@@ -77,7 +77,14 @@ const typeSelectWithAttributes = {
 	}
 }
 
-const catalogSelect = {
+const catalogContactSelect = {
+	id: true,
+	type: true,
+	position: true,
+	value: true
+}
+
+const catalogSelect: Prisma.CatalogSelect = {
 	id: true,
 	slug: true,
 	domain: true,
@@ -110,6 +117,11 @@ const catalogSelect = {
 
 const catalogSelectWithType = {
 	...catalogSelect,
+	contacts: {
+		where: { deleteAt: null },
+		select: catalogContactSelect,
+		orderBy: [{ position: 'asc' as const }, { createdAt: 'asc' as const }]
+	},
 	type: {
 		select: typeSelectWithAttributes
 	}

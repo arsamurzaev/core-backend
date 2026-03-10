@@ -1,4 +1,4 @@
-import { CatalogStatus } from '@generated/enums'
+import { CatalogStatus, ContactType } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
 import { AttributeDto } from '@/modules/attribute/dto/responses/attribute.dto.res'
@@ -53,6 +53,20 @@ export class CatalogTypeDto {
 	attributes: AttributeDto[]
 }
 
+export class CatalogContactDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ enum: ContactType })
+	type: ContactType
+
+	@ApiProperty({ type: Number })
+	position: number
+
+	@ApiProperty({ type: String })
+	value: string
+}
+
 export class CatalogDto {
 	@ApiProperty({ type: String })
 	id: string
@@ -92,6 +106,9 @@ export class CatalogDto {
 }
 
 export class CatalogCurrentDto extends CatalogDto {
+	@ApiProperty({ type: [CatalogContactDto] })
+	contacts: CatalogContactDto[]
+
 	@ApiProperty({ type: CatalogTypeDto })
 	type: CatalogTypeDto
 }

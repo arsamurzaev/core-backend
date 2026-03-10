@@ -5,6 +5,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-redundant-type-constituents */
+import { ContactType } from '@generated/enums'
 import { CatalogCreateInput, CatalogUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
@@ -20,9 +21,9 @@ import {
 	CATALOG_TYPE_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
 import type { MediaDto } from '@/shared/media/dto/media.dto.res'
-import { ensureMediaInCatalog } from '@/shared/media/media.validation'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
+import { ensureMediaInCatalog } from '@/shared/media/media.validation'
 import { RequestContext } from '@/shared/tenancy/request-context'
 import { assertHasUpdateFields, normalizeRequiredString } from '@/shared/utils'
 
@@ -78,6 +79,30 @@ function applySuffix(base: string, suffix: number): string {
 	const headLength = Math.max(0, SLUG_MAX_LENGTH - suffixPart.length)
 	const head = base.slice(0, headLength).replace(/-+$/g, '')
 	return `${head}${suffixPart}`
+}
+
+function normalizeContactValue(value: string, type: ContactType): string {
+	const trimmed = value.trim()
+	if (!trimmed) {
+		throw new BadRequestException(`Контакт ${type} не может быть пустым`)
+	}
+
+	if (
+		type === ContactType.PHONE ||
+		type === ContactType.SMS ||
+		type === ContactType.WHATSAPP
+	) {
+		const hasLeadingPlus = trimmed.startsWith('+')
+		const digits = trimmed.replace(/\D/g, '')
+
+		if (!digits) {
+			throw new BadRequestException(`Контакт ${type} содержит некорректный номер`)
+		}
+
+		return hasLeadingPlus ? `+${digits}` : digits
+	}
+
+	return trimmed
 }
 
 type CatalogConfigMediaMapped<T> = T extends { config?: infer C }
@@ -328,6 +353,35 @@ export class CatalogService {
 					create: settingsCreate
 				}
 			}
+		}
+
+		if (dto.contacts !== undefined) {
+			const seenTypes = new Set<ContactType>()
+			const contactItems = dto.contacts.map((contact, index) => {
+				if (seenTypes.has(contact.type)) {
+					throw new BadRequestException(
+						`Контакт типа ${contact.type} передан больше одного раза`
+					)
+				}
+
+				seenTypes.add(contact.type)
+
+				return {
+					type: contact.type,
+					position: contact.position ?? index,
+					value: normalizeContactValue(contact.value, contact.type)
+				}
+			})
+
+			const contacts = { deleteMany: {} } as NonNullable<
+				CatalogUpdateInput['contacts']
+			>
+
+			if (contactItems.length > 0) {
+				contacts.create = contactItems
+			}
+
+			data.contacts = contacts
 		}
 
 		assertHasUpdateFields(data)

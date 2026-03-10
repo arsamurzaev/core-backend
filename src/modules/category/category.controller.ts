@@ -70,7 +70,11 @@ export class CategoryController {
 	}
 
 	@Get('/:id/products/infinite')
-	@ApiOperation({ summary: 'List category products (infinite)' })
+	@ApiOperation({
+		summary: 'List category products (infinite)',
+		description:
+			'Для media.variants внутри product.media возвращается только variant с назначением card.'
+	})
 	@ApiParam({
 		name: 'id',
 		description: 'ID категории'

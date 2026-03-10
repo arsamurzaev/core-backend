@@ -12,7 +12,10 @@ import {
 	CATEGORY_PRODUCTS_NEXT_PAGE_CACHE_TTL_SEC
 } from '@/shared/cache/catalog-cache.constants'
 import type { MediaRecord } from '@/shared/media/media-url.service'
-import { MediaUrlService } from '@/shared/media/media-url.service'
+import {
+	MEDIA_LIST_VARIANT_NAMES,
+	MediaUrlService
+} from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { ensureMediaInCatalog } from '@/shared/media/media.validation'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
@@ -274,7 +277,9 @@ export class CategoryService {
 			media: (product.media ?? []).map(item => ({
 				position: item.position,
 				kind: item.kind ?? null,
-				media: this.mediaUrl.mapMedia(item.media)
+				media: this.mediaUrl.mapMedia(item.media, {
+					variantNames: MEDIA_LIST_VARIANT_NAMES
+				})
 			}))
 		}
 	}

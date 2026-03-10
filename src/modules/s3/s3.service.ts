@@ -34,9 +34,15 @@ import { mustCatalogId } from '@/shared/tenancy/ctx'
 const DEFAULT_VARIANT_WIDTHS = [1200, 800, 400]
 const DEFAULT_IMAGE_FORMATS = ['webp']
 const DEFAULT_VARIANT_NAMES = new Map<number, string>([
-	[1200, 'xl'],
-	[800, 'md'],
-	[400, 'sm']
+	[1600, 'detail'],
+	[1400, 'detail'],
+	[1200, 'detail'],
+	[900, 'card'],
+	[800, 'card'],
+	[600, 'card'],
+	[400, 'thumb'],
+	[320, 'thumb'],
+	[200, 'thumb']
 ])
 const RAW_SEGMENT = 'raw'
 const MULTIPART_MIN_PART_BYTES = 5 * 1024 * 1024
@@ -970,10 +976,15 @@ export class S3Service implements OnModuleDestroy {
 
 		const primary =
 			responseVariants.find(
-				variant => variant.name === 'xl' && variant.contentType === 'image/webp'
+				variant =>
+					variant.name === 'detail' && variant.contentType === 'image/webp'
 			) ??
+			responseVariants.find(variant => variant.name === 'detail') ??
+			responseVariants.find(
+				variant => variant.name === 'card' && variant.contentType === 'image/webp'
+			) ??
+			responseVariants.find(variant => variant.name === 'card') ??
 			responseVariants.find(variant => variant.contentType === 'image/webp') ??
-			responseVariants.find(variant => variant.name === 'xl') ??
 			responseVariants.find(variant => variant.name.startsWith('w')) ??
 			responseVariants[0]
 
@@ -1066,8 +1077,10 @@ export class S3Service implements OnModuleDestroy {
 			}
 		}
 
-		for (const width of sorted) {
-			const name = DEFAULT_VARIANT_NAMES.get(width) ?? `w${width}`
+		for (const [index, width] of sorted.entries()) {
+			const name =
+				DEFAULT_VARIANT_NAMES.get(width) ??
+				this.resolveVariantNameByOrder(width, index, sorted.length)
 			for (const format of formats) {
 				const variant = await this.renderVariant(buffer, width, {
 					name,
@@ -1084,6 +1097,17 @@ export class S3Service implements OnModuleDestroy {
 		}
 
 		return variants
+	}
+
+	private resolveVariantNameByOrder(
+		width: number,
+		index: number,
+		total: number
+	): string {
+		if (index === 0) return 'detail'
+		if (index === 1 && total >= 2) return 'card'
+		if (index === 2 && total >= 3) return 'thumb'
+		return `w${width}`
 	}
 
 	private async createPresignRecord(params: {

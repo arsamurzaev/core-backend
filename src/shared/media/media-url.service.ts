@@ -5,6 +5,27 @@ import { AllInterfaces } from '@/core/config'
 
 import { MediaDto, MediaVariantDto } from './dto/media.dto.res'
 
+export const MEDIA_VARIANT_NAMES = {
+	thumb: 'thumb',
+	card: 'card',
+	detail: 'detail'
+} as const
+
+export type MediaVariantName =
+	(typeof MEDIA_VARIANT_NAMES)[keyof typeof MEDIA_VARIANT_NAMES]
+
+export const MEDIA_LIST_VARIANT_NAMES = [MEDIA_VARIANT_NAMES.card] as const
+export const MEDIA_DETAIL_VARIANT_NAMES = [
+	MEDIA_VARIANT_NAMES.thumb,
+	MEDIA_VARIANT_NAMES.detail
+] as const
+
+const LEGACY_MEDIA_VARIANT_NAMES: Record<string, MediaVariantName> = {
+	sm: MEDIA_VARIANT_NAMES.thumb,
+	md: MEDIA_VARIANT_NAMES.card,
+	xl: MEDIA_VARIANT_NAMES.detail
+}
+
 export type MediaRecord = {
 	id: string
 	originalName: string
@@ -27,6 +48,42 @@ export type MediaVariantRecord = {
 	height?: number | null
 	storage: string
 	key: string
+}
+
+export type MediaMapOptions = {
+	variantNames?: readonly string[]
+}
+
+function splitVariantKind(kind: string): {
+	name: string
+	format: string | null
+} {
+	const normalized = kind.trim().toLowerCase()
+	if (!normalized) {
+		return { name: '', format: null }
+	}
+
+	const match = normalized.match(/^(.*?)-(avif|webp)$/)
+	if (!match) {
+		return { name: normalized, format: null }
+	}
+
+	return { name: match[1], format: match[2] }
+}
+
+export function normalizeMediaVariantName(name: string): string {
+	const normalized = name.trim().toLowerCase()
+	return LEGACY_MEDIA_VARIANT_NAMES[normalized] ?? normalized
+}
+
+function extractNormalizedVariantName(kind: string): string {
+	return normalizeMediaVariantName(splitVariantKind(kind).name)
+}
+
+function normalizeMediaVariantKind(kind: string): string {
+	const { name, format } = splitVariantKind(kind)
+	const normalizedName = normalizeMediaVariantName(name)
+	return format ? `${normalizedName}-${format}` : normalizedName
 }
 
 @Injectable()
@@ -54,7 +111,7 @@ export class MediaUrlService {
 	mapVariant(variant: MediaVariantRecord): MediaVariantDto {
 		return {
 			id: variant.id,
-			kind: variant.kind,
+			kind: normalizeMediaVariantKind(variant.kind),
 			mimeType: variant.mimeType ?? null,
 			size: variant.size ?? null,
 			width: variant.width ?? null,
@@ -64,10 +121,20 @@ export class MediaUrlService {
 		}
 	}
 
-	mapMedia(media: MediaRecord): MediaDto {
-		const variants = (media.variants ?? []).map(variant =>
-			this.mapVariant(variant)
-		)
+	mapMedia(media: MediaRecord, options?: MediaMapOptions): MediaDto {
+		const variantNames = options?.variantNames?.length
+			? new Set(
+					options.variantNames.map(variantName =>
+						normalizeMediaVariantName(variantName)
+					)
+				)
+			: null
+		const variants = (media.variants ?? [])
+			.filter(variant => {
+				if (!variantNames?.size) return true
+				return variantNames.has(extractNormalizedVariantName(variant.kind))
+			})
+			.map(variant => this.mapVariant(variant))
 		return {
 			id: media.id,
 			originalName: media.originalName,

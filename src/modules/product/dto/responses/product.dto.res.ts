@@ -201,6 +201,21 @@ export class ProductWithDetailsDto extends ProductWithAttributesDto {
 	variants: ProductVariantDto[]
 }
 
+export class ProductInfinitePageDto {
+	@ApiProperty({ type: [ProductWithAttributesDto] })
+	items: ProductWithAttributesDto[]
+
+	@ApiProperty({ type: String, nullable: true })
+	nextCursor: string | null
+
+	@ApiProperty({
+		type: String,
+		nullable: true,
+		description: 'Стабильный seed для детерминированной рандомизации'
+	})
+	seed: string | null
+}
+
 export class ProductUpdateResponseDto extends ProductWithAttributesDto {
 	@ApiProperty({ example: true })
 	ok: boolean

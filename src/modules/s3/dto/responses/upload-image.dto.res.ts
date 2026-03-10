@@ -3,7 +3,7 @@
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 
 export class ImageVariantDto {
-	@ApiProperty({ example: 'xl' })
+	@ApiProperty({ example: 'detail' })
 	name: string
 
 	@ApiProperty({ example: 1600 })
@@ -18,10 +18,10 @@ export class ImageVariantDto {
 	@ApiProperty({ example: 'image/webp' })
 	contentType: string
 
-	@ApiProperty({ example: 'catalogs/uuid/products/2026/02/09/uuid-xl.webp' })
+	@ApiProperty({ example: 'catalogs/uuid/products/2026/02/09/uuid-detail.webp' })
 	key: string
 
-	@ApiProperty({ example: 'https://cdn.example.com/.../uuid-xl.webp' })
+	@ApiProperty({ example: 'https://cdn.example.com/.../uuid-detail.webp' })
 	url: string
 }
 
@@ -29,10 +29,10 @@ export class UploadImageResponseDto extends OkResponseDto {
 	@ApiProperty({ example: 'uuid' })
 	mediaId: string
 
-	@ApiProperty({ example: 'catalogs/uuid/products/2026/02/09/uuid-xl.webp' })
+	@ApiProperty({ example: 'catalogs/uuid/products/2026/02/09/uuid-detail.webp' })
 	key: string
 
-	@ApiProperty({ example: 'https://cdn.example.com/.../uuid-xl.webp' })
+	@ApiProperty({ example: 'https://cdn.example.com/.../uuid-detail.webp' })
 	url: string
 
 	@ApiProperty({ type: [ImageVariantDto] })

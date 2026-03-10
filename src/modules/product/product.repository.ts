@@ -1,5 +1,6 @@
 ﻿import type { Prisma } from '@generated/client'
-import { ProductVariantStatus } from '@generated/enums'
+import { Prisma as PrismaSql } from '@generated/client'
+import { DataType, ProductStatus, ProductVariantStatus } from '@generated/enums'
 import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import { BadRequestException, Injectable } from '@nestjs/common'
 
@@ -16,6 +17,88 @@ export type ProductVariantUpdateData = {
 	price?: number
 	stock?: number
 	status?: ProductVariantStatus
+}
+
+export type AttributeFilterMeta = {
+	id: string
+	key: string
+	dataType: DataType
+	isVariantAttribute: boolean
+	isFilterable: boolean
+	isHidden: boolean
+}
+
+export type ProductAttributeFilter =
+	| {
+			kind: 'enum'
+			attributeId: string
+			values: string[]
+	  }
+	| {
+			kind: 'variant-enum'
+			attributeId: string
+			values: string[]
+	  }
+	| {
+			kind: 'string'
+			attributeId: string
+			values: string[]
+	  }
+	| {
+			kind: 'boolean'
+			attributeId: string
+			value: boolean
+	  }
+	| {
+			kind: 'integer'
+			attributeId: string
+			values: number[]
+			min?: number
+			max?: number
+	  }
+	| {
+			kind: 'decimal'
+			attributeId: string
+			values: number[]
+			min?: number
+			max?: number
+	  }
+	| {
+			kind: 'datetime'
+			attributeId: string
+			values: Date[]
+			min?: Date
+			max?: Date
+	  }
+
+export type DiscountAttributeIds = {
+	discountId?: string
+	discountStartAtId?: string
+	discountEndAtId?: string
+}
+
+export type ProductFilterQueryBase = {
+	catalogId: string
+	categoryIds: string[]
+	brandIds: string[]
+	minPrice?: number
+	maxPrice?: number
+	searchTerm?: string
+	isPopular?: boolean
+	isDiscount?: boolean
+	attributeFilters: ProductAttributeFilter[]
+	discountAttributeIds?: DiscountAttributeIds
+	take: number
+}
+
+export type ProductDefaultPageCursor = {
+	updatedAt: Date
+	id: string
+}
+
+export type ProductSeededPageCursor = {
+	score: string
+	id: string
 }
 
 const productSelect = {
@@ -155,6 +238,10 @@ const productSelectWithDetails = {
 	}
 }
 
+function escapeLikePattern(value: string): string {
+	return value.replace(/[\\%_]/g, char => `\\${char}`)
+}
+
 @Injectable()
 export class ProductRepository {
 	constructor(private readonly prisma: PrismaService) {}
@@ -187,6 +274,99 @@ export class ProductRepository {
 			where: { slug, catalogId, deleteAt: null },
 			select: productSelectWithDetails
 		})
+	}
+
+	findByIdsWithAttributes(ids: string[], catalogId: string) {
+		if (!ids.length) return Promise.resolve([])
+
+		return this.prisma.product.findMany({
+			where: {
+				id: { in: ids },
+				catalogId,
+				deleteAt: null,
+				status: ProductStatus.ACTIVE
+			},
+			select: productSelectWithAttributes
+		})
+	}
+
+	findAttributesByTypeAndKeys(typeId: string, keys: string[]) {
+		if (!keys.length) return Promise.resolve([])
+		const byKey = keys.map(key => key.trim()).filter(Boolean)
+
+		return this.prisma.attribute.findMany({
+			where: {
+				deleteAt: null,
+				OR: byKey.map(key => ({
+					key: { equals: key, mode: 'insensitive' as const }
+				})),
+				types: { some: { id: typeId } }
+			},
+			select: {
+				id: true,
+				key: true,
+				dataType: true,
+				isVariantAttribute: true,
+				isFilterable: true,
+				isHidden: true
+			}
+		})
+	}
+
+	findFilteredProductIdsPageDefault(
+		query: ProductFilterQueryBase & { cursor?: ProductDefaultPageCursor }
+	) {
+		const whereClauses = this.buildBaseFilterClauses(query)
+
+		if (query.cursor) {
+			whereClauses.push(PrismaSql.sql`(
+				p.updated_at < ${query.cursor.updatedAt}
+				OR (
+					p.updated_at = ${query.cursor.updatedAt}
+					AND p.id < ${query.cursor.id}::uuid
+				)
+			)`)
+		}
+
+		return this.prisma.$queryRaw<Array<{ id: string; updatedAt: Date }>>(
+			PrismaSql.sql`
+				SELECT p.id, p.updated_at AS "updatedAt"
+				FROM products p
+				WHERE ${PrismaSql.join(whereClauses, ' AND ')}
+				ORDER BY p.updated_at DESC, p.id DESC
+				LIMIT ${query.take}
+			`
+		)
+	}
+
+	findFilteredProductIdsPageSeeded(
+		query: ProductFilterQueryBase & {
+			seed: string
+			cursor?: ProductSeededPageCursor
+		}
+	) {
+		const whereClauses = this.buildBaseFilterClauses(query)
+		const scoreExpr = PrismaSql.sql`md5(${query.seed} || p.id::text)`
+
+		if (query.cursor) {
+			whereClauses.push(PrismaSql.sql`(
+				${scoreExpr} > ${query.cursor.score}
+				OR (
+					${scoreExpr} = ${query.cursor.score}
+					AND p.id > ${query.cursor.id}::uuid
+				)
+			)`)
+		}
+
+		return this.prisma.$queryRaw<Array<{ id: string; score: string }>>(
+			PrismaSql.sql`
+				SELECT p.id, ${scoreExpr} AS score
+				FROM products p
+				WHERE ${PrismaSql.join(whereClauses, ' AND ')}
+				ORDER BY ${scoreExpr} ASC, p.id ASC
+				LIMIT ${query.take}
+			`
+		)
 	}
 
 	findSkuById(id: string, catalogId: string) {
@@ -517,6 +697,299 @@ export class ProductRepository {
 				data: { position: targetPosition }
 			})
 		})
+	}
+
+	private buildBaseFilterClauses(query: ProductFilterQueryBase): Prisma.Sql[] {
+		const clauses: Prisma.Sql[] = [
+			PrismaSql.sql`p.catalog_id = ${query.catalogId}::uuid`,
+			PrismaSql.sql`p.delete_at IS NULL`,
+			PrismaSql.sql`p.status::text = ${ProductStatus.ACTIVE}`
+		]
+
+		if (query.categoryIds.length) {
+			const categoryIds = query.categoryIds.map(
+				categoryId => PrismaSql.sql`${categoryId}::uuid`
+			)
+			clauses.push(PrismaSql.sql`
+				EXISTS (
+					SELECT 1
+					FROM category_products cp
+					JOIN categories c ON c.id = cp.category_id
+					WHERE cp.product_id = p.id
+						AND cp.category_id IN (${PrismaSql.join(categoryIds)})
+						AND c.catalog_id = p.catalog_id
+						AND c.delete_at IS NULL
+				)
+			`)
+		}
+
+		if (query.brandIds.length) {
+			const brandIds = query.brandIds.map(
+				brandId => PrismaSql.sql`${brandId}::uuid`
+			)
+			clauses.push(PrismaSql.sql`p.brand_id IN (${PrismaSql.join(brandIds)})`)
+		}
+
+		if (query.minPrice !== undefined) {
+			clauses.push(PrismaSql.sql`p.price >= ${query.minPrice}`)
+		}
+
+		if (query.maxPrice !== undefined) {
+			clauses.push(PrismaSql.sql`p.price <= ${query.maxPrice}`)
+		}
+
+		if (query.searchTerm) {
+			const pattern = `%${escapeLikePattern(query.searchTerm)}%`
+			clauses.push(PrismaSql.sql`p.name ILIKE ${pattern} ESCAPE '\'`)
+		}
+
+		if (query.isPopular !== undefined) {
+			clauses.push(PrismaSql.sql`p.is_popular = ${query.isPopular}`)
+		}
+
+		if (query.isDiscount) {
+			clauses.push(this.buildDiscountActiveClause(query.discountAttributeIds))
+		}
+
+		for (const filter of query.attributeFilters) {
+			clauses.push(this.buildAttributeFilterClause(filter))
+		}
+
+		return clauses
+	}
+
+	private buildDiscountActiveClause(ids?: DiscountAttributeIds): Prisma.Sql {
+		if (!ids?.discountId) {
+			return PrismaSql.sql`FALSE`
+		}
+
+		const now = new Date()
+		const discountPositive = PrismaSql.sql`
+			EXISTS (
+				SELECT 1
+				FROM product_attributes pa
+				WHERE pa.product_id = p.id
+					AND pa.delete_at IS NULL
+					AND pa.attribute_id = ${ids.discountId}::uuid
+					AND (
+						(pa.value_decimal IS NOT NULL AND pa.value_decimal > 0)
+						OR (pa.value_integer IS NOT NULL AND pa.value_integer > 0)
+					)
+			)
+		`
+
+		const startMissing = ids.discountStartAtId
+			? PrismaSql.sql`
+				NOT EXISTS (
+					SELECT 1
+					FROM product_attributes pa
+					WHERE pa.product_id = p.id
+						AND pa.delete_at IS NULL
+						AND pa.attribute_id = ${ids.discountStartAtId}::uuid
+						AND pa.value_datetime IS NOT NULL
+				)
+			`
+			: PrismaSql.sql`TRUE`
+
+		const startValid = ids.discountStartAtId
+			? PrismaSql.sql`
+				EXISTS (
+					SELECT 1
+					FROM product_attributes pa
+					WHERE pa.product_id = p.id
+						AND pa.delete_at IS NULL
+						AND pa.attribute_id = ${ids.discountStartAtId}::uuid
+						AND pa.value_datetime IS NOT NULL
+						AND pa.value_datetime <= ${now}
+				)
+			`
+			: PrismaSql.sql`TRUE`
+
+		const endMissing = ids.discountEndAtId
+			? PrismaSql.sql`
+				NOT EXISTS (
+					SELECT 1
+					FROM product_attributes pa
+					WHERE pa.product_id = p.id
+						AND pa.delete_at IS NULL
+						AND pa.attribute_id = ${ids.discountEndAtId}::uuid
+						AND pa.value_datetime IS NOT NULL
+				)
+			`
+			: PrismaSql.sql`TRUE`
+
+		const endValid = ids.discountEndAtId
+			? PrismaSql.sql`
+				EXISTS (
+					SELECT 1
+					FROM product_attributes pa
+					WHERE pa.product_id = p.id
+						AND pa.delete_at IS NULL
+						AND pa.attribute_id = ${ids.discountEndAtId}::uuid
+						AND pa.value_datetime IS NOT NULL
+						AND pa.value_datetime >= ${now}
+				)
+			`
+			: PrismaSql.sql`TRUE`
+
+		const activeWindow = PrismaSql.sql`
+			(
+				(${startMissing} AND ${endMissing})
+				OR (${startValid} AND ${endMissing})
+				OR (${startMissing} AND ${endValid})
+				OR (${startValid} AND ${endValid})
+			)
+		`
+
+		return PrismaSql.sql`(${discountPositive} AND ${activeWindow})`
+	}
+
+	private buildAttributeFilterClause(
+		filter: ProductAttributeFilter
+	): Prisma.Sql {
+		switch (filter.kind) {
+			case 'enum': {
+				const values = filter.values.map(value => PrismaSql.sql`${value}`)
+				return PrismaSql.sql`
+					EXISTS (
+						SELECT 1
+						FROM product_attributes pa
+						JOIN attribute_enum_values aev ON aev.id = pa.enum_value_id
+						WHERE pa.product_id = p.id
+							AND pa.delete_at IS NULL
+							AND aev.delete_at IS NULL
+							AND pa.attribute_id = ${filter.attributeId}::uuid
+							AND aev.value IN (${PrismaSql.join(values)})
+					)
+				`
+			}
+			case 'variant-enum': {
+				const values = filter.values.map(value => PrismaSql.sql`${value}`)
+				return PrismaSql.sql`
+					EXISTS (
+						SELECT 1
+						FROM product_variants pv
+						JOIN variant_attributes va ON va.variant_id = pv.id
+						JOIN attribute_enum_values aev ON aev.id = va.enum_value_id
+						WHERE pv.product_id = p.id
+							AND pv.delete_at IS NULL
+							AND va.delete_at IS NULL
+							AND aev.delete_at IS NULL
+							AND va.attribute_id = ${filter.attributeId}::uuid
+							AND aev.value IN (${PrismaSql.join(values)})
+					)
+				`
+			}
+			case 'string': {
+				const values = filter.values.map(
+					value => PrismaSql.sql`${value.toLowerCase()}`
+				)
+				return PrismaSql.sql`
+					EXISTS (
+						SELECT 1
+						FROM product_attributes pa
+						WHERE pa.product_id = p.id
+							AND pa.delete_at IS NULL
+							AND pa.attribute_id = ${filter.attributeId}::uuid
+							AND LOWER(pa.value_string) IN (${PrismaSql.join(values)})
+					)
+				`
+			}
+			case 'boolean': {
+				return PrismaSql.sql`
+					EXISTS (
+						SELECT 1
+						FROM product_attributes pa
+						WHERE pa.product_id = p.id
+							AND pa.delete_at IS NULL
+							AND pa.attribute_id = ${filter.attributeId}::uuid
+							AND pa.value_boolean = ${filter.value}
+					)
+				`
+			}
+			case 'integer': {
+				const valueClauses: Prisma.Sql[] = []
+				if (filter.values.length) {
+					const values = filter.values.map(value => PrismaSql.sql`${value}`)
+					valueClauses.push(
+						PrismaSql.sql`pa.value_integer IN (${PrismaSql.join(values)})`
+					)
+				}
+				if (filter.min !== undefined) {
+					valueClauses.push(PrismaSql.sql`pa.value_integer >= ${filter.min}`)
+				}
+				if (filter.max !== undefined) {
+					valueClauses.push(PrismaSql.sql`pa.value_integer <= ${filter.max}`)
+				}
+
+				return PrismaSql.sql`
+					EXISTS (
+						SELECT 1
+						FROM product_attributes pa
+						WHERE pa.product_id = p.id
+							AND pa.delete_at IS NULL
+							AND pa.attribute_id = ${filter.attributeId}::uuid
+							AND ${PrismaSql.join(valueClauses, ' AND ')}
+					)
+				`
+			}
+			case 'decimal': {
+				const valueClauses: Prisma.Sql[] = []
+				if (filter.values.length) {
+					const values = filter.values.map(value => PrismaSql.sql`${value}`)
+					valueClauses.push(
+						PrismaSql.sql`pa.value_decimal IN (${PrismaSql.join(values)})`
+					)
+				}
+				if (filter.min !== undefined) {
+					valueClauses.push(PrismaSql.sql`pa.value_decimal >= ${filter.min}`)
+				}
+				if (filter.max !== undefined) {
+					valueClauses.push(PrismaSql.sql`pa.value_decimal <= ${filter.max}`)
+				}
+
+				return PrismaSql.sql`
+					EXISTS (
+						SELECT 1
+						FROM product_attributes pa
+						WHERE pa.product_id = p.id
+							AND pa.delete_at IS NULL
+							AND pa.attribute_id = ${filter.attributeId}::uuid
+							AND ${PrismaSql.join(valueClauses, ' AND ')}
+					)
+				`
+			}
+			case 'datetime': {
+				const valueClauses: Prisma.Sql[] = []
+				if (filter.values.length) {
+					const values = filter.values.map(value => PrismaSql.sql`${value}`)
+					valueClauses.push(
+						PrismaSql.sql`pa.value_datetime IN (${PrismaSql.join(values)})`
+					)
+				}
+				if (filter.min !== undefined) {
+					valueClauses.push(PrismaSql.sql`pa.value_datetime >= ${filter.min}`)
+				}
+				if (filter.max !== undefined) {
+					valueClauses.push(PrismaSql.sql`pa.value_datetime <= ${filter.max}`)
+				}
+
+				return PrismaSql.sql`
+					EXISTS (
+						SELECT 1
+						FROM product_attributes pa
+						WHERE pa.product_id = p.id
+							AND pa.delete_at IS NULL
+							AND pa.attribute_id = ${filter.attributeId}::uuid
+							AND ${PrismaSql.join(valueClauses, ' AND ')}
+					)
+				`
+			}
+			default: {
+				const _exhaustive: never = filter
+				return _exhaustive
+			}
+		}
 	}
 
 	private async applyVariants(

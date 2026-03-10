@@ -1,4 +1,5 @@
-﻿import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
+﻿import { DataType } from '@generated/enums'
+import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
 	Injectable,
@@ -9,13 +10,17 @@ import slugify from 'slugify'
 
 import { CacheService } from '@/shared/cache/cache.service'
 import {
-	CATEGORY_PRODUCTS_CACHE_VERSION,
 	CATALOG_TYPE_CACHE_VERSION,
+	CATEGORY_PRODUCTS_CACHE_VERSION,
 	PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
 import type { MediaDto } from '@/shared/media/dto/media.dto.res'
 import type { MediaRecord } from '@/shared/media/media-url.service'
-import { MediaUrlService } from '@/shared/media/media-url.service'
+import {
+	MEDIA_DETAIL_VARIANT_NAMES,
+	MEDIA_LIST_VARIANT_NAMES,
+	MediaUrlService
+} from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { mustCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
 import {
@@ -30,7 +35,13 @@ import { SetProductVariantsDtoReq } from './dto/requests/set-product-variants.dt
 import { UpdateProductDtoReq } from './dto/requests/update-product.dto.req'
 import { ProductAttributeBuilder } from './product-attribute.builder'
 import { ProductVariantBuilder } from './product-variant.builder'
-import { ProductRepository } from './product.repository'
+import {
+	type DiscountAttributeIds,
+	type ProductAttributeFilter,
+	type ProductDefaultPageCursor,
+	ProductRepository,
+	type ProductSeededPageCursor
+} from './product.repository'
 
 type ProductMediaMapped<T> = Omit<T, 'media'> & {
 	media: { position: number; kind?: string | null; media: MediaDto }[]
@@ -43,8 +54,50 @@ type PopularProductList = ProductMediaMapped<
 	Awaited<ReturnType<ProductRepository['findPopular']>>[number]
 >[]
 
+type ParsedAttributeFilter = {
+	key: string
+	values: string[]
+	min?: string
+	max?: string
+	bool?: boolean
+}
+
+type RawAttributeFilterState = {
+	values: string[]
+	min?: string
+	max?: string
+	bool?: boolean
+}
+
+type ParsedProductInfiniteQuery = {
+	cursor?: string
+	limit: number
+	seed?: string
+	categoryIds: string[]
+	brandIds: string[]
+	minPrice?: number
+	maxPrice?: number
+	searchTerm?: string
+	isPopular?: boolean
+	isDiscount?: boolean
+	attributeFilters: ParsedAttributeFilter[]
+}
+
+type DecodedInfiniteCursor =
+	| {
+			mode: 'default'
+			cursor: ProductDefaultPageCursor
+	  }
+	| {
+			mode: 'seed'
+			seed: string
+			cursor: ProductSeededPageCursor
+	  }
+
 const PRODUCTS_CACHE_TTL_SEC =
 	Number(process.env.CATALOG_PRODUCTS_CACHE_TTL_SEC ?? 0) || 0
+const PRODUCT_INFINITE_DEFAULT_LIMIT = 24
+const PRODUCT_INFINITE_MAX_LIMIT = 50
 const SLUG_MAX_LENGTH = 255
 const SKU_MAX_LENGTH = 100
 const PRODUCT_SLUG_FALLBACK = 'product'
@@ -107,7 +160,9 @@ export class ProductService {
 		const catalogId = mustCatalogId()
 		if (!this.cacheTtlSec) {
 			const products = await this.repo.findAll(catalogId)
-			return products.map(product => this.mapProductMedia(product))
+			return products.map(product =>
+				this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
+			)
 		}
 
 		const cacheKey = await this.buildCatalogProductsCacheKey(catalogId)
@@ -115,7 +170,9 @@ export class ProductService {
 		if (cached !== null) return cached
 
 		const products = await this.repo.findAll(catalogId)
-		const mapped = products.map(product => this.mapProductMedia(product))
+		const mapped = products.map(product =>
+			this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
+		)
 		await this.cache.setJson(cacheKey, mapped, this.cacheTtlSec)
 		return mapped
 	}
@@ -124,7 +181,9 @@ export class ProductService {
 		const catalogId = mustCatalogId()
 		if (!this.cacheTtlSec) {
 			const products = await this.repo.findPopular(catalogId)
-			return products.map(product => this.mapProductMedia(product))
+			return products.map(product =>
+				this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
+			)
 		}
 
 		const cacheKey = await this.buildCatalogPopularProductsCacheKey(catalogId)
@@ -132,23 +191,114 @@ export class ProductService {
 		if (cached !== null) return cached
 
 		const products = await this.repo.findPopular(catalogId)
-		const mapped = products.map(product => this.mapProductMedia(product))
+		const mapped = products.map(product =>
+			this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
+		)
 		await this.cache.setJson(cacheKey, mapped, this.cacheTtlSec)
 		return mapped
+	}
+
+	async getInfinite(query: Record<string, unknown>) {
+		const catalogId = mustCatalogId()
+		const typeId = mustTypeId()
+		const parsed = this.parseInfiniteQuery(query)
+		const decodedCursor = this.decodeInfiniteCursor(parsed.cursor)
+
+		let seed = parsed.seed
+		if (!seed && decodedCursor?.mode === 'seed') {
+			seed = decodedCursor.seed
+		}
+
+		const attributeFilters = await this.resolveAttributeFilters(
+			typeId,
+			parsed.attributeFilters
+		)
+		const discountAttributeIds = parsed.isDiscount
+			? await this.resolveDiscountAttributeIds(typeId)
+			: undefined
+
+		const take = parsed.limit + 1
+		const baseQuery = {
+			catalogId,
+			categoryIds: parsed.categoryIds,
+			brandIds: parsed.brandIds,
+			minPrice: parsed.minPrice,
+			maxPrice: parsed.maxPrice,
+			searchTerm: parsed.searchTerm,
+			isPopular: parsed.isPopular,
+			isDiscount: parsed.isDiscount,
+			attributeFilters,
+			discountAttributeIds,
+			take
+		}
+
+		const rows = seed
+			? await this.repo.findFilteredProductIdsPageSeeded({
+					...baseQuery,
+					seed,
+					cursor:
+						decodedCursor?.mode === 'seed' && decodedCursor.seed === seed
+							? decodedCursor.cursor
+							: undefined
+				})
+			: await this.repo.findFilteredProductIdsPageDefault({
+					...baseQuery,
+					cursor:
+						decodedCursor?.mode === 'default' ? decodedCursor.cursor : undefined
+				})
+
+		const hasMore = rows.length > parsed.limit
+		const pageRows = hasMore ? rows.slice(0, parsed.limit) : rows
+		const ids = pageRows.map(row => row.id)
+
+		const products = await this.repo.findByIdsWithAttributes(ids, catalogId)
+		const productById = new Map(
+			products.map(product => [
+				product.id,
+				this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
+			])
+		)
+		const items = ids
+			.map(id => productById.get(id))
+			.filter((item): item is NonNullable<typeof item> => Boolean(item))
+
+		const lastRow = pageRows[pageRows.length - 1]
+		let nextCursor: string | null = null
+		if (hasMore && lastRow) {
+			if (seed) {
+				const row = lastRow as { id: string; score: string }
+				nextCursor = this.encodeSeedCursor(seed, {
+					id: row.id,
+					score: row.score
+				})
+			} else {
+				const row = lastRow as { id: string; updatedAt: Date }
+				nextCursor = this.encodeDefaultCursor({
+					id: row.id,
+					updatedAt: row.updatedAt
+				})
+			}
+		}
+
+		return {
+			items,
+			nextCursor,
+			seed: seed ?? null
+		}
 	}
 
 	async getById(id: string) {
 		const catalogId = mustCatalogId()
 		const product = await this.repo.findById(id, catalogId)
 		if (!product) throw new NotFoundException('Товар не найден')
-		return this.mapProductMedia(product)
+		return this.mapProductMedia(product, MEDIA_DETAIL_VARIANT_NAMES)
 	}
 
 	async getBySlug(slug: string) {
 		const catalogId = mustCatalogId()
 		const product = await this.repo.findBySlug(normalizeSlug(slug), catalogId)
 		if (!product) throw new NotFoundException('Товар не найден')
-		return this.mapProductMedia(product)
+		return this.mapProductMedia(product, MEDIA_DETAIL_VARIANT_NAMES)
 	}
 
 	async create(dto: CreateProductDtoReq) {
@@ -303,7 +453,10 @@ export class ProductService {
 
 		await this.invalidateCatalogProductsCache(catalogId)
 		await this.invalidateCategoryProductsCache(catalogId)
-		return { ok: true, ...this.mapProductMedia(product) }
+		return {
+			ok: true,
+			...this.mapProductMedia(product, MEDIA_DETAIL_VARIANT_NAMES)
+		}
 	}
 
 	async setVariants(id: string, dto: SetProductVariantsDtoReq) {
@@ -351,7 +504,10 @@ export class ProductService {
 		if (hasCustomVariantValues) {
 			await this.cache.bumpVersion(CATALOG_TYPE_CACHE_VERSION, typeId)
 		}
-		return { ok: true, ...this.mapProductMedia(updated) }
+		return {
+			ok: true,
+			...this.mapProductMedia(updated, MEDIA_DETAIL_VARIANT_NAMES)
+		}
 	}
 
 	async remove(id: string) {
@@ -364,17 +520,587 @@ export class ProductService {
 		return { ok: true }
 	}
 
+	private parseInfiniteQuery(
+		query: Record<string, unknown>
+	): ParsedProductInfiniteQuery {
+		const limit = this.normalizeInfiniteLimit(
+			this.getSingleQueryValue(query.limit)
+		)
+		const seedRaw = this.getSingleQueryValue(query.seed)
+		const seed = seedRaw ? seedRaw : undefined
+		const minPrice = this.parseOptionalNumber(
+			this.getSingleQueryValue(query.minPrice),
+			'minPrice'
+		)
+		const maxPrice = this.parseOptionalNumber(
+			this.getSingleQueryValue(query.maxPrice),
+			'maxPrice'
+		)
+		if (minPrice !== undefined && maxPrice !== undefined && minPrice > maxPrice) {
+			throw new BadRequestException('minPrice не может быть больше maxPrice')
+		}
+
+		return {
+			cursor: this.getSingleQueryValue(query.cursor),
+			limit,
+			seed,
+			categoryIds: this.extractCsvValues(query.categories),
+			brandIds: this.extractCsvValues(query.brands),
+			minPrice,
+			maxPrice,
+			searchTerm: this.getSingleQueryValue(query.searchTerm),
+			isPopular: this.parseOptionalBoolean(
+				this.getSingleQueryValue(query.isPopular),
+				'isPopular'
+			),
+			isDiscount: this.parseOptionalBoolean(
+				this.getSingleQueryValue(query.isDiscount),
+				'isDiscount'
+			),
+			attributeFilters: this.parseAttributeFilters(query)
+		}
+	}
+
+	private parseAttributeFilters(
+		query: Record<string, unknown>
+	): ParsedAttributeFilter[] {
+		const stateByKey = new Map<string, RawAttributeFilterState>()
+		const rawAttributesJson = this.getSingleQueryValue(query.attributes)
+
+		if (rawAttributesJson) {
+			let parsed: unknown
+			try {
+				parsed = JSON.parse(rawAttributesJson)
+			} catch {
+				throw new BadRequestException(
+					'attributes должен быть валидным JSON-объектом'
+				)
+			}
+
+			if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+				throw new BadRequestException(
+					'attributes должен быть JSON-объектом вида {"key": value}'
+				)
+			}
+
+			for (const [rawKey, rawValue] of Object.entries(parsed)) {
+				const key = this.normalizeAttributeKey(rawKey)
+				const state = this.ensureAttributeState(stateByKey, key)
+				this.applyAttributeJsonValue(state, rawValue)
+			}
+		}
+
+		for (const [rawKey, rawValue] of Object.entries(query)) {
+			if (rawKey.startsWith('attr.')) {
+				const key = this.normalizeAttributeKey(rawKey.slice('attr.'.length))
+				const state = this.ensureAttributeState(stateByKey, key)
+				state.values.push(...this.extractCsvValues(rawValue))
+				continue
+			}
+
+			if (rawKey.startsWith('attrMin.')) {
+				const key = this.normalizeAttributeKey(rawKey.slice('attrMin.'.length))
+				const state = this.ensureAttributeState(stateByKey, key)
+				state.min = this.getSingleQueryValue(rawValue)
+				continue
+			}
+
+			if (rawKey.startsWith('attrMax.')) {
+				const key = this.normalizeAttributeKey(rawKey.slice('attrMax.'.length))
+				const state = this.ensureAttributeState(stateByKey, key)
+				state.max = this.getSingleQueryValue(rawValue)
+				continue
+			}
+
+			if (rawKey.startsWith('attrBool.')) {
+				const key = this.normalizeAttributeKey(rawKey.slice('attrBool.'.length))
+				const state = this.ensureAttributeState(stateByKey, key)
+				state.bool = this.parseOptionalBoolean(
+					this.getSingleQueryValue(rawValue),
+					`attrBool.${key}`
+				)
+			}
+		}
+
+		return Array.from(stateByKey.entries())
+			.map(([key, state]) => ({
+				key,
+				values: this.uniqueNonEmpty(state.values.map(value => value.trim())),
+				min: state.min?.trim() || undefined,
+				max: state.max?.trim() || undefined,
+				bool: state.bool
+			}))
+			.filter(
+				state =>
+					state.values.length > 0 ||
+					state.min !== undefined ||
+					state.max !== undefined ||
+					state.bool !== undefined
+			)
+	}
+
+	private async resolveAttributeFilters(
+		typeId: string,
+		filters: ParsedAttributeFilter[]
+	): Promise<ProductAttributeFilter[]> {
+		if (!filters.length) return []
+
+		const keys = this.uniqueNonEmpty(filters.map(filter => filter.key))
+		const meta = await this.repo.findAttributesByTypeAndKeys(typeId, keys)
+		const metaByKey = new Map(meta.map(item => [item.key.toLowerCase(), item]))
+
+		const missing = keys.filter(key => !metaByKey.has(key))
+		if (missing.length) {
+			throw new BadRequestException(
+				`Неизвестные атрибуты фильтра: ${missing.join(', ')}`
+			)
+		}
+
+		return filters.map(filter => {
+			const item = metaByKey.get(filter.key)
+			if (!item) {
+				throw new BadRequestException(`Неизвестный атрибут фильтра: ${filter.key}`)
+			}
+			if (item.isHidden || !item.isFilterable) {
+				throw new BadRequestException(
+					`Атрибут ${item.key} недоступен для фильтрации`
+				)
+			}
+			return this.resolveSingleAttributeFilter(item, filter)
+		})
+	}
+
+	private resolveSingleAttributeFilter(
+		meta: {
+			id: string
+			key: string
+			dataType: DataType
+			isVariantAttribute: boolean
+		},
+		filter: ParsedAttributeFilter
+	): ProductAttributeFilter {
+		switch (meta.dataType) {
+			case DataType.ENUM: {
+				if (
+					filter.bool !== undefined ||
+					filter.min !== undefined ||
+					filter.max !== undefined
+				) {
+					throw new BadRequestException(
+						`Для ENUM-атрибута ${meta.key} поддерживаются только значения`
+					)
+				}
+				const values = this.uniqueNonEmpty(filter.values.map(v => v.trim()))
+				if (!values.length) {
+					throw new BadRequestException(
+						`Для атрибута ${meta.key} нужно передать значения`
+					)
+				}
+				return meta.isVariantAttribute
+					? { kind: 'variant-enum', attributeId: meta.id, values }
+					: { kind: 'enum', attributeId: meta.id, values }
+			}
+			case DataType.STRING: {
+				if (
+					filter.bool !== undefined ||
+					filter.min !== undefined ||
+					filter.max !== undefined
+				) {
+					throw new BadRequestException(
+						`Для STRING-атрибута ${meta.key} поддерживаются только значения`
+					)
+				}
+				const values = this.uniqueNonEmpty(filter.values.map(v => v.trim()))
+				if (!values.length) {
+					throw new BadRequestException(
+						`Для атрибута ${meta.key} нужно передать значения`
+					)
+				}
+				return { kind: 'string', attributeId: meta.id, values }
+			}
+			case DataType.BOOLEAN: {
+				if (filter.min !== undefined || filter.max !== undefined) {
+					throw new BadRequestException(
+						`Для BOOLEAN-атрибута ${meta.key} min/max не поддерживаются`
+					)
+				}
+				if (filter.values.length > 1) {
+					throw new BadRequestException(
+						`Для BOOLEAN-атрибута ${meta.key} нужно одно значение`
+					)
+				}
+				const value =
+					filter.bool ??
+					(filter.values.length
+						? this.parseBooleanStrict(filter.values[0], `attr.${meta.key}`)
+						: undefined)
+				if (value === undefined) {
+					throw new BadRequestException(
+						`Для атрибута ${meta.key} нужно передать true или false`
+					)
+				}
+				return { kind: 'boolean', attributeId: meta.id, value }
+			}
+			case DataType.INTEGER: {
+				if (filter.bool !== undefined) {
+					throw new BadRequestException(
+						`Для INTEGER-атрибута ${meta.key} bool не поддерживается`
+					)
+				}
+				const values = filter.values.map(value =>
+					this.parseInteger(value, `attr.${meta.key}`)
+				)
+				const min =
+					filter.min !== undefined
+						? this.parseInteger(filter.min, `attrMin.${meta.key}`)
+						: undefined
+				const max =
+					filter.max !== undefined
+						? this.parseInteger(filter.max, `attrMax.${meta.key}`)
+						: undefined
+				if (!values.length && min === undefined && max === undefined) {
+					throw new BadRequestException(
+						`Для атрибута ${meta.key} нужно передать value, min или max`
+					)
+				}
+				if (min !== undefined && max !== undefined && min > max) {
+					throw new BadRequestException(
+						`attrMin.${meta.key} не может быть больше attrMax.${meta.key}`
+					)
+				}
+				return { kind: 'integer', attributeId: meta.id, values, min, max }
+			}
+			case DataType.DECIMAL: {
+				if (filter.bool !== undefined) {
+					throw new BadRequestException(
+						`Для DECIMAL-атрибута ${meta.key} bool не поддерживается`
+					)
+				}
+				const values = filter.values.map(value =>
+					this.parseDecimal(value, `attr.${meta.key}`)
+				)
+				const min =
+					filter.min !== undefined
+						? this.parseDecimal(filter.min, `attrMin.${meta.key}`)
+						: undefined
+				const max =
+					filter.max !== undefined
+						? this.parseDecimal(filter.max, `attrMax.${meta.key}`)
+						: undefined
+				if (!values.length && min === undefined && max === undefined) {
+					throw new BadRequestException(
+						`Для атрибута ${meta.key} нужно передать value, min или max`
+					)
+				}
+				if (min !== undefined && max !== undefined && min > max) {
+					throw new BadRequestException(
+						`attrMin.${meta.key} не может быть больше attrMax.${meta.key}`
+					)
+				}
+				return { kind: 'decimal', attributeId: meta.id, values, min, max }
+			}
+			case DataType.DATETIME: {
+				if (filter.bool !== undefined) {
+					throw new BadRequestException(
+						`Для DATETIME-атрибута ${meta.key} bool не поддерживается`
+					)
+				}
+				const values = filter.values.map(value =>
+					this.parseDate(value, `attr.${meta.key}`)
+				)
+				const min =
+					filter.min !== undefined
+						? this.parseDate(filter.min, `attrMin.${meta.key}`)
+						: undefined
+				const max =
+					filter.max !== undefined
+						? this.parseDate(filter.max, `attrMax.${meta.key}`)
+						: undefined
+				if (!values.length && min === undefined && max === undefined) {
+					throw new BadRequestException(
+						`Для атрибута ${meta.key} нужно передать value, min или max`
+					)
+				}
+				if (
+					min !== undefined &&
+					max !== undefined &&
+					min.getTime() > max.getTime()
+				) {
+					throw new BadRequestException(
+						`attrMin.${meta.key} не может быть больше attrMax.${meta.key}`
+					)
+				}
+				return { kind: 'datetime', attributeId: meta.id, values, min, max }
+			}
+			default:
+				throw new BadRequestException(
+					`Тип атрибута ${meta.key} не поддерживается в фильтре`
+				)
+		}
+	}
+
+	private async resolveDiscountAttributeIds(
+		typeId: string
+	): Promise<DiscountAttributeIds> {
+		const attrs = await this.repo.findAttributesByTypeAndKeys(typeId, [
+			'discount',
+			'discountStartAt',
+			'discountEndAt'
+		])
+		const byKey = new Map(attrs.map(attr => [attr.key.toLowerCase(), attr.id]))
+
+		return {
+			discountId: byKey.get('discount'),
+			discountStartAtId: byKey.get('discountstartat'),
+			discountEndAtId: byKey.get('discountendat')
+		}
+	}
+
+	private decodeInfiniteCursor(raw?: string): DecodedInfiniteCursor | null {
+		if (!raw) return null
+
+		try {
+			const decoded = Buffer.from(raw, 'base64').toString('utf8')
+			const payload = JSON.parse(decoded) as {
+				mode?: unknown
+				id?: unknown
+				updatedAt?: unknown
+				score?: unknown
+				seed?: unknown
+			}
+
+			if (payload.mode === 'default') {
+				const id = typeof payload.id === 'string' ? payload.id.trim() : ''
+				const updatedAtRaw =
+					typeof payload.updatedAt === 'string'
+						? payload.updatedAt.trim()
+						: undefined
+				if (!id || !updatedAtRaw) return null
+				const updatedAt = new Date(updatedAtRaw)
+				if (Number.isNaN(updatedAt.getTime())) return null
+				return {
+					mode: 'default',
+					cursor: { id, updatedAt }
+				}
+			}
+
+			if (payload.mode === 'seed') {
+				const id = typeof payload.id === 'string' ? payload.id.trim() : ''
+				const score = typeof payload.score === 'string' ? payload.score.trim() : ''
+				const seed = typeof payload.seed === 'string' ? payload.seed.trim() : ''
+				if (!id || !score || !seed) return null
+				return {
+					mode: 'seed',
+					seed,
+					cursor: { id, score }
+				}
+			}
+
+			return null
+		} catch {
+			return null
+		}
+	}
+
+	private encodeDefaultCursor(cursor: ProductDefaultPageCursor): string {
+		return Buffer.from(
+			JSON.stringify({
+				mode: 'default',
+				id: cursor.id,
+				updatedAt: cursor.updatedAt.toISOString()
+			})
+		).toString('base64')
+	}
+
+	private encodeSeedCursor(
+		seed: string,
+		cursor: ProductSeededPageCursor
+	): string {
+		return Buffer.from(
+			JSON.stringify({
+				mode: 'seed',
+				id: cursor.id,
+				score: cursor.score,
+				seed
+			})
+		).toString('base64')
+	}
+
+	private normalizeInfiniteLimit(value?: string): number {
+		if (!value) return PRODUCT_INFINITE_DEFAULT_LIMIT
+		const parsed = Number(value)
+		if (!Number.isFinite(parsed)) return PRODUCT_INFINITE_DEFAULT_LIMIT
+		const normalized = Math.floor(parsed)
+		if (normalized <= 0) return PRODUCT_INFINITE_DEFAULT_LIMIT
+		return Math.min(normalized, PRODUCT_INFINITE_MAX_LIMIT)
+	}
+
+	private getSingleQueryValue(raw: unknown): string | undefined {
+		if (Array.isArray(raw)) {
+			for (const item of raw) {
+				const normalized = this.getSingleQueryValue(item)
+				if (normalized) return normalized
+			}
+			return undefined
+		}
+		if (raw === undefined || raw === null) return undefined
+		const normalized = String(raw).trim()
+		return normalized || undefined
+	}
+
+	private extractCsvValues(raw: unknown): string[] {
+		if (Array.isArray(raw)) {
+			return this.uniqueNonEmpty(raw.flatMap(item => this.extractCsvValues(item)))
+		}
+		if (raw === undefined || raw === null) return []
+		return this.uniqueNonEmpty(
+			String(raw)
+				.split(',')
+				.map(item => item.trim())
+		)
+	}
+
+	private parseOptionalBoolean(
+		value: string | undefined,
+		field: string
+	): boolean | undefined {
+		if (value === undefined) return undefined
+		return this.parseBooleanStrict(value, field)
+	}
+
+	private parseBooleanStrict(value: string, field: string): boolean {
+		const normalized = value.trim().toLowerCase()
+		if (normalized === 'true' || normalized === '1') return true
+		if (normalized === 'false' || normalized === '0') return false
+		throw new BadRequestException(`Поле ${field} должно быть true/false`)
+	}
+
+	private parseOptionalNumber(
+		value: string | undefined,
+		field: string
+	): number | undefined {
+		if (value === undefined) return undefined
+		const parsed = Number(value)
+		if (!Number.isFinite(parsed)) {
+			throw new BadRequestException(`Поле ${field} должно быть числом`)
+		}
+		return parsed
+	}
+
+	private parseInteger(value: string, field: string): number {
+		const parsed = Number(value)
+		if (!Number.isInteger(parsed)) {
+			throw new BadRequestException(`Поле ${field} должно быть целым числом`)
+		}
+		return parsed
+	}
+
+	private parseDecimal(value: string, field: string): number {
+		const parsed = Number(value)
+		if (!Number.isFinite(parsed)) {
+			throw new BadRequestException(`Поле ${field} должно быть числом`)
+		}
+		return parsed
+	}
+
+	private parseDate(value: string, field: string): Date {
+		const parsed = new Date(value)
+		if (Number.isNaN(parsed.getTime())) {
+			throw new BadRequestException(`Поле ${field} должно быть датой`)
+		}
+		return parsed
+	}
+
+	private normalizeAttributeKey(value: string): string {
+		const normalized = value.trim().toLowerCase()
+		if (!normalized) {
+			throw new BadRequestException('Ключ атрибута фильтра не может быть пустым')
+		}
+		return normalized
+	}
+
+	private ensureAttributeState(
+		map: Map<string, RawAttributeFilterState>,
+		key: string
+	): RawAttributeFilterState {
+		let state = map.get(key)
+		if (!state) {
+			state = { values: [] }
+			map.set(key, state)
+		}
+		return state
+	}
+
+	private applyAttributeJsonValue(
+		state: RawAttributeFilterState,
+		value: unknown
+	): void {
+		if (value === null || value === undefined) return
+
+		if (Array.isArray(value)) {
+			state.values.push(
+				...value
+					.map(item => (item === null || item === undefined ? '' : String(item)))
+					.filter(Boolean)
+			)
+			return
+		}
+
+		if (typeof value === 'boolean') {
+			state.bool = value
+			return
+		}
+
+		if (typeof value === 'number' || typeof value === 'string') {
+			state.values.push(String(value))
+			return
+		}
+
+		if (typeof value === 'object') {
+			const payload = value as {
+				values?: unknown
+				value?: unknown
+				min?: unknown
+				max?: unknown
+				bool?: unknown
+			}
+
+			if (payload.values !== undefined) {
+				state.values.push(...this.extractCsvValues(payload.values))
+			}
+			if (payload.value !== undefined) {
+				state.values.push(...this.extractCsvValues(payload.value))
+			}
+			if (payload.min !== undefined && payload.min !== null) {
+				state.min = String(payload.min)
+			}
+			if (payload.max !== undefined && payload.max !== null) {
+				state.max = String(payload.max)
+			}
+			if (payload.bool !== undefined && payload.bool !== null) {
+				state.bool = this.parseBooleanStrict(
+					String(payload.bool),
+					'attributes.bool'
+				)
+			}
+		}
+	}
+
+	private uniqueNonEmpty(values: string[]): string[] {
+		return Array.from(new Set(values.filter(Boolean)))
+	}
+
 	private mapProductMedia<
 		T extends {
 			media: { position: number; kind?: string | null; media: MediaRecord }[]
 		}
-	>(product: T) {
+	>(product: T, variantNames?: readonly string[]) {
 		return {
 			...product,
 			media: (product.media ?? []).map(item => ({
 				position: item.position,
 				kind: item.kind ?? null,
-				media: this.mediaUrl.mapMedia(item.media)
+				media: this.mediaUrl.mapMedia(item.media, { variantNames })
 			}))
 		}
 	}

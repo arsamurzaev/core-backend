@@ -1,20 +1,41 @@
-import { CatalogStatus } from '@generated/enums'
+import { CatalogStatus, ContactType } from '@generated/enums'
 import { ApiPropertyOptional } from '@nestjs/swagger'
-import { Transform } from 'class-transformer'
+import { Transform, Type } from 'class-transformer'
 import {
+	ArrayMaxSize,
+	IsArray,
 	IsBoolean,
 	IsEnum,
 	IsOptional,
 	IsString,
 	Matches,
 	MaxLength,
-	MinLength
+	MinLength,
+	ValidateNested
 } from 'class-validator'
 
 const SLUG_PATTERN = /^[a-z0-9-]+$/
 const DOMAIN_PATTERN = /^[a-z0-9.-]+$/
 const SLUG_MIN_LENGTH = 2
 const SLUG_MAX_LENGTH = 63
+
+export class UpdateCatalogContactDtoReq {
+	@ApiPropertyOptional({ enum: ContactType, example: ContactType.PHONE })
+	@IsEnum(ContactType)
+	type: ContactType
+
+	@ApiPropertyOptional({ type: Number, example: 0 })
+	@IsOptional()
+	position?: number
+
+	@ApiPropertyOptional({ type: String, example: '+79991234567' })
+	@IsString()
+	@Transform(({ value }: { value: unknown }) => {
+		if (typeof value !== 'string') return value
+		return value.trim()
+	})
+	value: string
+}
 
 export class UpdateCatalogDtoReq {
 	@ApiPropertyOptional({ type: String, example: 'catalog' })
@@ -168,4 +189,16 @@ export class UpdateCatalogDtoReq {
 		return normalized.length ? normalized : null
 	})
 	yandexVerification?: string | null
+
+	@ApiPropertyOptional({
+		type: [UpdateCatalogContactDtoReq],
+		description:
+			'Полный набор контактов каталога. При передаче существующие контакты заменяются.'
+	})
+	@IsOptional()
+	@IsArray()
+	@ArrayMaxSize(8)
+	@ValidateNested({ each: true })
+	@Type(() => UpdateCatalogContactDtoReq)
+	contacts?: UpdateCatalogContactDtoReq[]
 }
