@@ -21,6 +21,11 @@ const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
 const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'lax') as 'strict' | 'lax'
 const isProd = process.env.NODE_ENV === 'production'
 const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7
+const CLEAR_COOKIE_OPTIONS = {
+	path: '/',
+	sameSite: SAME_SITE,
+	secure: isProd
+} as const
 
 function parseCookie(
 	header: string | undefined,
@@ -39,7 +44,7 @@ function isUnsafeMethod(method: string | undefined) {
 	return m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE'
 }
 
-// ��������: ADMIN > CATALOG > USER
+// Иерархия ролей: ADMIN > CATALOG > USER
 const ROLE_RANK: Record<Role, number> = {
 	ADMIN: 3,
 	CATALOG: 2,
@@ -47,8 +52,15 @@ const ROLE_RANK: Record<Role, number> = {
 }
 
 function requiredRank(required: Role[]) {
-	// ������� ������ ������� �� �������������
+	// Берём максимальный уровень роли среди требуемых
 	return Math.max(...required.map(r => ROLE_RANK[r] ?? 999))
+}
+
+function clearSessionCookies(res: Response | undefined): void {
+	if (!res?.clearCookie) return
+
+	res.clearCookie(SID_COOKIE, CLEAR_COOKIE_OPTIONS)
+	res.clearCookie(CSRF_COOKIE, CLEAR_COOKIE_OPTIONS)
 }
 
 @Injectable()
@@ -70,68 +82,80 @@ export class SessionGuard implements CanActivate {
 		const req = http.getRequest<AuthRequest>()
 		const res = http.getResponse<Response>()
 
-		const sid = parseCookie(req.headers.cookie, SID_COOKIE)
-
-		if (!sid) throw new UnauthorizedException('�� �����������')
-
-		const session = await this.sessions.get(sid)
-		if (!session?.userId)
-			throw new UnauthorizedException('������ ���������������')
-
-		// CSRF (������ unsafe ������)
-		if (isUnsafeMethod(req.method)) {
-			const csrfHeader = String(req.headers['x-csrf-token'] ?? '')
-			const csrfCookie = parseCookie(req.headers.cookie, CSRF_COOKIE) ?? ''
-
-			if (!csrfHeader || !csrfCookie)
-				throw new ForbiddenException('CSRF ����� �����������')
-			if (csrfHeader !== csrfCookie || csrfHeader !== session.csrf) {
-				throw new ForbiddenException('CSRF ����� ��������������')
-			}
-		}
-
-		const user = await this.prisma.user.findFirst({
-			where: { id: session.userId, deleteAt: null },
-			select: { id: true, role: true, login: true, name: true }
-		})
-		if (!user) throw new UnauthorizedException('������������ �� ������')
-		req.user = user
-		req.sessionId = sid
-
-		// Roles(...) � ���������
-		const required =
-			this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
-				context.getHandler(),
-				context.getClass()
-			]) ?? []
-
-		if (required.length > 0) {
-			const need = requiredRank(required)
-			const have = ROLE_RANK[user.role]
-			if (have < need) throw new ForbiddenException('������������ ����')
-		}
 		try {
-			await this.sessions.touch(sid, session.userId)
-		} catch {
-			// no-op: do not block request if refresh fails
-		}
+			const sid = parseCookie(req.headers.cookie, SID_COOKIE)
 
-		if (res?.cookie) {
-			res.cookie(SID_COOKIE, sid, {
-				httpOnly: true,
-				sameSite: SAME_SITE,
-				secure: isProd,
-				path: '/',
-				maxAge: SESSION_MAX_AGE_MS
+			if (!sid) throw new UnauthorizedException('Не авторизован')
+
+			const session = await this.sessions.get(sid)
+			if (!session?.userId) {
+				throw new UnauthorizedException('Сессия недействительна')
+			}
+
+			// CSRF проверяем только для небезопасных методов
+			if (isUnsafeMethod(req.method)) {
+				const csrfHeader = String(req.headers['x-csrf-token'] ?? '')
+				const csrfCookie = parseCookie(req.headers.cookie, CSRF_COOKIE) ?? ''
+
+				if (!csrfHeader || !csrfCookie) {
+					throw new ForbiddenException('CSRF токен обязателен')
+				}
+				if (csrfHeader !== csrfCookie || csrfHeader !== session.csrf) {
+					throw new ForbiddenException('CSRF токен недействителен')
+				}
+			}
+
+			const user = await this.prisma.user.findFirst({
+				where: { id: session.userId, deleteAt: null },
+				select: { id: true, role: true, login: true, name: true }
 			})
-			res.cookie(CSRF_COOKIE, session.csrf, {
-				httpOnly: false,
-				sameSite: SAME_SITE,
-				secure: isProd,
-				path: '/',
-				maxAge: SESSION_MAX_AGE_MS
-			})
+			if (!user) throw new UnauthorizedException('Пользователь не найден')
+			req.user = user
+			req.sessionId = sid
+
+			// Roles(...) учитываем с иерархией ролей
+			const required =
+				this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
+					context.getHandler(),
+					context.getClass()
+				]) ?? []
+
+			if (required.length > 0) {
+				const need = requiredRank(required)
+				const have = ROLE_RANK[user.role]
+				if (have < need) throw new ForbiddenException('Недостаточно прав')
+			}
+			try {
+				await this.sessions.touch(sid, session.userId)
+			} catch {
+				// no-op: do not block request if refresh fails
+			}
+
+			if (res?.cookie) {
+				res.cookie(SID_COOKIE, sid, {
+					httpOnly: true,
+					sameSite: SAME_SITE,
+					secure: isProd,
+					path: '/',
+					maxAge: SESSION_MAX_AGE_MS
+				})
+				res.cookie(CSRF_COOKIE, session.csrf, {
+					httpOnly: false,
+					sameSite: SAME_SITE,
+					secure: isProd,
+					path: '/',
+					maxAge: SESSION_MAX_AGE_MS
+				})
+			}
+			return true
+		} catch (error: unknown) {
+			if (
+				error instanceof UnauthorizedException ||
+				error instanceof ForbiddenException
+			) {
+				clearSessionCookies(res)
+			}
+			throw error
 		}
-		return true
 	}
 }

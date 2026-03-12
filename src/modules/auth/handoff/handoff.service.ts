@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { RedisService } from '@/infrastructure/redis/redis.service'
 
+import { sanitizeHandoffNext } from './handoff.utils'
+
 export type HandoffPayload = {
 	userId: string
 	role: Role
@@ -25,14 +27,6 @@ export class HandoffService {
 
 	private key(token: string) {
 		return `${this.prefix}${token}`
-	}
-
-	private sanitizeNext(next?: string): string | undefined {
-		if (!next) return undefined
-		if (!next.startsWith('/')) return undefined
-		if (next.startsWith('//')) return undefined
-		if (next.includes('http://') || next.includes('https://')) return undefined
-		return next
 	}
 
 	async createForCatalog(params: {
@@ -59,7 +53,7 @@ export class HandoffService {
 			userId,
 			role,
 			catalogId,
-			next: this.sanitizeNext(params.next),
+			next: sanitizeHandoffNext(params.next),
 			createdAt: Date.now()
 		}
 

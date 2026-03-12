@@ -2,15 +2,13 @@
 import {
 	AttributeCreateInput,
 	AttributeEnumValueCreateInput,
-	AttributeEnumValueUpdateInput,
-	AttributeUpdateInput
+	AttributeEnumValueUpdateInput
 } from '@generated/models'
 import {
 	BadRequestException,
 	Injectable,
 	NotFoundException
 } from '@nestjs/common'
-import slugify from 'slugify'
 
 import { CacheService } from '@/shared/cache/cache.service'
 import {
@@ -20,39 +18,28 @@ import {
 import { assertHasUpdateFields } from '@/shared/utils'
 
 import { AttributeRepository } from './attribute.repository'
+import {
+	applyAttributeSuffix,
+	ATTRIBUTE_KEY_MAX_LENGTH,
+	buildAttributeCreateInput,
+	buildAttributeEnumValueCreateInput,
+	buildAttributeEnumValueUpdateInput,
+	buildAttributeKeyBase,
+	buildAttributeUpdateInput,
+	buildEnumValueBase,
+	ensureVariantAttributeRules,
+	ENUM_VALUE_MAX_LENGTH,
+	getAttributeTypeIds,
+	mapAttributeWithTypeIds,
+	mergeUniqueTypeIds,
+	normalizeAttributeEnumValue,
+	normalizeAttributeKey,
+	normalizeAttributeTypeIds
+} from './attribute.utils'
 import { CreateAttributeEnumDtoReq } from './dto/requests/create-attribute-enum.dto.req'
 import { CreateAttributeDtoReq } from './dto/requests/create-attribute.dto.req'
 import { UpdateAttributeEnumDtoReq } from './dto/requests/update-attribute-enum.dto.req'
 import { UpdateAttributeDtoReq } from './dto/requests/update-attribute.dto.req'
-
-function normalizeKey(value: string): string {
-	return value.trim().toLowerCase()
-}
-
-function normalizeLabel(value: string): string {
-	return value.trim()
-}
-
-function normalizeEnumValue(value: string): string {
-	return value.trim().toLowerCase()
-}
-
-const ATTRIBUTE_KEY_MAX_LENGTH = 100
-const ENUM_VALUE_MAX_LENGTH = 255
-const ATTRIBUTE_KEY_FALLBACK = 'attr'
-const ENUM_VALUE_FALLBACK = 'value'
-
-function buildKeyFromLabel(value: string): string {
-	const slug = slugify(value, { lower: true, strict: true, trim: true })
-	return slug.replace(/-+/g, '-').replace(/^[-_]+|[-_]+$/g, '')
-}
-
-function applySuffix(base: string, suffix: number, maxLength: number): string {
-	const suffixPart = suffix > 0 ? `-${suffix}` : ''
-	const headLength = Math.max(0, maxLength - suffixPart.length)
-	const head = base.slice(0, headLength).replace(/-+$/g, '')
-	return `${head}${suffixPart}`
-}
 
 @Injectable()
 export class AttributeService {
@@ -65,123 +52,73 @@ export class AttributeService {
 
 	async getByType(typeId: string) {
 		const attributes = await this.repo.findByType(typeId, true)
-		return attributes.map(attribute => this.mapAttribute(attribute))
+		return attributes.map(attribute => mapAttributeWithTypeIds(attribute))
 	}
 
 	async getById(id: string) {
-		const attribute = await this.repo.findById(id, true)
-		if (!attribute) throw new NotFoundException('Атрибут не найден')
-		return this.mapAttribute(attribute)
+		const attribute = await this.requireAttribute(id, true)
+		return mapAttributeWithTypeIds(attribute)
 	}
 
 	async create(dto: CreateAttributeDtoReq) {
-		this.ensureVariantRules(dto.dataType, dto.isVariantAttribute)
-		const typeIds = this.normalizeTypeIds(dto.typeIds, dto.typeId)
-
+		ensureVariantAttributeRules(dto.dataType, dto.isVariantAttribute)
+		const typeIds = normalizeAttributeTypeIds(dto.typeIds, dto.typeId)
 		const key = dto.key
-			? normalizeKey(dto.key)
+			? normalizeAttributeKey(dto.key)
 			: await this.generateAttributeKey(typeIds, dto.displayName)
-		if (dto.key) {
-			const exists = await this.repo.existsKeyInTypes(typeIds, key)
-			if (exists) {
-				throw new BadRequestException(
-					'Ключ атрибута уже используется в выбранном типе'
-				)
-			}
-		}
+		if (dto.key) await this.ensureAttributeKeyAvailable(typeIds, key)
 
-		const data: AttributeCreateInput = {
-			key,
-			displayName: normalizeLabel(dto.displayName),
-			dataType: dto.dataType,
-			isRequired: dto.isRequired ?? false,
-			isVariantAttribute: dto.isVariantAttribute ?? false,
-			isFilterable: dto.isFilterable ?? false,
-			displayOrder: dto.displayOrder ?? 0,
-			isHidden: dto.isHidden ?? false,
-			types: {
-				connect: typeIds.map(typeId => ({ id: typeId }))
-			}
-		}
-
+		const data: AttributeCreateInput = buildAttributeCreateInput(
+			dto,
+			typeIds,
+			key
+		)
 		const attribute = await this.repo.create(data)
 		await this.invalidateTypeCache(typeIds)
-		return this.mapAttribute(attribute)
+		return mapAttributeWithTypeIds(attribute)
 	}
 
 	async update(id: string, dto: UpdateAttributeDtoReq) {
-		const data: AttributeUpdateInput = {}
-		const nextTypeIds =
-			dto.typeIds !== undefined ? this.normalizeTypeIds(dto.typeIds) : undefined
-
-		const nextKey = dto.key !== undefined ? normalizeKey(dto.key) : undefined
-		if (nextKey !== undefined) {
-			data.key = nextKey
-		}
-		if (dto.displayName !== undefined) {
-			data.displayName = normalizeLabel(dto.displayName)
-		}
-		if (dto.dataType !== undefined) {
-			data.dataType = dto.dataType
-		}
-		if (dto.isRequired !== undefined) {
-			data.isRequired = dto.isRequired
-		}
-		if (dto.isVariantAttribute !== undefined) {
-			data.isVariantAttribute = dto.isVariantAttribute
-		}
-		if (dto.isFilterable !== undefined) {
-			data.isFilterable = dto.isFilterable
-		}
-		if (dto.displayOrder !== undefined) {
-			data.displayOrder = dto.displayOrder
-		}
-		if (dto.isHidden !== undefined) {
-			data.isHidden = dto.isHidden
-		}
+		const { data, nextKey, nextTypeIds } = buildAttributeUpdateInput(dto)
 
 		if (nextTypeIds === undefined) {
 			assertHasUpdateFields(data)
 		}
 
-		const current = await this.repo.findById(id)
-		if (!current) throw new NotFoundException('Атрибут не найден')
-
-		const currentTypeIds = current.types?.map(type => type.id) ?? []
+		const current = await this.requireAttribute(id)
+		const currentTypeIds = getAttributeTypeIds(current)
 		const finalTypeIds = nextTypeIds ?? currentTypeIds
 
 		if (nextKey !== undefined || nextTypeIds !== undefined) {
 			const keyToCheck = nextKey ?? current.key
-			const exists = await this.repo.existsKeyInTypes(finalTypeIds, keyToCheck, id)
-			if (exists) {
-				throw new BadRequestException(
-					'Ключ атрибута уже используется в выбранном типе'
-				)
-			}
+			await this.ensureAttributeKeyAvailable(finalTypeIds, keyToCheck, id)
 		}
 
 		if (dto.dataType !== undefined || dto.isVariantAttribute !== undefined) {
 			const nextType = dto.dataType ?? current.dataType
 			const nextVariant = dto.isVariantAttribute ?? current.isVariantAttribute
 
-			this.ensureVariantRules(nextType, nextVariant)
+			ensureVariantAttributeRules(nextType, nextVariant)
 		}
 
 		const attribute = await this.repo.update(id, data, nextTypeIds)
 		if (!attribute) throw new NotFoundException('Атрибут не найден')
 
-		const updatedTypeIds = attribute.types?.map(type => type.id) ?? finalTypeIds
+		const updatedTypeIds = getAttributeTypeIds(attribute)
 		await this.invalidateTypeCache(
-			Array.from(new Set([...currentTypeIds, ...updatedTypeIds]))
+			mergeUniqueTypeIds(
+				currentTypeIds,
+				updatedTypeIds.length ? updatedTypeIds : finalTypeIds
+			)
 		)
-		return this.mapAttribute(attribute)
+		return mapAttributeWithTypeIds(attribute)
 	}
 
 	async remove(id: string) {
 		const attribute = await this.repo.softDelete(id)
 		if (!attribute) throw new NotFoundException('Атрибут не найден')
 
-		await this.invalidateTypeCache(attribute.types?.map(type => type.id) ?? [])
+		await this.invalidateTypeCache(getAttributeTypeIds(attribute))
 		return { ok: true }
 	}
 
@@ -194,20 +131,13 @@ export class AttributeService {
 		const attribute = await this.requireEnumAttribute(attributeId)
 
 		const value = dto.value
-			? normalizeEnumValue(dto.value)
+			? normalizeAttributeEnumValue(dto.value)
 			: await this.generateEnumValue(attributeId, dto.displayName)
 
-		const data: AttributeEnumValueCreateInput = {
-			value,
-			displayName:
-				dto.displayName === undefined ? null : normalizeLabel(dto.displayName),
-			displayOrder: dto.displayOrder ?? 0,
-			businessId: dto.businessId?.trim() || null,
-			attribute: { connect: { id: attributeId } }
-		}
-
+		const data: AttributeEnumValueCreateInput =
+			buildAttributeEnumValueCreateInput(attributeId, dto, value)
 		const enumValue = await this.repo.createEnumValue(data)
-		await this.invalidateTypeCache(attribute.types?.map(type => type.id) ?? [])
+		await this.invalidateTypeCache(getAttributeTypeIds(attribute))
 		return enumValue
 	}
 
@@ -218,28 +148,15 @@ export class AttributeService {
 	) {
 		const attribute = await this.requireEnumAttribute(attributeId)
 
-		const data: AttributeEnumValueUpdateInput = {}
-
-		if (dto.value !== undefined) {
-			data.value = normalizeEnumValue(dto.value)
-		}
-		if (dto.displayName !== undefined) {
-			data.displayName = normalizeLabel(dto.displayName)
-		}
-		if (dto.displayOrder !== undefined) {
-			data.displayOrder = dto.displayOrder
-		}
-		if (dto.businessId !== undefined) {
-			data.businessId = dto.businessId?.trim() || null
-		}
-
+		const data: AttributeEnumValueUpdateInput =
+			buildAttributeEnumValueUpdateInput(dto)
 		assertHasUpdateFields(data)
 
 		const enumValue = await this.repo.updateEnumValue(id, attributeId, data)
 		if (!enumValue)
 			throw new NotFoundException('Значение перечисления не найдено')
 
-		await this.invalidateTypeCache(attribute.types?.map(type => type.id) ?? [])
+		await this.invalidateTypeCache(getAttributeTypeIds(attribute))
 		return enumValue
 	}
 
@@ -250,22 +167,21 @@ export class AttributeService {
 		if (!enumValue)
 			throw new NotFoundException('Значение перечисления не найдено')
 
-		await this.invalidateTypeCache(attribute.types?.map(type => type.id) ?? [])
+		await this.invalidateTypeCache(getAttributeTypeIds(attribute))
 		return { ok: true }
 	}
 
-	private ensureVariantRules(dataType: DataType, isVariantAttribute?: boolean) {
-		if (isVariantAttribute && dataType !== DataType.ENUM) {
-			throw new BadRequestException('Вариантные атрибуты должны иметь тип ENUM')
-		}
-	}
-
 	private async requireEnumAttribute(attributeId: string) {
-		const attribute = await this.repo.findById(attributeId)
-		if (!attribute) throw new NotFoundException('Атрибут не найден')
+		const attribute = await this.requireAttribute(attributeId)
 		if (attribute.dataType !== DataType.ENUM) {
 			throw new BadRequestException('Атрибут не типа ENUM')
 		}
+		return attribute
+	}
+
+	private async requireAttribute(id: string, withEnums = false) {
+		const attribute = await this.repo.findById(id, withEnums)
+		if (!attribute) throw new NotFoundException('Атрибут не найден')
 		return attribute
 	}
 
@@ -283,21 +199,10 @@ export class AttributeService {
 		typeIds: string[],
 		displayName: string
 	): Promise<string> {
-		const base = buildKeyFromLabel(displayName) || ATTRIBUTE_KEY_FALLBACK
+		const base = buildAttributeKeyBase(displayName)
 		return this.ensureUniqueKey(base, ATTRIBUTE_KEY_MAX_LENGTH, key =>
 			this.repo.existsKeyInTypes(typeIds, key)
 		)
-	}
-
-	private normalizeTypeIds(typeIds?: string[], typeId?: string): string[] {
-		const list = [...(typeIds ?? []), ...(typeId ? [typeId] : [])].map(value =>
-			String(value).trim()
-		)
-		const unique = Array.from(new Set(list)).filter(Boolean)
-		if (!unique.length) {
-			throw new BadRequestException('Нужно указать typeIds или typeId')
-		}
-		return unique
 	}
 
 	private async generateEnumValue(
@@ -311,18 +216,10 @@ export class AttributeService {
 			)
 		}
 
-		const base = buildKeyFromLabel(label) || ENUM_VALUE_FALLBACK
+		const base = buildEnumValueBase(label)
 		return this.ensureUniqueKey(base, ENUM_VALUE_MAX_LENGTH, value =>
 			this.repo.existsEnumValue(attributeId, value)
 		)
-	}
-
-	private mapAttribute<T extends { types?: { id: string }[] }>(attribute: T) {
-		const attributeWithTypes = attribute as T & { types?: { id: string }[] }
-		const typeIds = attributeWithTypes.types?.map(type => type.id) ?? []
-		const rest = { ...attributeWithTypes }
-		delete (rest as { types?: { id: string }[] }).types
-		return { ...rest, typeIds }
 	}
 
 	private async ensureUniqueKey(
@@ -330,15 +227,27 @@ export class AttributeService {
 		maxLength: number,
 		exists: (candidate: string) => Promise<boolean>
 	): Promise<string> {
-		const normalizedBase = base
-		let candidate = applySuffix(normalizedBase, 0, maxLength)
+		let candidate = applyAttributeSuffix(base, 0, maxLength)
 		let suffix = 1
 
 		while (await exists(candidate)) {
-			candidate = applySuffix(normalizedBase, suffix, maxLength)
+			candidate = applyAttributeSuffix(base, suffix, maxLength)
 			suffix += 1
 		}
 
 		return candidate
+	}
+
+	private async ensureAttributeKeyAvailable(
+		typeIds: string[],
+		key: string,
+		excludeId?: string
+	): Promise<void> {
+		const exists = await this.repo.existsKeyInTypes(typeIds, key, excludeId)
+		if (exists) {
+			throw new BadRequestException(
+				'Ключ атрибута уже используется в выбранном типе'
+			)
+		}
 	}
 }

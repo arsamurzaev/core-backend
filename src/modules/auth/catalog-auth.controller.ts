@@ -19,42 +19,10 @@ import type { Request, Response } from 'express'
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
+import { getSessionCookie, setSessionCookies } from './auth-cookie.utils'
 import { AuthService } from './auth.service'
 import { LoginDtoReq } from './dto/requests/login.dto.req'
 import { AuthCatalogLoginResponseDto } from './dto/responses/auth-catalog-login.dto.res'
-
-const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
-const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
-const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'lax') as 'strict' | 'lax'
-const isProd = process.env.NODE_ENV === 'production'
-const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7
-
-function getCookie(req: Request, name: string): string | undefined {
-	const header = req.headers.cookie
-	if (!header) return undefined
-	for (const part of header.split(';')) {
-		const [k, ...rest] = part.trim().split('=')
-		if (k === name) return decodeURIComponent(rest.join('='))
-	}
-	return undefined
-}
-
-function setSessionCookies(res: Response, sid: string, csrf: string) {
-	res.cookie(SID_COOKIE, sid, {
-		httpOnly: true,
-		sameSite: SAME_SITE,
-		secure: isProd,
-		path: '/',
-		maxAge: SESSION_MAX_AGE_MS
-	})
-	res.cookie(CSRF_COOKIE, csrf, {
-		httpOnly: false,
-		sameSite: SAME_SITE,
-		secure: isProd,
-		path: '/',
-		maxAge: SESSION_MAX_AGE_MS
-	})
-}
 
 @ApiTags('Catalog Auth')
 @Controller('catalog/auth')
@@ -81,7 +49,7 @@ export class CatalogAuthController {
 		}
 
 		const { ip, userAgent } = getClientInfo(req)
-		const existingSid = getCookie(req, SID_COOKIE) ?? null
+		const existingSid = getSessionCookie(req)
 		const { sid, csrf, user, catalogId } = await this.auth.loginForCatalog(
 			dto,
 			store.catalogId,
@@ -91,7 +59,7 @@ export class CatalogAuthController {
 		)
 
 		res.setHeader('Cache-Control', 'no-store')
-		setSessionCookies(res, sid, csrf)
+		setSessionCookies(res, { sid, csrf })
 
 		return { ok: true, user, catalogId }
 	}

@@ -11,19 +11,20 @@ import { Observable, Subject } from 'rxjs'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
-type UpsertCartItemInput = {
-	productId: string
-	variantId?: string
-	quantity: number
-}
+import {
+	CART_COOKIE_NAME,
+	CART_SSE_HEARTBEAT_MS,
+	CART_TOKEN_BYTES,
+	CHECKOUT_KEY_BYTES,
+	mapCartEntity,
+	normalizeCartItemInput,
+	type NormalizedCartItemInput,
+	PUBLIC_KEY_BYTES,
+	readCartTokenFromCookie,
+	type UpsertCartItemInput
+} from './cart.utils'
 
 type SsePayload = string | Record<string, unknown>
-
-const CART_TOKEN_BYTES = 24
-const PUBLIC_KEY_BYTES = 16
-const CHECKOUT_KEY_BYTES = 18
-const COOKIE_NAME = 'cart_token'
-const SSE_HEARTBEAT_MS = 20_000
 
 const cartSelect = {
 	id: true,
@@ -57,6 +58,8 @@ const cartSelect = {
 }
 
 type CartEntity = Prisma.CartGetPayload<{ select: typeof cartSelect }>
+type CartContext = { id: string; catalogId: string }
+type ExistingCartItem = { id: string; deleteAt: Date | null } | null
 
 @Injectable()
 export class CartService {
@@ -65,25 +68,11 @@ export class CartService {
 	constructor(private readonly prisma: PrismaService) {}
 
 	getCookieName() {
-		return COOKIE_NAME
+		return CART_COOKIE_NAME
 	}
 
 	readTokenFromCookie(cookieHeader?: string): string | null {
-		if (!cookieHeader) return null
-		const pairs = cookieHeader.split(';')
-		for (const pair of pairs) {
-			const [key, ...rest] = pair.split('=')
-			if (!key) continue
-			if (key.trim() !== COOKIE_NAME) continue
-			const rawValue = rest.join('=').trim()
-			if (!rawValue) return null
-			try {
-				return decodeURIComponent(rawValue)
-			} catch {
-				return rawValue
-			}
-		}
-		return null
+		return readCartTokenFromCookie(cookieHeader)
 	}
 
 	async getOrCreateCurrentCart(catalogId: string, token?: string | null) {
@@ -113,16 +102,19 @@ export class CartService {
 		if (!normalizedToken) {
 			throw new NotFoundException('Корзина не найдена')
 		}
+
 		const cart = await this.findByToken(catalogId, normalizedToken)
 		if (!cart) {
 			throw new NotFoundException('Корзина не найдена')
 		}
+
 		return { cart: this.mapCart(cart), token: normalizedToken }
 	}
 
 	async shareCurrentCart(catalogId: string, token?: string | null) {
 		const current = await this.getOrCreateCurrentCart(catalogId, token)
 		let publicKey = current.cart.publicKey
+
 		if (!publicKey) {
 			publicKey = await this.generateUniquePublicKey()
 			await this.prisma.cart.update({
@@ -130,6 +122,7 @@ export class CartService {
 				data: { publicKey }
 			})
 		}
+
 		const fresh = await this.findByIdOrThrow(current.cart.id)
 		return { cart: this.mapCart(fresh), token: current.token }
 	}
@@ -139,8 +132,10 @@ export class CartService {
 		if (!key) {
 			throw new BadRequestException('publicKey обязателен')
 		}
+
 		const cart = await this.findByPublicKeyOrThrow(key)
 		const checkoutKey = await this.generateUniqueCheckoutKey()
+
 		await this.prisma.cart.update({
 			where: { id: cart.id },
 			data: {
@@ -148,6 +143,7 @@ export class CartService {
 				checkoutAt: new Date()
 			}
 		})
+
 		const fresh = await this.findByIdOrThrow(cart.id)
 		return {
 			cart: this.mapCart(fresh),
@@ -222,86 +218,11 @@ export class CartService {
 	}
 
 	private async upsertItem(cartId: string, input: UpsertCartItemInput) {
-		const productId = input.productId.trim()
-		const variantId = input.variantId?.trim() || null
-		const quantity = input.quantity
+		const normalizedInput = normalizeCartItemInput(input)
 
-		if (!productId) {
-			throw new BadRequestException('productId обязателен')
-		}
-		if (!Number.isInteger(quantity) || quantity < 0) {
-			throw new BadRequestException(
-				'quantity должен быть целым числом больше или равен 0'
-			)
-		}
-
-		return this.prisma.$transaction(async tx => {
-			const cart = await tx.cart.findFirst({
-				where: { id: cartId, deleteAt: null },
-				select: { id: true, catalogId: true }
-			})
-			if (!cart) throw new NotFoundException('Корзина не найдена')
-
-			const product = await tx.product.findFirst({
-				where: {
-					id: productId,
-					catalogId: cart.catalogId,
-					deleteAt: null
-				},
-				select: { id: true }
-			})
-			if (!product) {
-				throw new BadRequestException('Товар не найден в текущем каталоге')
-			}
-
-			if (variantId) {
-				const variant = await tx.productVariant.findFirst({
-					where: {
-						id: variantId,
-						productId,
-						deleteAt: null
-					},
-					select: { id: true }
-				})
-				if (!variant) {
-					throw new BadRequestException('Вариация не найдена для выбранного товара')
-				}
-			}
-
-			const existing = await tx.cartItem.findFirst({
-				where: {
-					cartId: cart.id,
-					productId,
-					variantId
-				},
-				select: { id: true, deleteAt: true }
-			})
-
-			if (quantity === 0) {
-				if (existing && !existing.deleteAt) {
-					await tx.cartItem.update({
-						where: { id: existing.id },
-						data: { deleteAt: new Date() }
-					})
-				}
-			} else if (existing) {
-				await tx.cartItem.update({
-					where: { id: existing.id },
-					data: { quantity, deleteAt: null }
-				})
-			} else {
-				await tx.cartItem.create({
-					data: {
-						cartId: cart.id,
-						productId,
-						variantId,
-						quantity
-					}
-				})
-			}
-
-			return this.findByIdOrThrow(cart.id, tx)
-		})
+		return this.prisma.$transaction(async tx =>
+			this.upsertItemInTransaction(cartId, normalizedInput, tx)
+		)
 	}
 
 	private async removeItem(cartId: string, itemId: string) {
@@ -350,7 +271,7 @@ export class CartService {
 					type: 'ping',
 					data: { timestamp: new Date().toISOString() }
 				})
-			}, SSE_HEARTBEAT_MS)
+			}, CART_SSE_HEARTBEAT_MS)
 
 			return () => {
 				clearInterval(pingTimer)
@@ -367,50 +288,14 @@ export class CartService {
 	private broadcastCart(cartId: string, type: string, payload: SsePayload) {
 		const streams = this.sseStreams.get(cartId)
 		if (!streams?.size) return
+
 		for (const stream of streams) {
 			stream.next({ type, data: payload })
 		}
 	}
 
 	private mapCart(cart: CartEntity) {
-		const items = cart.items.map(item => {
-			const unitPrice = Number(item.product.price)
-			const lineTotal = Number((unitPrice * item.quantity).toFixed(2))
-			return {
-				id: item.id,
-				productId: item.productId,
-				variantId: item.variantId,
-				quantity: item.quantity,
-				product: {
-					id: item.product.id,
-					name: item.product.name,
-					slug: item.product.slug,
-					price: unitPrice
-				},
-				lineTotal,
-				createdAt: item.createdAt,
-				updatedAt: item.updatedAt
-			}
-		})
-
-		const itemsCount = items.reduce((acc, item) => acc + item.quantity, 0)
-		const subtotal = Number(
-			items.reduce((acc, item) => acc + item.lineTotal, 0).toFixed(2)
-		)
-
-		return {
-			id: cart.id,
-			catalogId: cart.catalogId,
-			publicKey: cart.publicKey,
-			checkoutAt: cart.checkoutAt,
-			items,
-			totals: {
-				itemsCount,
-				subtotal
-			},
-			createdAt: cart.createdAt,
-			updatedAt: cart.updatedAt
-		}
+		return mapCartEntity(cart)
 	}
 
 	private ensureCheckoutAccess(cart: CartEntity, checkoutKey?: string | null) {
@@ -436,6 +321,7 @@ export class CartService {
 		if (!normalized) {
 			throw new BadRequestException('publicKey обязателен')
 		}
+
 		const cart = await this.prisma.cart.findFirst({
 			where: {
 				publicKey: normalized,
@@ -443,7 +329,9 @@ export class CartService {
 			},
 			select: cartSelect
 		})
+
 		if (!cart) throw new NotFoundException('Корзина не найдена')
+
 		return cart
 	}
 
@@ -456,8 +344,135 @@ export class CartService {
 			where: { id, deleteAt: null },
 			select: cartSelect
 		})
+
 		if (!cart) throw new NotFoundException('Корзина не найдена')
+
 		return cart
+	}
+
+	private async upsertItemInTransaction(
+		cartId: string,
+		input: NormalizedCartItemInput,
+		tx: Prisma.TransactionClient
+	) {
+		const cart = await this.findCartContextOrThrow(cartId, tx)
+		await this.ensureProductInCatalog(tx, cart.catalogId, input.productId)
+		await this.ensureVariantMatchesProduct(tx, input.productId, input.variantId)
+
+		const existing = await this.findExistingItem(
+			tx,
+			cart.id,
+			input.productId,
+			input.variantId
+		)
+
+		await this.applyCartItemChange(tx, cart.id, existing, input)
+
+		return this.findByIdOrThrow(cart.id, tx)
+	}
+
+	private async findCartContextOrThrow(
+		cartId: string,
+		tx: Prisma.TransactionClient
+	): Promise<CartContext> {
+		const cart = await tx.cart.findFirst({
+			where: { id: cartId, deleteAt: null },
+			select: { id: true, catalogId: true }
+		})
+
+		if (!cart) throw new NotFoundException('Корзина не найдена')
+
+		return cart
+	}
+
+	private async ensureProductInCatalog(
+		tx: Prisma.TransactionClient,
+		catalogId: string,
+		productId: string
+	): Promise<void> {
+		const product = await tx.product.findFirst({
+			where: {
+				id: productId,
+				catalogId,
+				deleteAt: null
+			},
+			select: { id: true }
+		})
+
+		if (!product) {
+			throw new BadRequestException('Товар не найден в текущем каталоге')
+		}
+	}
+
+	private async ensureVariantMatchesProduct(
+		tx: Prisma.TransactionClient,
+		productId: string,
+		variantId: string | null
+	): Promise<void> {
+		if (!variantId) return
+
+		const variant = await tx.productVariant.findFirst({
+			where: {
+				id: variantId,
+				productId,
+				deleteAt: null
+			},
+			select: { id: true }
+		})
+
+		if (!variant) {
+			throw new BadRequestException('Вариация не найдена для выбранного товара')
+		}
+	}
+
+	private async findExistingItem(
+		tx: Prisma.TransactionClient,
+		cartId: string,
+		productId: string,
+		variantId: string | null
+	): Promise<ExistingCartItem> {
+		return tx.cartItem.findFirst({
+			where: {
+				cartId,
+				productId,
+				variantId
+			},
+			select: { id: true, deleteAt: true }
+		})
+	}
+
+	private async applyCartItemChange(
+		tx: Prisma.TransactionClient,
+		cartId: string,
+		existing: ExistingCartItem,
+		input: NormalizedCartItemInput
+	): Promise<void> {
+		if (input.quantity === 0) {
+			if (existing && !existing.deleteAt) {
+				await tx.cartItem.update({
+					where: { id: existing.id },
+					data: { deleteAt: new Date() }
+				})
+			}
+			return
+		}
+
+		if (existing) {
+			await tx.cartItem.update({
+				where: { id: existing.id },
+				data: { quantity: input.quantity, deleteAt: null }
+			})
+			return
+		}
+
+		await tx.cartItem.create({
+			data: {
+				cartId,
+				productId: input.productId,
+				variantId: input.variantId,
+				quantity: input.quantity
+			}
+		})
 	}
 
 	private async generateUniqueToken() {

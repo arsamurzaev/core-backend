@@ -1,4 +1,4 @@
-﻿import { Transform } from 'class-transformer'
+import { Transform } from 'class-transformer'
 import {
 	IsNotEmpty,
 	IsString,
@@ -7,7 +7,7 @@ import {
 	MinLength
 } from 'class-validator'
 
-const CODE_PATTERN = /^[a-z0-9-]+$/
+import { TYPE_CODE_PATTERN } from '../../type.utils'
 
 export class UpdateTypeDtoReq {
 	@IsString({ message: 'Тип должен быть строкой' })
@@ -25,7 +25,7 @@ export class UpdateTypeDtoReq {
 	@IsNotEmpty({ message: 'Программный код типа не может быть пустым' })
 	@MinLength(2)
 	@MaxLength(50)
-	@Matches(CODE_PATTERN)
+	@Matches(TYPE_CODE_PATTERN)
 	@Transform(({ value }: { value: unknown }) => {
 		if (typeof value !== 'string') return value
 		return value.trim().toLowerCase()

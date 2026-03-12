@@ -101,23 +101,12 @@ export class AuthService {
 		existingSid?: string | null
 	) {
 		const user = await this.validateUser(dto)
-
-		if (user.role !== Role.CATALOG) {
-			throw new ForbiddenException('Нет прав на вход в каталог')
-		}
-
-		let ownerId = ownerUserId ?? null
-		if (!ownerId) {
-			const catalog = await this.prisma.catalog.findUnique({
-				where: { id: catalogId },
-				select: { userId: true }
-			})
-			ownerId = catalog?.userId ?? null
-		}
-
-		if (!ownerId || ownerId !== user.id) {
-			throw new ForbiddenException('Нет прав для этого каталога')
-		}
+		await this.assertCatalogAccess(
+			user.id,
+			user.role,
+			catalogId,
+			ownerUserId ?? null
+		)
 
 		const { sid, csrf } = await this.createSessionForUser(
 			user.id,
@@ -127,5 +116,38 @@ export class AuthService {
 		)
 
 		return { sid, csrf, user, catalogId }
+	}
+
+	async assertCatalogAccess(
+		userId: string,
+		role: Role,
+		catalogId: string,
+		ownerUserId?: string | null
+	): Promise<void> {
+		if (role !== Role.CATALOG && role !== Role.ADMIN) {
+			throw new ForbiddenException('Нет прав на вход в каталог')
+		}
+		if (role === Role.ADMIN) return
+
+		const ownerId = await this.resolveCatalogOwnerId(
+			catalogId,
+			ownerUserId ?? null
+		)
+		if (!ownerId || ownerId !== userId) {
+			throw new ForbiddenException('Нет прав для этого каталога')
+		}
+	}
+
+	private async resolveCatalogOwnerId(
+		catalogId: string,
+		ownerUserId: string | null
+	): Promise<string | null> {
+		if (ownerUserId) return ownerUserId
+
+		const catalog = await this.prisma.catalog.findUnique({
+			where: { id: catalogId },
+			select: { userId: true }
+		})
+		return catalog?.userId ?? null
 	}
 }

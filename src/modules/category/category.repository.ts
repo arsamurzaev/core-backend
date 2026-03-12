@@ -5,10 +5,10 @@ import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
-type CategoryProductCursor = {
-	position: number
-	productId: string
-}
+import {
+	type CategoryProductCursor,
+	decodeCategoryProductsCursor
+} from './category-products.utils'
 
 const uuidRegex =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -321,28 +321,6 @@ export class CategoryRepository {
 		})
 	}
 
-	private decodeCursor(value?: string): CategoryProductCursor | null {
-		if (!value) return null
-		try {
-			const decoded = Buffer.from(value, 'base64').toString('utf8')
-			const parsed = JSON.parse(decoded) as {
-				position?: unknown
-				productId?: unknown
-			}
-			const position =
-				typeof parsed.position === 'number' && Number.isFinite(parsed.position)
-					? Math.floor(parsed.position)
-					: null
-			const productId =
-				typeof parsed.productId === 'string' ? parsed.productId.trim() : ''
-
-			if (position === null || !productId) return null
-			return { position, productId }
-		} catch {
-			return null
-		}
-	}
-
 	private async resolveCursor(
 		categoryId: string,
 		catalogId: string,
@@ -350,7 +328,7 @@ export class CategoryRepository {
 	): Promise<CategoryProductCursor | null> {
 		if (!cursor) return null
 
-		const decoded = this.decodeCursor(cursor)
+		const decoded = decodeCategoryProductsCursor(cursor)
 		if (decoded) return decoded
 
 		if (!uuidRegex.test(cursor)) return null

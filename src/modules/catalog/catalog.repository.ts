@@ -127,6 +127,53 @@ const catalogSelectWithType = {
 	}
 }
 
+const catalogCurrentSelect: Prisma.CatalogSelect = {
+	createdAt: false,
+	updatedAt: false,
+	deleteAt: false
+}
+
+const catalogCurrentFallbackSelect = {
+	...catalogCurrentSelect,
+	type: {
+		select: {
+			id: true,
+			code: true,
+			name: true,
+			attributes: {
+				where: { deleteAt: null },
+				select: {
+					id: true,
+					key: true,
+					displayName: true,
+					dataType: true,
+					isRequired: true,
+					isVariantAttribute: true,
+					isFilterable: true,
+					displayOrder: true,
+					createdAt: true,
+					updatedAt: true,
+					typeId: true,
+					enumValues: {
+						where: { deleteAt: null },
+						select: {
+							id: true,
+							attributeId: true,
+							value: true,
+							displayName: true,
+							displayOrder: true,
+							createdAt: true,
+							updatedAt: true
+						},
+						orderBy: [{ displayOrder: 'asc' as const }, { value: 'asc' as const }]
+					}
+				},
+				orderBy: [{ displayOrder: 'asc' as const }, { key: 'asc' as const }]
+			}
+		}
+	}
+}
+
 @Injectable()
 export class CatalogRepository {
 	constructor(private readonly prisma: PrismaService) {}
@@ -149,6 +196,17 @@ export class CatalogRepository {
 			where: { id },
 			select: { ...catalogSelectWithType, ...select }
 		})
+	}
+
+	async getCurrentByIdWithType(id: string) {
+		try {
+			return await this.getByIdWithType(id, catalogCurrentSelect)
+		} catch (error) {
+			if (isUnknownAttributeTypesError(error)) {
+				return this.getByIdWithType(id, catalogCurrentFallbackSelect)
+			}
+			throw error
+		}
 	}
 
 	async getBySlug(slug: string) {
@@ -198,4 +256,14 @@ export class CatalogRepository {
 			select: catalogSelect
 		})
 	}
+}
+
+function isUnknownAttributeTypesError(error: unknown): boolean {
+	const message =
+		typeof error === 'object' && error !== null && 'message' in error
+			? String((error as { message?: string }).message)
+			: ''
+	return message.includes(
+		'Unknown field `types` for select statement on model `Attribute`'
+	)
 }

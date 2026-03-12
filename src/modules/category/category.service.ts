@@ -25,22 +25,20 @@ import {
 	normalizeRequiredString
 } from '@/shared/utils'
 
+import {
+	buildCategoryProductsPage,
+	type CategoryProductInput,
+	type CategoryProductsPage as CategoryProductsPagePayload,
+	normalizeCategoryName,
+	normalizeCategoryProducts,
+	normalizeCategoryProductsLimit,
+	resolveCategoryProductPositions
+} from './category-products.utils'
 import { CategoryRepository } from './category.repository'
 import { CreateCategoryDtoReq } from './dto/requests/create-category.dto.req'
 import { UpdateCategoryDtoReq } from './dto/requests/update-category.dto.req'
 
-const CATEGORY_PRODUCTS_DEFAULT_LIMIT = 24
-const CATEGORY_PRODUCTS_MAX_LIMIT = 50
-
-type CategoryProductInput = { productId: string; position?: number }
-type CategoryProductsPage = {
-	items: { productId: string; position: number; product: unknown }[]
-	nextCursor: string | null
-}
-
-function normalizeName(value: string): string {
-	return value.trim()
-}
+type CategoryProductsPage = CategoryProductsPagePayload<unknown>
 
 @Injectable()
 export class CategoryService {
@@ -77,7 +75,7 @@ export class CategoryService {
 		const category = await this.repo.findById(id, catalogId)
 		if (!category) throw new NotFoundException('Категория не найдена')
 
-		const limit = this.normalizeLimit(options?.limit)
+		const limit = normalizeCategoryProductsLimit(options?.limit)
 		const cursor = options?.cursor?.trim() || undefined
 		const cacheTtlSec = cursor
 			? this.nextPageCacheTtlSec
@@ -97,23 +95,11 @@ export class CategoryService {
 			take: limit + 1
 		})
 
-		const hasMore = items.length > limit
-		const pageItems = hasMore ? items.slice(0, limit) : items
-		const nextCursor =
-			hasMore && pageItems.length
-				? this.encodeCursor({
-						position: pageItems[pageItems.length - 1].position,
-						productId: pageItems[pageItems.length - 1].productId
-					})
-				: null
-
-		const page: CategoryProductsPage = {
-			items: pageItems.map(item => ({
-				...item,
-				product: this.mapProductMedia(item.product)
-			})),
-			nextCursor
-		}
+		const page: CategoryProductsPage = buildCategoryProductsPage(
+			items,
+			limit,
+			product => this.mapProductMedia(product)
+		)
 
 		if (cacheKey) {
 			await this.cache.setJson(cacheKey, page, cacheTtlSec)
@@ -143,7 +129,7 @@ export class CategoryService {
 		}
 
 		const data: CategoryCreateInput = {
-			name: normalizeName(dto.name),
+			name: normalizeCategoryName(dto.name),
 			descriptor: dto.descriptor ?? null,
 			discount: dto.discount ?? null,
 			position: dto.position ?? 0,
@@ -175,7 +161,7 @@ export class CategoryService {
 		const hasProductChanges = dto.products !== undefined
 
 		if (dto.name !== undefined) {
-			data.name = normalizeName(dto.name)
+			data.name = normalizeCategoryName(dto.name)
 		}
 		if (dto.imageMediaId !== undefined) {
 			const imageMediaId = normalizeRequiredString(
@@ -286,68 +272,6 @@ export class CategoryService {
 		}
 	}
 
-	private normalizeCategoryProducts(
-		products?: CategoryProductInput[]
-	): CategoryProductInput[] {
-		if (!products) return []
-		const normalized = products.map((product, index) => {
-			const productId = product.productId?.trim()
-			if (!productId) {
-				throw new BadRequestException('productId обязателен')
-			}
-			if (
-				product.position !== undefined &&
-				(!Number.isInteger(product.position) || product.position < 0)
-			) {
-				throw new BadRequestException(
-					`position должен быть целым числом >= 0 (products[${index}])`
-				)
-			}
-			const position =
-				Number.isInteger(product.position) && product.position >= 0
-					? product.position
-					: undefined
-			return { productId, position }
-		})
-		const unique = new Set(normalized.map(product => product.productId))
-		if (unique.size !== normalized.length) {
-			throw new BadRequestException('Дублирующиеся productId')
-		}
-		return normalized
-	}
-
-	private resolveCategoryProductPositions(
-		products: CategoryProductInput[],
-		existingPositionById?: Map<string, number>
-	): [string, number][] {
-		const result = new Map<string, number>()
-		let maxPosition = -1
-
-		for (const product of products) {
-			if (product.position === undefined) continue
-			result.set(product.productId, product.position)
-			maxPosition = Math.max(maxPosition, product.position)
-		}
-
-		if (existingPositionById) {
-			for (const product of products) {
-				if (result.has(product.productId)) continue
-				const existingPosition = existingPositionById.get(product.productId)
-				if (existingPosition === undefined) continue
-				result.set(product.productId, existingPosition)
-				maxPosition = Math.max(maxPosition, existingPosition)
-			}
-		}
-
-		for (const product of products) {
-			if (result.has(product.productId)) continue
-			maxPosition += 1
-			result.set(product.productId, maxPosition)
-		}
-
-		return Array.from(result.entries())
-	}
-
 	private async prepareCategoryProductsForWrite(
 		catalogId: string,
 		products?: CategoryProductInput[],
@@ -358,7 +282,7 @@ export class CategoryService {
 			position: number
 		}[]
 	> {
-		const normalizedProducts = this.normalizeCategoryProducts(products)
+		const normalizedProducts = normalizeCategoryProducts(products)
 		const productIds = normalizedProducts.map(product => product.productId)
 		const validProductIds = await this.ensureProductsInCatalog(
 			productIds,
@@ -374,10 +298,7 @@ export class CategoryService {
 				)
 			: undefined
 		const positionById = new Map(
-			this.resolveCategoryProductPositions(
-				normalizedProducts,
-				existingPositionById
-			)
+			resolveCategoryProductPositions(normalizedProducts, existingPositionById)
 		)
 
 		return validProductIds.map(productId => ({
@@ -415,18 +336,6 @@ export class CategoryService {
 			)
 		}
 		return productIds
-	}
-
-	private normalizeLimit(value?: number | string): number {
-		const raw = typeof value === 'string' ? Number(value.trim()) : value
-		if (!Number.isFinite(raw)) return CATEGORY_PRODUCTS_DEFAULT_LIMIT
-		const normalized = Math.floor(raw)
-		if (normalized <= 0) return CATEGORY_PRODUCTS_DEFAULT_LIMIT
-		return Math.min(normalized, CATEGORY_PRODUCTS_MAX_LIMIT)
-	}
-
-	private encodeCursor(value: { position: number; productId: string }): string {
-		return Buffer.from(JSON.stringify(value)).toString('base64')
 	}
 
 	private async buildCategoryProductsCacheKey(

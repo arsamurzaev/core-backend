@@ -1,3 +1,4 @@
+import type { Prisma } from '@generated/client'
 import {
 	AttributeCreateInput,
 	AttributeEnumValueCreateInput,
@@ -48,6 +49,31 @@ const attributeSelectWithEnums = {
 const uuidRegex =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
+const attributeIdSelect = {
+	id: true
+}
+
+function buildActiveAttributeWhere(id: string) {
+	return { id, deleteAt: null }
+}
+
+function hasAttributeUpdateData(data: AttributeUpdateInput): boolean {
+	return Object.keys(data).length > 0
+}
+
+function buildTypeSet(typeIds: string[]) {
+	return typeIds.map(typeId => ({ id: typeId }))
+}
+
+type AttributeMutationTx = Pick<
+	Prisma.TransactionClient,
+	| 'attribute'
+	| 'attributeEnumValue'
+	| 'productAttribute'
+	| 'productVariant'
+	| 'variantAttribute'
+>
+
 @Injectable()
 export class AttributeRepository {
 	constructor(private readonly prisma: PrismaService) {}
@@ -74,7 +100,7 @@ export class AttributeRepository {
 
 	findById(id: string, withEnums = false) {
 		return this.prisma.attribute.findFirst({
-			where: { id, deleteAt: null },
+			where: buildActiveAttributeWhere(id),
 			select: withEnums ? attributeSelectWithEnums : attributeSelect
 		})
 	}
@@ -99,77 +125,27 @@ export class AttributeRepository {
 
 	async update(id: string, data: AttributeUpdateInput, typeIds?: string[]) {
 		return this.prisma.$transaction(async tx => {
-			const hasData = Object.keys(data).length > 0
-			if (hasData) {
-				const result = await tx.attribute.updateMany({
-					where: { id, deleteAt: null },
-					data
-				})
-				if (!result.count) return null
-			} else {
-				const existing = await tx.attribute.findFirst({
-					where: { id, deleteAt: null },
-					select: { id: true }
-				})
-				if (!existing) return null
-			}
+			const exists = await this.ensureAttributeReadyForUpdate(tx, id, data)
+			if (!exists) return null
 
-			if (typeIds) {
-				await tx.attribute.update({
-					where: { id },
-					data: {
-						types: {
-							set: typeIds.map(typeId => ({ id: typeId }))
-						}
-					}
-				})
-			}
-
-			return tx.attribute.findFirst({
-				where: { id, deleteAt: null },
-				select: attributeSelect
-			})
+			await this.syncAttributeTypes(tx, id, typeIds)
+			return this.findActiveAttributeInTx(tx, id)
 		})
 	}
 
 	async softDelete(id: string) {
 		return this.prisma.$transaction(async tx => {
-			const attribute = await tx.attribute.findFirst({
-				where: { id, deleteAt: null },
-				select: attributeSelect
-			})
+			const attribute = await this.findActiveAttributeInTx(tx, id)
 			if (!attribute) return null
 
 			const now = new Date()
-
-			await tx.attribute.update({
-				where: { id },
-				data: { deleteAt: now }
-			})
-
-			await tx.attributeEnumValue.updateMany({
-				where: { attributeId: id, deleteAt: null },
-				data: { deleteAt: now }
-			})
-
-			await tx.productAttribute.updateMany({
-				where: { attributeId: id, deleteAt: null },
-				data: { deleteAt: now }
-			})
+			await this.markAttributeDeleted(tx, id, now)
+			await this.markRelatedEnumValuesDeleted(tx, id, now)
+			await this.markRelatedProductAttributesDeleted(tx, id, now)
 
 			if (attribute.isVariantAttribute) {
-				await tx.productVariant.updateMany({
-					where: {
-						deleteAt: null,
-						attributes: { some: { attributeId: id, deleteAt: null } }
-					},
-					data: { deleteAt: now }
-				})
-
-				await tx.variantAttribute.updateMany({
-					where: { attributeId: id, deleteAt: null },
-					data: { deleteAt: now }
-				})
+				await this.markRelatedVariantsDeleted(tx, id, now)
+				await this.markRelatedVariantAttributesDeleted(tx, id, now)
 			}
 
 			return attribute
@@ -245,10 +221,7 @@ export class AttributeRepository {
 		})
 		if (!result.count) return null
 
-		return this.prisma.attributeEnumValue.findFirst({
-			where: { id, attributeId },
-			select: enumValueSelect
-		})
+		return this.findEnumValueById(id, attributeId)
 	}
 
 	async softDeleteEnumValue(id: string, attributeId: string) {
@@ -258,6 +231,112 @@ export class AttributeRepository {
 		})
 		if (!result.count) return null
 
+		return this.findEnumValueById(id, attributeId)
+	}
+
+	private async ensureAttributeReadyForUpdate(
+		tx: AttributeMutationTx,
+		id: string,
+		data: AttributeUpdateInput
+	): Promise<boolean> {
+		if (hasAttributeUpdateData(data)) {
+			const result = await tx.attribute.updateMany({
+				where: buildActiveAttributeWhere(id),
+				data
+			})
+			return result.count > 0
+		}
+
+		const existing = await tx.attribute.findFirst({
+			where: buildActiveAttributeWhere(id),
+			select: attributeIdSelect
+		})
+		return Boolean(existing)
+	}
+
+	private async syncAttributeTypes(
+		tx: AttributeMutationTx,
+		id: string,
+		typeIds?: string[]
+	): Promise<void> {
+		if (!typeIds) return
+
+		await tx.attribute.update({
+			where: { id },
+			data: {
+				types: {
+					set: buildTypeSet(typeIds)
+				}
+			}
+		})
+	}
+
+	private findActiveAttributeInTx(tx: AttributeMutationTx, id: string) {
+		return tx.attribute.findFirst({
+			where: buildActiveAttributeWhere(id),
+			select: attributeSelect
+		})
+	}
+
+	private markAttributeDeleted(
+		tx: AttributeMutationTx,
+		id: string,
+		deleteAt: Date
+	) {
+		return tx.attribute.update({
+			where: { id },
+			data: { deleteAt }
+		})
+	}
+
+	private markRelatedEnumValuesDeleted(
+		tx: AttributeMutationTx,
+		attributeId: string,
+		deleteAt: Date
+	) {
+		return tx.attributeEnumValue.updateMany({
+			where: { attributeId, deleteAt: null },
+			data: { deleteAt }
+		})
+	}
+
+	private markRelatedProductAttributesDeleted(
+		tx: AttributeMutationTx,
+		attributeId: string,
+		deleteAt: Date
+	) {
+		return tx.productAttribute.updateMany({
+			where: { attributeId, deleteAt: null },
+			data: { deleteAt }
+		})
+	}
+
+	private markRelatedVariantsDeleted(
+		tx: AttributeMutationTx,
+		attributeId: string,
+		deleteAt: Date
+	) {
+		return tx.productVariant.updateMany({
+			where: {
+				deleteAt: null,
+				attributes: { some: { attributeId, deleteAt: null } }
+			},
+			data: { deleteAt }
+		})
+	}
+
+	private markRelatedVariantAttributesDeleted(
+		tx: AttributeMutationTx,
+		attributeId: string,
+		deleteAt: Date
+	) {
+		return tx.variantAttribute.updateMany({
+			where: { attributeId, deleteAt: null },
+			data: { deleteAt }
+		})
+	}
+
+	private findEnumValueById(id: string, attributeId: string) {
 		return this.prisma.attributeEnumValue.findFirst({
 			where: { id, attributeId },
 			select: enumValueSelect

@@ -1,18 +1,11 @@
-﻿/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
-import { ContactType } from '@generated/enums'
 import { CatalogCreateInput, CatalogUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
 	Injectable,
 	NotFoundException
 } from '@nestjs/common'
-import slugify from 'slugify'
 
 import { CacheService } from '@/shared/cache/cache.service'
 import {
@@ -20,102 +13,32 @@ import {
 	CATALOG_CURRENT_CACHE_TTL_SEC,
 	CATALOG_TYPE_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
-import type { MediaDto } from '@/shared/media/dto/media.dto.res'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { ensureMediaInCatalog } from '@/shared/media/media.validation'
 import { RequestContext } from '@/shared/tenancy/request-context'
 import { assertHasUpdateFields, normalizeRequiredString } from '@/shared/utils'
 
+import { mapCatalogRecord } from './catalog.mapper'
 import { CatalogRepository } from './catalog.repository'
+import {
+	applyCatalogSlugSuffix,
+	buildCatalogConfigUpsert,
+	buildCatalogContactsUpdate,
+	buildCatalogRelationUpdateData,
+	buildCatalogSettingsUpsert,
+	CATALOG_SLUG_FALLBACK,
+	type CatalogUpdateAccess,
+	ensureCatalogSlugAllowed,
+	isCatalogSlugAllowed,
+	normalizeCatalogDomain,
+	normalizeCatalogSlug,
+	slugifyCatalogValue
+} from './catalog.utils'
 import { CreateCatalogDtoReq } from './dto/requests/create-catalog.dto.req'
 import { UpdateCatalogDtoReq } from './dto/requests/update-catalog.dto.req'
 
-const RESERVED_SUBDOMAINS = new Set(
-	(
-		process.env.CATALOG_RESERVED_SUBDOMAINS ??
-		'www,api,admin,app,static,cdn,assets'
-	)
-		.split(',')
-		.map(value => value.trim().toLowerCase())
-		.filter(Boolean)
-)
-
-const SLUG_MAX_LENGTH = 63
-const SLUG_FALLBACK = 'catalog'
-
-function normalizeSlug(value: string): string {
-	return value.trim().toLowerCase()
-}
-
-function normalizeDomain(value: string | null): string | null {
-	if (value === null) return null
-	let host = value.trim().toLowerCase()
-	if (!host) return null
-	host = host.replace(/^https?:\/\//, '')
-	host = host.split('/')[0] ?? host
-	host = host.split(':')[0] ?? host
-	if (host.startsWith('www.')) host = host.slice(4)
-	return host || null
-}
-
-function ensureSlugAllowed(slug: string) {
-	if (!isSlugAllowed(slug)) {
-		throw new BadRequestException('Слаг зарезервирован')
-	}
-}
-
-function isSlugAllowed(slug: string) {
-	return !RESERVED_SUBDOMAINS.has(slug)
-}
-
-function slugifyValue(value: string): string {
-	const slug = slugify(value, { lower: true, strict: true, trim: true })
-	return slug.replace(/-+/g, '-').replace(/^[-_]+|[-_]+$/g, '')
-}
-
-function applySuffix(base: string, suffix: number): string {
-	const suffixPart = suffix > 0 ? `-${suffix}` : ''
-	const headLength = Math.max(0, SLUG_MAX_LENGTH - suffixPart.length)
-	const head = base.slice(0, headLength).replace(/-+$/g, '')
-	return `${head}${suffixPart}`
-}
-
-function normalizeContactValue(value: string, type: ContactType): string {
-	const trimmed = value.trim()
-	if (!trimmed) {
-		throw new BadRequestException(`Контакт ${type} не может быть пустым`)
-	}
-
-	if (
-		type === ContactType.PHONE ||
-		type === ContactType.SMS ||
-		type === ContactType.WHATSAPP
-	) {
-		const hasLeadingPlus = trimmed.startsWith('+')
-		const digits = trimmed.replace(/\D/g, '')
-
-		if (!digits) {
-			throw new BadRequestException(`Контакт ${type} содержит некорректный номер`)
-		}
-
-		return hasLeadingPlus ? `+${digits}` : digits
-	}
-
-	return trimmed
-}
-
-type CatalogConfigMediaMapped<T> = T extends { config?: infer C }
-	? Omit<T, 'config'> & {
-			config:
-				| (C & { logoMedia?: MediaDto | null; bgMedia?: MediaDto | null })
-				| null
-		}
-	: T
-
-type CatalogCurrent = CatalogConfigMediaMapped<
-	Awaited<ReturnType<CatalogRepository['getByIdWithType']>>
->
+type CatalogCurrent = any
 
 @Injectable()
 export class CatalogService {
@@ -131,12 +54,12 @@ export class CatalogService {
 	async create(dto: CreateCatalogDtoReq) {
 		const { typeId, status, domain, slug, parentId, userId, ...rest } = dto
 
-		const normalizedDomain = normalizeDomain(domain ?? null)
+		const normalizedDomain = normalizeCatalogDomain(domain ?? null)
 		if (normalizedDomain) {
 			await this.ensureDomainAvailable(normalizedDomain)
 		}
 
-		const normalizedSlug = slug ? normalizeSlug(slug) : undefined
+		const normalizedSlug = slug ? normalizeCatalogSlug(slug) : undefined
 		if (normalizedSlug) {
 			await this.ensureSlugAvailable(normalizedSlug)
 		}
@@ -241,146 +164,28 @@ export class CatalogService {
 
 	private async buildUpdateData(
 		dto: UpdateCatalogDtoReq,
-		options: {
-			allowStatus: boolean
-			allowType: boolean
-			allowOwner: boolean
-			allowParent: boolean
-		},
+		options: CatalogUpdateAccess,
 		catalogId: string
 	): Promise<CatalogUpdateInput> {
-		const data: CatalogUpdateInput = {}
+		const data = buildCatalogRelationUpdateData(dto, options)
+		await this.applyCatalogIdentityUpdates(data, dto, catalogId)
 
-		if (dto.slug !== undefined) {
-			const normalized = normalizeSlug(dto.slug)
-			await this.ensureSlugAvailable(normalized, catalogId)
-			data.slug = normalized
+		const configMediaIds = await this.resolveConfigMediaIds(dto, catalogId)
+		const config = buildCatalogConfigUpsert(dto, {
+			allowStatus: options.allowStatus,
+			...configMediaIds
+		})
+		if (config) {
+			data.config = config
 		}
 
-		if (dto.domain !== undefined) {
-			const normalized = normalizeDomain(dto.domain)
-			if (normalized) {
-				await this.ensureDomainAvailable(normalized, catalogId)
-			}
-			data.domain = normalized
+		const settings = buildCatalogSettingsUpsert(dto)
+		if (settings) {
+			data.settings = settings
 		}
 
-		if (dto.name !== undefined) {
-			data.name = dto.name
-		}
-
-		if (options.allowType && dto.typeId) {
-			data.type = { connect: { id: dto.typeId } }
-		}
-
-		if (options.allowParent && dto.parentId !== undefined) {
-			data.parent =
-				dto.parentId === null
-					? { disconnect: true }
-					: { connect: { id: dto.parentId } }
-		}
-
-		if (options.allowOwner && dto.userId !== undefined) {
-			data.user =
-				dto.userId === null ? { disconnect: true } : { connect: { id: dto.userId } }
-		}
-
-		const configUpdate: Record<string, any> = {}
-		const configCreate: Record<string, any> = {}
-
-		if (dto.about !== undefined) {
-			configUpdate.about = dto.about
-			configCreate.about = dto.about
-		}
-		if (dto.description !== undefined) {
-			configUpdate.description = dto.description
-			configCreate.description = dto.description
-		}
-		if (dto.currency !== undefined) {
-			configUpdate.currency = dto.currency
-			configCreate.currency = dto.currency
-		}
-		if (dto.logoMediaId !== undefined) {
-			const logoMediaId = normalizeRequiredString(dto.logoMediaId, 'logoMediaId')
-			await ensureMediaInCatalog(this.mediaRepo, logoMediaId, catalogId)
-			configUpdate.logoMediaId = logoMediaId
-			configCreate.logoMediaId = logoMediaId
-		}
-		if (dto.bgMediaId !== undefined) {
-			const bgMediaId = normalizeRequiredString(dto.bgMediaId, 'bgMediaId')
-			await ensureMediaInCatalog(this.mediaRepo, bgMediaId, catalogId)
-			configUpdate.bgMediaId = bgMediaId
-			configCreate.bgMediaId = bgMediaId
-		}
-		if (dto.note !== undefined) {
-			configUpdate.note = dto.note
-			configCreate.note = dto.note
-		}
-		if (options.allowStatus && dto.status !== undefined) {
-			configUpdate.status = dto.status
-			configCreate.status = dto.status
-		}
-
-		if (Object.keys(configUpdate).length > 0) {
-			data.config = {
-				upsert: {
-					update: configUpdate,
-					create: configCreate
-				}
-			}
-		}
-
-		const settingsUpdate: Record<string, any> = {}
-		const settingsCreate: Record<string, any> = {}
-
-		if (dto.isActive !== undefined) {
-			settingsUpdate.isActive = dto.isActive
-			settingsCreate.isActive = dto.isActive
-		}
-		if (dto.googleVerification !== undefined) {
-			settingsUpdate.googleVerification = dto.googleVerification
-			settingsCreate.googleVerification = dto.googleVerification
-		}
-		if (dto.yandexVerification !== undefined) {
-			settingsUpdate.yandexVerification = dto.yandexVerification
-			settingsCreate.yandexVerification = dto.yandexVerification
-		}
-
-		if (Object.keys(settingsUpdate).length > 0) {
-			data.settings = {
-				upsert: {
-					update: settingsUpdate,
-					create: settingsCreate
-				}
-			}
-		}
-
-		if (dto.contacts !== undefined) {
-			const seenTypes = new Set<ContactType>()
-			const contactItems = dto.contacts.map((contact, index) => {
-				if (seenTypes.has(contact.type)) {
-					throw new BadRequestException(
-						`Контакт типа ${contact.type} передан больше одного раза`
-					)
-				}
-
-				seenTypes.add(contact.type)
-
-				return {
-					type: contact.type,
-					position: contact.position ?? index,
-					value: normalizeContactValue(contact.value, contact.type)
-				}
-			})
-
-			const contacts = { deleteMany: {} } as NonNullable<
-				CatalogUpdateInput['contacts']
-			>
-
-			if (contactItems.length > 0) {
-				contacts.create = contactItems
-			}
-
+		const contacts = buildCatalogContactsUpdate(dto.contacts)
+		if (contacts) {
 			data.contacts = contacts
 		}
 
@@ -389,131 +194,71 @@ export class CatalogService {
 		return data
 	}
 
+	private async applyCatalogIdentityUpdates(
+		data: CatalogUpdateInput,
+		dto: UpdateCatalogDtoReq,
+		catalogId: string
+	): Promise<void> {
+		if (dto.slug !== undefined) {
+			const normalizedSlug = normalizeCatalogSlug(dto.slug)
+			await this.ensureSlugAvailable(normalizedSlug, catalogId)
+			data.slug = normalizedSlug
+		}
+
+		if (dto.domain !== undefined) {
+			const normalizedDomain = normalizeCatalogDomain(dto.domain)
+			if (normalizedDomain) {
+				await this.ensureDomainAvailable(normalizedDomain, catalogId)
+			}
+			data.domain = normalizedDomain
+		}
+	}
+
+	private async resolveConfigMediaIds(
+		dto: UpdateCatalogDtoReq,
+		catalogId: string
+	): Promise<{ logoMediaId?: string; bgMediaId?: string }> {
+		const mediaIds: { logoMediaId?: string; bgMediaId?: string } = {}
+
+		if (dto.logoMediaId !== undefined) {
+			const logoMediaId = normalizeRequiredString(dto.logoMediaId, 'logoMediaId')
+			await ensureMediaInCatalog(this.mediaRepo, logoMediaId, catalogId)
+			mediaIds.logoMediaId = logoMediaId
+		}
+
+		if (dto.bgMediaId !== undefined) {
+			const bgMediaId = normalizeRequiredString(dto.bgMediaId, 'bgMediaId')
+			await ensureMediaInCatalog(this.mediaRepo, bgMediaId, catalogId)
+			mediaIds.bgMediaId = bgMediaId
+		}
+
+		return mediaIds
+	}
+
 	private async loadCurrentCatalog(catalogId: string) {
-		try {
-			const catalog = await this.repo.getByIdWithType(catalogId, {
-				createdAt: false,
-				updatedAt: false,
-				deleteAt: false
-			})
-			if (!catalog) throw new NotFoundException('Каталог не найден')
-			return this.mapCatalog(catalog)
-		} catch (error) {
-			if (this.isUnknownAttributeTypesError(error)) {
-				const catalog = await this.repo.getByIdWithType(catalogId, {
-					type: {
-						select: {
-							id: true,
-							code: true,
-							name: true,
-							attributes: {
-								where: { deleteAt: null },
-								select: {
-									id: true,
-									key: true,
-									displayName: true,
-									dataType: true,
-									isRequired: true,
-									isVariantAttribute: true,
-									isFilterable: true,
-									displayOrder: true,
-									createdAt: true,
-									updatedAt: true,
-									typeId: true,
-									enumValues: {
-										where: { deleteAt: null },
-										select: {
-											id: true,
-											attributeId: true,
-											value: true,
-											displayName: true,
-											displayOrder: true,
-											createdAt: true,
-											updatedAt: true
-										},
-										orderBy: [{ displayOrder: 'asc' as const }, { value: 'asc' as const }]
-									}
-								},
-								orderBy: [{ displayOrder: 'asc' as const }, { key: 'asc' as const }]
-							}
-						}
-					}
-				} as any)
-				if (!catalog) throw new NotFoundException('Каталог не найден')
-				return this.mapCatalog(catalog)
-			}
-			throw error
-		}
+		const catalog = await this.repo.getCurrentByIdWithType(catalogId)
+		if (!catalog) throw new NotFoundException('Каталог не найден')
+		return this.mapCatalog(catalog)
 	}
 
-	private mapCatalog<T extends { config?: any | null; type?: any }>(catalog: T) {
-		if (!catalog) return catalog
-		let result: any = catalog
-		if (catalog.config) {
-			const config = catalog.config as {
-				logoMedia?: any | null
-				bgMedia?: any | null
-			}
-			const hasLogo = Object.prototype.hasOwnProperty.call(config, 'logoMedia')
-			const hasBg = Object.prototype.hasOwnProperty.call(config, 'bgMedia')
-			if (hasLogo || hasBg) {
-				result = {
-					...result,
-					config: {
-						...config,
-						logoMedia: config.logoMedia
-							? this.mediaUrl.mapMedia(config.logoMedia)
-							: null,
-						bgMedia: config.bgMedia ? this.mediaUrl.mapMedia(config.bgMedia) : null
-					}
-				}
-			}
-		}
-
-		const type = result.type
-		if (type?.attributes?.length) {
-			const attributes = type.attributes.map((attribute: any) => {
-				const typeIds = Array.isArray(attribute.types)
-					? attribute.types.map((item: any) => item.id)
-					: attribute.typeId
-						? [attribute.typeId]
-						: []
-				const { types, typeId, ...rest } = attribute
-				return { ...rest, typeIds }
-			})
-			result = {
-				...result,
-				type: {
-					...type,
-					attributes
-				}
-			}
-		}
-
-		return result
-	}
-
-	private isUnknownAttributeTypesError(error: unknown): boolean {
-		const message =
-			typeof error === 'object' && error !== null && 'message' in error
-				? String((error as { message?: string }).message)
-				: ''
-		return message.includes(
-			'Unknown field `types` for select statement on model `Attribute`'
-		)
+	private mapCatalog<T>(catalog: T) {
+		return mapCatalogRecord(catalog, media => this.mediaUrl.mapMedia(media))
 	}
 
 	private async generateCatalogSlug(name: string): Promise<string> {
-		const base = slugifyValue(name) || SLUG_FALLBACK
+		const base = slugifyCatalogValue(name) || CATALOG_SLUG_FALLBACK
 		return this.ensureUniqueCatalogSlug(base)
 	}
 
 	private async ensureUniqueCatalogSlug(base: string): Promise<string> {
-		let candidate = applySuffix(base, 0)
+		let candidate = applyCatalogSlugSuffix(base, 0)
 		let suffix = 1
 
-		while (!isSlugAllowed(candidate) || (await this.repo.existsSlug(candidate))) {
-			candidate = applySuffix(base, suffix)
+		while (
+			!isCatalogSlugAllowed(candidate) ||
+			(await this.repo.existsSlug(candidate))
+		) {
+			candidate = applyCatalogSlugSuffix(base, suffix)
 			suffix += 1
 		}
 
@@ -524,7 +269,7 @@ export class CatalogService {
 		slug: string,
 		excludeId?: string
 	): Promise<void> {
-		ensureSlugAllowed(slug)
+		ensureCatalogSlugAllowed(slug)
 		const exists = await this.repo.existsSlug(slug, excludeId)
 		if (exists) {
 			throw new BadRequestException('Слаг каталога уже используется')

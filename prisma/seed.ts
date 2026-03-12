@@ -404,7 +404,7 @@ const baseCatalogSeeds: CatalogSeed[] = [
 		about: 'Демо-каталог ресторана с бургерами, пиццей и напитками.',
 		description:
 			'Набор данных для тестирования категорий и карточек товаров ресторана.',
-		currency: 'RUB',
+		currency: '₽',
 		logoUrl: buildOpenSourcePhotoUrl('restaurant-city-kitchen-logo'),
 		bgUrl: buildOpenSourcePhotoUrl('restaurant-city-kitchen-bg'),
 		categories: [
@@ -536,7 +536,7 @@ const baseCatalogSeeds: CatalogSeed[] = [
 		about: 'Демо-каталог одежды: футболки, худи, джинсы и куртки.',
 		description:
 			'Набор данных для тестирования категорий одежды и карточек товаров.',
-		currency: 'RUB',
+		currency: '₽',
 		logoUrl: buildOpenSourcePhotoUrl('clothing-urban-style-logo'),
 		bgUrl: buildOpenSourcePhotoUrl('clothing-urban-style-bg'),
 		categories: [

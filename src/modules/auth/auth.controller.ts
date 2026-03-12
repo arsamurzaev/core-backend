@@ -20,45 +20,17 @@ import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
+import {
+	clearSessionCookies,
+	getSessionCookie,
+	setSessionCookies
+} from './auth-cookie.utils'
 import { AuthService } from './auth.service'
 import { LoginDtoReq } from './dto/requests/login.dto.req'
 import { AuthLoginResponseDto } from './dto/responses/auth-login.dto.res'
 import { SessionGuard } from './guards/session.guard'
 import { SessionService } from './session/session.service'
 import type { AuthRequest } from './types/auth-request'
-
-const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
-const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
-const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'lax') as 'strict' | 'lax'
-const isProd = process.env.NODE_ENV === 'production'
-const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7
-
-function getCookie(req: Request, name: string): string | undefined {
-	const header = req.headers.cookie
-	if (!header) return undefined
-	for (const part of header.split(';')) {
-		const [k, ...rest] = part.trim().split('=')
-		if (k === name) return decodeURIComponent(rest.join('='))
-	}
-	return undefined
-}
-
-function setSessionCookies(res: Response, sid: string, csrf: string) {
-	res.cookie(SID_COOKIE, sid, {
-		httpOnly: true,
-		sameSite: SAME_SITE,
-		secure: isProd,
-		path: '/',
-		maxAge: SESSION_MAX_AGE_MS
-	})
-	res.cookie(CSRF_COOKIE, csrf, {
-		httpOnly: false,
-		sameSite: SAME_SITE,
-		secure: isProd,
-		path: '/',
-		maxAge: SESSION_MAX_AGE_MS
-	})
-}
 
 @ApiTags('Auth')
 @SkipCatalog()
@@ -82,7 +54,7 @@ export class AuthController {
 		@Res({ passthrough: true }) res: Response
 	) {
 		const { ip, userAgent } = getClientInfo(req)
-		const existingSid = getCookie(req, SID_COOKIE) ?? null
+		const existingSid = getSessionCookie(req)
 		const { sid, csrf, user } = await this.auth.login(
 			dto,
 			{ ip, userAgent },
@@ -90,7 +62,7 @@ export class AuthController {
 		)
 
 		res.setHeader('Cache-Control', 'no-store')
-		setSessionCookies(res, sid, csrf)
+		setSessionCookies(res, { sid, csrf })
 
 		return { ok: true, user }
 	}
@@ -118,18 +90,7 @@ export class AuthController {
 		if (sid) await this.sessions.destroy(sid)
 
 		res.setHeader('Cache-Control', 'no-store')
-
-		// важно: параметры должны совпадать с установкой cookie (path, sameSite, secure)
-		res.clearCookie(SID_COOKIE, {
-			path: '/',
-			sameSite: SAME_SITE,
-			secure: isProd
-		})
-		res.clearCookie(CSRF_COOKIE, {
-			path: '/',
-			sameSite: SAME_SITE,
-			secure: isProd
-		})
+		clearSessionCookies(res)
 
 		return { ok: true }
 	}

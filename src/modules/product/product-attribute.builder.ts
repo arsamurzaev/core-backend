@@ -42,6 +42,62 @@ export class ProductAttributeBuilder {
 		return this.build(typeId, inputs, { requireAll: false })
 	}
 
+	async prepareRemovedAttributeIdsForUpdate(
+		typeId: string,
+		inputs: string[]
+	): Promise<string[]> {
+		const attributeIds = inputs.map(input => {
+			const attributeId = String(input).trim()
+			if (!attributeId) {
+				throw new BadRequestException('attributeId обязателен')
+			}
+			return attributeId
+		})
+
+		const uniqueAttributeIds = [...new Set(attributeIds)]
+		if (uniqueAttributeIds.length !== attributeIds.length) {
+			throw new BadRequestException('Дубликаты удаляемых атрибутов не допускаются')
+		}
+
+		if (!uniqueAttributeIds.length) {
+			return []
+		}
+
+		const attributes = await this.loadAttributes(
+			typeId,
+			new Set(uniqueAttributeIds)
+		)
+		const attributeMap = new Map(
+			attributes.map(attribute => [attribute.id, attribute])
+		)
+
+		if (attributeMap.size !== uniqueAttributeIds.length) {
+			const missing = uniqueAttributeIds.filter(id => !attributeMap.has(id))
+			throw new BadRequestException(`Неизвестные атрибуты: ${missing.join(', ')}`)
+		}
+
+		for (const attribute of attributes) {
+			if (attribute.isVariantAttribute) {
+				throw new BadRequestException(
+					`Атрибут ${attribute.key} является вариантным и не может быть удален у товара`
+				)
+			}
+		}
+
+		const requiredAttributes = attributes.filter(
+			attribute => attribute.isRequired
+		)
+		if (requiredAttributes.length) {
+			throw new BadRequestException(
+				`Нельзя удалить обязательные атрибуты: ${requiredAttributes
+					.map(attribute => attribute.key)
+					.join(', ')}`
+			)
+		}
+
+		return uniqueAttributeIds
+	}
+
 	private async build(
 		typeId: string,
 		inputs: ProductAttributeValueDto[],

@@ -6,13 +6,17 @@ import {
 } from '@nestjs/common'
 
 import { mustCatalogId } from '@/shared/tenancy/ctx'
-import { assertHasUpdateFields, normalizeRequiredString } from '@/shared/utils'
+import { assertHasUpdateFields } from '@/shared/utils'
 
 import { BrandRepository } from './brand.repository'
+import {
+	buildBrandCreateInput,
+	buildBrandUpdateInput,
+	normalizeBrandName,
+	normalizeBrandSlug
+} from './brand.utils'
 import { CreateBrandDtoReq } from './dto/requests/create-brand.dto.req'
 import { UpdateBrandDtoReq } from './dto/requests/update-brand.dto.req'
-
-const BRAND_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 @Injectable()
 export class BrandService {
@@ -25,62 +29,41 @@ export class BrandService {
 
 	async getById(id: string) {
 		const catalogId = mustCatalogId()
-		const brand = await this.repo.findById(id, catalogId)
-		if (!brand) throw new NotFoundException('Бренд не найден')
-		return brand
+		return this.requireBrand(await this.repo.findById(id, catalogId))
 	}
 
 	async create(dto: CreateBrandDtoReq) {
 		const catalogId = mustCatalogId()
-		const name = normalizeRequiredString(dto.name, 'name')
-		const slug = this.normalizeSlug(dto.slug)
+		const name = normalizeBrandName(dto.name)
+		const slug = normalizeBrandSlug(dto.slug)
 		await this.ensureSlugAvailable(catalogId, slug)
 
-		const data: BrandCreateInput = {
-			name,
-			slug,
-			catalog: { connect: { id: catalogId } }
-		}
+		const data: BrandCreateInput = buildBrandCreateInput(catalogId, name, slug)
 		return this.repo.create(data)
 	}
 
 	async update(id: string, dto: UpdateBrandDtoReq) {
 		const catalogId = mustCatalogId()
-		const data: BrandUpdateInput = {}
-
-		if (dto.name !== undefined) {
-			data.name = normalizeRequiredString(dto.name, 'name')
-		}
+		let slug: string | undefined
 		if (dto.slug !== undefined) {
-			const slug = this.normalizeSlug(dto.slug)
+			slug = normalizeBrandSlug(dto.slug)
 			await this.ensureSlugAvailable(catalogId, slug, id)
-			data.slug = slug
 		}
 
+		const data: BrandUpdateInput = buildBrandUpdateInput({
+			name: dto.name,
+			slug
+		})
 		assertHasUpdateFields(data)
 
-		const brand = await this.repo.update(id, catalogId, data)
-		if (!brand) throw new NotFoundException('Бренд не найден')
-
-		return brand
+		return this.requireBrand(await this.repo.update(id, catalogId, data))
 	}
 
 	async remove(id: string) {
 		const catalogId = mustCatalogId()
-		const brand = await this.repo.softDelete(id, catalogId)
-		if (!brand) throw new NotFoundException('Бренд не найден')
+		this.requireBrand(await this.repo.softDelete(id, catalogId))
 
 		return { ok: true }
-	}
-
-	private normalizeSlug(value: string): string {
-		const normalized = normalizeRequiredString(value, 'slug').toLowerCase()
-		if (!BRAND_SLUG_PATTERN.test(normalized)) {
-			throw new BadRequestException(
-				'slug должен содержать только латиницу в нижнем регистре, цифры и дефисы'
-			)
-		}
-		return normalized
 	}
 
 	private async ensureSlugAvailable(
@@ -90,7 +73,14 @@ export class BrandService {
 	): Promise<void> {
 		const exists = await this.repo.existsSlug(catalogId, slug, excludeId)
 		if (exists) {
-			throw new BadRequestException('slug уже используется в каталоге')
+			throw new BadRequestException(
+				'slug СѓР¶Рµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РІ РєР°С‚Р°Р»РѕРіРµ'
+			)
 		}
+	}
+
+	private requireBrand<T>(brand: T | null): T {
+		if (!brand) throw new NotFoundException('Р‘СЂРµРЅРґ РЅРµ РЅР°Р№РґРµРЅ')
+		return brand
 	}
 }

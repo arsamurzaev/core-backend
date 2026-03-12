@@ -108,6 +108,16 @@ export class UpdateProductDtoReq {
 	@Type(() => ProductAttributeValueDto)
 	attributes?: ProductAttributeValueDto[]
 
+	@ApiPropertyOptional({
+		type: [String],
+		example: ['attribute-uuid'],
+		description: 'ID атрибутов товара, которые нужно удалить при редактировании'
+	})
+	@IsOptional()
+	@IsArray()
+	@IsString({ each: true })
+	removeAttributeIds?: string[]
+
 	@ApiPropertyOptional({ type: [ProductVariantUpdateDtoReq] })
 	@IsOptional()
 	@IsArray()

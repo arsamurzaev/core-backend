@@ -88,6 +88,32 @@ type PreparedVariant = {
 	contentType: string
 }
 
+type CatalogUploadTargetOptions = {
+	catalogId?: string
+	path?: string
+	folder?: string
+	entityId?: string
+}
+
+type RawObjectTarget = {
+	catalogId: string
+	mimeType: string
+	key: string
+	path?: string
+	entityId?: string
+}
+
+type CompletedMultipartPart = {
+	PartNumber: number
+	ETag: string
+}
+
+type UploadQueueResult = {
+	ok: true
+	jobId: string
+	count: number
+}
+
 export type UploadImageOptions = {
 	path?: string
 	folder?: string
@@ -315,22 +341,12 @@ export class S3Service implements OnModuleDestroy {
 		options: UploadImageOptions = {}
 	): Promise<PresignUploadResult> {
 		this.assertUploadEnabled()
-
-		const normalizedType = contentType?.trim().toLowerCase()
-		if (!normalizedType) {
-			throw new BadRequestException('contentType обязателен')
-		}
-		this.assertContentType(normalizedType)
-
-		const catalogId = options.catalogId ?? mustCatalogId()
-		const prefix = this.buildPrefix(catalogId, options, [RAW_SEGMENT])
-		const extension = CONTENT_TYPE_EXTENSION[normalizedType] ?? 'bin'
-		const key = `${prefix}/${randomUUID()}.${extension}`
+		const target = this.prepareRawObjectTarget(contentType, options)
 
 		const command = new PutObjectCommand({
 			Bucket: this.bucket,
-			Key: key,
-			ContentType: normalizedType,
+			Key: target.key,
+			ContentType: target.mimeType,
 			CacheControl: 'private, max-age=0',
 			...(this.publicRead ? { ACL: 'public-read' } : {})
 		})
@@ -340,19 +356,19 @@ export class S3Service implements OnModuleDestroy {
 		})
 
 		const mediaId = await this.createPresignRecord({
-			catalogId,
-			key,
-			mimeType: normalizedType,
-			path: options.path ?? options.folder,
-			entityId: options.entityId
+			catalogId: target.catalogId,
+			key: target.key,
+			mimeType: target.mimeType,
+			path: target.path,
+			entityId: target.entityId
 		})
 
 		return {
 			ok: true,
 			mediaId,
 			uploadUrl,
-			key,
-			url: this.buildPublicUrl(key),
+			key: target.key,
+			url: this.buildPublicUrl(target.key),
 			expiresIn: this.presignExpiresSec
 		}
 	}
@@ -363,26 +379,14 @@ export class S3Service implements OnModuleDestroy {
 		contentLength?: number
 	): Promise<PresignPostResult> {
 		this.assertUploadEnabled()
-
-		const normalizedType = contentType?.trim().toLowerCase()
-		if (!normalizedType) {
-			throw new BadRequestException('contentType обязателен')
-		}
-		this.assertContentType(normalizedType)
-
+		const target = this.prepareRawObjectTarget(contentType, options)
 		if (contentLength && contentLength > this.maxFileBytes) {
-			const maxMb = Math.ceil(this.maxFileBytes / 1024 / 1024)
-			throw new BadRequestException(`Размер файла превышает ${maxMb} МБ`)
+			this.assertFileSizeWithinLimit(contentLength)
 		}
-
-		const catalogId = options.catalogId ?? mustCatalogId()
-		const prefix = this.buildPrefix(catalogId, options, [RAW_SEGMENT])
-		const extension = CONTENT_TYPE_EXTENSION[normalizedType] ?? 'bin'
-		const key = `${prefix}/${randomUUID()}.${extension}`
 
 		const baseFields: Record<string, string> = {
-			key,
-			'Content-Type': normalizedType
+			key: target.key,
+			'Content-Type': target.mimeType
 		}
 		if (this.publicRead) {
 			baseFields.acl = 'public-read'
@@ -390,21 +394,21 @@ export class S3Service implements OnModuleDestroy {
 
 		const { url: uploadUrl, fields } = await createPresignedPost(this.client, {
 			Bucket: this.bucket,
-			Key: key,
+			Key: target.key,
 			Fields: baseFields,
 			Conditions: [
 				['content-length-range', 1, this.maxFileBytes],
-				['eq', '$Content-Type', normalizedType]
+				['eq', '$Content-Type', target.mimeType]
 			],
 			Expires: this.presignExpiresSec
 		})
 
 		const mediaId = await this.createPresignRecord({
-			catalogId,
-			key,
-			mimeType: normalizedType,
-			path: options.path ?? options.folder,
-			entityId: options.entityId
+			catalogId: target.catalogId,
+			key: target.key,
+			mimeType: target.mimeType,
+			path: target.path,
+			entityId: target.entityId
 		})
 
 		return {
@@ -412,8 +416,8 @@ export class S3Service implements OnModuleDestroy {
 			mediaId,
 			uploadUrl,
 			fields,
-			key,
-			url: this.buildPublicUrl(key),
+			key: target.key,
+			url: this.buildPublicUrl(target.key),
 			expiresIn: this.presignExpiresSec,
 			maxFileBytes: this.maxFileBytes
 		}
@@ -427,42 +431,12 @@ export class S3Service implements OnModuleDestroy {
 		}
 
 		const catalogId = mustCatalogId()
-		const preparedItems: UploadQueueItem[] = []
-		const tempFiles: string[] = []
-
-		try {
-			for (let index = 0; index < files.length; index += 1) {
-				const file = files[index]
-				this.assertFileValid(file)
-
-				const tempPath = await this.saveTempFile(file)
-				tempFiles.push(tempPath)
-
-				preparedItems.push({
-					source: 'file',
-					filePath: tempPath,
-					mimetype: file.mimetype,
-					size: file.size,
-					originalName: file.originalname,
-					options: {
-						...items[index],
-						catalogId
-					}
-				})
-			}
-		} catch (error) {
-			await Promise.all(
-				tempFiles.map(filePath => fs.unlink(filePath).catch(() => null))
-			)
-			throw error
-		}
-
-		const job = await this.uploadQueue.add('upload', { items: preparedItems })
-		return {
-			ok: true,
-			jobId: String(job.id),
-			count: preparedItems.length
-		}
+		const preparedItems = await this.prepareFileQueueItems(
+			files,
+			items,
+			catalogId
+		)
+		return this.enqueuePreparedItems(preparedItems)
 	}
 
 	async startMultipartUpload(params: {
@@ -474,21 +448,13 @@ export class S3Service implements OnModuleDestroy {
 		entityId?: string
 	}): Promise<MultipartStartResult> {
 		this.assertUploadEnabled()
-
-		const normalizedType = params.contentType?.trim().toLowerCase()
-		if (!normalizedType) {
-			throw new BadRequestException('contentType обязателен')
-		}
-		this.assertContentType(normalizedType)
+		const target = this.prepareRawObjectTarget(params.contentType, params)
 
 		const fileSize = Number(params.fileSize)
 		if (!Number.isFinite(fileSize) || fileSize <= 0) {
 			throw new BadRequestException('Некорректный размер файла')
 		}
-		if (fileSize > this.maxFileBytes) {
-			const maxMb = Math.ceil(this.maxFileBytes / 1024 / 1024)
-			throw new BadRequestException(`Размер файла превышает ${maxMb} МБ`)
-		}
+		this.assertFileSizeWithinLimit(fileSize)
 
 		const partSize = this.resolveMultipartPartSize(fileSize, params.partSizeMb)
 		const partCount = Math.ceil(fileSize / partSize)
@@ -496,15 +462,10 @@ export class S3Service implements OnModuleDestroy {
 			throw new BadRequestException('Слишком много частей. Увеличьте размер части')
 		}
 
-		const catalogId = mustCatalogId()
-		const prefix = this.buildPrefix(catalogId, params, [RAW_SEGMENT])
-		const extension = CONTENT_TYPE_EXTENSION[normalizedType] ?? 'bin'
-		const key = `${prefix}/${randomUUID()}.${extension}`
-
 		const command = new CreateMultipartUploadCommand({
 			Bucket: this.bucket,
-			Key: key,
-			ContentType: normalizedType,
+			Key: target.key,
+			ContentType: target.mimeType,
 			CacheControl: 'private, max-age=0',
 			...(this.publicRead ? { ACL: 'public-read' } : {})
 		})
@@ -515,19 +476,19 @@ export class S3Service implements OnModuleDestroy {
 		}
 
 		const mediaId = await this.createPresignRecord({
-			catalogId,
-			key,
-			mimeType: normalizedType,
-			path: params.path ?? params.folder,
-			entityId: params.entityId
+			catalogId: target.catalogId,
+			key: target.key,
+			mimeType: target.mimeType,
+			path: target.path,
+			entityId: target.entityId
 		})
 
 		return {
 			ok: true,
 			mediaId,
 			uploadId: response.UploadId,
-			key,
-			url: this.buildPublicUrl(key),
+			key: target.key,
+			url: this.buildPublicUrl(target.key),
 			partSize,
 			partCount
 		}
@@ -539,21 +500,9 @@ export class S3Service implements OnModuleDestroy {
 		partNumber: number
 	): Promise<MultipartPartResult> {
 		this.assertUploadEnabled()
-
-		const cleanedKey = key?.trim()
-		if (!cleanedKey) {
-			throw new BadRequestException('Ключ файла обязателен')
-		}
-		const cleanedUploadId = uploadId?.trim()
-		if (!cleanedUploadId) {
-			throw new BadRequestException('uploadId обязателен')
-		}
-		if (!Number.isFinite(partNumber) || partNumber < 1) {
-			throw new BadRequestException('Номер части некорректен')
-		}
-		if (partNumber > MULTIPART_MAX_PARTS) {
-			throw new BadRequestException('Номер части превышает лимит')
-		}
+		const cleanedKey = this.normalizeRequiredKey(key)
+		const cleanedUploadId = this.normalizeRequiredUploadId(uploadId)
+		this.assertMultipartPartNumber(partNumber)
 
 		const catalogId = mustCatalogId()
 		this.assertKeyBelongsToCatalog(cleanedKey, catalogId)
@@ -578,57 +527,14 @@ export class S3Service implements OnModuleDestroy {
 		parts: { partNumber: number; etag: string }[]
 	}): Promise<MultipartCompleteResult> {
 		this.assertUploadEnabled()
-
-		const cleanedKey = params.key?.trim()
-		if (!cleanedKey) {
-			throw new BadRequestException('Ключ файла обязателен')
-		}
-		if (!cleanedKey.includes(`/${RAW_SEGMENT}/`)) {
-			throw new BadRequestException(
-				`Ключ ${cleanedKey} должен содержать сегмент /${RAW_SEGMENT}/`
-			)
-		}
-		const cleanedUploadId = params.uploadId?.trim()
-		if (!cleanedUploadId) {
-			throw new BadRequestException('uploadId обязателен')
-		}
-		if (!params.parts?.length) {
-			throw new BadRequestException('Список частей пуст')
-		}
+		const cleanedKey = this.normalizeRequiredKey(params.key)
+		this.assertRawKey(cleanedKey)
+		const cleanedUploadId = this.normalizeRequiredUploadId(params.uploadId)
 
 		const catalogId = mustCatalogId()
 		this.assertKeyBelongsToCatalog(cleanedKey, catalogId)
 
-		const normalizedParts = params.parts
-			.map(part => ({
-				PartNumber: part.partNumber,
-				ETag: (() => {
-					const cleaned = part.etag?.trim()
-					if (!cleaned) return undefined
-					return cleaned.startsWith('"') ? cleaned : `"${cleaned}"`
-				})()
-			}))
-			.filter(part => part.PartNumber && part.ETag)
-
-		if (!normalizedParts.length) {
-			throw new BadRequestException('Список частей пуст')
-		}
-
-		const seen = new Set<number>()
-		for (const part of normalizedParts) {
-			if (!Number.isFinite(part.PartNumber) || part.PartNumber < 1) {
-				throw new BadRequestException('Номер части некорректен')
-			}
-			if (part.PartNumber > MULTIPART_MAX_PARTS) {
-				throw new BadRequestException('Номер части превышает лимит')
-			}
-			if (seen.has(part.PartNumber)) {
-				throw new BadRequestException('Номера частей не должны повторяться')
-			}
-			seen.add(part.PartNumber)
-		}
-
-		normalizedParts.sort((a, b) => a.PartNumber - b.PartNumber)
+		const normalizedParts = this.normalizeMultipartParts(params.parts)
 
 		const command = new CompleteMultipartUploadCommand({
 			Bucket: this.bucket,
@@ -653,15 +559,8 @@ export class S3Service implements OnModuleDestroy {
 		uploadId: string
 	): Promise<{ ok: true }> {
 		this.assertUploadEnabled()
-
-		const cleanedKey = key?.trim()
-		if (!cleanedKey) {
-			throw new BadRequestException('Ключ файла обязателен')
-		}
-		const cleanedUploadId = uploadId?.trim()
-		if (!cleanedUploadId) {
-			throw new BadRequestException('uploadId обязателен')
-		}
+		const cleanedKey = this.normalizeRequiredKey(key)
+		const cleanedUploadId = this.normalizeRequiredUploadId(uploadId)
 
 		const catalogId = mustCatalogId()
 		this.assertKeyBelongsToCatalog(cleanedKey, catalogId)
@@ -689,92 +588,21 @@ export class S3Service implements OnModuleDestroy {
 		}
 
 		const catalogId = mustCatalogId()
-		const preparedItems: UploadQueueItem[] = []
-
-		for (const item of items) {
-			const key = item.key?.trim()
-			if (!key) {
-				throw new BadRequestException('Ключ файла обязателен')
-			}
-
-			this.assertKeyBelongsToCatalog(key, catalogId)
-			if (!key.includes(`/${RAW_SEGMENT}/`)) {
-				throw new BadRequestException(
-					`Ключ ${key} должен содержать сегмент /${RAW_SEGMENT}/`
-				)
-			}
-
-			const head = await this.headObject(key)
-			const contentType = head.ContentType ?? ''
-			if (!contentType) {
-				throw new BadRequestException(`Не удалось определить тип файла для ${key}`)
-			}
-			this.assertContentType(contentType)
-
-			const size = head.ContentLength ?? 0
-			if (size && size > this.maxFileBytes) {
-				const maxMb = Math.ceil(this.maxFileBytes / 1024 / 1024)
-				throw new BadRequestException(`Файл ${key} превышает ${maxMb} МБ`)
-			}
-
-			preparedItems.push({
-				source: 's3',
-				key,
-				mimetype: contentType,
-				size,
-				options: { catalogId }
-			})
-		}
-
-		const keysToUpdate = preparedItems
-			.map(item => item.key)
-			.filter((value): value is string => Boolean(value))
-		if (keysToUpdate.length) {
-			await this.prisma.media.updateMany({
-				where: { catalogId, key: { in: keysToUpdate } },
-				data: { status: MediaStatus.PROCESSING }
-			})
-		}
-
-		const job = await this.uploadQueue.add('upload', { items: preparedItems })
-		return {
-			ok: true,
-			jobId: String(job.id),
-			count: preparedItems.length
-		}
+		const preparedItems = await this.prepareS3QueueItems(items, catalogId)
+		await this.markMediaAsProcessing(catalogId, preparedItems)
+		return this.enqueuePreparedItems(preparedItems)
 	}
 
 	async getUploadStatus(jobId: string) {
 		this.assertQueueEnabled()
 
-		const job = await this.uploadQueue.getJob(jobId)
-		if (!job) {
-			throw new NotFoundException('Задание не найдено')
-		}
-
+		const job = await this.getUploadJobOrThrow(jobId)
 		const status = await job.getState()
-		const rawProgress = typeof job.progress === 'number' ? job.progress : 0
-		const progress = status === 'completed' ? 100 : Math.round(rawProgress)
-		const result = job.returnvalue
-		const payload: Record<string, any> = {}
-
-		if (status === 'completed' && result?.length) {
-			if (result.length === 1) {
-				payload.result = result[0]
-			} else {
-				payload.results = result
-			}
-		}
-
-		if (status === 'failed') {
-			payload.error = job.failedReason ?? 'Ошибка загрузки'
-		}
-
 		return {
 			ok: true,
 			status,
-			progress,
-			...payload
+			progress: this.resolveUploadJobProgress(status, job.progress),
+			...this.buildUploadStatusPayload(status, job)
 		}
 	}
 
@@ -795,10 +623,7 @@ export class S3Service implements OnModuleDestroy {
 		if (!file?.buffer?.length) {
 			throw new BadRequestException('Файл не передан')
 		}
-		if (file.size > this.maxFileBytes) {
-			const maxMb = Math.ceil(this.maxFileBytes / 1024 / 1024)
-			throw new BadRequestException(`Размер файла превышает ${maxMb} МБ`)
-		}
+		this.assertFileSizeWithinLimit(file.size)
 		if (!ALLOWED_IMAGE_MIME.has(file.mimetype)) {
 			throw new BadRequestException(
 				'Неподдерживаемый формат. Разрешены JPEG, PNG, WebP, AVIF'
@@ -868,6 +693,160 @@ export class S3Service implements OnModuleDestroy {
 		return results
 	}
 
+	private async prepareFileQueueItems(
+		files: UploadedImageFile[],
+		items: UploadImageOptions[],
+		catalogId: string
+	): Promise<UploadQueueItem[]> {
+		const preparedItems: UploadQueueItem[] = []
+		const tempFiles: string[] = []
+
+		try {
+			for (let index = 0; index < files.length; index += 1) {
+				const file = files[index]
+				this.assertFileValid(file)
+
+				const tempPath = await this.saveTempFile(file)
+				tempFiles.push(tempPath)
+
+				preparedItems.push({
+					source: 'file',
+					filePath: tempPath,
+					mimetype: file.mimetype,
+					size: file.size,
+					originalName: file.originalname,
+					options: {
+						...items[index],
+						catalogId
+					}
+				})
+			}
+		} catch (error) {
+			await this.cleanupTempFiles(tempFiles)
+			throw error
+		}
+
+		return preparedItems
+	}
+
+	private async cleanupTempFiles(filePaths: string[]): Promise<void> {
+		await Promise.all(
+			filePaths.map(filePath => fs.unlink(filePath).catch(() => null))
+		)
+	}
+
+	private async prepareS3QueueItems(
+		items: { key: string }[],
+		catalogId: string
+	): Promise<UploadQueueItem[]> {
+		const preparedItems: UploadQueueItem[] = []
+
+		for (const item of items) {
+			preparedItems.push(await this.prepareS3QueueItem(item.key, catalogId))
+		}
+
+		return preparedItems
+	}
+
+	private async prepareS3QueueItem(
+		key: string,
+		catalogId: string
+	): Promise<UploadQueueItem> {
+		const cleanedKey = this.normalizeRequiredKey(key)
+		this.assertKeyBelongsToCatalog(cleanedKey, catalogId)
+		this.assertRawKey(cleanedKey)
+
+		const { contentType, size } = await this.loadS3QueueItemHead(cleanedKey)
+		return {
+			source: 's3',
+			key: cleanedKey,
+			mimetype: contentType,
+			size,
+			options: { catalogId }
+		}
+	}
+
+	private async loadS3QueueItemHead(
+		key: string
+	): Promise<{ contentType: string; size: number }> {
+		const head = await this.headObject(key)
+		const contentType = head.ContentType ?? ''
+		if (!contentType) {
+			throw new BadRequestException(`Не удалось определить тип файла для ${key}`)
+		}
+		this.assertContentType(contentType)
+
+		const size = head.ContentLength ?? 0
+		if (size) {
+			this.assertFileSizeWithinLimit(size, `Файл ${key}`)
+		}
+
+		return { contentType, size }
+	}
+
+	private async markMediaAsProcessing(
+		catalogId: string,
+		items: UploadQueueItem[]
+	): Promise<void> {
+		const keysToUpdate = items
+			.map(item => item.key)
+			.filter((value): value is string => Boolean(value))
+
+		if (!keysToUpdate.length) return
+
+		await this.prisma.media.updateMany({
+			where: { catalogId, key: { in: keysToUpdate } },
+			data: { status: MediaStatus.PROCESSING }
+		})
+	}
+
+	private async enqueuePreparedItems(
+		items: UploadQueueItem[]
+	): Promise<UploadQueueResult> {
+		const job = await this.uploadQueue.add('upload', { items })
+		return {
+			ok: true,
+			jobId: String(job.id),
+			count: items.length
+		}
+	}
+
+	private async getUploadJobOrThrow(
+		jobId: string
+	): Promise<Job<UploadQueueJob, UploadImageResult[]>> {
+		const job = await this.uploadQueue.getJob(jobId)
+		if (!job) {
+			throw new NotFoundException('Задание не найдено')
+		}
+		return job
+	}
+
+	private resolveUploadJobProgress(status: string, progress: unknown): number {
+		const rawProgress = typeof progress === 'number' ? progress : 0
+		return status === 'completed' ? 100 : Math.round(rawProgress)
+	}
+
+	private buildUploadStatusPayload(
+		status: string,
+		job: Job<UploadQueueJob, UploadImageResult[]>
+	): Record<string, unknown> {
+		const payload: Record<string, unknown> = {}
+
+		if (status === 'completed' && job.returnvalue?.length) {
+			if (job.returnvalue.length === 1) {
+				payload.result = job.returnvalue[0]
+			} else {
+				payload.results = job.returnvalue
+			}
+		}
+
+		if (status === 'failed') {
+			payload.error = job.failedReason ?? 'Ошибка загрузки'
+		}
+
+		return payload
+	}
+
 	private async uploadImageWithProgress(
 		file: UploadedImageFile,
 		options: UploadImageOptions,
@@ -909,10 +888,7 @@ export class S3Service implements OnModuleDestroy {
 	): Promise<UploadImageResult> {
 		this.assertUploadEnabled()
 
-		const cleanedKey = key.trim()
-		if (!cleanedKey) {
-			throw new BadRequestException('Ключ файла обязателен')
-		}
+		const cleanedKey = this.normalizeRequiredKey(key)
 
 		const catalogId = options.catalogId ?? mustCatalogId()
 		this.assertKeyBelongsToCatalog(cleanedKey, catalogId)
@@ -925,9 +901,8 @@ export class S3Service implements OnModuleDestroy {
 			)
 		}
 		this.assertContentType(contentType)
-		if (bufferData.size && bufferData.size > this.maxFileBytes) {
-			const maxMb = Math.ceil(this.maxFileBytes / 1024 / 1024)
-			throw new BadRequestException(`Файл ${cleanedKey} превышает ${maxMb} МБ`)
+		if (bufferData.size) {
+			this.assertFileSizeWithinLimit(bufferData.size, `Файл ${cleanedKey}`)
 		}
 
 		const baseKey = this.buildBaseKeyFromRawKey(cleanedKey)
@@ -1024,6 +999,21 @@ export class S3Service implements OnModuleDestroy {
 		return (
 			uniqueWidths.length * formatCount + (this.storeOriginal ? formatCount : 0)
 		)
+	}
+
+	private prepareRawObjectTarget(
+		contentType: string,
+		options: CatalogUploadTargetOptions
+	): RawObjectTarget {
+		const mimeType = this.normalizeRequiredContentType(contentType)
+		const catalogId = options.catalogId ?? mustCatalogId()
+		return {
+			catalogId,
+			mimeType,
+			key: this.buildRawObjectKey(catalogId, options, mimeType),
+			path: options.path ?? options.folder,
+			entityId: options.entityId
+		}
 	}
 
 	private resolveMultipartPartSize(
@@ -1325,6 +1315,16 @@ export class S3Service implements OnModuleDestroy {
 		return withoutRaw.replace(/\.[^/.]+$/, '')
 	}
 
+	private buildRawObjectKey(
+		catalogId: string,
+		options: Pick<CatalogUploadTargetOptions, 'path' | 'folder' | 'entityId'>,
+		contentType: string
+	): string {
+		const prefix = this.buildPrefix(catalogId, options, [RAW_SEGMENT])
+		const extension = CONTENT_TYPE_EXTENSION[contentType] ?? 'bin'
+		return `${prefix}/${randomUUID()}.${extension}`
+	}
+
 	private buildPrefix(
 		catalogId: string,
 		options: UploadImageOptions,
@@ -1365,6 +1365,98 @@ export class S3Service implements OnModuleDestroy {
 		return rawSegments
 			.map(segment => this.normalizeSegment(segment, ''))
 			.filter(Boolean)
+	}
+
+	private normalizeRequiredContentType(contentType: string): string {
+		const normalizedType = contentType?.trim().toLowerCase()
+		if (!normalizedType) {
+			throw new BadRequestException('contentType обязателен')
+		}
+		this.assertContentType(normalizedType)
+		return normalizedType
+	}
+
+	private normalizeRequiredKey(key?: string): string {
+		const cleanedKey = key?.trim()
+		if (!cleanedKey) {
+			throw new BadRequestException('Ключ файла обязателен')
+		}
+		return cleanedKey
+	}
+
+	private normalizeRequiredUploadId(uploadId?: string): string {
+		const cleanedUploadId = uploadId?.trim()
+		if (!cleanedUploadId) {
+			throw new BadRequestException('uploadId обязателен')
+		}
+		return cleanedUploadId
+	}
+
+	private assertRawKey(key: string): void {
+		if (!key.includes(`/${RAW_SEGMENT}/`)) {
+			throw new BadRequestException(
+				`Ключ ${key} должен содержать сегмент /${RAW_SEGMENT}/`
+			)
+		}
+	}
+
+	private assertMultipartPartNumber(partNumber: number): void {
+		if (!Number.isFinite(partNumber) || partNumber < 1) {
+			throw new BadRequestException('Номер части некорректен')
+		}
+		if (partNumber > MULTIPART_MAX_PARTS) {
+			throw new BadRequestException('Номер части превышает лимит')
+		}
+	}
+
+	private normalizeMultipartParts(
+		parts: { partNumber: number; etag: string }[]
+	): CompletedMultipartPart[] {
+		if (!parts?.length) {
+			throw new BadRequestException('Список частей пуст')
+		}
+
+		const normalizedParts = parts
+			.map(part => ({
+				PartNumber: part.partNumber,
+				ETag: (() => {
+					const cleaned = part.etag?.trim()
+					if (!cleaned) return undefined
+					return cleaned.startsWith('"') ? cleaned : `"${cleaned}"`
+				})()
+			}))
+			.filter(
+				(
+					part
+				): part is CompletedMultipartPart & { PartNumber: number; ETag: string } =>
+					Boolean(part.PartNumber) && Boolean(part.ETag)
+			)
+
+		if (!normalizedParts.length) {
+			throw new BadRequestException('Список частей пуст')
+		}
+
+		const seen = new Set<number>()
+		for (const part of normalizedParts) {
+			this.assertMultipartPartNumber(part.PartNumber)
+			if (seen.has(part.PartNumber)) {
+				throw new BadRequestException('Номера частей не должны повторяться')
+			}
+			seen.add(part.PartNumber)
+		}
+
+		normalizedParts.sort((a, b) => a.PartNumber - b.PartNumber)
+		return normalizedParts
+	}
+
+	private assertFileSizeWithinLimit(
+		size: number,
+		subject = 'Размер файла'
+	): void {
+		if (size > this.maxFileBytes) {
+			const maxMb = Math.ceil(this.maxFileBytes / 1024 / 1024)
+			throw new BadRequestException(`${subject} превышает ${maxMb} МБ`)
+		}
 	}
 
 	private normalizeSegment(value: string, fallback = 'images'): string {

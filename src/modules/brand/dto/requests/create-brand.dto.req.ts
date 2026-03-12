@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
 import { IsNotEmpty, IsString, Matches, MaxLength } from 'class-validator'
 
-const BRAND_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+import { BRAND_SLUG_PATTERN } from '../../brand.utils'
 
 export class CreateBrandDtoReq {
 	@ApiProperty({ type: String, example: 'Nike' })

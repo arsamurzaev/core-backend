@@ -1,4 +1,4 @@
-﻿import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
 import {
 	IsNotEmpty,
@@ -9,7 +9,7 @@ import {
 	MinLength
 } from 'class-validator'
 
-const CODE_PATTERN = /^[a-z0-9-]+$/
+import { TYPE_CODE_PATTERN } from '../../type.utils'
 
 export class CreateTypeDtoReq {
 	@ApiProperty({ type: String, example: 'Тип' })
@@ -34,7 +34,7 @@ export class CreateTypeDtoReq {
 	@IsNotEmpty({ message: 'Программный код типа не может быть пустым' })
 	@MinLength(2)
 	@MaxLength(50)
-	@Matches(CODE_PATTERN)
+	@Matches(TYPE_CODE_PATTERN)
 	@Transform(({ value }: { value: unknown }) => {
 		if (value === undefined || value === null) return value
 		if (typeof value !== 'string') return value

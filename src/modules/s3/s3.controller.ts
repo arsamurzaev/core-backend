@@ -96,7 +96,7 @@ export class S3Controller {
 	@ApiSecurity('csrf')
 	@UseGuards(SessionGuard, CatalogAccessGuard)
 	@Roles(Role.CATALOG)
-	@ApiOperation({ summary: 'Старт multipart загрузки' })
+	@ApiOperation({ summary: 'Начать multipart загрузку' })
 	@ApiCreatedResponse({
 		description: 'Multipart загрузка создана',
 		type: MultipartStartResponseDto

@@ -9,7 +9,13 @@ import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
+import type { ProductAttributeValueDto } from './dto/requests/product-attribute.dto.req'
 import { ProductAttributeBuilder } from './product-attribute.builder'
+import type { ProductAttributeValueData } from './product-attribute.builder'
+import {
+	encodeProductDefaultCursor,
+	encodeProductSeedCursor
+} from './product-query.utils'
 import { ProductVariantBuilder } from './product-variant.builder'
 import { ProductRepository } from './product.repository'
 import { ProductService } from './product.service'
@@ -50,7 +56,8 @@ describe('ProductService', () => {
 					provide: ProductAttributeBuilder,
 					useValue: {
 						buildForCreate: jest.fn(),
-						buildForUpdate: jest.fn()
+						buildForUpdate: jest.fn(),
+						prepareRemovedAttributeIdsForUpdate: jest.fn()
 					}
 				},
 				{
@@ -139,6 +146,158 @@ describe('ProductService', () => {
 		)
 	})
 
+	it('returns default infinite page with next cursor', async () => {
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
+		repo.findFilteredProductIdsPageDefault.mockResolvedValue([
+			{ id: 'product-1', updatedAt: new Date('2026-03-12T10:00:00.000Z') },
+			{ id: 'product-2', updatedAt: new Date('2026-03-12T09:00:00.000Z') },
+			{ id: 'product-3', updatedAt: new Date('2026-03-12T08:00:00.000Z') }
+		] as any)
+		repo.findByIdsWithAttributes.mockResolvedValue([
+			{ id: 'product-1', media: [] },
+			{ id: 'product-2', media: [] }
+		] as any)
+
+		const result = await runWithCatalog(() =>
+			service.getInfinite({
+				limit: '2'
+			})
+		)
+
+		expect(result.items).toHaveLength(2)
+		expect(result.seed).toBeNull()
+		expect(result.nextCursor).toEqual(expect.any(String))
+		expect(repo.findFilteredProductIdsPageDefault.mock.calls[0]?.[0]).toEqual(
+			expect.objectContaining({
+				catalogId: 'catalog-1',
+				take: 3,
+				cursor: undefined
+			})
+		)
+	})
+
+	it('passes decoded default cursor to default infinite query', async () => {
+		const updatedAt = new Date('2026-03-11T10:00:00.000Z')
+		const cursor = encodeProductDefaultCursor({
+			id: 'product-9',
+			updatedAt
+		})
+
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
+		repo.findFilteredProductIdsPageDefault.mockResolvedValue([] as any)
+		repo.findByIdsWithAttributes.mockResolvedValue([] as any)
+
+		const result = await runWithCatalog(() =>
+			service.getInfinite({
+				limit: '2',
+				cursor
+			})
+		)
+
+		expect(result.seed).toBeNull()
+		expect(result.nextCursor).toBeNull()
+		expect(repo.findFilteredProductIdsPageDefault.mock.calls[0]?.[0]).toEqual(
+			expect.objectContaining({
+				catalogId: 'catalog-1',
+				take: 3,
+				cursor: {
+					id: 'product-9',
+					updatedAt
+				}
+			})
+		)
+	})
+
+	it('reuses seeded cursor when explicit seed is not passed', async () => {
+		const cursor = encodeProductSeedCursor('seed-1', {
+			id: 'product-9',
+			score: '009'
+		})
+
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
+		repo.findFilteredProductIdsPageSeeded.mockResolvedValue([] as any)
+		repo.findByIdsWithAttributes.mockResolvedValue([] as any)
+
+		const result = await runWithCatalog(() =>
+			service.getInfinite({
+				limit: '2',
+				cursor
+			})
+		)
+
+		expect(result.seed).toBe('seed-1')
+		expect(repo.findFilteredProductIdsPageSeeded.mock.calls[0]?.[0]).toEqual(
+			expect.objectContaining({
+				catalogId: 'catalog-1',
+				seed: 'seed-1',
+				take: 3,
+				cursor: {
+					id: 'product-9',
+					score: '009'
+				}
+			})
+		)
+	})
+
+	it('ignores seeded cursor when query seed changes', async () => {
+		const cursor = encodeProductSeedCursor('seed-1', {
+			id: 'product-9',
+			score: '009'
+		})
+
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
+		repo.findFilteredProductIdsPageSeeded.mockResolvedValue([] as any)
+		repo.findByIdsWithAttributes.mockResolvedValue([] as any)
+
+		const result = await runWithCatalog(() =>
+			service.getInfinite({
+				limit: '2',
+				seed: 'seed-2',
+				cursor
+			})
+		)
+
+		expect(result.seed).toBe('seed-2')
+		expect(repo.findFilteredProductIdsPageSeeded.mock.calls[0]?.[0]).toEqual(
+			expect.objectContaining({
+				catalogId: 'catalog-1',
+				seed: 'seed-2',
+				take: 3,
+				cursor: undefined
+			})
+		)
+	})
+
+	it('resolves discount attribute ids only for discount infinite filter', async () => {
+		repo.findAttributesByTypeAndKeys.mockResolvedValueOnce([
+			{ id: 'discount-id', key: 'discount' },
+			{ id: 'discount-start-id', key: 'discountStartAt' },
+			{ id: 'discount-end-id', key: 'discountEndAt' }
+		] as any)
+		repo.findFilteredProductIdsPageDefault.mockResolvedValue([] as any)
+		repo.findByIdsWithAttributes.mockResolvedValue([] as any)
+
+		const result = await runWithCatalog(() =>
+			service.getInfinite({
+				limit: '2',
+				isDiscount: 'true'
+			})
+		)
+
+		expect(result.seed).toBeNull()
+		expect(repo.findFilteredProductIdsPageDefault.mock.calls[0]?.[0]).toEqual(
+			expect.objectContaining({
+				catalogId: 'catalog-1',
+				isDiscount: true,
+				discountAttributeIds: {
+					discountId: 'discount-id',
+					discountStartAtId: 'discount-start-id',
+					discountEndAtId: 'discount-end-id'
+				}
+			})
+		)
+	})
+
 	it('allows using one brand for multiple products', async () => {
 		repo.findBrandById.mockResolvedValue({ id: 'brand-1' } as any)
 		repo.existsSlug.mockResolvedValue(false)
@@ -182,9 +341,34 @@ describe('ProductService', () => {
 					price: 100
 				})
 			)
+		).rejects.toThrow('Товар с таким названием уже существует')
+	})
+
+	it('rejects removing and updating the same attribute in one request', async () => {
+		const attributes: ProductAttributeValueDto[] = [
+			{ attributeId: 'attribute-1', valueString: 'value' }
+		]
+		const builtAttributes: ProductAttributeValueData[] = [
+			{ attributeId: 'attribute-1' }
+		]
+
+		attributeBuilder.buildForUpdate.mockResolvedValue(builtAttributes)
+		attributeBuilder.prepareRemovedAttributeIdsForUpdate.mockResolvedValue([
+			'attribute-1'
+		])
+
+		await expect(
+			runWithCatalog(() =>
+				service.update('product-1', {
+					attributes,
+					removeAttributeIds: ['attribute-1']
+				})
+			)
 		).rejects.toThrow(
-			'РўРѕРІР°СЂ СЃ С‚Р°РєРёРј РЅР°Р·РІР°РЅРёРµРј СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚'
+			'Атрибуты нельзя одновременно обновлять и удалять: attribute-1'
 		)
+
+		expect(repo.update.mock.calls).toHaveLength(0)
 	})
 
 	it('adds created product to categories with first position', async () => {
