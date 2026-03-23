@@ -32,7 +32,7 @@ export class ProductAttributeBuilder {
 		typeId: string,
 		inputs?: ProductAttributeValueDto[]
 	): Promise<ProductAttributeValueData[]> {
-		return this.build(typeId, inputs ?? [], { requireAll: true })
+		return this.build(typeId, inputs ?? [], { requireAll: false })
 	}
 
 	async buildForUpdate(

@@ -2,6 +2,7 @@
 	AbortMultipartUploadCommand,
 	CompleteMultipartUploadCommand,
 	CreateMultipartUploadCommand,
+	DeleteObjectCommand,
 	GetObjectCommand,
 	HeadObjectCommand,
 	PutObjectCommand,
@@ -14,6 +15,7 @@ import { MediaStatus } from '@generated/enums'
 import {
 	BadRequestException,
 	Injectable,
+	InternalServerErrorException,
 	Logger,
 	NotFoundException,
 	type OnModuleDestroy
@@ -32,7 +34,7 @@ import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 
 const DEFAULT_VARIANT_WIDTHS = [1200, 800, 400]
-const DEFAULT_IMAGE_FORMATS = ['webp']
+const DEFAULT_IMAGE_FORMATS = ['avif']
 const DEFAULT_VARIANT_NAMES = new Map<number, string>([
 	[1600, 'detail'],
 	[1400, 'detail'],
@@ -224,7 +226,7 @@ export class S3Service implements OnModuleDestroy {
 
 		this.enabled = config?.enabled ?? false
 		this.bucket = config?.bucket ?? ''
-		this.region = config?.region ?? 'us-east-1'
+		this.region = config?.region ?? 'ru-1'
 		this.endpoint = config?.endpoint ?? null
 		this.publicUrl = config?.publicUrl ?? null
 		this.forcePathStyle = config?.forcePathStyle ?? false
@@ -603,6 +605,40 @@ export class S3Service implements OnModuleDestroy {
 			status,
 			progress: this.resolveUploadJobProgress(status, job.progress),
 			...this.buildUploadStatusPayload(status, job)
+		}
+	}
+
+	async deleteObjectsByKeys(keys: string[]): Promise<void> {
+		const normalizedKeys = [...new Set(keys.map(key => key.trim()).filter(Boolean))]
+		if (!normalizedKeys.length || !this.client || !this.enabled) {
+			return
+		}
+
+		const failedKeys: string[] = []
+
+		await Promise.all(
+			normalizedKeys.map(async key => {
+				try {
+					await this.client.send(
+						new DeleteObjectCommand({
+							Bucket: this.bucket,
+							Key: key
+						})
+					)
+				} catch (error) {
+					failedKeys.push(key)
+					this.logger.error('Ошибка удаления объекта из S3', {
+						key,
+						error: error instanceof Error ? error.message : String(error)
+					})
+				}
+			})
+		)
+
+		if (failedKeys.length) {
+			throw new InternalServerErrorException(
+				`Не удалось удалить файлы из S3: ${failedKeys.join(', ')}`
+			)
 		}
 	}
 

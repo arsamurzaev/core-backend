@@ -18,6 +18,7 @@ describe('CategoryController', () => {
 						useValue: {
 							getAll: jest.fn(),
 							getById: jest.fn(),
+							getProductsByCategory: jest.fn(),
 							create: jest.fn(),
 							update: jest.fn(),
 							remove: jest.fn()

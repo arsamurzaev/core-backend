@@ -69,19 +69,24 @@ export class CategoryService {
 
 	async getProductsByCategory(
 		id: string,
-		options?: { cursor?: string; limit?: number | string }
+		options?: {
+			cursor?: string
+			limit?: number | string
+			includeInactive?: boolean
+		}
 	) {
 		const catalogId = mustCatalogId()
 		const category = await this.repo.findById(id, catalogId)
 		if (!category) throw new NotFoundException('Категория не найдена')
 
+		const includeInactive = options?.includeInactive === true
 		const limit = normalizeCategoryProductsLimit(options?.limit)
 		const cursor = options?.cursor?.trim() || undefined
 		const cacheTtlSec = cursor
 			? this.nextPageCacheTtlSec
 			: this.firstPageCacheTtlSec
 		const cacheKey =
-			cacheTtlSec > 0
+			!includeInactive && cacheTtlSec > 0
 				? await this.buildCategoryProductsCacheKey(id, catalogId, cursor, limit)
 				: undefined
 
@@ -92,7 +97,8 @@ export class CategoryService {
 
 		const items = await this.repo.findCategoryProductsPage(id, catalogId, {
 			cursor,
-			take: limit + 1
+			take: limit + 1,
+			includeInactive
 		})
 
 		const page: CategoryProductsPage = buildCategoryProductsPage(

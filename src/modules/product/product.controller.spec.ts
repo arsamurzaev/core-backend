@@ -18,11 +18,16 @@ describe('ProductController', () => {
 						useValue: {
 							getAll: jest.fn(),
 							getInfinite: jest.fn(),
+							getRecommendationsInfinite: jest.fn(),
+							getUncategorizedInfinite: jest.fn(),
 							getPopular: jest.fn(),
 							getById: jest.fn(),
 							getBySlug: jest.fn(),
 							create: jest.fn(),
+							duplicate: jest.fn(),
 							update: jest.fn(),
+							toggleStatus: jest.fn(),
+							togglePopular: jest.fn(),
 							remove: jest.fn()
 						}
 					}

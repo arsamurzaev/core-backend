@@ -71,6 +71,25 @@ export class UpdateProductDtoReq {
 	brandId?: string | null
 
 	@ApiPropertyOptional({
+		type: [String],
+		example: ['category-uuid-1', 'category-uuid-2'],
+		description:
+			'Список категорий товара. При редактировании заменяет набор привязок товара к категориям.',
+		uniqueItems: true
+	})
+	@IsOptional()
+	@IsArray()
+	@ArrayMaxSize(50)
+	@IsString({ each: true })
+	@Transform(({ value }: { value: unknown }) => {
+		if (!Array.isArray(value)) return value
+
+		const items = value as unknown[]
+		return items.map(item => (typeof item === 'string' ? item.trim() : item))
+	})
+	categories?: string[]
+
+	@ApiPropertyOptional({
 		type: String,
 		example: 'category-uuid',
 		description:

@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller'
 import { AuthService } from './auth.service'
 import { CatalogAuthController } from './catalog-auth.controller'
 import { CatalogAccessGuard } from './guards/catalog-access.guard'
+import { OptionalSessionGuard } from './guards/optional-session.guard'
 import { SessionGuard } from './guards/session.guard'
 import { HandoffController } from './handoff/handoff.controller'
 import { HandoffService } from './handoff/handoff.service'
@@ -21,6 +22,7 @@ import { SessionService } from './session/session.service'
 		SessionService,
 		HandoffService,
 		SessionGuard,
+		OptionalSessionGuard,
 		CatalogAccessGuard
 	],
 	exports: [
@@ -28,6 +30,7 @@ import { SessionService } from './session/session.service'
 		SessionService,
 		HandoffService,
 		SessionGuard,
+		OptionalSessionGuard,
 		CatalogAccessGuard
 	]
 })

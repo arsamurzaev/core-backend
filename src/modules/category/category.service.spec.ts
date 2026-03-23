@@ -120,7 +120,7 @@ describe('CategoryService', () => {
 		expect(repo.findCategoryProductsPage.mock.calls).toContainEqual([
 			'cat-1',
 			'catalog-1',
-			{ cursor: undefined, take: 3 }
+			{ cursor: undefined, take: 3, includeInactive: false }
 		])
 		expect(result.items.map(item => item.productId)).toEqual(['p1', 'p2'])
 		expect(result.nextCursor).toBe(expectedCursor)
@@ -173,6 +173,30 @@ describe('CategoryService', () => {
 		expect(result).toEqual(cached)
 		expect(repo.findCategoryProductsPage.mock.calls).toHaveLength(0)
 		expect(cache.getJson.mock.calls.length).toBeGreaterThan(0)
+	})
+
+	it('skips category products cache in includeInactive mode', async () => {
+		serviceState.firstPageCacheTtlSec = 120
+
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
+		repo.findCategoryProductsPage.mockResolvedValue([] as any)
+
+		await runWithCatalog(() =>
+			service.getProductsByCategory('cat-1', {
+				limit: 2,
+				includeInactive: true
+			})
+		)
+
+		expect(cache.getJson).not.toHaveBeenCalled()
+		expect(repo.findCategoryProductsPage).toHaveBeenCalledWith(
+			'cat-1',
+			'catalog-1',
+			{ cursor: undefined, take: 3, includeInactive: true }
+		)
 	})
 
 	it('appends new products to the end of category when positions are omitted', async () => {

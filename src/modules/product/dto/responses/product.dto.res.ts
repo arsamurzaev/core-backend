@@ -1,7 +1,6 @@
 import { DataType, ProductStatus, ProductVariantStatus } from '@generated/enums'
 import { ApiProperty } from '@nestjs/swagger'
 
-import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
 
 export class ProductAttributeEnumValueDto {
@@ -153,6 +152,17 @@ export class ProductBrandDto {
 	slug: string
 }
 
+export class ProductCategoryDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	name: string
+
+	@ApiProperty({ type: Number })
+	position: number
+}
+
 export class ProductDto {
 	@ApiProperty({ type: String })
 	id: string
@@ -174,6 +184,9 @@ export class ProductDto {
 
 	@ApiProperty({ type: ProductBrandDto, nullable: true })
 	brand: ProductBrandDto | null
+
+	@ApiProperty({ type: [ProductCategoryDto] })
+	categories: ProductCategoryDto[]
 
 	@ApiProperty({ type: Boolean })
 	isPopular: boolean
@@ -216,7 +229,15 @@ export class ProductInfinitePageDto {
 	seed: string | null
 }
 
-export class ProductUpdateResponseDto extends ProductWithAttributesDto {
+export class ProductCursorPageDto {
+	@ApiProperty({ type: [ProductWithAttributesDto] })
+	items: ProductWithAttributesDto[]
+
+	@ApiProperty({ type: String, nullable: true })
+	nextCursor: string | null
+}
+
+export class ProductUpdateResponseDto extends ProductWithDetailsDto {
 	@ApiProperty({ example: true })
 	ok: boolean
 }
@@ -226,10 +247,7 @@ export class ProductVariantsResponseDto extends ProductWithDetailsDto {
 	ok: boolean
 }
 
-export class ProductCreateResponseDto extends OkResponseDto {
-	@ApiProperty({ type: String })
-	id: string
-
-	@ApiProperty({ type: String })
-	slug: string
+export class ProductCreateResponseDto extends ProductWithDetailsDto {
+	@ApiProperty({ example: true })
+	ok: boolean
 }

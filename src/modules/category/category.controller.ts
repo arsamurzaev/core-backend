@@ -8,6 +8,7 @@ import {
 	Patch,
 	Post,
 	Query,
+	Req,
 	UseGuards
 } from '@nestjs/common'
 import {
@@ -24,10 +25,14 @@ import {
 } from '@nestjs/swagger'
 
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
+import { RequestContext } from '@/shared/tenancy/request-context'
 
+import { canReadInactiveCatalogProducts } from '../auth/catalog-visibility.utils'
 import { Roles } from '../auth/decorators/roles.decorator'
 import { CatalogAccessGuard } from '../auth/guards/catalog-access.guard'
+import { OptionalSessionGuard } from '../auth/guards/optional-session.guard'
 import { SessionGuard } from '../auth/guards/session.guard'
+import type { AuthRequest } from '../auth/types/auth-request'
 
 import { CategoryService } from './category.service'
 import { CreateCategoryDtoReq } from './dto/requests/create-category.dto.req'
@@ -70,6 +75,7 @@ export class CategoryController {
 	}
 
 	@Get('/:id/products/infinite')
+	@UseGuards(OptionalSessionGuard)
 	@ApiOperation({
 		summary: 'List category products (infinite)',
 		description:
@@ -98,9 +104,17 @@ export class CategoryController {
 	async getProductsByCategory(
 		@Param('id') id: string,
 		@Query('cursor') cursor?: string,
-		@Query('limit') limit?: string
+		@Query('limit') limit?: string,
+		@Req() req?: AuthRequest
 	) {
-		return this.categoryService.getProductsByCategory(id, { cursor, limit })
+		return this.categoryService.getProductsByCategory(id, {
+			cursor,
+			limit,
+			includeInactive: canReadInactiveCatalogProducts(
+				req?.user,
+				RequestContext.get()?.ownerUserId
+			)
+		})
 	}
 
 	@Post()

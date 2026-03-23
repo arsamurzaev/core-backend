@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 
 import { PrismaModule } from '@/infrastructure/prisma/prisma.module'
+import { S3Module } from '@/modules/s3/s3.module'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 
@@ -12,7 +13,7 @@ import { ProductService } from './product.service'
 
 @Module({
 	controllers: [ProductController],
-	imports: [PrismaModule],
+	imports: [PrismaModule, S3Module],
 	providers: [
 		ProductService,
 		ProductRepository,

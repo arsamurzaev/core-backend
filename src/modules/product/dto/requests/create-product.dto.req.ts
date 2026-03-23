@@ -5,7 +5,6 @@ import {
 	ArrayMaxSize,
 	IsArray,
 	IsBoolean,
-	IsEmpty,
 	IsEnum,
 	IsNotEmpty,
 	IsNumber,
@@ -16,6 +15,7 @@ import {
 } from 'class-validator'
 
 import { ProductAttributeValueDto } from './product-attribute.dto.req'
+import { ProductVariantDtoReq } from './product-variant.dto.req'
 
 export class CreateProductDtoReq {
 	@ApiProperty({ type: String, example: 'Basic T-Shirt' })
@@ -55,10 +55,14 @@ export class CreateProductDtoReq {
 	@ApiPropertyOptional({ type: String, example: 'brand-uuid' })
 	@IsOptional()
 	@IsString()
-	@Transform(({ value }: { value: unknown }) =>
-		typeof value === 'string' ? value.trim() : value
-	)
-	brandId?: string
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		if (typeof value !== 'string') return value
+		const normalized = value.trim()
+		return normalized.length ? normalized : null
+	})
+	brandId?: string | null
 
 	@ApiPropertyOptional({
 		type: [String],
@@ -86,10 +90,10 @@ export class CreateProductDtoReq {
 	@Type(() => ProductAttributeValueDto)
 	attributes?: ProductAttributeValueDto[]
 
-	@ApiPropertyOptional({
-		description: 'Вариации товара создаются администратором'
-	})
+	@ApiPropertyOptional({ type: [ProductVariantDtoReq] })
 	@IsOptional()
-	@IsEmpty({ message: 'Вариации товара создаются администратором' })
-	variants?: unknown
+	@IsArray()
+	@ValidateNested({ each: true })
+	@Type(() => ProductVariantDtoReq)
+	variants?: ProductVariantDtoReq[]
 }

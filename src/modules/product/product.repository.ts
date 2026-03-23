@@ -88,6 +88,7 @@ export type ProductFilterQueryBase = {
 	isDiscount?: boolean
 	attributeFilters: ProductAttributeFilter[]
 	discountAttributeIds?: DiscountAttributeIds
+	includeInactive?: boolean
 	take: number
 }
 
@@ -142,6 +143,23 @@ const productSelect = {
 						},
 						orderBy: [{ width: 'desc' as const }, { kind: 'asc' as const }]
 					}
+				}
+			}
+		},
+		orderBy: { position: 'asc' as const }
+	},
+	categoryProducts: {
+		where: {
+			category: {
+				deleteAt: null
+			}
+		},
+		select: {
+			position: true,
+			category: {
+				select: {
+					id: true,
+					name: true
 				}
 			}
 		},
@@ -298,42 +316,73 @@ function escapeLikePattern(value: string): string {
 export class ProductRepository {
 	constructor(private readonly prisma: PrismaService) {}
 
-	findAll(catalogId: string): Promise<ProductListItem[]> {
+	findAll(
+		catalogId: string,
+		includeInactive = false
+	): Promise<ProductListItem[]> {
 		return this.prisma.product.findMany({
-			where: { deleteAt: null, catalogId },
+			where: {
+				deleteAt: null,
+				catalogId,
+				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
+			},
 			select: productSelect,
 			orderBy: { createdAt: 'desc' }
 		})
 	}
 
-	findPopular(catalogId: string): Promise<ProductDetailsItem[]> {
+	findPopular(
+		catalogId: string,
+		includeInactive = false
+	): Promise<ProductDetailsItem[]> {
 		return this.prisma.product.findMany({
-			where: { deleteAt: null, catalogId, isPopular: true },
+			where: {
+				deleteAt: null,
+				catalogId,
+				isPopular: true,
+				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
+			},
 			select: productSelectWithDetails,
 			orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }]
 		})
 	}
 
-	findById(id: string, catalogId: string): Promise<ProductDetailsItem | null> {
+	findById(
+		id: string,
+		catalogId: string,
+		includeInactive = false
+	): Promise<ProductDetailsItem | null> {
 		return this.prisma.product.findFirst({
-			where: { id, catalogId, deleteAt: null },
+			where: {
+				id,
+				catalogId,
+				deleteAt: null,
+				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
+			},
 			select: productSelectWithDetails
 		})
 	}
 
 	findBySlug(
 		slug: string,
-		catalogId: string
+		catalogId: string,
+		includeInactive = false
 	): Promise<ProductDetailsItem | null> {
 		return this.prisma.product.findFirst({
-			where: { slug, catalogId, deleteAt: null },
+			where: {
+				slug,
+				catalogId,
+				deleteAt: null,
+				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
+			},
 			select: productSelectWithDetails
 		})
 	}
 
 	findByIdsWithAttributes(
 		ids: string[],
-		catalogId: string
+		catalogId: string,
+		includeInactive = false
 	): Promise<ProductWithAttributesItem[]> {
 		if (!ids.length) return Promise.resolve<ProductWithAttributesItem[]>([])
 
@@ -342,9 +391,50 @@ export class ProductRepository {
 				id: { in: ids },
 				catalogId,
 				deleteAt: null,
-				status: ProductStatus.ACTIVE
+				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
 			},
 			select: productSelectWithAttributes
+		})
+	}
+
+	findUncategorizedPage(
+		catalogId: string,
+		options: {
+			cursor?: ProductDefaultPageCursor
+			take: number
+			includeInactive?: boolean
+		}
+	): Promise<ProductWithAttributesItem[]> {
+		const { cursor, take, includeInactive } = options
+
+		return this.prisma.product.findMany({
+			where: {
+				catalogId,
+				deleteAt: null,
+				...(includeInactive ? {} : { status: ProductStatus.ACTIVE }),
+				categoryProducts: {
+					none: {
+						category: {
+							catalogId,
+							deleteAt: null
+						}
+					}
+				},
+				...(cursor
+					? {
+							OR: [
+								{ updatedAt: { lt: cursor.updatedAt } },
+								{
+									updatedAt: cursor.updatedAt,
+									id: { lt: cursor.id }
+								}
+							]
+						}
+					: {})
+			},
+			select: productSelectWithAttributes,
+			orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+			take
 		})
 	}
 
@@ -381,6 +471,16 @@ export class ProductRepository {
 		return this.executeDefaultProductIdsPageQuery(whereClauses, query.take)
 	}
 
+	findRecommendedProductIdsPageDefault(
+		query: ProductFilterQueryBase & { cursor?: ProductDefaultPageCursor }
+	): Promise<Array<{ id: string; updatedAt: Date }>> {
+		const whereClauses = this.buildRecommendationPageWhereClauses(
+			query,
+			query.cursor
+		)
+		return this.executeDefaultProductIdsPageQuery(whereClauses, query.take)
+	}
+
 	findFilteredProductIdsPageSeeded(
 		query: ProductFilterQueryBase & {
 			seed: string
@@ -389,6 +489,25 @@ export class ProductRepository {
 	): Promise<Array<{ id: string; score: string }>> {
 		const scoreExpr = this.buildSeededScoreExpression(query.seed)
 		const whereClauses = this.buildSeededPageWhereClauses(
+			query,
+			scoreExpr,
+			query.cursor
+		)
+		return this.executeSeededProductIdsPageQuery(
+			whereClauses,
+			scoreExpr,
+			query.take
+		)
+	}
+
+	findRecommendedProductIdsPageSeeded(
+		query: ProductFilterQueryBase & {
+			seed: string
+			cursor?: ProductSeededPageCursor
+		}
+	): Promise<Array<{ id: string; score: string }>> {
+		const scoreExpr = this.buildSeededScoreExpression(query.seed)
+		const whereClauses = this.buildRecommendationSeededPageWhereClauses(
 			query,
 			scoreExpr,
 			query.cursor
@@ -523,21 +642,82 @@ export class ProductRepository {
 				await this.applyVariantUpdates(tx, id, variantUpdates)
 			}
 
-			return this.findProductWithAttributes(tx, id, catalogId)
+			return this.findProductWithDetails(tx, id, catalogId)
 		})
 	}
 
 	async softDelete(id: string, catalogId: string) {
-		const result = await this.prisma.product.updateMany({
-			where: { id, catalogId, deleteAt: null },
-			data: { deleteAt: new Date(), brandId: null }
-		})
-		if (!result.count) return null
+		return this.prisma.$transaction(async tx => {
+			const existing = await tx.product.findFirst({
+				where: { id, catalogId, deleteAt: null },
+				select: {
+					id: true,
+					media: {
+						select: {
+							mediaId: true
+						}
+					}
+				}
+			})
+			if (!existing) return null
 
-		return this.prisma.product.findFirst({
-			where: { id, catalogId },
-			select: productSelect
+			await tx.productMedia.deleteMany({
+				where: { productId: id }
+			})
+
+			await tx.product.update({
+				where: { id },
+				data: { deleteAt: new Date(), brandId: null }
+			})
+
+			return {
+				id: existing.id,
+				mediaIds: [...new Set(existing.media.map(item => item.mediaId))]
+			}
 		})
+	}
+
+	async toggleStatus(
+		id: string,
+		catalogId: string
+	): Promise<ProductDetailsItem | null> {
+		const existing = await this.prisma.product.findFirst({
+			where: { id, catalogId, deleteAt: null },
+			select: { id: true, status: true }
+		})
+		if (!existing) return null
+
+		await this.prisma.product.update({
+			where: { id },
+			data: {
+				status:
+					existing.status === ProductStatus.ACTIVE
+						? ProductStatus.HIDDEN
+						: ProductStatus.ACTIVE
+			}
+		})
+
+		return this.findProductWithDetails(this.prisma, id, catalogId)
+	}
+
+	async togglePopular(
+		id: string,
+		catalogId: string
+	): Promise<ProductDetailsItem | null> {
+		const existing = await this.prisma.product.findFirst({
+			where: { id, catalogId, deleteAt: null },
+			select: { id: true, isPopular: true }
+		})
+		if (!existing) return null
+
+		await this.prisma.product.update({
+			where: { id },
+			data: {
+				isPopular: !existing.isPopular
+			}
+		})
+
+		return this.findProductWithDetails(this.prisma, id, catalogId)
 	}
 
 	async setVariants(
@@ -622,7 +802,7 @@ export class ProductRepository {
 		data: ProductUpdateInput,
 		catalogId: string,
 		hasData: boolean
-	): Promise<ProductWithAttributesItem | null> {
+	): Promise<ProductDetailsItem | null> {
 		if (hasData) {
 			const result = await this.prisma.product.updateMany({
 				where: { id, catalogId, deleteAt: null },
@@ -634,7 +814,7 @@ export class ProductRepository {
 			if (!existing) return null
 		}
 
-		return this.findProductWithAttributes(this.prisma, id, catalogId)
+		return this.findProductWithDetails(this.prisma, id, catalogId)
 	}
 
 	private async findActiveProductRef(
@@ -750,6 +930,66 @@ export class ProductRepository {
 		})
 	}
 
+	async syncProductCategories(
+		productId: string,
+		catalogId: string,
+		categoryIds: string[]
+	) {
+		await this.prisma.$transaction(async tx => {
+			const existing = await tx.categoryProduct.findMany({
+				where: {
+					productId,
+					category: { catalogId, deleteAt: null }
+				},
+				select: {
+					categoryId: true,
+					position: true
+				}
+			})
+
+			const nextCategoryIds = new Set(categoryIds)
+			const existingByCategoryId = new Map(
+				existing.map(item => [item.categoryId, item] as const)
+			)
+
+			for (const current of existing) {
+				if (nextCategoryIds.has(current.categoryId)) {
+					continue
+				}
+
+				await tx.categoryProduct.updateMany({
+					where: {
+						categoryId: current.categoryId,
+						position: { gt: current.position }
+					},
+					data: { position: { decrement: 1 } }
+				})
+				await tx.categoryProduct.delete({
+					where: {
+						categoryId_productId: {
+							categoryId: current.categoryId,
+							productId
+						}
+					}
+				})
+			}
+
+			for (const categoryId of categoryIds) {
+				if (existingByCategoryId.has(categoryId)) {
+					continue
+				}
+
+				await tx.categoryProduct.updateMany({
+					where: { categoryId, position: { gte: 0 } },
+					data: { position: { increment: 1 } }
+				})
+				await tx.categoryProduct.create({
+					data: { categoryId, productId, position: 0 }
+				})
+			}
+		})
+	}
+
 	async upsertCategoryProductPosition(
 		productId: string,
 		categoryId: string,
@@ -840,7 +1080,16 @@ export class ProductRepository {
 
 	private buildBaseFilterClauses(query: ProductFilterQueryBase): Prisma.Sql[] {
 		return [
-			...this.buildDefaultFilterClauses(query.catalogId),
+			...this.buildDefaultFilterClauses(
+				query.catalogId,
+				query.includeInactive === true
+			),
+			...this.buildActiveFilterClauses(query)
+		]
+	}
+
+	private buildActiveFilterClauses(query: ProductFilterQueryBase): Prisma.Sql[] {
+		return [
 			...this.buildPriceFilterClauses(query.minPrice, query.maxPrice),
 			...[
 				this.buildCategoryFilterClause(query.categoryIds),
@@ -867,6 +1116,24 @@ export class ProductRepository {
 		return whereClauses
 	}
 
+	private buildRecommendationPageWhereClauses(
+		query: ProductFilterQueryBase,
+		cursor?: ProductDefaultPageCursor
+	): Prisma.Sql[] {
+		const whereClauses = [
+			...this.buildDefaultFilterClauses(
+				query.catalogId,
+				query.includeInactive === true
+			),
+			this.buildRecommendationFilterClause(query)
+		]
+		const cursorClause = this.buildDefaultPageCursorClause(cursor)
+		if (cursorClause) {
+			whereClauses.push(cursorClause)
+		}
+		return whereClauses
+	}
+
 	private buildSeededPageWhereClauses(
 		query: ProductFilterQueryBase,
 		scoreExpr: Prisma.Sql,
@@ -878,6 +1145,39 @@ export class ProductRepository {
 			whereClauses.push(cursorClause)
 		}
 		return whereClauses
+	}
+
+	private buildRecommendationSeededPageWhereClauses(
+		query: ProductFilterQueryBase,
+		scoreExpr: Prisma.Sql,
+		cursor?: ProductSeededPageCursor
+	): Prisma.Sql[] {
+		const whereClauses = [
+			...this.buildDefaultFilterClauses(
+				query.catalogId,
+				query.includeInactive === true
+			),
+			this.buildRecommendationFilterClause(query)
+		]
+		const cursorClause = this.buildSeededPageCursorClause(scoreExpr, cursor)
+		if (cursorClause) {
+			whereClauses.push(cursorClause)
+		}
+		return whereClauses
+	}
+
+	private buildRecommendationFilterClause(
+		query: ProductFilterQueryBase
+	): Prisma.Sql {
+		const activeClauses = this.buildActiveFilterClauses(query)
+		if (!activeClauses.length) {
+			return PrismaSql.sql`FALSE`
+		}
+
+		const normalizedClauses = activeClauses.map(
+			clause => PrismaSql.sql`COALESCE((${clause}), FALSE)`
+		)
+		return PrismaSql.sql`NOT (${PrismaSql.join(normalizedClauses, ' AND ')})`
 	}
 
 	private buildDefaultPageCursorClause(
@@ -1116,12 +1416,18 @@ export class ProductRepository {
 		}
 	}
 
-	private buildDefaultFilterClauses(catalogId: string): Prisma.Sql[] {
-		return [
+	private buildDefaultFilterClauses(
+		catalogId: string,
+		includeInactive = false
+	): Prisma.Sql[] {
+		const clauses = [
 			PrismaSql.sql`p.catalog_id = ${catalogId}::uuid`,
-			PrismaSql.sql`p.delete_at IS NULL`,
-			PrismaSql.sql`p.status::text = ${ProductStatus.ACTIVE}`
+			PrismaSql.sql`p.delete_at IS NULL`
 		]
+		if (!includeInactive) {
+			clauses.push(PrismaSql.sql`p.status::text = ${ProductStatus.ACTIVE}`)
+		}
+		return clauses
 	}
 
 	private buildCategoryFilterClause(categoryIds: string[]): Prisma.Sql | null {

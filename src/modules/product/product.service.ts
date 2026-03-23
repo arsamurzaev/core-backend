@@ -1,3 +1,4 @@
+﻿import { ProductStatus } from '@generated/enums'
 import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
@@ -11,6 +12,8 @@ import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_TYPE_CACHE_VERSION,
 	CATEGORY_PRODUCTS_CACHE_VERSION,
+	CATEGORY_PRODUCTS_FIRST_PAGE_CACHE_TTL_SEC,
+	CATEGORY_PRODUCTS_NEXT_PAGE_CACHE_TTL_SEC,
 	PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
 import type { MediaDto } from '@/shared/media/dto/media.dto.res'
@@ -24,12 +27,15 @@ import { MediaRepository } from '@/shared/media/media.repository'
 import { mustCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
 import {
 	assertHasUpdateFields,
-	normalizeOptionalId,
+	normalizeNullableTrimmedString,
 	normalizeRequiredString
 } from '@/shared/utils'
 
+import { S3Service } from '../s3/s3.service'
+
 import { CreateProductDtoReq } from './dto/requests/create-product.dto.req'
 import { ProductVariantUpdateDtoReq } from './dto/requests/product-variant-update.dto.req'
+import { ProductVariantDtoReq } from './dto/requests/product-variant.dto.req'
 import { SetProductVariantsDtoReq } from './dto/requests/set-product-variants.dto.req'
 import { UpdateProductDtoReq } from './dto/requests/update-product.dto.req'
 import {
@@ -47,24 +53,29 @@ import {
 	resolveProductAttributeFilter,
 	uniqueNonEmptyValues
 } from './product-query.utils'
-import { ProductVariantBuilder } from './product-variant.builder'
+import {
+	ProductVariantBuilder,
+	type ProductVariantData
+} from './product-variant.builder'
 import {
 	type AttributeFilterMeta,
 	type DiscountAttributeIds,
 	type ProductAttributeFilter,
+	type ProductDetailsItem,
 	type ProductFilterQueryBase,
 	ProductRepository,
 	type ProductVariantUpdateData
 } from './product.repository'
 
-type ProductMediaMapped<T> = Omit<T, 'media'> & {
+type ProductMapped<T> = Omit<T, 'media' | 'categoryProducts'> & {
 	media: { position: number; kind?: string | null; media: MediaDto }[]
+	categories: { id: string; name: string; position: number }[]
 }
 
-type ProductList = ProductMediaMapped<
+type ProductList = ProductMapped<
 	Awaited<ReturnType<ProductRepository['findAll']>>[number]
 >[]
-type PopularProductList = ProductMediaMapped<
+type PopularProductList = ProductMapped<
 	Awaited<ReturnType<ProductRepository['findPopular']>>[number]
 >[]
 type ProductInfiniteDefaultRow = Awaited<
@@ -80,9 +91,14 @@ type ProductInfinitePage = {
 	hasMore: boolean
 }
 
+type ProductReadOptions = {
+	includeInactive?: boolean
+}
+
 type PreparedProductCreatePayload = {
 	data: ProductCreateInput
 	attributes: ProductAttributeValueData[]
+	variants?: ProductVariantData[]
 	categoryIds: string[]
 }
 
@@ -92,6 +108,7 @@ type PreparedProductUpdatePayload = {
 	removeAttributeIds?: string[]
 	variants?: ProductVariantUpdateData[]
 	mediaIds?: string[]
+	categoryIds?: string[]
 	categoryId?: string
 	categoryPosition: number
 }
@@ -100,10 +117,12 @@ const PRODUCTS_CACHE_TTL_SEC =
 	Number(process.env.CATALOG_PRODUCTS_CACHE_TTL_SEC ?? 0) || 0
 const PRODUCT_INFINITE_DEFAULT_LIMIT = 24
 const PRODUCT_INFINITE_MAX_LIMIT = 50
+const PRODUCT_NAME_MAX_LENGTH = 255
 const SLUG_MAX_LENGTH = 255
 const SKU_MAX_LENGTH = 100
 const PRODUCT_SLUG_FALLBACK = 'product'
 const PRODUCT_SKU_FALLBACK = 'SKU'
+const PRODUCT_DUPLICATE_SUFFIX = ' (копия)'
 
 function normalizeSlug(value: string): string {
 	return value.trim().toLowerCase()
@@ -133,6 +152,16 @@ function applySuffix(base: string, suffix: number, maxLength: number): string {
 	return `${head}${suffixPart}`
 }
 
+function buildDuplicateNameCandidate(name: string, copyIndex = 1): string {
+	const suffixPart = copyIndex > 1 ? ` ${copyIndex}` : ''
+	const headLength = Math.max(
+		0,
+		PRODUCT_NAME_MAX_LENGTH - PRODUCT_DUPLICATE_SUFFIX.length - suffixPart.length
+	)
+	const head = name.slice(0, headLength).trimEnd()
+	return `${head}${PRODUCT_DUPLICATE_SUFFIX}${suffixPart}`
+}
+
 function buildHashedSku(base: string): string {
 	const hash = createHash('sha1')
 		.update(base)
@@ -148,6 +177,10 @@ function buildHashedSku(base: string): string {
 @Injectable()
 export class ProductService {
 	private readonly cacheTtlSec = PRODUCTS_CACHE_TTL_SEC
+	private readonly uncategorizedFirstPageCacheTtlSec =
+		CATEGORY_PRODUCTS_FIRST_PAGE_CACHE_TTL_SEC
+	private readonly uncategorizedNextPageCacheTtlSec =
+		CATEGORY_PRODUCTS_NEXT_PAGE_CACHE_TTL_SEC
 
 	constructor(
 		private readonly repo: ProductRepository,
@@ -155,13 +188,16 @@ export class ProductService {
 		private readonly attributeBuilder: ProductAttributeBuilder,
 		private readonly variantBuilder: ProductVariantBuilder,
 		private readonly mediaRepo: MediaRepository,
-		private readonly mediaUrl: MediaUrlService
+		private readonly mediaUrl: MediaUrlService,
+		private readonly s3Service: S3Service
 	) {}
 
-	async getAll() {
+	async getAll(options?: ProductReadOptions) {
 		const catalogId = mustCatalogId()
-		if (!this.cacheTtlSec) {
-			const products = await this.repo.findAll(catalogId)
+		const includeInactive = options?.includeInactive === true
+
+		if (includeInactive || !this.cacheTtlSec) {
+			const products = await this.repo.findAll(catalogId, includeInactive)
 			return products.map(product =>
 				this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
 			)
@@ -171,7 +207,7 @@ export class ProductService {
 		const cached = await this.cache.getJson<ProductList>(cacheKey)
 		if (cached !== null) return cached
 
-		const products = await this.repo.findAll(catalogId)
+		const products = await this.repo.findAll(catalogId, false)
 		const mapped = products.map(product =>
 			this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
 		)
@@ -179,10 +215,12 @@ export class ProductService {
 		return mapped
 	}
 
-	async getPopular() {
+	async getPopular(options?: ProductReadOptions) {
 		const catalogId = mustCatalogId()
-		if (!this.cacheTtlSec) {
-			const products = await this.repo.findPopular(catalogId)
+		const includeInactive = options?.includeInactive === true
+
+		if (includeInactive || !this.cacheTtlSec) {
+			const products = await this.repo.findPopular(catalogId, includeInactive)
 			return products.map(product =>
 				this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
 			)
@@ -192,7 +230,7 @@ export class ProductService {
 		const cached = await this.cache.getJson<PopularProductList>(cacheKey)
 		if (cached !== null) return cached
 
-		const products = await this.repo.findPopular(catalogId)
+		const products = await this.repo.findPopular(catalogId, false)
 		const mapped = products.map(product =>
 			this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
 		)
@@ -200,9 +238,13 @@ export class ProductService {
 		return mapped
 	}
 
-	async getInfinite(query: Record<string, unknown>) {
+	async getInfinite(
+		query: Record<string, unknown>,
+		options?: ProductReadOptions
+	) {
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
+		const includeInactive = options?.includeInactive === true
 		const parsed = parseProductInfiniteQuery(query, {
 			defaultLimit: PRODUCT_INFINITE_DEFAULT_LIMIT,
 			maxLimit: PRODUCT_INFINITE_MAX_LIMIT
@@ -222,11 +264,16 @@ export class ProductService {
 			catalogId,
 			parsed,
 			attributeFilters,
-			discountAttributeIds
+			discountAttributeIds,
+			includeInactive
 		)
 		const rows = await this.loadInfiniteRows(baseQuery, seed, decodedCursor)
 		const { pageRows, hasMore } = this.buildInfinitePage(rows, parsed.limit)
-		const items = await this.loadInfiniteItems(pageRows, catalogId)
+		const items = await this.loadInfiniteItems(
+			pageRows,
+			catalogId,
+			includeInactive
+		)
 		const nextCursor = this.buildInfiniteNextCursor(pageRows, hasMore, seed)
 
 		return {
@@ -236,39 +283,241 @@ export class ProductService {
 		}
 	}
 
-	async getById(id: string) {
+	async getRecommendationsInfinite(
+		query: Record<string, unknown>,
+		options?: ProductReadOptions
+	) {
 		const catalogId = mustCatalogId()
-		const product = await this.repo.findById(id, catalogId)
+		const typeId = mustTypeId()
+		const includeInactive = options?.includeInactive === true
+		const parsed = parseProductInfiniteQuery(query, {
+			defaultLimit: PRODUCT_INFINITE_DEFAULT_LIMIT,
+			maxLimit: PRODUCT_INFINITE_MAX_LIMIT
+		})
+		const decodedCursor = decodeProductInfiniteCursor(parsed.cursor)
+		const seed = this.resolveInfiniteSeed(parsed, decodedCursor)
+
+		const attributeFilters = await this.resolveAttributeFilters(
+			typeId,
+			parsed.attributeFilters
+		)
+		const discountAttributeIds = parsed.isDiscount
+			? await this.resolveDiscountAttributeIds(typeId)
+			: undefined
+
+		if (!this.hasRecommendationFilters(parsed, attributeFilters)) {
+			return {
+				items: [],
+				nextCursor: null,
+				seed: seed ?? null
+			}
+		}
+
+		const baseQuery = this.buildInfiniteBaseQuery(
+			catalogId,
+			parsed,
+			attributeFilters,
+			discountAttributeIds,
+			includeInactive
+		)
+		const rows = await this.loadRecommendationRows(baseQuery, seed, decodedCursor)
+		const { pageRows, hasMore } = this.buildInfinitePage(rows, parsed.limit)
+		const items = await this.loadInfiniteItems(
+			pageRows,
+			catalogId,
+			includeInactive
+		)
+		const nextCursor = this.buildInfiniteNextCursor(pageRows, hasMore, seed)
+
+		return {
+			items,
+			nextCursor,
+			seed: seed ?? null
+		}
+	}
+
+	async getUncategorizedInfinite(options?: {
+		cursor?: string
+		limit?: number | string
+		includeInactive?: boolean
+	}) {
+		const catalogId = mustCatalogId()
+		const includeInactive = options?.includeInactive === true
+		const parsed = parseProductInfiniteQuery(
+			{
+				cursor: options?.cursor,
+				limit: options?.limit
+			},
+			{
+				defaultLimit: PRODUCT_INFINITE_DEFAULT_LIMIT,
+				maxLimit: PRODUCT_INFINITE_MAX_LIMIT
+			}
+		)
+		const cacheTtlSec = parsed.cursor
+			? this.uncategorizedNextPageCacheTtlSec
+			: this.uncategorizedFirstPageCacheTtlSec
+		const cacheKey =
+			!includeInactive && cacheTtlSec > 0
+				? await this.buildUncategorizedProductsCacheKey(
+						catalogId,
+						parsed.cursor,
+						parsed.limit
+					)
+				: undefined
+
+		if (cacheKey) {
+			const cached = await this.cache.getJson<{
+				items: ProductList
+				nextCursor: string | null
+			}>(cacheKey)
+			if (cached !== null) return cached
+		}
+
+		const decodedCursor = decodeProductInfiniteCursor(parsed.cursor)
+		const rows = await this.repo.findUncategorizedPage(catalogId, {
+			cursor: decodedCursor?.mode === 'default' ? decodedCursor.cursor : undefined,
+			take: parsed.limit + 1,
+			includeInactive
+		})
+		const hasMore = rows.length > parsed.limit
+		const pageRows = hasMore ? rows.slice(0, parsed.limit) : rows
+		const lastRow = pageRows[pageRows.length - 1]
+		const page = {
+			items: pageRows.map(product =>
+				this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
+			),
+			nextCursor:
+				hasMore && lastRow
+					? encodeProductDefaultCursor({
+							id: lastRow.id,
+							updatedAt: lastRow.updatedAt
+						})
+					: null
+		}
+
+		if (cacheKey) {
+			await this.cache.setJson(cacheKey, page, cacheTtlSec)
+		}
+
+		return page
+	}
+
+	async getById(id: string, options?: ProductReadOptions) {
+		const catalogId = mustCatalogId()
+		const product = await this.repo.findById(
+			id,
+			catalogId,
+			options?.includeInactive === true
+		)
 		if (!product) throw new NotFoundException('Товар не найден')
 		return this.mapProductMedia(product, MEDIA_DETAIL_VARIANT_NAMES)
 	}
 
-	async getBySlug(slug: string) {
+	async getBySlug(slug: string, options?: ProductReadOptions) {
 		const catalogId = mustCatalogId()
-		const product = await this.repo.findBySlug(normalizeSlug(slug), catalogId)
+		const product = await this.repo.findBySlug(
+			normalizeSlug(slug),
+			catalogId,
+			options?.includeInactive === true
+		)
 		if (!product) throw new NotFoundException('Товар не найден')
 		return this.mapProductMedia(product, MEDIA_DETAIL_VARIANT_NAMES)
 	}
 
 	async create(dto: CreateProductDtoReq) {
-		const { mediaIds, attributes, brandId, categories, ...rest } = dto
+		const { mediaIds, attributes, brandId, categories, variants, ...rest } = dto
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
 		const payload = await this.prepareCreatePayload(
-			{ mediaIds, attributes, brandId, categories, ...rest },
+			{ mediaIds, attributes, brandId, categories, variants, ...rest },
 			catalogId,
 			typeId
 		)
 
-		const product = await this.repo.create(payload.data, payload.attributes)
+		const product = await this.repo.create(
+			payload.data,
+			payload.attributes,
+			payload.variants
+		)
 		await this.assignProductToCategories(
 			product.id,
 			payload.categoryIds,
 			catalogId
 		)
+		const created = await this.repo.findById(product.id, catalogId, true)
+		if (!created) throw new NotFoundException('РўРѕРІР°СЂ РЅРµ РЅР°Р№РґРµРЅ')
+
 		await this.invalidateCatalogProductsCache(catalogId)
 		await this.invalidateCategoryProductsCache(catalogId)
-		return { ok: true, id: product.id, slug: product.slug }
+		if (
+			payload.variants?.some(variant =>
+				variant.attributes.some(attribute => Boolean(attribute.value))
+			)
+		) {
+			await this.cache.bumpVersion(CATALOG_TYPE_CACHE_VERSION, typeId)
+		}
+		return {
+			ok: true,
+			...this.mapProductMedia(created, MEDIA_DETAIL_VARIANT_NAMES)
+		}
+	}
+
+	async duplicate(id: string) {
+		const catalogId = mustCatalogId()
+		const typeId = mustTypeId()
+		const source = await this.repo.findById(id, catalogId, true)
+		if (!source) throw new NotFoundException('Товар не найден')
+
+		const duplicatedName = await this.generateDuplicatedProductName(
+			source.name,
+			catalogId
+		)
+		const duplicatedSlug = await this.generateProductSlug(
+			duplicatedName,
+			catalogId
+		)
+		const duplicatedSku = await this.generateProductSku(duplicatedName)
+		const duplicatedVariants = source.variants.length
+			? await this.variantBuilder.build(
+					typeId,
+					this.buildDuplicatedVariantInputs(source),
+					duplicatedSku
+				)
+			: undefined
+		const duplicatedCategoryIds = uniqueNonEmptyValues(
+			source.categoryProducts.map(item => item.category?.id?.trim() ?? '')
+		)
+		const brandId = source.brand?.id
+			? await this.resolveExistingBrandId(source.brand.id, catalogId)
+			: null
+
+		const product = await this.repo.create(
+			this.buildDuplicatedProductData(
+				source,
+				catalogId,
+				duplicatedName,
+				duplicatedSlug,
+				duplicatedSku,
+				brandId
+			),
+			this.buildDuplicatedProductAttributes(source),
+			duplicatedVariants
+		)
+		await this.assignProductToCategories(
+			product.id,
+			duplicatedCategoryIds,
+			catalogId
+		)
+
+		const duplicated = await this.repo.findById(product.id, catalogId, true)
+		if (!duplicated) throw new NotFoundException('Товар не найден')
+
+		await this.invalidateCatalogProductsCache(catalogId)
+		await this.invalidateCategoryProductsCache(catalogId)
+		return {
+			ok: true,
+			...this.mapProductMedia(duplicated, MEDIA_DETAIL_VARIANT_NAMES)
+		}
 	}
 
 	async update(id: string, dto: UpdateProductDtoReq) {
@@ -287,6 +536,10 @@ export class ProductService {
 		)
 		if (!product) throw new NotFoundException('Товар не найден')
 
+		if (payload.categoryIds !== undefined) {
+			await this.repo.syncProductCategories(id, catalogId, payload.categoryIds)
+		}
+
 		if (payload.categoryId) {
 			await this.repo.upsertCategoryProductPosition(
 				id,
@@ -304,12 +557,38 @@ export class ProductService {
 		}
 	}
 
+	async toggleStatus(id: string) {
+		const catalogId = mustCatalogId()
+		const product = await this.repo.toggleStatus(id, catalogId)
+		if (!product) throw new NotFoundException('Товар не найден')
+
+		await this.invalidateCatalogProductsCache(catalogId)
+		await this.invalidateCategoryProductsCache(catalogId)
+		return {
+			ok: true,
+			...this.mapProductMedia(product, MEDIA_DETAIL_VARIANT_NAMES)
+		}
+	}
+
+	async togglePopular(id: string) {
+		const catalogId = mustCatalogId()
+		const product = await this.repo.togglePopular(id, catalogId)
+		if (!product) throw new NotFoundException('Товар не найден')
+
+		await this.invalidateCatalogProductsCache(catalogId)
+		await this.invalidateCategoryProductsCache(catalogId)
+		return {
+			ok: true,
+			...this.mapProductMedia(product, MEDIA_DETAIL_VARIANT_NAMES)
+		}
+	}
+
 	private async prepareCreatePayload(
 		dto: CreateProductDtoReq,
 		catalogId: string,
 		typeId: string
 	): Promise<PreparedProductCreatePayload> {
-		const { mediaIds, attributes, brandId, categories, ...rest } = dto
+		const { mediaIds, attributes, brandId, categories, variants, ...rest } = dto
 		const normalizedName = normalizeRequiredString(dto.name, 'name')
 		await this.ensureUniqueName(normalizedName, catalogId)
 		const resolvedSlug = await this.generateProductSlug(normalizedName, catalogId)
@@ -318,13 +597,17 @@ export class ProductService {
 		const normalizedMediaIds = this.normalizeMediaIds(mediaIds)
 		await this.ensureMediaIds(normalizedMediaIds, catalogId)
 
-		const normalizedBrandId = normalizeOptionalId(brandId)
+		const normalizedBrandId = normalizeNullableTrimmedString(brandId)
 		if (normalizedBrandId) {
 			await this.ensureBrandExists(normalizedBrandId, catalogId)
 		}
 
 		const normalizedCategoryIds = this.normalizeCategoryIds(categories)
 		await this.ensureCategoriesExist(normalizedCategoryIds, catalogId)
+		const preparedVariants =
+			variants !== undefined
+				? await this.prepareCreateVariants(typeId, resolvedSku, variants)
+				: undefined
 
 		return {
 			data: {
@@ -348,6 +631,7 @@ export class ProductService {
 					: {})
 			},
 			attributes: await this.attributeBuilder.buildForCreate(typeId, attributes),
+			variants: preparedVariants,
 			categoryIds: normalizedCategoryIds
 		}
 	}
@@ -361,12 +645,24 @@ export class ProductService {
 		const data = await this.buildUpdateData(id, dto, catalogId)
 		const mediaIds =
 			dto.mediaIds !== undefined ? this.normalizeMediaIds(dto.mediaIds) : undefined
-		const categoryId = await this.resolveUpdatedCategoryId(dto, catalogId)
+		const categoryIds =
+			dto.categories !== undefined
+				? this.normalizeCategoryIds(dto.categories)
+				: undefined
+		if (categoryIds !== undefined) {
+			await this.ensureCategoriesExist(categoryIds, catalogId)
+		}
+		const categoryId = await this.resolveUpdatedCategoryId(
+			dto,
+			catalogId,
+			categoryIds
+		)
 		const hasAttributeChanges = dto.attributes !== undefined
 		const hasRemovedAttributeChanges = dto.removeAttributeIds !== undefined
 		const hasVariantChanges = dto.variants !== undefined
 		const hasMediaChanges = mediaIds !== undefined
-		const hasCategoryChanges = dto.categoryId !== undefined
+		const hasCategoryChanges =
+			categoryIds !== undefined || dto.categoryId !== undefined
 
 		if (
 			!hasAttributeChanges &&
@@ -403,6 +699,7 @@ export class ProductService {
 			removeAttributeIds,
 			variants,
 			mediaIds,
+			categoryIds,
 			categoryId,
 			categoryPosition: dto.categoryPosition ?? 0
 		}
@@ -464,6 +761,23 @@ export class ProductService {
 		const product = await this.repo.softDelete(id, catalogId)
 		if (!product) throw new NotFoundException('Товар не найден')
 
+		if (product.mediaIds.length) {
+			const orphanedMedia = await this.mediaRepo.findOrphanedByIds(
+				product.mediaIds,
+				catalogId
+			)
+			const s3Keys = this.collectS3MediaKeys(orphanedMedia)
+			if (s3Keys.length) {
+				await this.s3Service.deleteObjectsByKeys(s3Keys)
+			}
+			if (orphanedMedia.length) {
+				await this.mediaRepo.deleteOrphanedByIds(
+					orphanedMedia.map(media => media.id),
+					catalogId
+				)
+			}
+		}
+
 		await this.invalidateCatalogProductsCache(catalogId)
 		await this.invalidateCategoryProductsCache(catalogId)
 		return { ok: true }
@@ -482,7 +796,8 @@ export class ProductService {
 		catalogId: string,
 		parsed: ParsedProductInfiniteQuery,
 		attributeFilters: ProductAttributeFilter[],
-		discountAttributeIds?: DiscountAttributeIds
+		discountAttributeIds?: DiscountAttributeIds,
+		includeInactive = false
 	): ProductFilterQueryBase {
 		return {
 			catalogId,
@@ -495,6 +810,7 @@ export class ProductService {
 			isDiscount: parsed.isDiscount,
 			attributeFilters,
 			discountAttributeIds,
+			includeInactive,
 			take: parsed.limit + 1
 		}
 	}
@@ -521,6 +837,28 @@ export class ProductService {
 		})
 	}
 
+	private async loadRecommendationRows(
+		baseQuery: ProductFilterQueryBase,
+		seed: string | undefined,
+		decodedCursor: DecodedInfiniteCursor | null
+	): Promise<ProductInfiniteRow[]> {
+		if (seed) {
+			return this.repo.findRecommendedProductIdsPageSeeded({
+				...baseQuery,
+				seed,
+				cursor:
+					decodedCursor?.mode === 'seed' && decodedCursor.seed === seed
+						? decodedCursor.cursor
+						: undefined
+			})
+		}
+
+		return this.repo.findRecommendedProductIdsPageDefault({
+			...baseQuery,
+			cursor: decodedCursor?.mode === 'default' ? decodedCursor.cursor : undefined
+		})
+	}
+
 	private buildInfinitePage(
 		rows: ProductInfiniteRow[],
 		limit: number
@@ -534,10 +872,15 @@ export class ProductService {
 
 	private async loadInfiniteItems(
 		rows: ProductInfiniteRow[],
-		catalogId: string
+		catalogId: string,
+		includeInactive = false
 	): Promise<ProductList> {
 		const ids = rows.map(row => row.id)
-		const products = await this.repo.findByIdsWithAttributes(ids, catalogId)
+		const products = await this.repo.findByIdsWithAttributes(
+			ids,
+			catalogId,
+			includeInactive
+		)
 		const productById = new Map(
 			products.map(
 				product =>
@@ -632,19 +975,75 @@ export class ProductService {
 		}
 	}
 
+	private hasRecommendationFilters(
+		parsed: ParsedProductInfiniteQuery,
+		attributeFilters: ProductAttributeFilter[]
+	): boolean {
+		return (
+			parsed.categoryIds.length > 0 ||
+			parsed.brandIds.length > 0 ||
+			parsed.minPrice !== undefined ||
+			parsed.maxPrice !== undefined ||
+			parsed.searchTerm !== undefined ||
+			parsed.isPopular !== undefined ||
+			parsed.isDiscount === true ||
+			attributeFilters.length > 0
+		)
+	}
+
 	private mapProductMedia<
 		T extends {
 			media: { position: number; kind?: string | null; media: MediaRecord }[]
+			categoryProducts?: {
+				position: number
+				category?: { id: string; name: string } | null
+			}[]
 		}
 	>(product: T, variantNames?: readonly string[]) {
+		const { media, categoryProducts, ...rest } = product
+
 		return {
-			...product,
-			media: (product.media ?? []).map(item => ({
+			...rest,
+			media: (media ?? []).map(item => ({
 				position: item.position,
 				kind: item.kind ?? null,
 				media: this.mediaUrl.mapMedia(item.media, { variantNames })
-			}))
+			})),
+			categories: (categoryProducts ?? [])
+				.map(item =>
+					item.category
+						? {
+								id: item.category.id,
+								name: item.category.name,
+								position: item.position
+							}
+						: null
+				)
+				.filter((item): item is NonNullable<typeof item> => Boolean(item))
 		}
+	}
+
+	private collectS3MediaKeys(
+		media: Array<{
+			key: string
+			storage: string
+			variants: { key: string; storage: string }[]
+		}>
+	): string[] {
+		const keys = new Set<string>()
+
+		for (const item of media) {
+			if (item.storage === 's3' && item.key.trim()) {
+				keys.add(item.key.trim())
+			}
+			for (const variant of item.variants) {
+				if (variant.storage === 's3' && variant.key.trim()) {
+					keys.add(variant.key.trim())
+				}
+			}
+		}
+
+		return [...keys]
 	}
 
 	private normalizeMediaIds(value?: string[]): string[] {
@@ -716,7 +1115,8 @@ export class ProductService {
 
 	private async resolveUpdatedCategoryId(
 		dto: UpdateProductDtoReq,
-		catalogId: string
+		catalogId: string,
+		categoryIds?: string[]
 	): Promise<string | undefined> {
 		const hasCategoryChanges = dto.categoryId !== undefined
 		if (dto.categoryPosition !== undefined && !hasCategoryChanges) {
@@ -734,6 +1134,14 @@ export class ProductService {
 			'categoryId'
 		)
 		await this.ensureCategoryExists(normalizedCategoryId, catalogId)
+		if (
+			categoryIds !== undefined &&
+			!categoryIds.includes(normalizedCategoryId)
+		) {
+			throw new BadRequestException(
+				'categoryId должен входить в categories, если они переданы вместе'
+			)
+		}
 		return normalizedCategoryId
 	}
 
@@ -768,6 +1176,14 @@ export class ProductService {
 		if (!brand) {
 			throw new BadRequestException(`Бренд ${brandId} не найден в каталоге`)
 		}
+	}
+
+	private async resolveExistingBrandId(
+		brandId: string,
+		catalogId: string
+	): Promise<string | null> {
+		const brand = await this.repo.findBrandById(brandId, catalogId)
+		return brand ? brand.id : null
 	}
 
 	private async ensureCategoryExists(
@@ -838,6 +1254,14 @@ export class ProductService {
 		}
 	}
 
+	private async prepareCreateVariants(
+		typeId: string,
+		sku: string,
+		variants: ProductVariantDtoReq[]
+	): Promise<ProductVariantData[]> {
+		return this.variantBuilder.build(typeId, variants, sku)
+	}
+
 	private prepareVariantUpdates(variants: ProductVariantUpdateDtoReq[]): {
 		variantKey: string
 		price?: number
@@ -889,6 +1313,89 @@ export class ProductService {
 		return this.ensureUniqueSku(normalizedBase)
 	}
 
+	private async generateDuplicatedProductName(
+		name: string,
+		catalogId: string
+	): Promise<string> {
+		const normalizedName = normalizeRequiredString(name, 'name')
+		let copyIndex = 1
+		let candidate = buildDuplicateNameCandidate(normalizedName, copyIndex)
+
+		while (await this.repo.existsName(candidate, catalogId)) {
+			copyIndex += 1
+			candidate = buildDuplicateNameCandidate(normalizedName, copyIndex)
+		}
+
+		return candidate
+	}
+
+	private buildDuplicatedProductData(
+		source: ProductDetailsItem,
+		catalogId: string,
+		name: string,
+		slug: string,
+		sku: string,
+		brandId: string | null
+	): ProductCreateInput {
+		const price =
+			typeof source.price === 'number' ? source.price : Number(source.price)
+
+		return {
+			name,
+			slug,
+			sku,
+			price,
+			isPopular: source.isPopular,
+			status: ProductStatus.HIDDEN,
+			position: source.position,
+			catalog: { connect: { id: catalogId } },
+			...(brandId ? { brand: { connect: { id: brandId } } } : {}),
+			...(source.media.length
+				? {
+						media: {
+							create: source.media.map(item => ({
+								position: item.position,
+								kind: item.kind ?? null,
+								media: { connect: { id: item.media.id } }
+							}))
+						}
+					}
+				: {})
+		}
+	}
+
+	private buildDuplicatedProductAttributes(
+		source: ProductDetailsItem
+	): ProductAttributeValueData[] {
+		return source.productAttributes.map(attribute => ({
+			attributeId: attribute.attributeId,
+			enumValueId: attribute.enumValueId ?? null,
+			valueString: attribute.valueString ?? null,
+			valueInteger: attribute.valueInteger ?? null,
+			valueDecimal:
+				attribute.valueDecimal === null ? null : Number(attribute.valueDecimal),
+			valueBoolean: attribute.valueBoolean ?? null,
+			valueDateTime: attribute.valueDateTime
+				? new Date(attribute.valueDateTime)
+				: null
+		}))
+	}
+
+	private buildDuplicatedVariantInputs(
+		source: ProductDetailsItem
+	): ProductVariantDtoReq[] {
+		return source.variants.map(variant => ({
+			price:
+				typeof variant.price === 'number' ? variant.price : Number(variant.price),
+			stock: variant.stock,
+			status: variant.status,
+			attributes: variant.attributes.map(attribute => ({
+				attributeId: attribute.attributeId,
+				enumValueId: attribute.enumValueId
+			}))
+		}))
+	}
+
 	private async ensureUniqueSlug(
 		base: string,
 		catalogId: string
@@ -934,6 +1441,27 @@ export class ProductService {
 			catalogId,
 			'products',
 			'popular',
+			`v${version}`
+		])
+	}
+
+	private async buildUncategorizedProductsCacheKey(
+		catalogId: string,
+		cursor: string | undefined,
+		limit: number
+	): Promise<string> {
+		const version = await this.cache.getVersion(
+			CATEGORY_PRODUCTS_CACHE_VERSION,
+			catalogId
+		)
+		return this.cache.buildKey([
+			'catalog',
+			catalogId,
+			'products',
+			'uncategorized',
+			'infinite',
+			`limit-${limit}`,
+			cursor ? `cursor-${encodeURIComponent(cursor)}` : 'cursor-first',
 			`v${version}`
 		])
 	}

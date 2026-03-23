@@ -1,4 +1,5 @@
 import type { Prisma } from '@generated/client'
+import { ProductStatus } from '@generated/enums'
 import { SortOrder } from '@generated/internal/prismaNamespace'
 import { CategoryCreateInput, CategoryUpdateInput } from '@generated/models'
 import { Injectable } from '@nestjs/common'
@@ -289,14 +290,18 @@ export class CategoryRepository {
 	async findCategoryProductsPage(
 		categoryId: string,
 		catalogId: string,
-		options: { cursor?: string; take: number }
+		options: { cursor?: string; take: number; includeInactive?: boolean }
 	) {
-		const { cursor, take } = options
+		const { cursor, take, includeInactive } = options
 		const after = await this.resolveCursor(categoryId, catalogId, cursor)
 		const where: Prisma.CategoryProductWhereInput = {
 			categoryId,
 			category: { catalogId, deleteAt: null },
-			product: { catalogId, deleteAt: null }
+			product: {
+				catalogId,
+				deleteAt: null,
+				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
+			}
 		}
 
 		if (after) {
