@@ -33,6 +33,7 @@ import type { AuthRequest } from '../auth/types/auth-request'
 
 import { CreateProductDtoReq } from './dto/requests/create-product.dto.req'
 import { SetProductVariantsDtoReq } from './dto/requests/set-product-variants.dto.req'
+import { UpdateProductCategoryPositionDtoReq } from './dto/requests/update-product-category-position.dto.req'
 import { UpdateProductDtoReq } from './dto/requests/update-product.dto.req'
 import {
 	ProductCreateResponseDto,
@@ -340,6 +341,27 @@ export class ProductController {
 	@ApiOkResponse({ type: ProductUpdateResponseDto })
 	async update(@Param('id') id: string, @Body() dto: UpdateProductDtoReq) {
 		return this.productService.update(id, dto)
+	}
+
+	@Patch('/:id/category-position')
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({
+		summary: 'Изменить позицию товара в категории',
+		description:
+			'Меняет позицию товара внутри конкретной категории. Если товар еще не привязан к категории, привязка будет создана на указанной позиции.'
+	})
+	@ApiParam({
+		name: 'id',
+		description: 'ID товара'
+	})
+	@ApiOkResponse({ type: ProductUpdateResponseDto })
+	async updateCategoryPosition(
+		@Param('id') id: string,
+		@Body() dto: UpdateProductCategoryPositionDtoReq
+	) {
+		return this.productService.updateCategoryPosition(id, dto)
 	}
 
 	@Patch('/:id/toggle-status')

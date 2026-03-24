@@ -157,6 +157,38 @@ describe('ProductService', () => {
 		expect(service).toBeDefined()
 	})
 
+	it('returns integration metadata for integrated products', async () => {
+		const syncedAt = new Date('2026-03-23T15:37:00.336Z')
+
+		repo.findById.mockResolvedValue({
+			id: 'product-1',
+			media: [],
+			productAttributes: [],
+			variants: [],
+			categoryProducts: [],
+			integrationLinks: [
+				{
+					externalId: 'ms-123',
+					externalCode: 'code-123',
+					lastSyncedAt: syncedAt,
+					integration: { provider: 'MOYSKLAD' }
+				}
+			]
+		} as any)
+
+		const result = await runWithCatalog(() => service.getById('product-1'))
+
+		expect(result).toMatchObject({
+			id: 'product-1',
+			integration: {
+				provider: 'MOYSKLAD',
+				externalId: 'ms-123',
+				externalCode: 'code-123',
+				lastSyncedAt: syncedAt
+			}
+		})
+	})
+
 	it('returns seeded infinite page with next cursor', async () => {
 		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
 		repo.findFilteredProductIdsPageSeeded.mockResolvedValue([
@@ -1004,6 +1036,30 @@ describe('ProductService', () => {
 		await expect(
 			runWithCatalog(() => service.togglePopular('product-404'))
 		).rejects.toThrow('Товар не найден')
+	})
+
+	it('delegates category position update to generic product update flow', async () => {
+		const updateSpy = jest.spyOn(service, 'update').mockResolvedValue({
+			ok: true,
+			id: 'product-1'
+		} as any)
+
+		await expect(
+			runWithCatalog(() =>
+				service.updateCategoryPosition('product-1', {
+					categoryId: 'category-1',
+					position: 4
+				})
+			)
+		).resolves.toMatchObject({
+			ok: true,
+			id: 'product-1'
+		})
+
+		expect(updateSpy).toHaveBeenCalledWith('product-1', {
+			categoryId: 'category-1',
+			categoryPosition: 4
+		})
 	})
 
 	it('rejects categoryId outside categories when both are passed', async () => {

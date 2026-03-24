@@ -1,4 +1,5 @@
 ﻿import { CategoryCreateInput, CategoryUpdateInput } from '@generated/models'
+import type { IntegrationProvider } from '@generated/enums'
 import {
 	BadRequestException,
 	Injectable,
@@ -39,6 +40,13 @@ import { CreateCategoryDtoReq } from './dto/requests/create-category.dto.req'
 import { UpdateCategoryDtoReq } from './dto/requests/update-category.dto.req'
 
 type CategoryProductsPage = CategoryProductsPagePayload<unknown>
+
+type ProductIntegrationLinkRecord = {
+	externalId: string
+	externalCode?: string | null
+	lastSyncedAt?: Date | string | null
+	integration?: { provider: IntegrationProvider } | null
+}
 
 @Injectable()
 export class CategoryService {
@@ -264,17 +272,37 @@ export class CategoryService {
 	private mapProductMedia<
 		T extends {
 			media: { position: number; kind?: string | null; media: MediaRecord }[]
+			integrationLinks?: ProductIntegrationLinkRecord[]
 		}
 	>(product: T) {
+		const { integrationLinks, ...rest } = product
+
 		return {
-			...product,
+			...rest,
 			media: (product.media ?? []).map(item => ({
 				position: item.position,
 				kind: item.kind ?? null,
 				media: this.mediaUrl.mapMedia(item.media, {
 					variantNames: MEDIA_LIST_VARIANT_NAMES
 				})
-			}))
+			})),
+			integration: this.mapProductIntegration(integrationLinks)
+		}
+	}
+
+	private mapProductIntegration(
+		integrationLinks?: ProductIntegrationLinkRecord[]
+	) {
+		const link = integrationLinks?.[0]
+		if (!link?.integration?.provider) {
+			return null
+		}
+
+		return {
+			provider: link.integration.provider,
+			externalId: link.externalId,
+			externalCode: link.externalCode ?? null,
+			lastSyncedAt: link.lastSyncedAt ?? null
 		}
 	}
 

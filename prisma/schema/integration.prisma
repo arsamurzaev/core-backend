@@ -1,15 +1,97 @@
-// Здесь настройки интеграции
+// Р—РґРµСЃСЊ РЅР°СЃС‚СЂРѕРёМ†РєРё РёРЅС‚РµРіСЂР°С†РёРё
 model Integration {
     id String @id @default(uuid()) @db.Uuid
 
-    // Здесь будет интеграция с разными системами
-    name String
+    catalogId String              @map("catalog_id") @db.Uuid
+    provider  IntegrationProvider
 
     metadata Json
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
+    isActive Boolean @default(true) @map("is_active")
+
+    syncStartedAt  DateTime?             @map("sync_started_at")
+    lastSyncAt     DateTime?             @map("last_sync_at")
+    lastSyncStatus IntegrationSyncStatus @default(IDLE) @map("last_sync_status")
+    lastSyncError  String?               @db.Text @map("last_sync_error")
+
+    totalProducts   Int @default(0) @map("total_products")
+    createdProducts Int @default(0) @map("created_products")
+    updatedProducts Int @default(0) @map("updated_products")
+    deletedProducts Int @default(0) @map("deleted_products")
+
+    catalog      Catalog               @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+    productLinks IntegrationProductLink[]
+    syncRuns     IntegrationSyncRun[]
+
+    deleteAt  DateTime? @map("delete_at") // Р”Р°С‚Р° СѓРґР°Р»РµРЅРёСЏ
     createdAt DateTime  @default(now()) @map("created_at")
     updatedAt DateTime  @updatedAt @map("updated_at")
 
+    @@unique([catalogId, provider])
+    @@index([catalogId, isActive])
+    @@index([lastSyncStatus, syncStartedAt])
     @@map("integrations")
+}
+
+model IntegrationProductLink {
+    id String @id @default(uuid()) @db.Uuid
+
+    integrationId String @map("integration_id") @db.Uuid
+    productId     String @map("product_id") @db.Uuid
+
+    externalId        String    @map("external_id") @db.VarChar(64)
+    externalCode      String?   @map("external_code") @db.VarChar(100)
+    externalUpdatedAt DateTime? @map("external_updated_at")
+    lastSyncedAt      DateTime? @map("last_synced_at")
+    rawMeta           Json?     @map("raw_meta")
+
+    integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+    product     Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@unique([integrationId, externalId])
+    @@unique([integrationId, productId])
+    @@index([productId])
+    @@map("integration_product_links")
+}
+
+model IntegrationSyncRun {
+    id String @id @default(uuid()) @db.Uuid
+
+    integrationId String @map("integration_id") @db.Uuid
+    catalogId     String @map("catalog_id") @db.Uuid
+
+    provider IntegrationProvider
+    mode     IntegrationSyncRunMode
+    trigger  IntegrationSyncRunTrigger
+    status   IntegrationSyncRunStatus @default(PENDING)
+
+    jobId      String? @unique @map("job_id") @db.VarChar(191)
+    productId  String? @map("product_id") @db.Uuid
+    externalId String? @map("external_id") @db.VarChar(64)
+    error      String? @db.Text
+    metadata   Json?
+
+    totalProducts   Int  @default(0) @map("total_products")
+    createdProducts Int  @default(0) @map("created_products")
+    updatedProducts Int  @default(0) @map("updated_products")
+    deletedProducts Int  @default(0) @map("deleted_products")
+    imagesImported  Int  @default(0) @map("images_imported")
+    durationMs      Int? @map("duration_ms")
+
+    requestedAt DateTime  @default(now()) @map("requested_at")
+    startedAt   DateTime? @map("started_at")
+    finishedAt  DateTime? @map("finished_at")
+    createdAt   DateTime  @default(now()) @map("created_at")
+    updatedAt   DateTime  @updatedAt @map("updated_at")
+
+    integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+    @@index([integrationId, requestedAt])
+    @@index([catalogId, provider, requestedAt])
+    @@index([status, requestedAt])
+    @@index([productId, requestedAt])
+    @@map("integration_sync_runs")
 }

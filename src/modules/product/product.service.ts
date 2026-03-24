@@ -1,4 +1,5 @@
 ﻿import { ProductStatus } from '@generated/enums'
+import type { IntegrationProvider } from '@generated/enums'
 import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
@@ -37,6 +38,7 @@ import { CreateProductDtoReq } from './dto/requests/create-product.dto.req'
 import { ProductVariantUpdateDtoReq } from './dto/requests/product-variant-update.dto.req'
 import { ProductVariantDtoReq } from './dto/requests/product-variant.dto.req'
 import { SetProductVariantsDtoReq } from './dto/requests/set-product-variants.dto.req'
+import { UpdateProductCategoryPositionDtoReq } from './dto/requests/update-product-category-position.dto.req'
 import { UpdateProductDtoReq } from './dto/requests/update-product.dto.req'
 import {
 	ProductAttributeBuilder,
@@ -67,9 +69,15 @@ import {
 	type ProductVariantUpdateData
 } from './product.repository'
 
-type ProductMapped<T> = Omit<T, 'media' | 'categoryProducts'> & {
+type ProductMapped<T> = Omit<T, 'media' | 'categoryProducts' | 'integrationLinks'> & {
 	media: { position: number; kind?: string | null; media: MediaDto }[]
 	categories: { id: string; name: string; position: number }[]
+	integration: {
+		provider: IntegrationProvider
+		externalId: string
+		externalCode: string | null
+		lastSyncedAt: Date | string | null
+	} | null
 }
 
 type ProductList = ProductMapped<
@@ -93,6 +101,13 @@ type ProductInfinitePage = {
 
 type ProductReadOptions = {
 	includeInactive?: boolean
+}
+
+type ProductIntegrationLinkRecord = {
+	externalId: string
+	externalCode?: string | null
+	lastSyncedAt?: Date | string | null
+	integration?: { provider: IntegrationProvider } | null
 }
 
 type PreparedProductCreatePayload = {
@@ -583,6 +598,16 @@ export class ProductService {
 		}
 	}
 
+	async updateCategoryPosition(
+		id: string,
+		dto: UpdateProductCategoryPositionDtoReq
+	) {
+		return this.update(id, {
+			categoryId: dto.categoryId,
+			categoryPosition: dto.position
+		})
+	}
+
 	private async prepareCreatePayload(
 		dto: CreateProductDtoReq,
 		catalogId: string,
@@ -998,9 +1023,10 @@ export class ProductService {
 				position: number
 				category?: { id: string; name: string } | null
 			}[]
+			integrationLinks?: ProductIntegrationLinkRecord[]
 		}
 	>(product: T, variantNames?: readonly string[]) {
-		const { media, categoryProducts, ...rest } = product
+		const { media, categoryProducts, integrationLinks, ...rest } = product
 
 		return {
 			...rest,
@@ -1019,7 +1045,24 @@ export class ProductService {
 							}
 						: null
 				)
-				.filter((item): item is NonNullable<typeof item> => Boolean(item))
+				.filter((item): item is NonNullable<typeof item> => Boolean(item)),
+			integration: this.mapProductIntegration(integrationLinks)
+		}
+	}
+
+	private mapProductIntegration(
+		integrationLinks?: ProductIntegrationLinkRecord[]
+	) {
+		const link = integrationLinks?.[0]
+		if (!link?.integration?.provider) {
+			return null
+		}
+
+		return {
+			provider: link.integration.provider,
+			externalId: link.externalId,
+			externalCode: link.externalCode ?? null,
+			lastSyncedAt: link.lastSyncedAt ?? null
 		}
 	}
 

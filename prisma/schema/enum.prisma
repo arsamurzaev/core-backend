@@ -4,6 +4,35 @@ enum Role {
     ADMIN
 }
 
+enum IntegrationProvider {
+    MOYSKLAD
+}
+
+enum IntegrationSyncStatus {
+    IDLE
+    SYNCING
+    SUCCESS
+    ERROR
+}
+
+enum IntegrationSyncRunMode {
+    FULL
+    PRODUCT
+}
+
+enum IntegrationSyncRunTrigger {
+    MANUAL
+    SCHEDULED
+}
+
+enum IntegrationSyncRunStatus {
+    PENDING
+    RUNNING
+    SUCCESS
+    ERROR
+    SKIPPED
+}
+
 enum ProductsDisplayMode {
     LIST
     CATEGORY

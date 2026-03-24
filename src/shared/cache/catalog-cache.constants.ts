@@ -7,8 +7,8 @@ export const CATALOG_CURRENT_CACHE_TTL_SEC =
 
 export const CATALOG_CACHE_VERSION = 'catalog'
 export const CATALOG_TYPE_CACHE_VERSION = 'catalog-type'
-export const PRODUCTS_CACHE_VERSION = 'products'
-export const CATEGORY_PRODUCTS_CACHE_VERSION = 'category-products'
+export const PRODUCTS_CACHE_VERSION = 'products-v2'
+export const CATEGORY_PRODUCTS_CACHE_VERSION = 'category-products-v2'
 
 export const CATEGORY_PRODUCTS_FIRST_PAGE_CACHE_TTL_SEC =
 	Number(

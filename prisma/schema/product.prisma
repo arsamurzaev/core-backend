@@ -59,6 +59,7 @@ model Product {
     variants          ProductVariant[]
     media             ProductMedia[]
     productAttributes ProductAttribute[]
+    integrationLinks  IntegrationProductLink[]
     cartItem          CartItem[]
     categoryProducts  CategoryProduct[]
     orderItems        OrderItem[]

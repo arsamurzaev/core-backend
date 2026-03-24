@@ -26,6 +26,7 @@ describe('ProductController', () => {
 							create: jest.fn(),
 							duplicate: jest.fn(),
 							update: jest.fn(),
+							updateCategoryPosition: jest.fn(),
 							toggleStatus: jest.fn(),
 							togglePopular: jest.fn(),
 							remove: jest.fn()

@@ -1,4 +1,9 @@
-import { DataType, ProductStatus, ProductVariantStatus } from '@generated/enums'
+import {
+	DataType,
+	IntegrationProvider,
+	ProductStatus,
+	ProductVariantStatus
+} from '@generated/enums'
 import { ApiProperty } from '@nestjs/swagger'
 
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
@@ -163,6 +168,20 @@ export class ProductCategoryDto {
 	position: number
 }
 
+export class ProductIntegrationDto {
+	@ApiProperty({ enum: IntegrationProvider })
+	provider: IntegrationProvider
+
+	@ApiProperty({ type: String })
+	externalId: string
+
+	@ApiProperty({ type: String, nullable: true })
+	externalCode: string | null
+
+	@ApiProperty({ type: String, format: 'date-time', nullable: true })
+	lastSyncedAt: string | null
+}
+
 export class ProductDto {
 	@ApiProperty({ type: String })
 	id: string
@@ -187,6 +206,9 @@ export class ProductDto {
 
 	@ApiProperty({ type: [ProductCategoryDto] })
 	categories: ProductCategoryDto[]
+
+	@ApiProperty({ type: ProductIntegrationDto, nullable: true })
+	integration: ProductIntegrationDto | null
 
 	@ApiProperty({ type: Boolean })
 	isPopular: boolean

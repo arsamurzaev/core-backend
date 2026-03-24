@@ -98,6 +98,20 @@ const productSelect = {
 		},
 		orderBy: { position: 'asc' as const }
 	},
+	integrationLinks: {
+		select: {
+			externalId: true,
+			externalCode: true,
+			lastSyncedAt: true,
+			integration: {
+				select: {
+					provider: true
+				}
+			}
+		},
+		orderBy: { createdAt: 'asc' as const },
+		take: 1
+	},
 	isPopular: true,
 	status: true,
 	position: true,

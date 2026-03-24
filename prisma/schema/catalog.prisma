@@ -57,6 +57,7 @@ model Catalog {
     metrics     Metrics[]
     contacts    CatalogContact[]
     products    Product[]
+    integrations Integration[]
     category    Category[]
     brands      Brand[]
     order       Order[]

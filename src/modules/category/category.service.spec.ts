@@ -98,6 +98,50 @@ describe('CategoryService', () => {
 		expect(service).toBeDefined()
 	})
 
+	it('returns integration metadata in category product pages', async () => {
+		const syncedAt = new Date('2026-03-23T15:37:00.336Z')
+
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
+		repo.findCategoryProductsPage.mockResolvedValue([
+			{
+				productId: 'p1',
+				position: 0,
+				product: {
+					id: 'p1',
+					media: [],
+					integrationLinks: [
+						{
+							externalId: 'ms-123',
+							externalCode: 'code-123',
+							lastSyncedAt: syncedAt,
+							integration: { provider: 'MOYSKLAD' }
+						}
+					]
+				}
+			}
+		] as any)
+
+		const result = await runWithCatalog(() =>
+			service.getProductsByCategory('cat-1', { limit: 2 })
+		)
+
+		expect(result.items[0]).toMatchObject({
+			productId: 'p1',
+			product: {
+				id: 'p1',
+				integration: {
+					provider: 'MOYSKLAD',
+					externalId: 'ms-123',
+					externalCode: 'code-123',
+					lastSyncedAt: syncedAt
+				}
+			}
+		})
+	})
+
 	it('returns page and nextCursor when more items exist', async () => {
 		repo.findById.mockResolvedValue({
 			id: 'cat-1',

@@ -14,6 +14,7 @@ import { BrandModule } from '@/modules/brand/brand.module'
 import { CartModule } from '@/modules/cart/cart.module'
 import { CatalogModule } from '@/modules/catalog/catalog.module'
 import { CategoryModule } from '@/modules/category/category.module'
+import { IntegrationModule } from '@/modules/integration/integration.module'
 import { ProductModule } from '@/modules/product/product.module'
 import { S3Module } from '@/modules/s3/s3.module'
 import { SeoModule } from '@/modules/seo/seo.module'
@@ -27,13 +28,19 @@ import { CatalogContextMiddleware } from '@/shared/tenancy/tenant-context.middle
 
 import { PrismaModule } from '../infrastructure/prisma/prisma.module'
 
-import { databaseEnv, httpEnv, redisEnv, s3Env } from './config/env'
+import {
+	databaseEnv,
+	httpEnv,
+	integrationCryptoEnv,
+	redisEnv,
+	s3Env
+} from './config/env'
 
 @Module({
 	imports: [
 		ConfigModule.forRoot({
 			isGlobal: true,
-			load: [databaseEnv, redisEnv, httpEnv, s3Env]
+			load: [databaseEnv, redisEnv, httpEnv, s3Env, integrationCryptoEnv]
 		}),
 		CacheModule,
 		PrismaModule,
@@ -45,6 +52,7 @@ import { databaseEnv, httpEnv, redisEnv, s3Env } from './config/env'
 		UserModule,
 		CatalogModule,
 		CategoryModule,
+		IntegrationModule,
 		CartModule,
 		ProductModule,
 		S3Module,
