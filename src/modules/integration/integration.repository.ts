@@ -54,6 +54,26 @@ const productSyncSelect = {
 	deleteAt: true
 }
 
+const categorySyncSelect = {
+	id: true,
+	name: true,
+	parentId: true
+}
+
+const categoryLinkSelect = {
+	id: true,
+	integrationId: true,
+	categoryId: true,
+	externalId: true,
+	externalParentId: true,
+	rawMeta: true,
+	category: {
+		select: categorySyncSelect
+	},
+	createdAt: true,
+	updatedAt: true
+}
+
 const syncRunSelect = {
 	id: true,
 	integrationId: true,
@@ -96,6 +116,15 @@ export type IntegrationProductLinkRecord =
 export type ProductSyncRecord = Prisma.ProductGetPayload<{
 	select: typeof productSyncSelect
 }>
+
+export type CategorySyncRecord = Prisma.CategoryGetPayload<{
+	select: typeof categorySyncSelect
+}>
+
+export type IntegrationCategoryLinkRecord =
+	Prisma.IntegrationCategoryLinkGetPayload<{
+		select: typeof categoryLinkSelect
+	}>
 
 export type IntegrationSyncRunRecord = Prisma.IntegrationSyncRunGetPayload<{
 	select: typeof syncRunSelect
@@ -616,7 +645,7 @@ export class IntegrationRepository {
 		catalogId: string,
 		name: string,
 		tx?: Prisma.TransactionClient
-	): Promise<{ id: string; name: string } | null> {
+	): Promise<CategorySyncRecord | null> {
 		const db = tx || this.prisma
 		return db.category.findFirst({
 			where: {
@@ -624,7 +653,25 @@ export class IntegrationRepository {
 				name,
 				deleteAt: null
 			},
-			select: { id: true, name: true }
+			orderBy: [{ createdAt: 'asc' }],
+			select: categorySyncSelect
+		})
+	}
+
+	findCategoriesByName(
+		catalogId: string,
+		name: string,
+		tx?: Prisma.TransactionClient
+	): Promise<CategorySyncRecord[]> {
+		const db = tx || this.prisma
+		return db.category.findMany({
+			where: {
+				catalogId,
+				name,
+				deleteAt: null
+			},
+			orderBy: [{ createdAt: 'asc' }],
+			select: categorySyncSelect
 		})
 	}
 
@@ -633,7 +680,7 @@ export class IntegrationRepository {
 		name: string,
 		parentId?: string,
 		tx?: Prisma.TransactionClient
-	): Promise<{ id: string; name: string }> {
+	): Promise<CategorySyncRecord> {
 		const db = tx || this.prisma
 		return db.category.create({
 			data: {
@@ -641,31 +688,249 @@ export class IntegrationRepository {
 				name,
 				...(parentId ? { parent: { connect: { id: parentId } } } : {})
 			},
-			select: { id: true, name: true }
+			select: categorySyncSelect
 		})
 	}
 
-	async syncProductCategories(
-		productId: string,
-		catalogId: string,
-		categoryIds: string[],
+	async updateCategory(
+		params: {
+			categoryId: string
+			catalogId: string
+			data: {
+				name?: string
+				parentId?: string | null
+			}
+		},
 		tx?: Prisma.TransactionClient
-	): Promise<void> {
+	): Promise<CategorySyncRecord | null> {
 		const db = tx || this.prisma
-		// Simplified: replace all categories for the product
-		await db.categoryProduct.deleteMany({
-			where: { productId, category: { catalogId } }
+		const existing = await db.category.findFirst({
+			where: {
+				id: params.categoryId,
+				catalogId: params.catalogId,
+				deleteAt: null
+			},
+			select: { id: true }
 		})
-		if (categoryIds.length > 0) {
-			await db.categoryProduct.createMany({
-				data: categoryIds.map(categoryId => ({
-					categoryId,
-					productId,
-					position: 0
-				}))
+		if (!existing) return null
+
+		await db.category.update({
+			where: { id: params.categoryId },
+			data: {
+				...(params.data.name !== undefined ? { name: params.data.name } : {}),
+				...(params.data.parentId !== undefined
+					? params.data.parentId
+						? { parent: { connect: { id: params.data.parentId } } }
+						: { parent: { disconnect: true } }
+					: {})
+			}
+		})
+
+		return db.category.findFirst({
+			where: {
+				id: params.categoryId,
+				catalogId: params.catalogId,
+				deleteAt: null
+			},
+			select: categorySyncSelect
+		})
+	}
+
+	findCategoryLinkByExternalId(
+		integrationId: string,
+		externalId: string,
+		tx?: Prisma.TransactionClient
+	): Promise<IntegrationCategoryLinkRecord | null> {
+		const db = tx || this.prisma
+		return db.integrationCategoryLink.findFirst({
+			where: {
+				integrationId,
+				externalId,
+				category: { deleteAt: null }
+			},
+			select: categoryLinkSelect
+		})
+	}
+
+	findCategoryLinkByCategoryId(
+		integrationId: string,
+		categoryId: string,
+		tx?: Prisma.TransactionClient
+	): Promise<IntegrationCategoryLinkRecord | null> {
+		const db = tx || this.prisma
+		return db.integrationCategoryLink.findFirst({
+			where: {
+				integrationId,
+				categoryId,
+				category: { deleteAt: null }
+			},
+			select: categoryLinkSelect
+		})
+	}
+
+	async upsertCategoryLink(
+		params: {
+			integrationId: string
+			categoryId: string
+			externalId: string
+			externalParentId?: string | null
+			rawMeta?: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput
+		},
+		tx?: Prisma.TransactionClient
+	): Promise<IntegrationCategoryLinkRecord> {
+		const db = tx || this.prisma
+
+		const existingByExternalId = await db.integrationCategoryLink.findUnique({
+			where: {
+				integrationId_externalId: {
+					integrationId: params.integrationId,
+					externalId: params.externalId
+				}
+			},
+			select: { id: true }
+		})
+
+		if (existingByExternalId) {
+			return db.integrationCategoryLink.update({
+				where: { id: existingByExternalId.id },
+				data: {
+					categoryId: params.categoryId,
+					externalParentId: params.externalParentId ?? null,
+					...(params.rawMeta !== undefined ? { rawMeta: params.rawMeta } : {})
+				},
+				select: categoryLinkSelect
 			})
 		}
-		return
+
+		const existingByCategoryId = await db.integrationCategoryLink.findUnique({
+			where: {
+				integrationId_categoryId: {
+					integrationId: params.integrationId,
+					categoryId: params.categoryId
+				}
+			},
+			select: { id: true }
+		})
+
+		if (existingByCategoryId) {
+			return db.integrationCategoryLink.update({
+				where: { id: existingByCategoryId.id },
+				data: {
+					externalId: params.externalId,
+					externalParentId: params.externalParentId ?? null,
+					...(params.rawMeta !== undefined ? { rawMeta: params.rawMeta } : {})
+				},
+				select: categoryLinkSelect
+			})
+		}
+
+		return db.integrationCategoryLink.create({
+			data: {
+				integrationId: params.integrationId,
+				categoryId: params.categoryId,
+				externalId: params.externalId,
+				externalParentId: params.externalParentId ?? null,
+				...(params.rawMeta !== undefined ? { rawMeta: params.rawMeta } : {})
+			},
+			select: categoryLinkSelect
+		})
+	}
+
+	async syncManagedProductCategories(
+		productId: string,
+		catalogId: string,
+		integrationId: string,
+		categoryIds: string[],
+		tx?: Prisma.TransactionClient
+	): Promise<{ added: number; removed: number }> {
+		const uniqueCategoryIds = [...new Set(categoryIds)]
+		const run = async (
+			db: Prisma.TransactionClient | PrismaService
+		): Promise<{ added: number; removed: number }> => {
+			const existing = await db.categoryProduct.findMany({
+				where: {
+					productId,
+					category: { catalogId, deleteAt: null }
+				},
+				select: {
+					categoryId: true,
+					position: true,
+					category: {
+						select: {
+							integrationLinks: {
+								where: { integrationId },
+								select: { id: true }
+							}
+						}
+					}
+				}
+			})
+
+			const nextManagedCategoryIds = new Set(uniqueCategoryIds)
+			const existingByCategoryId = new Map(
+				existing.map(item => [item.categoryId, item] as const)
+			)
+			let removed = 0
+			let added = 0
+
+			for (const current of existing) {
+				const isManagedByIntegration = current.category.integrationLinks.length > 0
+				if (
+					!isManagedByIntegration ||
+					nextManagedCategoryIds.has(current.categoryId)
+				) {
+					continue
+				}
+
+				await db.categoryProduct.updateMany({
+					where: {
+						categoryId: current.categoryId,
+						position: { gt: current.position }
+					},
+					data: { position: { decrement: 1 } }
+				})
+				await db.categoryProduct.delete({
+					where: {
+						categoryId_productId: {
+							categoryId: current.categoryId,
+							productId
+						}
+					}
+				})
+				removed += 1
+			}
+
+			for (const categoryId of uniqueCategoryIds) {
+				if (existingByCategoryId.has(categoryId)) {
+					continue
+				}
+
+				const maxPosition = await db.categoryProduct.aggregate({
+					where: {
+						categoryId,
+						category: { catalogId, deleteAt: null }
+					},
+					_max: { position: true }
+				})
+
+				await db.categoryProduct.create({
+					data: {
+						categoryId,
+						productId,
+						position: (maxPosition._max.position ?? -1) + 1
+					}
+				})
+				added += 1
+			}
+
+			return { added, removed }
+		}
+
+		if (tx) {
+			return run(tx)
+		}
+
+		return this.prisma.$transaction(run)
 	}
 
 	createProduct(

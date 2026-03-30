@@ -1,33 +1,12 @@
 import { Prisma } from '@generated/client'
+import { SeoEntityType } from '@generated/enums'
 import { CatalogCreateInput, CatalogUpdateInput } from '@generated/models'
 import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { buildMediaSelect } from '@/shared/media/media-select'
 
-const mediaSelect = {
-	id: true,
-	originalName: true,
-	mimeType: true,
-	size: true,
-	width: true,
-	height: true,
-	status: true,
-	storage: true,
-	key: true,
-	variants: {
-		select: {
-			id: true,
-			kind: true,
-			mimeType: true,
-			size: true,
-			width: true,
-			height: true,
-			storage: true,
-			key: true
-		},
-		orderBy: [{ width: 'desc' as const }, { kind: 'asc' as const }]
-	}
-}
+const mediaSelect = buildMediaSelect()
 
 const enumValueSelect = {
 	id: true,
@@ -84,6 +63,55 @@ const catalogContactSelect = {
 	value: true
 }
 
+const catalogSeoSelect = {
+	id: true,
+	catalogId: true,
+	entityType: true,
+	entityId: true,
+	urlPath: true,
+	canonicalUrl: true,
+	title: true,
+	description: true,
+	keywords: true,
+	h1: true,
+	seoText: true,
+	robots: true,
+	isIndexable: true,
+	isFollowable: true,
+	ogTitle: true,
+	ogDescription: true,
+	ogMedia: { select: mediaSelect },
+	ogType: true,
+	ogUrl: true,
+	ogSiteName: true,
+	ogLocale: true,
+	twitterCard: true,
+	twitterTitle: true,
+	twitterDescription: true,
+	twitterMedia: { select: mediaSelect },
+	twitterSite: true,
+	twitterCreator: true,
+	hreflang: true,
+	structuredData: true,
+	extras: true,
+	sitemapPriority: true,
+	sitemapChangeFreq: true,
+	createdAt: true,
+	updatedAt: true
+}
+
+const catalogSeoRelationSelect = {
+	seoSettings: {
+		where: {
+			deleteAt: null,
+			entityType: SeoEntityType.CATALOG
+		},
+		select: catalogSeoSelect,
+		orderBy: [{ updatedAt: 'desc' as const }, { createdAt: 'desc' as const }],
+		take: 1
+	}
+}
+
 const catalogSelect: Prisma.CatalogSelect = {
 	id: true,
 	slug: true,
@@ -92,6 +120,7 @@ const catalogSelect: Prisma.CatalogSelect = {
 	typeId: true,
 	parentId: true,
 	userId: true,
+	subscriptionEndsAt: true,
 	deleteAt: true,
 	createdAt: true,
 	updatedAt: true,
@@ -128,9 +157,34 @@ const catalogSelectWithType = {
 }
 
 const catalogCurrentSelect: Prisma.CatalogSelect = {
+	...catalogSeoRelationSelect,
 	createdAt: false,
 	updatedAt: false,
 	deleteAt: false
+}
+
+const catalogCurrentShellSelect = {
+	...catalogSelect,
+	...catalogSeoRelationSelect,
+	createdAt: false,
+	updatedAt: false,
+	deleteAt: false,
+	contacts: {
+		where: { deleteAt: null },
+		select: catalogContactSelect,
+		orderBy: [{ position: 'asc' as const }, { createdAt: 'asc' as const }]
+	}
+}
+
+const catalogTypeSelect = {
+	id: true,
+	code: true,
+	name: true,
+	attributes: {
+		where: { deleteAt: null },
+		select: attributeSelectWithEnums,
+		orderBy: [{ displayOrder: 'asc' as const }, { key: 'asc' as const }]
+	}
 }
 
 const catalogCurrentFallbackSelect = {
@@ -204,6 +258,30 @@ export class CatalogRepository {
 		} catch (error) {
 			if (isUnknownAttributeTypesError(error)) {
 				return this.getByIdWithType(id, catalogCurrentFallbackSelect)
+			}
+			throw error
+		}
+	}
+
+	async getCurrentShellById(id: string) {
+		return this.prisma.catalog.findUnique({
+			where: { id },
+			select: catalogCurrentShellSelect
+		})
+	}
+
+	async getTypeByIdWithAttributes(id: string) {
+		try {
+			return await this.prisma.type.findUnique({
+				where: { id },
+				select: catalogTypeSelect
+			})
+		} catch (error) {
+			if (isUnknownAttributeTypesError(error)) {
+				return this.prisma.type.findUnique({
+					where: { id },
+					select: catalogCurrentFallbackSelect.type.select
+				})
 			}
 			throw error
 		}

@@ -2,6 +2,7 @@ import { CatalogStatus, ContactType } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
 import { AttributeDto } from '@/modules/attribute/dto/responses/attribute.dto.res'
+import { SeoDto } from '@/modules/seo/dto/responses/seo.dto.res'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
 
@@ -98,6 +99,9 @@ export class CatalogDto {
 	@ApiPropertyOptional({ type: String, format: 'date-time' })
 	updatedAt?: string
 
+	@ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+	subscriptionEndsAt?: string | null
+
 	@ApiProperty({ type: CatalogConfigDto, nullable: true })
 	config: CatalogConfigDto | null
 
@@ -109,8 +113,19 @@ export class CatalogCurrentDto extends CatalogDto {
 	@ApiProperty({ type: [CatalogContactDto] })
 	contacts: CatalogContactDto[]
 
+	@ApiProperty({ type: SeoDto, nullable: true })
+	seo: SeoDto | null
+
 	@ApiProperty({ type: CatalogTypeDto })
 	type: CatalogTypeDto
+}
+
+export class CatalogCurrentShellDto extends CatalogDto {
+	@ApiProperty({ type: [CatalogContactDto] })
+	contacts: CatalogContactDto[]
+
+	@ApiProperty({ type: SeoDto, nullable: true })
+	seo: SeoDto | null
 }
 
 export class CatalogCreateResponseDto extends OkResponseDto {

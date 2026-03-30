@@ -28,6 +28,29 @@ export function mapCatalogRecord(catalog: any, mapMedia: CatalogMapMedia): any {
 		}
 	}
 
+	if (Object.prototype.hasOwnProperty.call(result, 'seoSettings')) {
+		const seoCandidate = Array.isArray(result.seoSettings)
+			? result.seoSettings.find((item: any) => item?.entityId === result.id) ??
+				result.seoSettings[0] ??
+				null
+			: null
+
+		result = {
+			...result,
+			seo: seoCandidate
+				? {
+						...seoCandidate,
+						ogMedia: seoCandidate.ogMedia ? mapMedia(seoCandidate.ogMedia) : null,
+						twitterMedia: seoCandidate.twitterMedia
+							? mapMedia(seoCandidate.twitterMedia)
+							: null
+					}
+				: null
+		}
+
+		delete result.seoSettings
+	}
+
 	const type = result.type
 	if (type?.attributes?.length) {
 		const attributes = type.attributes.map((attribute: any) => {

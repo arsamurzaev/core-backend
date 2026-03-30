@@ -73,14 +73,12 @@ export class BrandService {
 	): Promise<void> {
 		const exists = await this.repo.existsSlug(catalogId, slug, excludeId)
 		if (exists) {
-			throw new BadRequestException(
-				'slug СѓР¶Рµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РІ РєР°С‚Р°Р»РѕРіРµ'
-			)
+			throw new BadRequestException('slug уже используется в каталоге')
 		}
 	}
 
 	private requireBrand<T>(brand: T | null): T {
-		if (!brand) throw new NotFoundException('Р‘СЂРµРЅРґ РЅРµ РЅР°Р№РґРµРЅ')
+		if (!brand) throw new NotFoundException('Бренд не найден')
 		return brand
 	}
 }

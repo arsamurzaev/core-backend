@@ -9,6 +9,7 @@ import {
 	Post,
 	Query,
 	Req,
+	Res,
 	UseGuards
 } from '@nestjs/common'
 import {
@@ -23,7 +24,14 @@ import {
 	ApiSecurity,
 	ApiTags
 } from '@nestjs/swagger'
+import type { Response } from 'express'
 
+import {
+	PUBLIC_CACHE_CONTROL_SHORT,
+	PUBLIC_CACHE_CONTROL_STANDARD,
+	setPublicCacheHeaders,
+	setUserAwarePublicCacheHeaders
+} from '@/shared/http/cache-control'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
@@ -36,9 +44,11 @@ import type { AuthRequest } from '../auth/types/auth-request'
 
 import { CategoryService } from './category.service'
 import { CreateCategoryDtoReq } from './dto/requests/create-category.dto.req'
+import { UpdateCategoryPositionDtoReq } from './dto/requests/update-category-position.dto.req'
 import { UpdateCategoryDtoReq } from './dto/requests/update-category.dto.req'
 import {
 	CategoryDto,
+	CategoryProductsCardPageDto,
 	CategoryProductsPageDto,
 	CategoryWithRelationsDto
 } from './dto/responses/category.dto.res'
@@ -55,7 +65,8 @@ export class CategoryController {
 		type: CategoryDto,
 		isArray: true
 	})
-	async getAll() {
+	async getAll(@Res({ passthrough: true }) res: Response) {
+		setPublicCacheHeaders(res, PUBLIC_CACHE_CONTROL_STANDARD)
 		return this.categoryService.getAll()
 	}
 
@@ -70,7 +81,11 @@ export class CategoryController {
 		type: CategoryWithRelationsDto
 	})
 	@ApiNotFoundResponse({ description: 'Категория не найдена' })
-	async getById(@Param('id') id: string) {
+	async getById(
+		@Param('id') id: string,
+		@Res({ passthrough: true }) res: Response
+	) {
+		setPublicCacheHeaders(res, PUBLIC_CACHE_CONTROL_STANDARD)
 		return this.categoryService.getById(id)
 	}
 
@@ -103,11 +118,64 @@ export class CategoryController {
 	@ApiNotFoundResponse({ description: 'Категория не найдена' })
 	async getProductsByCategory(
 		@Param('id') id: string,
-		@Query('cursor') cursor?: string,
-		@Query('limit') limit?: string,
-		@Req() req?: AuthRequest
+		@Query('cursor') cursor: string | undefined,
+		@Query('limit') limit: string | undefined,
+		@Req() req: AuthRequest,
+		@Res({ passthrough: true }) res: Response
 	) {
+		setUserAwarePublicCacheHeaders(res, {
+			isPrivate: Boolean(req?.user),
+			publicCacheControl: PUBLIC_CACHE_CONTROL_SHORT
+		})
 		return this.categoryService.getProductsByCategory(id, {
+			cursor,
+			limit,
+			includeInactive: canReadInactiveCatalogProducts(
+				req?.user,
+				RequestContext.get()?.ownerUserId
+			)
+		})
+	}
+
+	@Get('/:id/products/cards/infinite')
+	@UseGuards(OptionalSessionGuard)
+	@ApiOperation({
+		summary: 'List category product cards (infinite)',
+		description:
+			'Возвращает карточки товаров категории с productAttributes, но без variants.'
+	})
+	@ApiParam({
+		name: 'id',
+		description: 'ID категории'
+	})
+	@ApiQuery({
+		name: 'cursor',
+		required: false,
+		description: 'Курсор из предыдущего ответа (opaque)'
+	})
+	@ApiQuery({
+		name: 'limit',
+		required: false,
+		description: 'Размер страницы (1-50)',
+		schema: { type: 'integer', minimum: 1, maximum: 50, default: 24 }
+	})
+	@ApiOkResponse({
+		description: 'Страница карточек товаров категории',
+		type: CategoryProductsCardPageDto
+	})
+	@ApiNotFoundResponse({ description: 'Категория не найдена' })
+	async getProductCardsByCategory(
+		@Param('id') id: string,
+		@Query('cursor') cursor: string | undefined,
+		@Query('limit') limit: string | undefined,
+		@Req() req: AuthRequest,
+		@Res({ passthrough: true }) res: Response
+	) {
+		setUserAwarePublicCacheHeaders(res, {
+			isPrivate: Boolean(req?.user),
+			publicCacheControl: PUBLIC_CACHE_CONTROL_SHORT
+		})
+		return this.categoryService.getProductCardsByCategory(id, {
 			cursor,
 			limit,
 			includeInactive: canReadInactiveCatalogProducts(
@@ -150,6 +218,33 @@ export class CategoryController {
 	@ApiForbiddenResponse({ description: 'Доступ запрещён' })
 	async update(@Param('id') id: string, @Body() dto: UpdateCategoryDtoReq) {
 		return this.categoryService.update(id, dto)
+	}
+
+	@Patch('/:id/position')
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({
+		summary: 'Изменить позицию категории',
+		description:
+			'Меняет позицию категории среди соседних категорий и пересобирает порядок без пропусков.'
+	})
+	@ApiParam({
+		name: 'id',
+		description: 'ID категории'
+	})
+	@ApiOkResponse({
+		description: 'Позиция категории обновлена',
+		type: CategoryWithRelationsDto
+	})
+	@ApiBadRequestResponse({ description: 'Ошибка валидации' })
+	@ApiNotFoundResponse({ description: 'Категория не найдена' })
+	@ApiForbiddenResponse({ description: 'Доступ запрещён' })
+	async updatePosition(
+		@Param('id') id: string,
+		@Body() dto: UpdateCategoryPositionDtoReq
+	) {
+		return this.categoryService.updatePosition(id, dto)
 	}
 
 	@Delete('/:id')

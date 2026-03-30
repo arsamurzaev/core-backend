@@ -100,14 +100,15 @@ export class SeoRepository {
 	}
 
 	async update(id: string, catalogId: string, data: SeoSettingUpdateInput) {
-		const result = await this.prisma.seoSetting.updateMany({
+		const existing = await this.prisma.seoSetting.findFirst({
 			where: { id, catalogId, deleteAt: null },
-			data
+			select: { id: true }
 		})
-		if (!result.count) return null
+		if (!existing) return null
 
-		return this.prisma.seoSetting.findFirst({
-			where: { id, catalogId, deleteAt: null },
+		return this.prisma.seoSetting.update({
+			where: { id: existing.id },
+			data,
 			select: seoSelect
 		})
 	}

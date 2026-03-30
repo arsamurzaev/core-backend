@@ -1,3 +1,4 @@
+import { Role } from '@generated/client'
 import {
 	Body,
 	Controller,
@@ -10,7 +11,8 @@ import {
 	Query,
 	Req,
 	Res,
-	Sse
+	Sse,
+	UseGuards
 } from '@nestjs/common'
 import {
 	ApiBody,
@@ -25,6 +27,10 @@ import {
 import type { Request, Response } from 'express'
 import type { Observable } from 'rxjs'
 
+import { Roles } from '@/modules/auth/decorators/roles.decorator'
+import { User } from '@/modules/auth/decorators/user.decorator'
+import { SessionGuard } from '@/modules/auth/guards/session.guard'
+import type { SessionUser } from '@/modules/auth/types/auth-request'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
@@ -36,6 +42,7 @@ import {
 import {
 	CartResponseDto,
 	CheckoutCartResponseDto,
+	CompleteCartOrderResponseDto,
 	ShareCartResponseDto
 } from './dto/responses/cart.dto.res'
 
@@ -46,19 +53,22 @@ const SSE_EXAMPLE = [
 	'event: ping',
 	'data: {"timestamp":"2026-02-12T09:00:20.000Z"}',
 	'',
+	'event: cart.status_changed',
+	'data: {"id":"0a7f0d75-4d82-4764-9fc4-3f2f11d5d955","status":"IN_PROGRESS"}',
+	'',
 	'event: cart.updated',
 	'data: {"id":"0a7f0d75-4d82-4764-9fc4-3f2f11d5d955","items":[],"totals":{"itemsCount":0,"subtotal":0}}',
 	''
 ].join('\n')
 
-@ApiTags('Корзина')
+@ApiTags('Cart')
 @Controller('cart')
 export class CartController {
 	constructor(private readonly cartService: CartService) {}
 
 	@Post('current')
 	@ApiOperation({
-		summary: 'Создать или получить текущую корзину по cookie-токену'
+		summary: 'Create or return the current cart by cookie token'
 	})
 	@ApiCreatedResponse({ type: CartResponseDto })
 	async createOrGetCurrent(
@@ -73,7 +83,7 @@ export class CartController {
 	}
 
 	@Get('current')
-	@ApiOperation({ summary: 'Получить текущую корзину по cookie-токену' })
+	@ApiOperation({ summary: 'Get the current cart by cookie token' })
 	@ApiOkResponse({ type: CartResponseDto })
 	async getCurrent(@Req() req: Request) {
 		const token = this.readTokenFromRequest(req)
@@ -83,7 +93,7 @@ export class CartController {
 	}
 
 	@Post('current/share')
-	@ApiOperation({ summary: 'Получить публичный ключ для шаринга корзины' })
+	@ApiOperation({ summary: 'Issue a public key for the current cart' })
 	@ApiOkResponse({ type: ShareCartResponseDto })
 	async shareCurrent(
 		@Req() req: Request,
@@ -101,12 +111,12 @@ export class CartController {
 	}
 
 	@Put('current/items')
-	@ApiOperation({ summary: 'Добавить или обновить позицию в текущей корзине' })
+	@ApiOperation({ summary: 'Upsert an item in the current cart' })
 	@ApiBody({
 		type: UpsertCartItemDtoReq,
 		examples: {
 			base: {
-				summary: 'Добавить 2 шт товара',
+				summary: 'Add two units of a product',
 				value: {
 					productId: 'd084ec3f-55cb-4ba4-9f50-c18fd01ea124',
 					variantId: '9f3f4ec2-9f74-4e03-b8cf-95ce5449cb8e',
@@ -129,10 +139,10 @@ export class CartController {
 	}
 
 	@Delete('current/items/:itemId')
-	@ApiOperation({ summary: 'Удалить позицию из текущей корзины' })
+	@ApiOperation({ summary: 'Remove an item from the current cart' })
 	@ApiParam({
 		name: 'itemId',
-		description: 'ID позиции корзины',
+		description: 'Cart item id',
 		example: 'fc31fd15-6f7e-4fb1-a594-34fa14f6ef0c'
 	})
 	@ApiOkResponse({ type: CartResponseDto })
@@ -153,10 +163,10 @@ export class CartController {
 	}
 
 	@Sse('current/sse')
-	@ApiOperation({ summary: 'SSE поток обновлений текущей корзины' })
+	@ApiOperation({ summary: 'SSE stream for the current cart' })
 	@ApiProduces('text/event-stream')
 	@ApiOkResponse({
-		description: 'SSE события: connected, ping, cart.updated',
+		description: 'SSE events: connected, ping, cart.updated, cart.status_changed',
 		content: {
 			'text/event-stream': {
 				schema: { type: 'string', example: SSE_EXAMPLE }
@@ -176,10 +186,10 @@ export class CartController {
 
 	@SkipCatalog()
 	@Post('public/:publicKey/checkout')
-	@ApiOperation({ summary: 'Выдать checkoutKey для публичной корзины' })
+	@ApiOperation({ summary: 'Issue a checkoutKey for a public cart' })
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Публичный ключ корзины',
+		description: 'Public cart key',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiOkResponse({ type: CheckoutCartResponseDto })
@@ -195,16 +205,16 @@ export class CartController {
 
 	@SkipCatalog()
 	@Get('public/:publicKey')
-	@ApiOperation({ summary: 'Получить публичную корзину по checkoutKey' })
+	@ApiOperation({ summary: 'Get a public cart by checkoutKey' })
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Публичный ключ корзины',
+		description: 'Public cart key',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiQuery({
 		name: 'checkoutKey',
 		required: true,
-		description: 'Ключ доступа для чтения/изменения публичной корзины'
+		description: 'Read/write key for the public cart'
 	})
 	@ApiOkResponse({ type: CartResponseDto })
 	async getPublicCart(
@@ -216,18 +226,98 @@ export class CartController {
 	}
 
 	@SkipCatalog()
-	@Put('public/:publicKey/items')
-	@ApiOperation({ summary: 'Добавить или обновить позицию в публичной корзине' })
+	@Post('public/:publicKey/manager/start')
+	@UseGuards(SessionGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({ summary: 'Mark a cart as being processed by a manager' })
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Публичный ключ корзины',
+		description: 'Public cart key',
+		example: '5f7ec4ac9cc6c392419eec11850d45f1'
+	})
+	@ApiOkResponse({ type: CartResponseDto })
+	async startManagerSession(
+		@Param('publicKey') publicKey: string,
+		@User() user: SessionUser
+	) {
+		const cart = await this.cartService.beginManagerSession(publicKey, user)
+		return { ok: true, cart }
+	}
+
+	@SkipCatalog()
+	@Post('public/:publicKey/manager/heartbeat')
+	@UseGuards(SessionGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({ summary: 'Refresh manager presence for a cart' })
+	@ApiParam({
+		name: 'publicKey',
+		description: 'Public cart key',
+		example: '5f7ec4ac9cc6c392419eec11850d45f1'
+	})
+	@ApiOkResponse({ type: CartResponseDto })
+	async heartbeatManagerSession(
+		@Param('publicKey') publicKey: string,
+		@User() user: SessionUser
+	) {
+		const cart = await this.cartService.heartbeatManagerSession(publicKey, user)
+		return { ok: true, cart }
+	}
+
+	@SkipCatalog()
+	@Post('public/:publicKey/manager/release')
+	@UseGuards(SessionGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({
+		summary: 'Move a cart to PAUSED after manager processing'
+	})
+	@ApiParam({
+		name: 'publicKey',
+		description: 'Public cart key',
+		example: '5f7ec4ac9cc6c392419eec11850d45f1'
+	})
+	@ApiOkResponse({ type: CartResponseDto })
+	async releaseManagerSession(
+		@Param('publicKey') publicKey: string,
+		@User() user: SessionUser
+	) {
+		const cart = await this.cartService.releaseManagerSession(publicKey, user)
+		return { ok: true, cart }
+	}
+
+	@SkipCatalog()
+	@Post('public/:publicKey/manager/complete')
+	@UseGuards(SessionGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({
+		summary: 'Convert a shared cart to a completed order'
+	})
+	@ApiParam({
+		name: 'publicKey',
+		description: 'Public cart key',
+		example: '5f7ec4ac9cc6c392419eec11850d45f1'
+	})
+	@ApiOkResponse({ type: CompleteCartOrderResponseDto })
+	async completeManagerOrder(
+		@Param('publicKey') publicKey: string,
+		@User() user: SessionUser
+	) {
+		const result = await this.cartService.completeManagerOrder(publicKey, user)
+		return { ok: true, order: result.order }
+	}
+
+	@SkipCatalog()
+	@Put('public/:publicKey/items')
+	@ApiOperation({ summary: 'Upsert an item in a public cart' })
+	@ApiParam({
+		name: 'publicKey',
+		description: 'Public cart key',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiBody({
 		type: PublicUpsertCartItemDtoReq,
 		examples: {
 			base: {
-				summary: 'Добавить товар в публичную корзину',
+				summary: 'Add a product to the public cart',
 				value: {
 					checkoutKey: '7b5f8d06f87d14d4a4f1f3f9826459fd9f9a',
 					productId: 'd084ec3f-55cb-4ba4-9f50-c18fd01ea124',
@@ -252,21 +342,21 @@ export class CartController {
 
 	@SkipCatalog()
 	@Delete('public/:publicKey/items/:itemId')
-	@ApiOperation({ summary: 'Удалить позицию из публичной корзины' })
+	@ApiOperation({ summary: 'Remove an item from a public cart' })
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Публичный ключ корзины',
+		description: 'Public cart key',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiParam({
 		name: 'itemId',
-		description: 'ID позиции корзины',
+		description: 'Cart item id',
 		example: 'fc31fd15-6f7e-4fb1-a594-34fa14f6ef0c'
 	})
 	@ApiQuery({
 		name: 'checkoutKey',
 		required: true,
-		description: 'Ключ доступа для изменения публичной корзины'
+		description: 'Write key for the public cart'
 	})
 	@ApiOkResponse({ type: CartResponseDto })
 	async removePublicItem(
@@ -284,20 +374,20 @@ export class CartController {
 
 	@SkipCatalog()
 	@Sse('public/:publicKey/sse')
-	@ApiOperation({ summary: 'SSE поток обновлений публичной корзины' })
+	@ApiOperation({ summary: 'SSE stream for a public cart' })
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Публичный ключ корзины',
+		description: 'Public cart key',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiQuery({
 		name: 'checkoutKey',
 		required: true,
-		description: 'Ключ доступа для подписки на SSE'
+		description: 'SSE access key for the public cart'
 	})
 	@ApiProduces('text/event-stream')
 	@ApiOkResponse({
-		description: 'SSE события: connected, ping, cart.updated',
+		description: 'SSE events: connected, ping, cart.updated, cart.status_changed',
 		content: {
 			'text/event-stream': {
 				schema: { type: 'string', example: SSE_EXAMPLE }

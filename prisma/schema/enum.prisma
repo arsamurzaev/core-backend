@@ -56,6 +56,16 @@ enum OrderStatus {
     COMPLETED
 }
 
+enum CartStatus {
+    DRAFT
+    SHARED
+    IN_PROGRESS
+    PAUSED
+    CONVERTED
+    CANCELLED
+    EXPIRED
+}
+
 enum Metric {
     YANDEX
 }

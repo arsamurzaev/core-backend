@@ -63,7 +63,8 @@ const CONTENT_TYPE_EXTENSION: Record<string, string> = {
 	'image/jpeg': 'jpg',
 	'image/png': 'png',
 	'image/webp': 'webp',
-	'image/avif': 'avif'
+	'image/avif': 'avif',
+	'image/x-icon': 'ico'
 }
 
 const UPLOAD_QUEUE_NAME = 's3-image-uploads'
@@ -136,6 +137,22 @@ export type UploadImageResult = {
 	key: string
 	url: string
 	variants: ImageVariant[]
+}
+
+export type UploadGeneratedAsset = {
+	buffer: Buffer
+	contentType: string
+	originalName?: string
+	size?: number
+	width?: number
+	height?: number
+}
+
+export type UploadGeneratedAssetResult = {
+	ok: true
+	mediaId: string
+	key: string
+	url: string
 }
 
 export type PresignUploadResult = {
@@ -336,6 +353,45 @@ export class S3Service implements OnModuleDestroy {
 		})
 
 		return this.buildResponse(variants, mediaId)
+	}
+
+	async uploadGeneratedAsset(
+		asset: UploadGeneratedAsset,
+		options: UploadImageOptions & { filename: string }
+	): Promise<UploadGeneratedAssetResult> {
+		this.assertUploadEnabled()
+
+		if (!asset.buffer?.length) {
+			throw new BadRequestException('Файл не передан')
+		}
+
+		const contentType = this.normalizeAnyRequiredContentType(asset.contentType)
+		const catalogId = options.catalogId ?? mustCatalogId()
+		const key = this.buildManagedObjectKey(catalogId, options, options.filename)
+
+		await this.putObject(key, asset.buffer, contentType, {
+			cacheControl: 'public, max-age=0, must-revalidate'
+		})
+
+		const mediaId = await this.createMediaRecord({
+			catalogId,
+			originalName: asset.originalName ?? options.filename,
+			mimeType: contentType,
+			size: asset.size ?? asset.buffer.length,
+			width: asset.width,
+			height: asset.height,
+			rawKey: key,
+			variants: [],
+			path: options.path ?? options.folder,
+			entityId: options.entityId
+		})
+
+		return {
+			ok: true,
+			mediaId,
+			key,
+			url: this.buildPublicUrl(key)
+		}
 	}
 
 	async createPresignedUpload(
@@ -1279,7 +1335,8 @@ export class S3Service implements OnModuleDestroy {
 	private async putObject(
 		key: string,
 		body: Buffer,
-		contentType: string
+		contentType: string,
+		options?: { cacheControl?: string }
 	): Promise<void> {
 		if (!this.client) return
 
@@ -1288,7 +1345,8 @@ export class S3Service implements OnModuleDestroy {
 			Key: key,
 			Body: body,
 			ContentType: contentType,
-			CacheControl: 'public, max-age=31536000, immutable',
+			CacheControl:
+				options?.cacheControl ?? 'public, max-age=31536000, immutable',
 			...(this.publicRead ? { ACL: 'public-read' } : {})
 		})
 
@@ -1392,6 +1450,29 @@ export class S3Service implements OnModuleDestroy {
 		return segments.join('/')
 	}
 
+	private buildManagedObjectKey(
+		catalogId: string,
+		options: UploadImageOptions,
+		filename: string
+	): string {
+		const pathSegments = this.normalizePath(options.path)
+		const folderSegment = this.normalizeSegment(options.folder ?? 'images')
+		const entityId = options.entityId
+			? this.normalizeSegment(options.entityId)
+			: null
+		const safeFilename = this.normalizeFilename(filename)
+
+		const segments = [
+			'catalogs',
+			catalogId,
+			...(pathSegments.length ? pathSegments : [folderSegment])
+		]
+		if (entityId) segments.push(entityId)
+		segments.push(safeFilename)
+
+		return segments.join('/')
+	}
+
 	private normalizePath(value?: string): string[] {
 		if (!value) return []
 		const rawSegments = value
@@ -1403,12 +1484,37 @@ export class S3Service implements OnModuleDestroy {
 			.filter(Boolean)
 	}
 
+	private normalizeFilename(value: string): string {
+		const trimmed = value.trim()
+		if (!trimmed) {
+			throw new BadRequestException('filename обязателен')
+		}
+
+		const extension = path.extname(trimmed).toLowerCase()
+		const basename = trimmed.slice(0, trimmed.length - extension.length)
+		const normalizedBase = this.normalizeSegment(basename, 'asset')
+		const normalizedExtension = extension.replace(/[^a-z0-9.]/g, '')
+
+		return normalizedExtension
+			? `${normalizedBase}${normalizedExtension}`
+			: normalizedBase
+	}
+
 	private normalizeRequiredContentType(contentType: string): string {
 		const normalizedType = contentType?.trim().toLowerCase()
 		if (!normalizedType) {
 			throw new BadRequestException('contentType обязателен')
 		}
 		this.assertContentType(normalizedType)
+		return normalizedType
+	}
+
+	private normalizeAnyRequiredContentType(contentType: string): string {
+		const normalizedType = contentType?.trim().toLowerCase()
+		if (!normalizedType) {
+			throw new BadRequestException('contentType обязателен')
+		}
+
 		return normalizedType
 	}
 

@@ -1,3 +1,4 @@
+import { CartStatus } from '@generated/client'
 import { BadRequestException } from '@nestjs/common'
 
 export type UpsertCartItemInput = {
@@ -15,8 +16,14 @@ export type NormalizedCartItemInput = {
 type CartEntityLike = {
 	id: string
 	catalogId: string
+	status: CartStatus
+	statusChangedAt: unknown
 	publicKey: string | null
 	checkoutAt: unknown
+	assignedManagerId: string | null
+	managerSessionStartedAt: unknown
+	managerLastSeenAt: unknown
+	closedAt: unknown
 	items: CartItemLike[]
 	createdAt: unknown
 	updatedAt: unknown
@@ -42,6 +49,14 @@ export const PUBLIC_KEY_BYTES = 16
 export const CHECKOUT_KEY_BYTES = 18
 export const CART_COOKIE_NAME = 'cart_token'
 export const CART_SSE_HEARTBEAT_MS = 20_000
+
+function getCartStatusMessage(status: CartStatus): string | null {
+	if (status === CartStatus.IN_PROGRESS) {
+		return 'Менеджер магазина сейчас просматривает ваш заказ.'
+	}
+
+	return null
+}
 
 export function readCartTokenFromCookie(cookieHeader?: string): string | null {
 	if (!cookieHeader) return null
@@ -115,8 +130,15 @@ export function mapCartEntity(cart: CartEntityLike) {
 	return {
 		id: cart.id,
 		catalogId: cart.catalogId,
+		status: cart.status,
+		statusMessage: getCartStatusMessage(cart.status),
+		statusChangedAt: cart.statusChangedAt,
 		publicKey: cart.publicKey,
 		checkoutAt: cart.checkoutAt,
+		assignedManagerId: cart.assignedManagerId,
+		managerSessionStartedAt: cart.managerSessionStartedAt,
+		managerLastSeenAt: cart.managerLastSeenAt,
+		closedAt: cart.closedAt,
 		items,
 		totals: {
 			itemsCount,

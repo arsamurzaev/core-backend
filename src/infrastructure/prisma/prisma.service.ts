@@ -10,14 +10,23 @@ import { PrismaPg } from '@prisma/adapter-pg'
 
 import { AllInterfaces } from '@/core/config'
 
+import {
+	buildPrismaLogDefinitions,
+	normalizePrismaQueryText,
+	resolvePrismaSlowQuerySettings,
+	type PrismaSlowQuerySettings
+} from './prisma-observability'
+
 @Injectable()
 export class PrismaService
 	extends PrismaClient
 	implements OnModuleInit, OnModuleDestroy
 {
 	private readonly logger = new Logger(PrismaService.name)
+	private readonly slowQuerySettings: PrismaSlowQuerySettings
 
 	constructor(private readonly configService: ConfigService<AllInterfaces>) {
+		const slowQuerySettings = resolvePrismaSlowQuerySettings()
 		const adapter = new PrismaPg({
 			user: configService.get('database.user', { infer: true }),
 			password: configService.get('database.password', {
@@ -30,7 +39,13 @@ export class PrismaService
 			})
 		})
 
-		super({ adapter })
+		super({
+			adapter,
+			log: buildPrismaLogDefinitions(slowQuerySettings)
+		})
+
+		this.slowQuerySettings = slowQuerySettings
+		this.registerSlowQueryLogger()
 	}
 
 	async onModuleInit() {
@@ -63,5 +78,25 @@ export class PrismaService
 
 			throw error
 		}
+	}
+
+	private registerSlowQueryLogger() {
+		if (this.slowQuerySettings.thresholdMs <= 0) return
+
+		this.$on('query', event => {
+			if (event.duration < this.slowQuerySettings.thresholdMs) {
+				return
+			}
+
+			const target = event.target ? ` target=${event.target}` : ''
+			const query = normalizePrismaQueryText(
+				event.query,
+				this.slowQuerySettings.maxQueryLength
+			)
+
+			this.logger.warn(
+				`Slow Prisma query (${event.duration}ms${target}): ${query}`
+			)
+		})
 	}
 }

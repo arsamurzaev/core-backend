@@ -17,9 +17,13 @@ describe('ProductController', () => {
 						provide: ProductService,
 						useValue: {
 							getAll: jest.fn(),
+							getInfiniteCards: jest.fn(),
 							getInfinite: jest.fn(),
+							getRecommendationsInfiniteCards: jest.fn(),
 							getRecommendationsInfinite: jest.fn(),
+							getUncategorizedInfiniteCards: jest.fn(),
 							getUncategorizedInfinite: jest.fn(),
+							getPopularCards: jest.fn(),
 							getPopular: jest.fn(),
 							getById: jest.fn(),
 							getBySlug: jest.fn(),

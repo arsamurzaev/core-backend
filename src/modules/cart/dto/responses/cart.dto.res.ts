@@ -1,3 +1,4 @@
+import { CartStatus, OrderStatus } from '@generated/client'
 import { ApiProperty } from '@nestjs/swagger'
 
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
@@ -57,6 +58,19 @@ export class CartDto {
 	@ApiProperty({ type: String, format: 'uuid' })
 	catalogId: string
 
+	@ApiProperty({ enum: CartStatus, enumName: 'CartStatus' })
+	status: CartStatus
+
+	@ApiProperty({
+		type: String,
+		nullable: true,
+		example: 'Менеджер магазина сейчас просматривает ваш заказ.'
+	})
+	statusMessage: string | null
+
+	@ApiProperty({ type: String, format: 'date-time' })
+	statusChangedAt: string
+
 	@ApiProperty({
 		type: String,
 		nullable: true,
@@ -70,6 +84,34 @@ export class CartDto {
 		nullable: true
 	})
 	checkoutAt: string | null
+
+	@ApiProperty({
+		type: String,
+		format: 'uuid',
+		nullable: true
+	})
+	assignedManagerId: string | null
+
+	@ApiProperty({
+		type: String,
+		format: 'date-time',
+		nullable: true
+	})
+	managerSessionStartedAt: string | null
+
+	@ApiProperty({
+		type: String,
+		format: 'date-time',
+		nullable: true
+	})
+	managerLastSeenAt: string | null
+
+	@ApiProperty({
+		type: String,
+		format: 'date-time',
+		nullable: true
+	})
+	closedAt: string | null
 
 	@ApiProperty({ type: [CartItemDto] })
 	items: CartItemDto[]
@@ -109,4 +151,46 @@ export class CheckoutCartResponseDto extends CartResponseDto {
 		example: '7b5f8d06f87d14d4a4f1f3f9826459fd9f9a'
 	})
 	checkoutKey: string
+}
+
+export class CompletedOrderItemDto {
+	@ApiProperty({ type: String, format: 'uuid' })
+	id: string
+
+	@ApiProperty({ type: String, format: 'uuid' })
+	productId: string
+
+	@ApiProperty({ type: String, format: 'uuid', nullable: true })
+	variantId: string | null
+
+	@ApiProperty({ type: Number, example: 2 })
+	quantity: number
+
+	@ApiProperty({ type: Number, example: 1999 })
+	unitPrice: number
+}
+
+export class CompletedOrderDto {
+	@ApiProperty({ type: String, format: 'uuid' })
+	id: string
+
+	@ApiProperty({ enum: OrderStatus, enumName: 'OrderStatus' })
+	status: OrderStatus
+
+	@ApiProperty({ type: String, format: 'uuid' })
+	catalogId: string
+
+	@ApiProperty({ type: Number, example: 3998 })
+	totalAmount: number
+
+	@ApiProperty({ type: [CompletedOrderItemDto] })
+	items: CompletedOrderItemDto[]
+
+	@ApiProperty({ type: String, format: 'date-time' })
+	createdAt: string
+}
+
+export class CompleteCartOrderResponseDto extends OkResponseDto {
+	@ApiProperty({ type: CompletedOrderDto })
+	order: CompletedOrderDto
 }

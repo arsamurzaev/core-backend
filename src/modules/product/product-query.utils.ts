@@ -6,6 +6,7 @@ import type {
 	ProductDefaultPageCursor,
 	ProductSeededPageCursor
 } from './product.repository'
+import { normalizeProductSearchTerm } from './product-search.utils'
 
 type ScalarQueryValue = string | number | boolean | bigint
 
@@ -102,7 +103,9 @@ export function parseProductInfiniteQuery(
 		brandIds: extractCsvValues(query.brands),
 		minPrice,
 		maxPrice,
-		searchTerm: getSingleQueryValue(query.searchTerm),
+		searchTerm: normalizeProductSearchTerm(
+			getSingleQueryValue(query.searchTerm)
+		),
 		isPopular: parseOptionalBoolean(
 			getSingleQueryValue(query.isPopular),
 			'isPopular'

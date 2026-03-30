@@ -20,6 +20,7 @@ import {
 import { MediaRepository } from '@/shared/media/media.repository'
 
 import {
+	type CategorySyncRecord,
 	IntegrationRecord,
 	IntegrationRepository,
 	type ProductSyncRecord
@@ -27,9 +28,12 @@ import {
 
 import { MoySkladClient } from './moysklad.client'
 import { MoySkladMetadataCryptoService } from './moysklad.metadata'
-import type { MoySkladProduct } from './moysklad.types'
-
-type CategorySyncRecord = { id: string; name: string }
+import type {
+	MoySkladEntityType,
+	MoySkladProduct,
+	MoySkladProductFolder,
+	MoySkladProductFolderRef
+} from './moysklad.types'
 
 const SYNC_LOCK_TIMEOUT_MS = 10 * 60 * 1000
 const PRODUCT_SLUG_FALLBACK = 'product'
@@ -43,6 +47,11 @@ const ALLOWED_IMAGE_MIME_TYPES = new Set([
 	'image/png',
 	'image/webp',
 	'image/avif'
+])
+const SUPPORTED_ASSORTMENT_TYPES = new Set<MoySkladEntityType>([
+	'product',
+	'service',
+	'bundle'
 ])
 
 type SyncCatalogResult = {
@@ -78,7 +87,6 @@ type SyncExternalProductParams = {
 	importImages: boolean
 	refreshImagesForExistingProduct?: boolean
 	syncStock: boolean
-	stockByExternalId?: Map<string, number>
 	existingProduct?: ProductSyncRecord | null
 	existingLinkExternalId?: string | null
 	tx?: Prisma.TransactionClient
@@ -95,6 +103,12 @@ type SyncExternalProductOutcome = {
 type ImportedProductImages = {
 	mediaIds: string[]
 	sourceCount: number
+}
+
+type ResolvedProductFolder = {
+	externalId: string
+	name: string
+	externalParentId: string | null
 }
 
 function slugifyValue(value: string, lower: boolean): string {
@@ -164,13 +178,33 @@ function resolvePrice(product: MoySkladProduct, priceTypeName: string): number {
 	return Math.round(rawValue) / 100
 }
 
+function resolveExternalEntityType(
+	product: MoySkladProduct
+): MoySkladEntityType {
+	switch (product.meta?.type) {
+		case 'service':
+		case 'bundle':
+		case 'variant':
+			return product.meta.type
+		default:
+			return 'product'
+	}
+}
+
+function isSupportedAssortmentItem(product: MoySkladProduct): boolean {
+	return SUPPORTED_ASSORTMENT_TYPES.has(resolveExternalEntityType(product))
+}
+
 function resolveProductStatus(
 	product: MoySkladProduct,
 	stock: number | undefined,
 	syncStock: boolean,
 	currentStatus?: ProductStatus | null
 ): ProductStatus {
-	if (currentStatus === ProductStatus.DRAFT || currentStatus === ProductStatus.DELETE) {
+	if (
+		currentStatus === ProductStatus.DRAFT ||
+		currentStatus === ProductStatus.DELETE
+	) {
 		return currentStatus
 	}
 
@@ -179,6 +213,14 @@ function resolveProductStatus(
 	}
 
 	if (!syncStock) {
+		return currentStatus ?? ProductStatus.ACTIVE
+	}
+
+	if (resolveExternalEntityType(product) === 'service') {
+		return currentStatus ?? ProductStatus.ACTIVE
+	}
+
+	if (stock === undefined) {
 		return currentStatus ?? ProductStatus.ACTIVE
 	}
 
@@ -227,24 +269,25 @@ export class MoySkladSyncService {
 			this.logger.log(
 				`Starting MoySklad catalog sync for catalog ${catalogId}: integration=${integration.id}, updatedFrom=${updatedFrom?.toISOString() ?? 'full-snapshot'}, importImages=${metadata.importImages}, syncStock=${metadata.syncStock}`
 			)
-			const stockByExternalId = metadata.syncStock
-				? await client.getStockAll()
-				: undefined
+			const assortment = await client.getAllAssortment(updatedFrom)
+			const products = assortment.filter(isSupportedAssortmentItem)
+			const skipped = assortment.length - products.length
 			this.logger.log(
-				`Fetched MoySklad stock snapshot for catalog ${catalogId}: ${stockByExternalId?.size ?? 0} items`
+				`Fetched ${assortment.length} assortment items from MoySklad for catalog ${catalogId}; syncing ${products.length} supported items`
 			)
-			const products = await client.getAllProducts(updatedFrom)
-			this.logger.log(
-				`Fetched ${products.length} products from MoySklad for catalog ${catalogId}`
-			)
+			if (skipped > 0) {
+				this.logger.log(
+					`Skipped ${skipped} unsupported assortment items from MoySklad for catalog ${catalogId}`
+				)
+			}
 			if (products.length === 0) {
 				if (isIncrementalSync) {
 					this.logger.log(
-						`No MoySklad product changes found for catalog ${catalogId} since ${updatedFrom?.toISOString()}`
+						`No supported MoySklad assortment changes found for catalog ${catalogId} since ${updatedFrom?.toISOString()}`
 					)
 				} else {
 					this.logger.warn(
-						`MoySklad returned 0 products for catalog ${catalogId}. Check token permissions, filters, archived products, and whether the account really has products in the selected entity scope.`
+						`MoySklad returned 0 supported assortment items for catalog ${catalogId}. Check token permissions, filters, archived products, and whether the account really has product/service/bundle entries in the selected entity scope.`
 					)
 				}
 			}
@@ -268,8 +311,7 @@ export class MoySkladSyncService {
 					product,
 					priceTypeName: metadata.priceTypeName,
 					importImages: metadata.importImages,
-					syncStock: metadata.syncStock,
-					stockByExternalId
+					syncStock: metadata.syncStock
 				})
 
 				if (result.created) {
@@ -290,10 +332,7 @@ export class MoySkladSyncService {
 				const links = await this.repo.findProductLinksByIntegration(integration.id)
 				for (const link of links) {
 					if (!currentExternalIds.has(link.externalId)) {
-						const product = await this.repo.findProductById(
-							catalogId,
-							link.productId
-						)
+						const product = await this.repo.findProductById(catalogId, link.productId)
 						if (product && product.status === ProductStatus.ACTIVE) {
 							await this.repo.updateProduct({
 								productId: product.id,
@@ -377,10 +416,7 @@ export class MoySkladSyncService {
 				throw new NotFoundException('Товар не связан с MoySklad')
 			}
 
-			const stockByExternalId = metadata.syncStock
-				? await client.getStockAll()
-				: undefined
-			const externalProduct = await client.getProduct(link.externalId)
+			const externalProduct = await client.getAssortmentItemById(link.externalId)
 			const result = await this.syncExternalProduct({
 				catalogId,
 				integration,
@@ -390,7 +426,6 @@ export class MoySkladSyncService {
 				importImages: metadata.importImages,
 				refreshImagesForExistingProduct: true,
 				syncStock: metadata.syncStock,
-				stockByExternalId,
 				existingProduct: localProduct,
 				existingLinkExternalId: link.externalId
 			})
@@ -433,7 +468,11 @@ export class MoySkladSyncService {
 		const externalId = params.product.id
 		const externalCode = resolveExternalCode(params.product)
 		const externalUpdatedAt = parseMoySkladDate(params.product.updated)
-		const stock = params.stockByExternalId?.get(externalId)
+		const stock =
+			typeof params.product.stock === 'number' &&
+			Number.isFinite(params.product.stock)
+				? params.product.stock
+				: undefined
 		const name = normalizeProductName(params.product.name || externalCode)
 
 		const link = params.existingLinkExternalId
@@ -521,6 +560,16 @@ export class MoySkladSyncService {
 				params.tx
 			)
 
+			const categorySyncChanged = await this.syncProductFolderCategories({
+				catalogId: params.catalogId,
+				integrationId: params.integration.id,
+				productId: createdProduct.id,
+				productName: name,
+				client: params.client,
+				folder: params.product.productFolder,
+				tx: params.tx
+			})
+
 			if (imagesImported > 0) {
 				this.logger.log(`Imported ${imagesImported} images for new product ${name}`)
 			}
@@ -532,7 +581,7 @@ export class MoySkladSyncService {
 				productId: createdProduct.id,
 				externalId,
 				created: true,
-				updated: false,
+				updated: categorySyncChanged,
 				imagesImported
 			}
 		}
@@ -601,29 +650,20 @@ export class MoySkladSyncService {
 			},
 			params.tx
 		)
-
-		// Sync category if productFolder exists
-		if (params.product.productFolder) {
-			const category = await this.syncProductFolder(
-				params.catalogId,
-				params.product.productFolder,
-				params.tx
-			)
-			if (category) {
-				await this.repo.syncProductCategories(
-					product.id,
-					params.catalogId,
-					[category.id],
-					params.tx
-				)
-				this.logger.log(`Synced category ${category.name} for product ${name}`)
-			}
-		}
+		const categorySyncChanged = await this.syncProductFolderCategories({
+			catalogId: params.catalogId,
+			integrationId: params.integration.id,
+			productId: product.id,
+			productName: name,
+			client: params.client,
+			folder: params.product.productFolder,
+			tx: params.tx
+		})
 
 		if (imagesImported > 0) {
 			this.logger.log(`Imported ${imagesImported} images for product ${name}`)
 		}
-		if (!updated && imagesImported === 0 && link) {
+		if (!updated && imagesImported === 0 && !categorySyncChanged && link) {
 			this.logger.log(
 				`Skipped product update because nothing changed: catalog=${params.catalogId}, externalId=${externalId}, productId=${product.id}`
 			)
@@ -633,7 +673,7 @@ export class MoySkladSyncService {
 			productId: product.id,
 			externalId,
 			created: false,
-			updated: updated || imagesImported > 0 || !link,
+			updated: updated || imagesImported > 0 || !link || categorySyncChanged,
 			imagesImported
 		}
 	}
@@ -696,6 +736,7 @@ export class MoySkladSyncService {
 		product: MoySkladProduct
 	): Promise<ImportedProductImages | null> {
 		let imageUrls: string[]
+		const entityType = resolveExternalEntityType(product)
 
 		// Try to use expanded images from product first
 		if (product.images?.rows && product.images.rows.length > 0) {
@@ -705,7 +746,10 @@ export class MoySkladSyncService {
 		} else {
 			// Fallback to separate API call
 			try {
-				imageUrls = await client.getProductImages(product.id)
+				imageUrls =
+					entityType === 'variant'
+						? []
+						: await client.getEntityImages(entityType, product.id)
 			} catch (error) {
 				this.logger.warn(
 					`Не удалось загрузить список изображений MoySklad для товара ${product.id}: ${this.renderErrorMessage(error)}`
@@ -877,24 +921,285 @@ export class MoySkladSyncService {
 		return buildHashedCandidate(base, PRODUCT_SKU_MAX_LENGTH).toUpperCase()
 	}
 
-	private async syncProductFolder(
-		catalogId: string,
-		folder: MoySkladProduct['productFolder'],
+	private async syncProductFolderCategories(params: {
+		catalogId: string
+		integrationId: string
+		productId: string
+		productName: string
+		client: MoySkladClient
+		folder?: MoySkladProduct['productFolder']
 		tx?: Prisma.TransactionClient
-	): Promise<CategorySyncRecord | null> {
-		if (!folder?.name) return null
+	}): Promise<boolean> {
+		if (!params.folder) {
+			const result = await this.repo.syncManagedProductCategories(
+				params.productId,
+				params.catalogId,
+				params.integrationId,
+				[],
+				params.tx
+			)
+			if (result.removed > 0) {
+				this.logger.log(
+					`Removed ${result.removed} MoySklad-managed categories for product ${params.productName}`
+				)
+			}
+			return result.added > 0 || result.removed > 0
+		}
 
-		let category = await this.repo.findCategoryByName(catalogId, folder.name, tx)
-		if (category) return category
+		const categories = await this.syncProductFolderChain({
+			catalogId: params.catalogId,
+			integrationId: params.integrationId,
+			client: params.client,
+			folder: params.folder,
+			tx: params.tx
+		})
 
-		// For simplicity, create without parent
-		category = await this.repo.createCategory(
-			catalogId,
-			folder.name,
-			undefined,
-			tx
+		if (!categories.length) {
+			return false
+		}
+
+		const result = await this.repo.syncManagedProductCategories(
+			params.productId,
+			params.catalogId,
+			params.integrationId,
+			[categories[categories.length - 1].id],
+			params.tx
 		)
+
+		this.logger.log(
+			`Synced MoySklad category path for product ${params.productName}: ${categories.map(category => category.name).join(' > ')}`
+		)
+
+		return result.added > 0 || result.removed > 0
+	}
+
+	private async syncProductFolderChain(params: {
+		catalogId: string
+		integrationId: string
+		client: MoySkladClient
+		folder: MoySkladProductFolderRef
+		tx?: Prisma.TransactionClient
+	}): Promise<CategorySyncRecord[]> {
+		const folders = this.collapseProductFolderChain(
+			await this.resolveProductFolderChain(params.client, params.folder)
+		)
+		if (!folders.length) {
+			return []
+		}
+
+		const categories: CategorySyncRecord[] = []
+		let parentCategoryId: string | null = null
+
+		for (const folder of folders) {
+			const category = await this.ensureProductFolderCategory({
+				catalogId: params.catalogId,
+				integrationId: params.integrationId,
+				folder,
+				parentCategoryId,
+				tx: params.tx
+			})
+			if (!category) {
+				continue
+			}
+
+			categories.push(category)
+			parentCategoryId = category.id
+		}
+
+		return categories
+	}
+
+	private collapseProductFolderChain(
+		folders: ResolvedProductFolder[]
+	): ResolvedProductFolder[] {
+		if (folders.length <= 2) {
+			return folders
+		}
+
+		const root = folders[0]
+		const leaf = folders[folders.length - 1]
+
+		return [root, leaf]
+	}
+
+	private async resolveProductFolderChain(
+		client: MoySkladClient,
+		folder: MoySkladProductFolderRef
+	): Promise<ResolvedProductFolder[]> {
+		try {
+			const chain = await client.getProductFolderChain(folder)
+			const normalized = chain
+				.map(item => this.normalizeProductFolder(item))
+				.filter((item): item is ResolvedProductFolder => Boolean(item))
+			if (normalized.length > 0) {
+				return normalized
+			}
+		} catch (error) {
+			this.logger.warn(
+				`Failed to resolve MoySklad folder chain for folder ${folder.id ?? '<unknown>'}: ${this.renderErrorMessage(error)}`
+			)
+		}
+
+		const fallback = this.normalizeProductFolder(folder)
+		return fallback ? [fallback] : []
+	}
+
+	private normalizeProductFolder(
+		folder: MoySkladProductFolder | MoySkladProductFolderRef
+	): ResolvedProductFolder | null {
+		const externalId = folder.id?.trim()
+		const name = folder.name?.trim()
+		if (!externalId || !name) {
+			return null
+		}
+
+		const externalParentId =
+			'productFolder' in folder ? folder.productFolder?.id?.trim() || null : null
+
+		return {
+			externalId,
+			name,
+			externalParentId
+		}
+	}
+
+	private async ensureProductFolderCategory(params: {
+		catalogId: string
+		integrationId: string
+		folder: ResolvedProductFolder
+		parentCategoryId: string | null
+		tx?: Prisma.TransactionClient
+	}): Promise<CategorySyncRecord | null> {
+		const existingLink = await this.repo.findCategoryLinkByExternalId(
+			params.integrationId,
+			params.folder.externalId,
+			params.tx
+		)
+
+		if (existingLink) {
+			let category = existingLink.category
+			const shouldRename = category.name !== params.folder.name
+			const shouldReparent =
+				(category.parentId ?? null) !== (params.parentCategoryId ?? null)
+
+			if (shouldRename || shouldReparent) {
+				category =
+					(await this.repo.updateCategory(
+						{
+							categoryId: category.id,
+							catalogId: params.catalogId,
+							data: {
+								...(shouldRename ? { name: params.folder.name } : {}),
+								...(shouldReparent ? { parentId: params.parentCategoryId } : {})
+							}
+						},
+						params.tx
+					)) ?? category
+			}
+
+			await this.repo.upsertCategoryLink(
+				{
+					integrationId: params.integrationId,
+					categoryId: category.id,
+					externalId: params.folder.externalId,
+					externalParentId: params.folder.externalParentId,
+					rawMeta: this.buildProductFolderRawMeta(params.folder)
+				},
+				params.tx
+			)
+
+			return category
+		}
+
+		let category = await this.findReusableProductFolderCategory(params)
+		if (!category) {
+			category = await this.repo.createCategory(
+				params.catalogId,
+				params.folder.name,
+				params.parentCategoryId ?? undefined,
+				params.tx
+			)
+		} else {
+			const shouldRename = category.name !== params.folder.name
+			const shouldReparent =
+				(category.parentId ?? null) !== (params.parentCategoryId ?? null)
+			if (shouldRename || shouldReparent) {
+				category =
+					(await this.repo.updateCategory(
+						{
+							categoryId: category.id,
+							catalogId: params.catalogId,
+							data: {
+								...(shouldRename ? { name: params.folder.name } : {}),
+								...(shouldReparent ? { parentId: params.parentCategoryId } : {})
+							}
+						},
+						params.tx
+					)) ?? category
+			}
+		}
+
+		await this.repo.upsertCategoryLink(
+			{
+				integrationId: params.integrationId,
+				categoryId: category.id,
+				externalId: params.folder.externalId,
+				externalParentId: params.folder.externalParentId,
+				rawMeta: this.buildProductFolderRawMeta(params.folder)
+			},
+			params.tx
+		)
+
 		return category
+	}
+
+	private async findReusableProductFolderCategory(params: {
+		catalogId: string
+		integrationId: string
+		folder: ResolvedProductFolder
+		parentCategoryId: string | null
+		tx?: Prisma.TransactionClient
+	}): Promise<CategorySyncRecord | null> {
+		const candidates = await this.repo.findCategoriesByName(
+			params.catalogId,
+			params.folder.name,
+			params.tx
+		)
+		if (!candidates.length) {
+			return null
+		}
+
+		const desiredParentId = params.parentCategoryId ?? null
+		const exactParentMatches = candidates.filter(
+			candidate => (candidate.parentId ?? null) === desiredParentId
+		)
+		const rootMatches = candidates.filter(
+			candidate => candidate.parentId === null
+		)
+
+		const candidate =
+			exactParentMatches.length === 1
+				? exactParentMatches[0]
+				: exactParentMatches.length === 0 && rootMatches.length === 1
+					? rootMatches[0]
+					: candidates.length === 1
+						? candidates[0]
+						: null
+
+		if (!candidate) {
+			return null
+		}
+
+		const existingLink = await this.repo.findCategoryLinkByCategoryId(
+			params.integrationId,
+			candidate.id,
+			params.tx
+		)
+		if (existingLink && existingLink.externalId !== params.folder.externalId) {
+			return null
+		}
+
+		return candidate
 	}
 
 	private normalizeImageContentType(contentType?: string | null): string {
@@ -911,12 +1216,33 @@ export class MoySkladSyncService {
 	private buildRawMeta(product: MoySkladProduct): Prisma.InputJsonValue {
 		return {
 			id: product.id,
+			type: resolveExternalEntityType(product),
 			name: product.name ?? null,
 			code: product.code ?? null,
 			article: product.article ?? null,
 			externalCode: product.externalCode ?? null,
+			stock:
+				typeof product.stock === 'number' && Number.isFinite(product.stock)
+					? product.stock
+					: null,
+			productFolder: product.productFolder
+				? {
+						id: product.productFolder.id ?? null,
+						name: product.productFolder.name ?? null
+					}
+				: null,
 			archived: Boolean(product.archived),
 			updated: product.updated ?? null
+		}
+	}
+
+	private buildProductFolderRawMeta(
+		folder: ResolvedProductFolder
+	): Prisma.InputJsonValue {
+		return {
+			id: folder.externalId,
+			name: folder.name,
+			parentId: folder.externalParentId
 		}
 	}
 

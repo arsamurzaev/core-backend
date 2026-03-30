@@ -6,6 +6,7 @@ import {
 	Param,
 	Patch,
 	Post,
+	Res,
 	UseGuards
 } from '@nestjs/common'
 import {
@@ -16,7 +17,12 @@ import {
 	ApiSecurity,
 	ApiTags
 } from '@nestjs/swagger'
+import type { Response } from 'express'
 
+import {
+	PUBLIC_CACHE_CONTROL_STANDARD,
+	setPublicCacheHeaders
+} from '@/shared/http/cache-control'
 import { Public } from '@/shared/http/decorators/public.decorator'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
@@ -30,7 +36,9 @@ import { UpdateCatalogDtoReq } from './dto/requests/update-catalog.dto.req'
 import {
 	CatalogCreateResponseDto,
 	CatalogCurrentDto,
-	CatalogDto
+	CatalogCurrentShellDto,
+	CatalogDto,
+	CatalogTypeDto
 } from './dto/responses/catalog.dto.res'
 
 @ApiTags('Catalog')
@@ -44,17 +52,44 @@ export class CatalogController {
 	@ApiOperation({ summary: 'Get current catalog' })
 	@Public()
 	@ApiOkResponse({ type: CatalogCurrentDto })
-	async getCurrent(): Promise<CatalogCurrentDto> {
+	async getCurrent(
+		@Res({ passthrough: true }) res: Response
+	): Promise<CatalogCurrentDto> {
+		setPublicCacheHeaders(res, PUBLIC_CACHE_CONTROL_STANDARD)
 		return this.catalogService.getCurrent() as Promise<CatalogCurrentDto>
+	}
+
+	@Get('/current/shell')
+	@ApiOperation({ summary: 'Get current catalog shell' })
+	@Public()
+	@ApiOkResponse({ type: CatalogCurrentShellDto })
+	async getCurrentShell(
+		@Res({ passthrough: true }) res: Response
+	): Promise<CatalogCurrentShellDto> {
+		setPublicCacheHeaders(res, PUBLIC_CACHE_CONTROL_STANDARD)
+		return this.catalogService.getCurrentShell() as Promise<CatalogCurrentShellDto>
+	}
+
+	@Get('/current/type-schema')
+	@ApiOperation({ summary: 'Get current catalog type schema' })
+	@Public()
+	@ApiOkResponse({ type: CatalogTypeDto })
+	async getCurrentTypeSchema(
+		@Res({ passthrough: true }) res: Response
+	): Promise<CatalogTypeDto> {
+		setPublicCacheHeaders(res, PUBLIC_CACHE_CONTROL_STANDARD)
+		return this.catalogService.getCurrentTypeSchema() as Promise<CatalogTypeDto>
 	}
 
 	@Patch('/current')
 	@ApiOperation({ summary: 'Update current catalog' })
 	@Roles(Role.CATALOG)
 	@UseGuards(CatalogAccessGuard)
-	@ApiOkResponse({ type: CatalogDto })
-	async updateCurrent(@Body() dto: UpdateCatalogDtoReq): Promise<CatalogDto> {
-		return this.catalogService.updateCurrent(dto) as Promise<CatalogDto>
+	@ApiOkResponse({ type: CatalogCurrentShellDto })
+	async updateCurrent(
+		@Body() dto: UpdateCatalogDtoReq
+	): Promise<CatalogCurrentShellDto> {
+		return this.catalogService.updateCurrent(dto) as Promise<CatalogCurrentShellDto>
 	}
 
 	@Get()

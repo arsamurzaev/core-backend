@@ -1,15 +1,20 @@
-import type { Prisma } from '@generated/client'
+import { CartStatus, OrderStatus, type Prisma, Role } from '@generated/client'
 import {
 	BadRequestException,
+	ForbiddenException,
 	Injectable,
+	Logger,
 	MessageEvent,
 	NotFoundException,
+	OnModuleDestroy,
+	OnModuleInit,
 	UnauthorizedException
 } from '@nestjs/common'
 import { randomBytes } from 'node:crypto'
 import { Observable, Subject } from 'rxjs'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import type { SessionUser } from '@/modules/auth/types/auth-request'
 
 import {
 	CART_COOKIE_NAME,
@@ -26,13 +31,34 @@ import {
 
 type SsePayload = string | Record<string, unknown>
 
+const CART_MANAGER_INACTIVITY_MS =
+	Number(process.env.CART_MANAGER_INACTIVITY_MS ?? 60_000) || 60_000
+const CART_MANAGER_SWEEP_MS =
+	Number(process.env.CART_MANAGER_SWEEP_MS ?? 15_000) || 15_000
+const CURRENT_CART_VISIBLE_STATUSES = [
+	CartStatus.DRAFT,
+	CartStatus.SHARED,
+	CartStatus.IN_PROGRESS
+] as const
+const TERMINAL_CART_STATUSES = new Set<CartStatus>([
+	CartStatus.CONVERTED,
+	CartStatus.CANCELLED,
+	CartStatus.EXPIRED
+])
+
 const cartSelect = {
 	id: true,
 	catalogId: true,
 	token: true,
+	status: true,
+	statusChangedAt: true,
 	publicKey: true,
 	checkoutKey: true,
 	checkoutAt: true,
+	assignedManagerId: true,
+	managerSessionStartedAt: true,
+	managerLastSeenAt: true,
+	closedAt: true,
 	createdAt: true,
 	updatedAt: true,
 	items: {
@@ -58,14 +84,64 @@ const cartSelect = {
 }
 
 type CartEntity = Prisma.CartGetPayload<{ select: typeof cartSelect }>
-type CartContext = { id: string; catalogId: string }
-type ExistingCartItem = { id: string; deleteAt: Date | null } | null
+type CartContext = { id: string; catalogId: string; status: CartStatus }
+type ExistingCartItem = {
+	id: string
+	deleteAt: Date | null
+	quantity: number
+} | null
+type CartMutationResult = { cart: CartEntity; changed: boolean }
+
+const completedOrderSelect = {
+	id: true,
+	status: true,
+	catalogId: true,
+	totalAmount: true,
+	createdAt: true,
+	items: {
+		select: {
+			id: true,
+			productId: true,
+			variantId: true,
+			quantity: true,
+			unitPrice: true
+		},
+		orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }]
+	}
+}
+
+type CompletedOrderEntity = Prisma.OrderGetPayload<{
+	select: typeof completedOrderSelect
+}>
 
 @Injectable()
-export class CartService {
+export class CartService implements OnModuleInit, OnModuleDestroy {
+	private readonly logger = new Logger(CartService.name)
 	private readonly sseStreams = new Map<string, Set<Subject<MessageEvent>>>()
+	private managerSweepTimer: NodeJS.Timeout | null = null
 
 	constructor(private readonly prisma: PrismaService) {}
+
+	onModuleInit() {
+		if (CART_MANAGER_SWEEP_MS <= 0) return
+
+		this.managerSweepTimer = setInterval(() => {
+			void this.expireInactiveManagerSessions().catch(error => {
+				const message =
+					error instanceof Error ? (error.stack ?? error.message) : String(error)
+				this.logger.error('Cart manager timeout sweep failed', message)
+			})
+		}, CART_MANAGER_SWEEP_MS)
+
+		this.managerSweepTimer.unref?.()
+	}
+
+	onModuleDestroy() {
+		if (this.managerSweepTimer) {
+			clearInterval(this.managerSweepTimer)
+			this.managerSweepTimer = null
+		}
+	}
 
 	getCookieName() {
 		return CART_COOKIE_NAME
@@ -90,7 +166,11 @@ export class CartService {
 
 		const newToken = await this.generateUniqueToken()
 		const created = await this.prisma.cart.create({
-			data: { catalogId, token: newToken },
+			data: {
+				catalogId,
+				token: newToken,
+				status: CartStatus.DRAFT
+			},
 			select: cartSelect
 		})
 
@@ -114,12 +194,23 @@ export class CartService {
 	async shareCurrentCart(catalogId: string, token?: string | null) {
 		const current = await this.getOrCreateCurrentCart(catalogId, token)
 		let publicKey = current.cart.publicKey
+		const now = new Date()
+		const data: Prisma.CartUpdateInput = {}
 
 		if (!publicKey) {
 			publicKey = await this.generateUniquePublicKey()
+			data.publicKey = publicKey
+		}
+
+		if (current.cart.status === CartStatus.DRAFT) {
+			data.status = CartStatus.SHARED
+			data.statusChangedAt = now
+		}
+
+		if (Object.keys(data).length > 0) {
 			await this.prisma.cart.update({
 				where: { id: current.cart.id },
-				data: { publicKey }
+				data
 			})
 		}
 
@@ -135,13 +226,20 @@ export class CartService {
 
 		const cart = await this.findByPublicKeyOrThrow(key)
 		const checkoutKey = await this.generateUniqueCheckoutKey()
+		const now = new Date()
+		const data: Prisma.CartUpdateInput = {
+			checkoutKey,
+			checkoutAt: now
+		}
+
+		if (cart.status === CartStatus.DRAFT) {
+			data.status = CartStatus.SHARED
+			data.statusChangedAt = now
+		}
 
 		await this.prisma.cart.update({
 			where: { id: cart.id },
-			data: {
-				checkoutKey,
-				checkoutAt: new Date()
-			}
+			data
 		})
 
 		const fresh = await this.findByIdOrThrow(cart.id)
@@ -164,8 +262,14 @@ export class CartService {
 	) {
 		const current = await this.getOrCreateCurrentCart(catalogId, token)
 		const updated = await this.upsertItem(current.cart.id, input)
-		this.broadcastCart(updated.id, 'cart.updated', this.mapCart(updated))
-		return { cart: this.mapCart(updated), token: current.token }
+		if (updated.changed) {
+			this.broadcastCart(
+				updated.cart.id,
+				'cart.updated',
+				this.mapCart(updated.cart)
+			)
+		}
+		return { cart: this.mapCart(updated.cart), token: current.token }
 	}
 
 	async removeCurrentItem(
@@ -175,8 +279,14 @@ export class CartService {
 	) {
 		const current = await this.getCurrentCartOrThrow(catalogId, token)
 		const updated = await this.removeItem(current.cart.id, itemId)
-		this.broadcastCart(updated.id, 'cart.updated', this.mapCart(updated))
-		return { cart: this.mapCart(updated), token: current.token }
+		if (updated.changed) {
+			this.broadcastCart(
+				updated.cart.id,
+				'cart.updated',
+				this.mapCart(updated.cart)
+			)
+		}
+		return { cart: this.mapCart(updated.cart), token: current.token }
 	}
 
 	async upsertPublicItem(
@@ -187,8 +297,14 @@ export class CartService {
 		const cart = await this.findByPublicKeyOrThrow(publicKey)
 		this.ensureCheckoutAccess(cart, checkoutKey)
 		const updated = await this.upsertItem(cart.id, input)
-		this.broadcastCart(updated.id, 'cart.updated', this.mapCart(updated))
-		return this.mapCart(updated)
+		if (updated.changed) {
+			this.broadcastCart(
+				updated.cart.id,
+				'cart.updated',
+				this.mapCart(updated.cart)
+			)
+		}
+		return this.mapCart(updated.cart)
 	}
 
 	async removePublicItem(
@@ -199,8 +315,188 @@ export class CartService {
 		const cart = await this.findByPublicKeyOrThrow(publicKey)
 		this.ensureCheckoutAccess(cart, checkoutKey)
 		const updated = await this.removeItem(cart.id, itemId)
-		this.broadcastCart(updated.id, 'cart.updated', this.mapCart(updated))
-		return this.mapCart(updated)
+		if (updated.changed) {
+			this.broadcastCart(
+				updated.cart.id,
+				'cart.updated',
+				this.mapCart(updated.cart)
+			)
+		}
+		return this.mapCart(updated.cart)
+	}
+
+	async beginManagerSession(publicKey: string, user: SessionUser) {
+		const cart = await this.findManageableCartByPublicKeyOrThrow(publicKey, user)
+		this.ensureCartIsOpen(cart.status)
+		this.ensureManagerCanTakeCart(cart, user)
+
+		const now = new Date()
+		const statusChanged =
+			cart.status !== CartStatus.IN_PROGRESS || cart.assignedManagerId !== user.id
+
+		await this.prisma.cart.update({
+			where: { id: cart.id },
+			data: {
+				status: CartStatus.IN_PROGRESS,
+				statusChangedAt: statusChanged ? now : cart.statusChangedAt,
+				assignedManagerId: user.id,
+				managerSessionStartedAt:
+					cart.status === CartStatus.IN_PROGRESS &&
+					cart.assignedManagerId === user.id &&
+					cart.managerSessionStartedAt
+						? cart.managerSessionStartedAt
+						: now,
+				managerLastSeenAt: now
+			}
+		})
+
+		const fresh = await this.findByIdOrThrow(cart.id)
+		if (statusChanged) {
+			this.broadcastCartStatusChanged(fresh)
+		}
+
+		return this.mapCart(fresh)
+	}
+
+	async heartbeatManagerSession(publicKey: string, user: SessionUser) {
+		const cart = await this.findManageableCartByPublicKeyOrThrow(publicKey, user)
+		this.ensureCartIsOpen(cart.status)
+		this.ensureManagerCanRefreshPresence(cart, user)
+
+		const now = new Date()
+		const statusChanged =
+			cart.status !== CartStatus.IN_PROGRESS || cart.assignedManagerId !== user.id
+
+		await this.prisma.cart.update({
+			where: { id: cart.id },
+			data: {
+				status: CartStatus.IN_PROGRESS,
+				statusChangedAt: statusChanged ? now : cart.statusChangedAt,
+				assignedManagerId: user.id,
+				managerSessionStartedAt:
+					cart.status === CartStatus.IN_PROGRESS &&
+					cart.assignedManagerId === user.id &&
+					cart.managerSessionStartedAt
+						? cart.managerSessionStartedAt
+						: now,
+				managerLastSeenAt: now
+			}
+		})
+
+		const fresh = await this.findByIdOrThrow(cart.id)
+		if (statusChanged) {
+			this.broadcastCartStatusChanged(fresh)
+		}
+
+		return this.mapCart(fresh)
+	}
+
+	async releaseManagerSession(publicKey: string, user: SessionUser) {
+		const cart = await this.findManageableCartByPublicKeyOrThrow(publicKey, user)
+		this.ensureCartIsOpen(cart.status)
+		this.ensureManagerCanRefreshPresence(cart, user)
+
+		const now = new Date()
+		const statusChanged =
+			cart.status !== CartStatus.PAUSED || cart.assignedManagerId !== user.id
+
+		await this.prisma.cart.update({
+			where: { id: cart.id },
+			data: {
+				status: CartStatus.PAUSED,
+				statusChangedAt: statusChanged ? now : cart.statusChangedAt,
+				assignedManagerId: user.id,
+				managerSessionStartedAt: cart.managerSessionStartedAt ?? now,
+				managerLastSeenAt: now
+			}
+		})
+
+		const fresh = await this.findByIdOrThrow(cart.id)
+		if (statusChanged) {
+			this.broadcastCartStatusChanged(fresh)
+		}
+
+		return this.mapCart(fresh)
+	}
+
+	async completeManagerOrder(publicKey: string, user: SessionUser) {
+		const cart = await this.findManageableCartByPublicKeyOrThrow(publicKey, user)
+		this.ensureCartIsOpen(cart.status)
+
+		if (!cart.items.length) {
+			throw new BadRequestException('Cannot complete an empty cart')
+		}
+
+		const now = new Date()
+		const result = await this.prisma.$transaction(async tx => {
+			const freshCart = await this.findByIdOrThrow(cart.id, tx)
+			this.ensureCartIsOpen(freshCart.status)
+
+			if (!freshCart.items.length) {
+				throw new BadRequestException('Cannot complete an empty cart')
+			}
+
+			const snapshotItems = freshCart.items.map(item => {
+				const unitPrice = Number(item.product.price)
+				return {
+					id: item.id,
+					productId: item.productId,
+					variantId: item.variantId,
+					quantity: item.quantity,
+					unitPrice,
+					lineTotal: Number((unitPrice * item.quantity).toFixed(2)),
+					product: {
+						id: item.product.id,
+						name: item.product.name,
+						slug: item.product.slug
+					}
+				}
+			})
+
+			const totalAmount = Math.round(
+				snapshotItems.reduce((sum, item) => sum + item.lineTotal, 0)
+			)
+
+			const order = await tx.order.create({
+				data: {
+					status: OrderStatus.COMPLETED,
+					catalogId: freshCart.catalogId,
+					paymentProof: [],
+					products: snapshotItems,
+					totalAmount,
+					items: {
+						create: freshCart.items.map(item => ({
+							productId: item.productId,
+							variantId: item.variantId,
+							quantity: item.quantity,
+							unitPrice: item.product.price
+						}))
+					}
+				},
+				select: completedOrderSelect
+			})
+
+			await tx.cart.update({
+				where: { id: freshCart.id },
+				data: {
+					status: CartStatus.CONVERTED,
+					statusChangedAt: now,
+					assignedManagerId: user.id,
+					managerLastSeenAt: now,
+					closedAt: now,
+					publicKey: null,
+					checkoutKey: null
+				}
+			})
+
+			return {
+				order,
+				cart: await this.findByIdOrThrow(freshCart.id, tx)
+			}
+		})
+
+		this.broadcastCartStatusChanged(result.cart)
+		return { order: this.mapCompletedOrder(result.order) }
 	}
 
 	async connectCurrentSse(catalogId: string, token?: string | null) {
@@ -217,7 +513,10 @@ export class CartService {
 		return this.createSseStream(cart.id)
 	}
 
-	private async upsertItem(cartId: string, input: UpsertCartItemInput) {
+	private async upsertItem(
+		cartId: string,
+		input: UpsertCartItemInput
+	): Promise<CartMutationResult> {
 		const normalizedInput = normalizeCartItemInput(input)
 
 		return this.prisma.$transaction(async tx =>
@@ -225,13 +524,19 @@ export class CartService {
 		)
 	}
 
-	private async removeItem(cartId: string, itemId: string) {
+	private async removeItem(
+		cartId: string,
+		itemId: string
+	): Promise<CartMutationResult> {
 		const normalizedItemId = itemId.trim()
 		if (!normalizedItemId) {
 			throw new BadRequestException('itemId обязателен')
 		}
 
 		return this.prisma.$transaction(async tx => {
+			const cart = await this.findCartContextOrThrow(cartId, tx)
+			this.ensureCartIsOpen(cart.status)
+
 			const item = await tx.cartItem.findFirst({
 				where: {
 					id: normalizedItemId,
@@ -249,7 +554,12 @@ export class CartService {
 				data: { deleteAt: new Date() }
 			})
 
-			return this.findByIdOrThrow(cartId, tx)
+			await this.touchCart(tx, cartId)
+
+			return {
+				cart: await this.findByIdOrThrow(cartId, tx),
+				changed: true
+			}
 		})
 	}
 
@@ -294,8 +604,30 @@ export class CartService {
 		}
 	}
 
+	private broadcastCartStatusChanged(cart: CartEntity) {
+		const payload = this.mapCart(cart)
+		this.broadcastCart(cart.id, 'cart.status_changed', payload)
+	}
+
 	private mapCart(cart: CartEntity) {
 		return mapCartEntity(cart)
+	}
+
+	private mapCompletedOrder(order: CompletedOrderEntity) {
+		return {
+			id: order.id,
+			status: order.status,
+			catalogId: order.catalogId,
+			totalAmount: order.totalAmount,
+			items: order.items.map(item => ({
+				id: item.id,
+				productId: item.productId,
+				variantId: item.variantId,
+				quantity: item.quantity,
+				unitPrice: Number(item.unitPrice)
+			})),
+			createdAt: order.createdAt
+		}
 	}
 
 	private ensureCheckoutAccess(cart: CartEntity, checkoutKey?: string | null) {
@@ -305,11 +637,70 @@ export class CartService {
 		}
 	}
 
+	private ensureCartIsOpen(status: CartStatus) {
+		if (!TERMINAL_CART_STATUSES.has(status)) return
+		throw new BadRequestException('Cart is already closed')
+	}
+
+	private ensureManagerCanTakeCart(cart: CartEntity, user: SessionUser) {
+		if (
+			cart.status === CartStatus.IN_PROGRESS &&
+			cart.assignedManagerId &&
+			cart.assignedManagerId !== user.id &&
+			user.role !== Role.ADMIN
+		) {
+			throw new ForbiddenException('Cart is already being processed')
+		}
+	}
+
+	private ensureManagerCanRefreshPresence(cart: CartEntity, user: SessionUser) {
+		if (
+			cart.assignedManagerId &&
+			cart.assignedManagerId !== user.id &&
+			user.role !== Role.ADMIN
+		) {
+			throw new ForbiddenException('Cart is assigned to another manager')
+		}
+	}
+
+	private async ensureManagerOwnsCatalog(
+		catalogId: string,
+		user: SessionUser
+	): Promise<void> {
+		if (user.role === Role.ADMIN) return
+		if (user.role !== Role.CATALOG) {
+			throw new ForbiddenException('Only catalog managers can manage carts')
+		}
+
+		const catalog = await this.prisma.catalog.findFirst({
+			where: { id: catalogId, deleteAt: null },
+			select: { id: true, userId: true }
+		})
+
+		if (!catalog) {
+			throw new NotFoundException('Catalog not found')
+		}
+
+		if (!catalog.userId || catalog.userId !== user.id) {
+			throw new ForbiddenException('You do not have access to this cart')
+		}
+	}
+
+	private async findManageableCartByPublicKeyOrThrow(
+		publicKey: string,
+		user: SessionUser
+	) {
+		const cart = await this.findByPublicKeyOrThrow(publicKey)
+		await this.ensureManagerOwnsCatalog(cart.catalogId, user)
+		return cart
+	}
+
 	private async findByToken(catalogId: string, token: string) {
 		return this.prisma.cart.findFirst({
 			where: {
 				catalogId,
 				token,
+				status: { in: [...CURRENT_CART_VISIBLE_STATUSES] },
 				deleteAt: null
 			},
 			select: cartSelect
@@ -354,8 +745,9 @@ export class CartService {
 		cartId: string,
 		input: NormalizedCartItemInput,
 		tx: Prisma.TransactionClient
-	) {
+	): Promise<CartMutationResult> {
 		const cart = await this.findCartContextOrThrow(cartId, tx)
+		this.ensureCartIsOpen(cart.status)
 		await this.ensureProductInCatalog(tx, cart.catalogId, input.productId)
 		await this.ensureVariantMatchesProduct(tx, input.productId, input.variantId)
 
@@ -366,9 +758,16 @@ export class CartService {
 			input.variantId
 		)
 
-		await this.applyCartItemChange(tx, cart.id, existing, input)
+		const changed = await this.applyCartItemChange(tx, cart.id, existing, input)
 
-		return this.findByIdOrThrow(cart.id, tx)
+		if (changed) {
+			await this.touchCart(tx, cart.id)
+		}
+
+		return {
+			cart: await this.findByIdOrThrow(cart.id, tx),
+			changed
+		}
 	}
 
 	private async findCartContextOrThrow(
@@ -377,7 +776,7 @@ export class CartService {
 	): Promise<CartContext> {
 		const cart = await tx.cart.findFirst({
 			where: { id: cartId, deleteAt: null },
-			select: { id: true, catalogId: true }
+			select: { id: true, catalogId: true, status: true }
 		})
 
 		if (!cart) throw new NotFoundException('Корзина не найдена')
@@ -437,7 +836,7 @@ export class CartService {
 				productId,
 				variantId
 			},
-			select: { id: true, deleteAt: true }
+			select: { id: true, deleteAt: true, quantity: true }
 		})
 	}
 
@@ -446,23 +845,28 @@ export class CartService {
 		cartId: string,
 		existing: ExistingCartItem,
 		input: NormalizedCartItemInput
-	): Promise<void> {
+	): Promise<boolean> {
 		if (input.quantity === 0) {
 			if (existing && !existing.deleteAt) {
 				await tx.cartItem.update({
 					where: { id: existing.id },
 					data: { deleteAt: new Date() }
 				})
+				return true
 			}
-			return
+			return false
 		}
 
 		if (existing) {
+			if (!existing.deleteAt && existing.quantity === input.quantity) {
+				return false
+			}
+
 			await tx.cartItem.update({
 				where: { id: existing.id },
 				data: { quantity: input.quantity, deleteAt: null }
 			})
-			return
+			return true
 		}
 
 		await tx.cartItem.create({
@@ -473,6 +877,57 @@ export class CartService {
 				quantity: input.quantity
 			}
 		})
+
+		return true
+	}
+
+	private async touchCart(tx: Prisma.TransactionClient, cartId: string) {
+		await tx.cart.update({
+			where: { id: cartId },
+			data: { updatedAt: new Date() }
+		})
+	}
+
+	private async expireInactiveManagerSessions() {
+		const threshold = new Date(Date.now() - CART_MANAGER_INACTIVITY_MS)
+		const stale = await this.prisma.cart.findMany({
+			where: {
+				deleteAt: null,
+				status: CartStatus.IN_PROGRESS,
+				managerLastSeenAt: { lt: threshold }
+			},
+			select: { id: true }
+		})
+
+		if (!stale.length) return
+
+		const now = new Date()
+		const staleIds = stale.map(cart => cart.id)
+
+		await this.prisma.cart.updateMany({
+			where: {
+				id: { in: staleIds },
+				status: CartStatus.IN_PROGRESS
+			},
+			data: {
+				status: CartStatus.PAUSED,
+				statusChangedAt: now
+			}
+		})
+
+		const fresh = await this.prisma.cart.findMany({
+			where: {
+				id: { in: staleIds },
+				deleteAt: null
+			},
+			select: cartSelect
+		})
+
+		for (const cart of fresh) {
+			if (cart.status === CartStatus.PAUSED) {
+				this.broadcastCartStatusChanged(cart)
+			}
+		}
 	}
 
 	private async generateUniqueToken() {

@@ -18,6 +18,7 @@ import {
 	encodeProductDefaultCursor,
 	encodeProductSeedCursor
 } from './product-query.utils'
+import { ProductSeoSyncService } from './product-seo-sync.service'
 import { ProductVariantBuilder } from './product-variant.builder'
 import { ProductRepository } from './product.repository'
 import { ProductService } from './product.service'
@@ -25,6 +26,7 @@ import { ProductService } from './product.service'
 describe('ProductService', () => {
 	let service: ProductService
 	let serviceState: {
+		cacheTtlSec: number
 		uncategorizedFirstPageCacheTtlSec: number
 		uncategorizedNextPageCacheTtlSec: number
 	}
@@ -34,6 +36,7 @@ describe('ProductService', () => {
 	let cache: jest.Mocked<CacheService>
 	let mediaRepo: jest.Mocked<MediaRepository>
 	let s3Service: jest.Mocked<S3Service>
+	let productSeoSync: jest.Mocked<ProductSeoSyncService>
 
 	const runWithCatalog = <T>(fn: () => Promise<T>) =>
 		RequestContext.run(
@@ -80,10 +83,13 @@ describe('ProductService', () => {
 					useValue: {
 						findAll: jest.fn(),
 						findPopular: jest.fn(),
+						findPopularCards: jest.fn(),
 						findById: jest.fn(),
 						findBySlug: jest.fn(),
+						findByIds: jest.fn(),
 						findByIdsWithAttributes: jest.fn(),
 						findUncategorizedPage: jest.fn(),
+						findUncategorizedCardsPage: jest.fn(),
 						findFilteredProductIdsPageDefault: jest.fn(),
 						findFilteredProductIdsPageSeeded: jest.fn(),
 						findRecommendedProductIdsPageDefault: jest.fn(),
@@ -101,6 +107,7 @@ describe('ProductService', () => {
 						togglePopular: jest.fn(),
 						softDelete: jest.fn(),
 						syncProductCategories: jest.fn(),
+						prependProductToCategories: jest.fn(),
 						upsertCategoryProductPosition: jest.fn()
 					}
 				},
@@ -124,12 +131,20 @@ describe('ProductService', () => {
 					useValue: {
 						deleteObjectsByKeys: jest.fn()
 					}
+				},
+				{
+					provide: ProductSeoSyncService,
+					useValue: {
+						syncProduct: jest.fn(),
+						removeProduct: jest.fn()
+					}
 				}
 			]
 		}).compile()
 
 		service = module.get<ProductService>(ProductService)
 		serviceState = service as unknown as {
+			cacheTtlSec: number
 			uncategorizedFirstPageCacheTtlSec: number
 			uncategorizedNextPageCacheTtlSec: number
 		}
@@ -139,6 +154,7 @@ describe('ProductService', () => {
 		cache = module.get(CacheService)
 		mediaRepo = module.get(MediaRepository)
 		s3Service = module.get(S3Service)
+		productSeoSync = module.get(ProductSeoSyncService)
 
 		cache.buildKey.mockImplementation(parts =>
 			parts
@@ -149,6 +165,7 @@ describe('ProductService', () => {
 		cache.getVersion.mockResolvedValue(0)
 		cache.getJson.mockResolvedValue(null)
 		cache.setJson.mockResolvedValue(undefined)
+		serviceState.cacheTtlSec = 0
 		serviceState.uncategorizedFirstPageCacheTtlSec = 0
 		serviceState.uncategorizedNextPageCacheTtlSec = 0
 	})
@@ -248,6 +265,47 @@ describe('ProductService', () => {
 				cursor: undefined
 			})
 		)
+	})
+
+	it('returns lightweight infinite cards page with product attributes and without variants', async () => {
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
+		repo.findFilteredProductIdsPageDefault.mockResolvedValue([
+			{ id: 'product-1', updatedAt: new Date('2026-03-12T10:00:00.000Z') },
+			{ id: 'product-2', updatedAt: new Date('2026-03-12T09:00:00.000Z') },
+			{ id: 'product-3', updatedAt: new Date('2026-03-12T08:00:00.000Z') }
+		] as any)
+		repo.findByIds.mockResolvedValue([
+			{
+				id: 'product-1',
+				media: [],
+				categoryProducts: [],
+				integrationLinks: [],
+				productAttributes: []
+			},
+			{
+				id: 'product-2',
+				media: [],
+				categoryProducts: [],
+				integrationLinks: [],
+				productAttributes: []
+			}
+		] as any)
+
+		const result = await runWithCatalog(() =>
+			service.getInfiniteCards({
+				limit: '2'
+			})
+		)
+
+		expect(result.items).toHaveLength(2)
+		expect(repo.findByIds).toHaveBeenCalledWith(
+			['product-1', 'product-2'],
+			'catalog-1',
+			false
+		)
+		expect(repo.findByIdsWithAttributes).not.toHaveBeenCalled()
+		expect(result.items[0]).toHaveProperty('productAttributes', [])
+		expect(result.items[0]).not.toHaveProperty('variants')
 	})
 
 	it('passes decoded default cursor to default infinite query', async () => {
@@ -495,6 +553,32 @@ describe('ProductService', () => {
 		expect(repo.findRecommendedProductIdsPageSeeded).not.toHaveBeenCalled()
 	})
 
+	it('returns cached lightweight recommendations page when first-page cache is warm', async () => {
+		serviceState.cacheTtlSec = 120
+		cache.getJson.mockResolvedValue({
+			items: [{ id: 'product-1', media: [], categories: [] }],
+			nextCursor: null,
+			seed: 'seed-1'
+		} as any)
+
+		const result = await runWithCatalog(() =>
+			service.getRecommendationsInfiniteCards({
+				limit: '2',
+				seed: 'seed-1',
+				brands: 'brand-1'
+			})
+		)
+
+		expect(result).toEqual({
+			items: [{ id: 'product-1', media: [], categories: [] }],
+			nextCursor: null,
+			seed: 'seed-1'
+		})
+		expect(repo.findRecommendedProductIdsPageDefault).not.toHaveBeenCalled()
+		expect(repo.findRecommendedProductIdsPageSeeded).not.toHaveBeenCalled()
+		expect(repo.findByIds).not.toHaveBeenCalled()
+	})
+
 	it('returns cached uncategorized page when cache is warm', async () => {
 		serviceState.uncategorizedFirstPageCacheTtlSec = 120
 		const cached = {
@@ -514,6 +598,51 @@ describe('ProductService', () => {
 		expect(cache.getJson.mock.calls.length).toBeGreaterThan(0)
 	})
 
+	it('returns lightweight uncategorized page with product attributes and without variants', async () => {
+		repo.findUncategorizedCardsPage.mockResolvedValue([
+			{
+				id: 'product-1',
+				updatedAt: new Date('2026-03-12T10:00:00.000Z'),
+				media: [],
+				categoryProducts: [],
+				integrationLinks: [],
+				productAttributes: []
+			},
+			{
+				id: 'product-2',
+				updatedAt: new Date('2026-03-12T09:00:00.000Z'),
+				media: [],
+				categoryProducts: [],
+				integrationLinks: [],
+				productAttributes: []
+			},
+			{
+				id: 'product-3',
+				updatedAt: new Date('2026-03-12T08:00:00.000Z'),
+				media: [],
+				categoryProducts: [],
+				integrationLinks: [],
+				productAttributes: []
+			}
+		] as any)
+
+		const result = await runWithCatalog(() =>
+			service.getUncategorizedInfiniteCards({
+				limit: '2'
+			})
+		)
+
+		expect(result.items).toHaveLength(2)
+		expect(repo.findUncategorizedCardsPage).toHaveBeenCalledWith('catalog-1', {
+			cursor: undefined,
+			take: 3,
+			includeInactive: false
+		})
+		expect(repo.findUncategorizedPage).not.toHaveBeenCalled()
+		expect(result.items[0]).toHaveProperty('productAttributes', [])
+		expect(result.items[0]).not.toHaveProperty('variants')
+	})
+
 	it('skips uncategorized cache in includeInactive mode', async () => {
 		serviceState.uncategorizedFirstPageCacheTtlSec = 120
 		repo.findUncategorizedPage.mockResolvedValue([] as any)
@@ -531,6 +660,48 @@ describe('ProductService', () => {
 			take: 3,
 			includeInactive: true
 		})
+	})
+
+	it('returns lightweight popular cards with product attributes and without variants', async () => {
+		serviceState.cacheTtlSec = 120
+		repo.findPopularCards.mockResolvedValue([
+			{
+				id: 'product-1',
+				media: [],
+				categoryProducts: [],
+				integrationLinks: [],
+				isPopular: true,
+				productAttributes: []
+			}
+		] as any)
+
+		const result = await runWithCatalog(() => service.getPopularCards())
+
+		expect(result).toHaveLength(1)
+		expect(repo.findPopularCards).toHaveBeenCalledWith('catalog-1', false)
+		expect(repo.findPopular).not.toHaveBeenCalled()
+		expect(result[0]).toHaveProperty('productAttributes', [])
+		expect(result[0]).not.toHaveProperty('variants')
+		expect(cache.setJson).toHaveBeenCalled()
+	})
+
+	it('returns popular products with product attributes and without variants in bulk read', async () => {
+		repo.findPopular.mockResolvedValue([
+			{
+				id: 'product-1',
+				media: [],
+				categoryProducts: [],
+				integrationLinks: [],
+				productAttributes: [],
+				isPopular: true
+			}
+		] as any)
+
+		const result = await runWithCatalog(() => service.getPopular())
+
+		expect(repo.findPopular).toHaveBeenCalledWith('catalog-1', false)
+		expect(result[0]).toHaveProperty('productAttributes', [])
+		expect(result[0]).not.toHaveProperty('variants')
 	})
 
 	it('allows using one brand for multiple products', async () => {
@@ -639,6 +810,43 @@ describe('ProductService', () => {
 			CATALOG_TYPE_CACHE_VERSION,
 			'type-1'
 		])
+	})
+
+	it('syncs SEO after product creation', async () => {
+		repo.existsSlug.mockResolvedValue(false)
+		repo.existsName.mockResolvedValue(false)
+		repo.existsSku.mockResolvedValue(false)
+		repo.create.mockResolvedValue({ id: 'product-1', slug: 'seo-product' } as any)
+		repo.findById.mockResolvedValue({
+			id: 'product-1',
+			slug: 'seo-product',
+			name: 'SEO Product',
+			price: 100,
+			status: 'ACTIVE',
+			brand: null,
+			media: [],
+			productAttributes: [],
+			variants: [],
+			categoryProducts: []
+		} as any)
+		attributeBuilder.buildForCreate.mockResolvedValue([])
+
+		await expect(
+			runWithCatalog(() =>
+				service.create({
+					name: 'SEO Product',
+					price: 100
+				})
+			)
+		).resolves.toMatchObject({ ok: true, id: 'product-1' })
+
+		expect(productSeoSync.syncProduct).toHaveBeenCalledWith(
+			expect.objectContaining({
+				id: 'product-1',
+				slug: 'seo-product'
+			}),
+			'catalog-1'
+		)
 	})
 
 	it('duplicates product with hidden status and copied relations', async () => {
@@ -784,18 +992,11 @@ describe('ProductService', () => {
 			],
 			builtVariants
 		)
-		expect(repo.upsertCategoryProductPosition.mock.calls).toContainEqual([
+		expect(repo.prependProductToCategories).toHaveBeenCalledWith(
 			'product-2',
-			'category-1',
 			'catalog-1',
-			0
-		])
-		expect(repo.upsertCategoryProductPosition.mock.calls).toContainEqual([
-			'product-2',
-			'category-2',
-			'catalog-1',
-			0
-		])
+			['category-1', 'category-2']
+		)
 		expect(cache.bumpVersion.mock.calls).toContainEqual([
 			CATEGORY_PRODUCTS_CACHE_VERSION,
 			'catalog-1'
@@ -883,18 +1084,11 @@ describe('ProductService', () => {
 			)
 		).resolves.toMatchObject({ ok: true, id: 'product-1', slug: 'first' })
 
-		expect(repo.upsertCategoryProductPosition.mock.calls).toContainEqual([
+		expect(repo.prependProductToCategories).toHaveBeenCalledWith(
 			'product-1',
-			'category-1',
 			'catalog-1',
-			0
-		])
-		expect(repo.upsertCategoryProductPosition.mock.calls).toContainEqual([
-			'product-1',
-			'category-2',
-			'catalog-1',
-			0
-		])
+			['category-1', 'category-2']
+		)
 		expect(cache.bumpVersion.mock.calls).toContainEqual([
 			CATEGORY_PRODUCTS_CACHE_VERSION,
 			'catalog-1'
@@ -908,6 +1102,7 @@ describe('ProductService', () => {
 	it('updates category position when categoryId and categoryPosition are passed', async () => {
 		repo.findCategoryById.mockResolvedValue({ id: 'category-1' } as any)
 		repo.update.mockResolvedValue({ id: 'product-1', media: [] } as any)
+		repo.findById.mockResolvedValue({ id: 'product-1', media: [] } as any)
 
 		await expect(
 			runWithCatalog(() =>
@@ -940,6 +1135,7 @@ describe('ProductService', () => {
 			{ id: 'category-2' }
 		] as any)
 		repo.update.mockResolvedValue({ id: 'product-1', media: [] } as any)
+		repo.findById.mockResolvedValue({ id: 'product-1', media: [] } as any)
 
 		await expect(
 			runWithCatalog(() =>
@@ -964,6 +1160,37 @@ describe('ProductService', () => {
 		])
 	})
 
+	it('syncs SEO after product update using final product state', async () => {
+		repo.update.mockResolvedValue({
+			id: 'product-1',
+			slug: 'updated-product',
+			name: 'Updated Product',
+			price: 120,
+			status: 'ACTIVE',
+			brand: null,
+			media: [],
+			productAttributes: [],
+			variants: [],
+			categoryProducts: []
+		} as any)
+
+		await expect(
+			runWithCatalog(() =>
+				service.update('product-1', {
+					name: 'Updated Product'
+				})
+			)
+		).resolves.toMatchObject({ ok: true, id: 'product-1' })
+
+		expect(productSeoSync.syncProduct).toHaveBeenCalledWith(
+			expect.objectContaining({
+				id: 'product-1',
+				slug: 'updated-product'
+			}),
+			'catalog-1'
+		)
+	})
+
 	it('toggles product status and invalidates caches', async () => {
 		repo.toggleStatus.mockResolvedValue({
 			id: 'product-1',
@@ -983,6 +1210,13 @@ describe('ProductService', () => {
 		})
 
 		expect(repo.toggleStatus).toHaveBeenCalledWith('product-1', 'catalog-1')
+		expect(productSeoSync.syncProduct).toHaveBeenCalledWith(
+			expect.objectContaining({
+				id: 'product-1',
+				status: 'HIDDEN'
+			}),
+			'catalog-1'
+		)
 		expect(cache.bumpVersion.mock.calls).toContainEqual([
 			CATEGORY_PRODUCTS_CACHE_VERSION,
 			'catalog-1'
@@ -1129,6 +1363,10 @@ describe('ProductService', () => {
 		])
 		expect(mediaRepo.deleteOrphanedByIds).toHaveBeenCalledWith(
 			['media-1'],
+			'catalog-1'
+		)
+		expect(productSeoSync.removeProduct).toHaveBeenCalledWith(
+			'product-1',
 			'catalog-1'
 		)
 		expect(cache.bumpVersion.mock.calls).toContainEqual([

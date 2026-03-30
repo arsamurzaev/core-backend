@@ -12,6 +12,10 @@ import { MediaRepository } from '@/shared/media/media.repository'
 import { ensureMediaInCatalog } from '@/shared/media/media.validation'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import {
+	CATALOG_CACHE_VERSION
+} from '@/shared/cache/catalog-cache.constants'
+import { CacheService } from '@/shared/cache/cache.service'
+import {
 	assertHasUpdateFields,
 	normalizeOptionalNonEmptyString,
 	normalizeRequiredString
@@ -27,7 +31,8 @@ export class SeoService {
 	constructor(
 		private readonly repo: SeoRepository,
 		private readonly mediaRepo: MediaRepository,
-		private readonly mediaUrl: MediaUrlService
+		private readonly mediaUrl: MediaUrlService,
+		private readonly cache: CacheService
 	) {}
 
 	async getAll() {
@@ -66,6 +71,7 @@ export class SeoService {
 		})
 
 		const created = await this.repo.create(data)
+		await this.invalidateCatalogCache(catalogId)
 		return this.mapSeo(created)
 	}
 
@@ -83,6 +89,7 @@ export class SeoService {
 		const seo = await this.repo.update(id, catalogId, data)
 		if (!seo) throw new NotFoundException('SEO-настройка не найдена')
 
+		await this.invalidateCatalogCache(catalogId)
 		return this.mapSeo(seo)
 	}
 
@@ -90,6 +97,7 @@ export class SeoService {
 		const catalogId = mustCatalogId()
 		const seo = await this.repo.softDelete(id, catalogId)
 		if (!seo) throw new NotFoundException('SEO-настройка не найдена')
+		await this.invalidateCatalogCache(catalogId)
 		return { ok: true }
 	}
 
@@ -137,5 +145,9 @@ export class SeoService {
 		}
 
 		return { ogMediaId, twitterMediaId }
+	}
+
+	private async invalidateCatalogCache(catalogId: string): Promise<void> {
+		await this.cache.bumpVersion(CATALOG_CACHE_VERSION, catalogId)
 	}
 }

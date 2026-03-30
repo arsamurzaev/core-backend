@@ -9,6 +9,7 @@ import {
 	Post,
 	Query,
 	Req,
+	Res,
 	UseGuards
 } from '@nestjs/common'
 import {
@@ -20,7 +21,12 @@ import {
 	ApiSecurity,
 	ApiTags
 } from '@nestjs/swagger'
+import type { Response } from 'express'
 
+import {
+	PUBLIC_CACHE_CONTROL_SHORT,
+	setUserAwarePublicCacheHeaders
+} from '@/shared/http/cache-control'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
@@ -37,9 +43,11 @@ import { UpdateProductCategoryPositionDtoReq } from './dto/requests/update-produ
 import { UpdateProductDtoReq } from './dto/requests/update-product.dto.req'
 import {
 	ProductCreateResponseDto,
+	ProductCursorCardPageDto,
 	ProductCursorPageDto,
-	ProductDto,
+	ProductCardPageDto,
 	ProductInfinitePageDto,
+	ProductWithAttributesDto,
 	ProductUpdateResponseDto,
 	ProductVariantsResponseDto,
 	ProductWithDetailsDto
@@ -56,11 +64,91 @@ export class ProductController {
 	@ApiOperation({
 		summary: 'Список товаров',
 		description:
-			'В media.variants для каждого изображения возвращается только variant с назначением card.'
+			'В массовой выдаче возвращаются productAttributes, но без variants. В media.variants для каждого изображения возвращается только variant с назначением card.'
 	})
-	@ApiOkResponse({ type: ProductDto, isArray: true })
-	async getAll(@Req() req: AuthRequest) {
+	@ApiOkResponse({ type: ProductWithAttributesDto, isArray: true })
+	async getAll(
+		@Req() req: AuthRequest,
+		@Res({ passthrough: true }) res: Response
+	) {
+		this.applyPublicReadCacheHeaders(res, req)
 		return this.productService.getAll({
+			includeInactive: this.canReadInactive(req)
+		})
+	}
+
+	@Get('/cards/infinite')
+	@UseGuards(OptionalSessionGuard)
+	@ApiOperation({
+		summary: 'Лёгкий card-feed товаров (бесконечный скролл)',
+		description:
+			'Возвращает карточки товаров с productAttributes, но без variants. Поддерживает те же фильтры, что и /product/infinite.'
+	})
+	@ApiQuery({
+		name: 'cursor',
+		required: false,
+		description: 'Курсор из предыдущего ответа (opaque base64)'
+	})
+	@ApiQuery({
+		name: 'limit',
+		required: false,
+		description: 'Размер страницы (1-50), по умолчанию 24'
+	})
+	@ApiQuery({
+		name: 'seed',
+		required: false,
+		description: 'Seed для детерминированной рандомизации'
+	})
+	@ApiQuery({
+		name: 'categories',
+		required: false,
+		description: 'ID категорий через запятую'
+	})
+	@ApiQuery({
+		name: 'brands',
+		required: false,
+		description: 'ID брендов через запятую'
+	})
+	@ApiQuery({
+		name: 'minPrice',
+		required: false,
+		description: 'Минимальная цена'
+	})
+	@ApiQuery({
+		name: 'maxPrice',
+		required: false,
+		description: 'Максимальная цена'
+	})
+	@ApiQuery({
+		name: 'searchTerm',
+		required: false,
+		description: 'Поиск по name, sku или slug (contains, insensitive)'
+	})
+	@ApiQuery({
+		name: 'isPopular',
+		required: false,
+		description: 'Фильтр по популярным товарам (true/false)'
+	})
+	@ApiQuery({
+		name: 'isDiscount',
+		required: false,
+		description:
+			'Только товары с активной скидкой (учитываются атрибуты discount, discountStartAt, discountEndAt)'
+	})
+	@ApiQuery({
+		name: 'attributes',
+		required: false,
+		description:
+			'JSON-объект фильтров атрибутов. Дополнительно поддерживаются query-параметры attr.<key>, attrMin.<key>, attrMax.<key>, attrBool.<key>.'
+	})
+	@ApiOkResponse({ type: ProductCardPageDto })
+	async getInfiniteCards(
+		@Query() query: Record<string, unknown>,
+		@Req() req: AuthRequest,
+		@Res({ passthrough: true }) res: Response
+	) {
+		this.applyPublicReadCacheHeaders(res, req)
+		return this.productService.getInfiniteCards(query, {
 			includeInactive: this.canReadInactive(req)
 		})
 	}
@@ -110,7 +198,7 @@ export class ProductController {
 	@ApiQuery({
 		name: 'searchTerm',
 		required: false,
-		description: 'Поиск по названию (contains, insensitive)'
+		description: 'Поиск по name, sku или slug (contains, insensitive)'
 	})
 	@ApiQuery({
 		name: 'isPopular',
@@ -132,9 +220,87 @@ export class ProductController {
 	@ApiOkResponse({ type: ProductInfinitePageDto })
 	async getInfinite(
 		@Query() query: Record<string, unknown>,
-		@Req() req: AuthRequest
+		@Req() req: AuthRequest,
+		@Res({ passthrough: true }) res: Response
 	) {
+		this.applyPublicReadCacheHeaders(res, req)
 		return this.productService.getInfinite(query, {
+			includeInactive: this.canReadInactive(req)
+		})
+	}
+
+	@Get('/cards/recommendations/infinite')
+	@UseGuards(OptionalSessionGuard)
+	@ApiOperation({
+		summary: 'Лёгкий card-feed рекомендаций',
+		description:
+			'Возвращает карточки рекомендаций с productAttributes, но без variants. Поддерживает те же query-параметры, что и /product/recommendations/infinite.'
+	})
+	@ApiQuery({
+		name: 'cursor',
+		required: false,
+		description: 'Курсор из предыдущего ответа (opaque base64)'
+	})
+	@ApiQuery({
+		name: 'limit',
+		required: false,
+		description: 'Размер страницы (1-50), по умолчанию 24'
+	})
+	@ApiQuery({
+		name: 'seed',
+		required: false,
+		description: 'Seed для детерминированной рандомизации'
+	})
+	@ApiQuery({
+		name: 'categories',
+		required: false,
+		description: 'ID категорий через запятую'
+	})
+	@ApiQuery({
+		name: 'brands',
+		required: false,
+		description: 'ID брендов через запятую'
+	})
+	@ApiQuery({
+		name: 'minPrice',
+		required: false,
+		description: 'Минимальная цена'
+	})
+	@ApiQuery({
+		name: 'maxPrice',
+		required: false,
+		description: 'Максимальная цена'
+	})
+	@ApiQuery({
+		name: 'searchTerm',
+		required: false,
+		description: 'Поиск по name, sku или slug (contains, insensitive)'
+	})
+	@ApiQuery({
+		name: 'isPopular',
+		required: false,
+		description: 'Фильтр по популярным товарам (true/false)'
+	})
+	@ApiQuery({
+		name: 'isDiscount',
+		required: false,
+		description:
+			'Только товары с активной скидкой (учитываются атрибуты discount, discountStartAt, discountEndAt)'
+	})
+	@ApiQuery({
+		name: 'attributes',
+		required: false,
+		description:
+			'JSON-объект фильтров атрибутов. Дополнительно поддерживаются query-параметры attr.<key>, attrMin.<key>, attrMax.<key>, attrBool.<key>.'
+	})
+	@ApiOkResponse({ type: ProductCardPageDto })
+	async getRecommendationsInfiniteCards(
+		@Query() query: Record<string, unknown>,
+		@Req() req: AuthRequest,
+		@Res({ passthrough: true }) res: Response
+	) {
+		this.applyPublicReadCacheHeaders(res, req)
+		return this.productService.getRecommendationsInfiniteCards(query, {
 			includeInactive: this.canReadInactive(req)
 		})
 	}
@@ -184,7 +350,7 @@ export class ProductController {
 	@ApiQuery({
 		name: 'searchTerm',
 		required: false,
-		description: 'Поиск по названию (contains, insensitive)'
+		description: 'Поиск по name, sku или slug (contains, insensitive)'
 	})
 	@ApiQuery({
 		name: 'isPopular',
@@ -206,9 +372,61 @@ export class ProductController {
 	@ApiOkResponse({ type: ProductInfinitePageDto })
 	async getRecommendationsInfinite(
 		@Query() query: Record<string, unknown>,
-		@Req() req: AuthRequest
+		@Req() req: AuthRequest,
+		@Res({ passthrough: true }) res: Response
 	) {
+		this.applyPublicReadCacheHeaders(res, req)
 		return this.productService.getRecommendationsInfinite(query, {
+			includeInactive: this.canReadInactive(req)
+		})
+	}
+
+	@Get('/cards/popular')
+	@UseGuards(OptionalSessionGuard)
+	@ApiOperation({
+		summary: 'Лёгкий список популярных товаров',
+		description:
+			'Возвращает популярные товары с productAttributes, но без variants.'
+	})
+	@ApiOkResponse({ type: ProductWithAttributesDto, isArray: true })
+	async getPopularCards(
+		@Req() req: AuthRequest,
+		@Res({ passthrough: true }) res: Response
+	) {
+		this.applyPublicReadCacheHeaders(res, req)
+		return this.productService.getPopularCards({
+			includeInactive: this.canReadInactive(req)
+		})
+	}
+
+	@Get('/cards/uncategorized/infinite')
+	@UseGuards(OptionalSessionGuard)
+	@ApiOperation({
+		summary: 'Лёгкий список товаров без категории',
+		description:
+			'Возвращает карточки товаров без активной категории с productAttributes, но без variants.'
+	})
+	@ApiQuery({
+		name: 'cursor',
+		required: false,
+		description: 'Курсор из предыдущего ответа (opaque base64)'
+	})
+	@ApiQuery({
+		name: 'limit',
+		required: false,
+		description: 'Размер страницы (1-50), по умолчанию 24'
+	})
+	@ApiOkResponse({ type: ProductCursorCardPageDto })
+	async getUncategorizedInfiniteCards(
+		@Query('cursor') cursor: string | undefined,
+		@Query('limit') limit: string | undefined,
+		@Req() req: AuthRequest,
+		@Res({ passthrough: true }) res: Response
+	) {
+		this.applyPublicReadCacheHeaders(res, req)
+		return this.productService.getUncategorizedInfiniteCards({
+			cursor,
+			limit,
 			includeInactive: this.canReadInactive(req)
 		})
 	}
@@ -232,10 +450,12 @@ export class ProductController {
 	})
 	@ApiOkResponse({ type: ProductCursorPageDto })
 	async getUncategorizedInfinite(
-		@Query('cursor') cursor?: string,
-		@Query('limit') limit?: string,
-		@Req() req?: AuthRequest
+		@Query('cursor') cursor: string | undefined,
+		@Query('limit') limit: string | undefined,
+		@Req() req: AuthRequest,
+		@Res({ passthrough: true }) res: Response
 	) {
+		this.applyPublicReadCacheHeaders(res, req)
 		return this.productService.getUncategorizedInfinite({
 			cursor,
 			limit,
@@ -248,10 +468,14 @@ export class ProductController {
 	@ApiOperation({
 		summary: 'Список популярных товаров',
 		description:
-			'В media.variants для каждого изображения возвращается только variant с назначением card.'
+			'В массовой выдаче возвращаются productAttributes, но без variants. В media.variants для каждого изображения возвращается только variant с назначением card.'
 	})
-	@ApiOkResponse({ type: ProductWithDetailsDto, isArray: true })
-	async getPopular(@Req() req: AuthRequest) {
+	@ApiOkResponse({ type: ProductWithAttributesDto, isArray: true })
+	async getPopular(
+		@Req() req: AuthRequest,
+		@Res({ passthrough: true }) res: Response
+	) {
+		this.applyPublicReadCacheHeaders(res, req)
 		return this.productService.getPopular({
 			includeInactive: this.canReadInactive(req)
 		})
@@ -269,7 +493,12 @@ export class ProductController {
 		description: 'Слаг товара'
 	})
 	@ApiOkResponse({ type: ProductWithDetailsDto })
-	async getBySlug(@Param('slug') slug: string, @Req() req: AuthRequest) {
+	async getBySlug(
+		@Param('slug') slug: string,
+		@Req() req: AuthRequest,
+		@Res({ passthrough: true }) res: Response
+	) {
+		this.applyPublicReadCacheHeaders(res, req)
 		return this.productService.getBySlug(slug, {
 			includeInactive: this.canReadInactive(req)
 		})
@@ -287,7 +516,12 @@ export class ProductController {
 		description: 'ID товара'
 	})
 	@ApiOkResponse({ type: ProductWithDetailsDto })
-	async getById(@Param('id') id: string, @Req() req: AuthRequest) {
+	async getById(
+		@Param('id') id: string,
+		@Req() req: AuthRequest,
+		@Res({ passthrough: true }) res: Response
+	) {
+		this.applyPublicReadCacheHeaders(res, req)
 		return this.productService.getById(id, {
 			includeInactive: this.canReadInactive(req)
 		})
@@ -439,5 +673,15 @@ export class ProductController {
 			req?.user,
 			RequestContext.get()?.ownerUserId
 		)
+	}
+
+	private applyPublicReadCacheHeaders(
+		res: Response,
+		req?: Pick<AuthRequest, 'user'>
+	): void {
+		setUserAwarePublicCacheHeaders(res, {
+			isPrivate: Boolean(req?.user),
+			publicCacheControl: PUBLIC_CACHE_CONTROL_SHORT
+		})
 	}
 }

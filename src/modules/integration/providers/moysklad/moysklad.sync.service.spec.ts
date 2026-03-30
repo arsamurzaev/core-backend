@@ -41,8 +41,13 @@ describe('MoySkladSyncService', () => {
 						upsertProductLink: jest.fn(),
 						findProductLinksByIntegration: jest.fn(),
 						findCategoryByName: jest.fn(),
+						findCategoriesByName: jest.fn(),
 						createCategory: jest.fn(),
-						syncProductCategories: jest.fn(),
+						updateCategory: jest.fn(),
+						findCategoryLinkByExternalId: jest.fn(),
+						findCategoryLinkByCategoryId: jest.fn(),
+						upsertCategoryLink: jest.fn(),
+						syncManagedProductCategories: jest.fn(),
 						finishMoySkladSync: jest.fn(),
 						failMoySkladSync: jest.fn()
 					}
@@ -87,6 +92,13 @@ describe('MoySkladSyncService', () => {
 		s3 = module.get(S3Service)
 		mediaRepo = module.get(MediaRepository)
 		metadataCrypto = module.get(MoySkladMetadataCryptoService)
+		repo.findCategoriesByName.mockResolvedValue([])
+		repo.findCategoryLinkByExternalId.mockResolvedValue(null)
+		repo.findCategoryLinkByCategoryId.mockResolvedValue(null)
+		repo.syncManagedProductCategories.mockResolvedValue({
+			added: 0,
+			removed: 0
+		})
 	})
 
 	afterEach(() => {
@@ -109,10 +121,12 @@ describe('MoySkladSyncService', () => {
 		}
 		const product = {
 			id: 'external-1',
+			meta: { type: 'product' },
 			name: 'Product 1',
 			code: 'MSK-1',
 			updated: '2026-03-23 14:00:00',
 			archived: false,
+			stock: 5,
 			salePrices: [
 				{
 					value: 12500,
@@ -159,10 +173,7 @@ describe('MoySkladSyncService', () => {
 		} as any)
 
 		jest
-			.spyOn(MoySkladClient.prototype, 'getStockAll')
-			.mockResolvedValue(new Map([['external-1', 5]]))
-		jest
-			.spyOn(MoySkladClient.prototype, 'getAllProducts')
+			.spyOn(MoySkladClient.prototype, 'getAllAssortment')
 			.mockResolvedValue([product] as any)
 		jest.spyOn(MoySkladClient.prototype, 'downloadImage').mockResolvedValue({
 			buffer: Buffer.from('image'),
@@ -175,7 +186,9 @@ describe('MoySkladSyncService', () => {
 		expect(metadataCrypto.parseStoredMetadata).toHaveBeenCalledWith(
 			integration.metadata
 		)
-		expect(MoySkladClient.prototype.getAllProducts).toHaveBeenCalledWith(undefined)
+		expect(MoySkladClient.prototype.getAllAssortment).toHaveBeenCalledWith(
+			undefined
+		)
 		expect(repo.existsProductSlug).toHaveBeenCalledWith(
 			catalogId,
 			'product-1',
@@ -222,6 +235,122 @@ describe('MoySkladSyncService', () => {
 		expect(mediaRepo.findOrphanedByIds).not.toHaveBeenCalled()
 	})
 
+	it('syncs supported assortment item types and skips variants', async () => {
+		const catalogId = 'catalog-1'
+		const integration = {
+			id: 'integration-1',
+			catalogId,
+			metadata: {},
+			isActive: true,
+			lastSyncAt: null
+		}
+		const assortment = [
+			{
+				id: 'external-product',
+				meta: { type: 'product' },
+				name: 'Product 1',
+				code: 'MSK-1',
+				updated: '2026-03-23 14:00:00',
+				archived: false,
+				stock: 5,
+				salePrices: [{ value: 12500, priceType: { name: 'Retail' } }],
+				images: { rows: [] }
+			},
+			{
+				id: 'external-service',
+				meta: { type: 'service' },
+				name: 'Service 1',
+				code: 'MSK-2',
+				updated: '2026-03-23 14:01:00',
+				archived: false,
+				salePrices: [{ value: 5000, priceType: { name: 'Retail' } }],
+				images: { rows: [] }
+			},
+			{
+				id: 'external-bundle',
+				meta: { type: 'bundle' },
+				name: 'Bundle 1',
+				code: 'MSK-3',
+				updated: '2026-03-23 14:02:00',
+				archived: false,
+				stock: 2,
+				salePrices: [{ value: 25900, priceType: { name: 'Retail' } }],
+				images: { rows: [] }
+			},
+			{
+				id: 'external-variant',
+				meta: { type: 'variant' },
+				name: 'Variant 1',
+				code: 'MSK-4',
+				updated: '2026-03-23 14:03:00',
+				archived: false,
+				stock: 3,
+				salePrices: [{ value: 9900, priceType: { name: 'Retail' } }],
+				images: { rows: [] }
+			}
+		]
+
+		repo.beginMoySkladSync.mockResolvedValue(integration as any)
+		repo.findMoySklad.mockResolvedValue(integration as any)
+		repo.findProductLinkByExternalId.mockResolvedValue(null)
+		repo.findProductByCatalogAndSku.mockResolvedValue(null)
+		repo.existsProductSlug.mockResolvedValue(false)
+		repo.existsProductSku.mockResolvedValue(false)
+		repo.findProductMediaIds.mockResolvedValue([])
+		repo.replaceProductMedia.mockResolvedValue(true)
+		repo.createProduct
+			.mockResolvedValueOnce({
+				id: 'local-product',
+				catalogId,
+				name: 'Product 1',
+				sku: 'MSK-1',
+				slug: 'product-1',
+				price: 125,
+				status: ProductStatus.ACTIVE,
+				deleteAt: null
+			} as any)
+			.mockResolvedValueOnce({
+				id: 'local-service',
+				catalogId,
+				name: 'Service 1',
+				sku: 'MSK-2',
+				slug: 'service-1',
+				price: 50,
+				status: ProductStatus.ACTIVE,
+				deleteAt: null
+			} as any)
+			.mockResolvedValueOnce({
+				id: 'local-bundle',
+				catalogId,
+				name: 'Bundle 1',
+				sku: 'MSK-3',
+				slug: 'bundle-1',
+				price: 259,
+				status: ProductStatus.ACTIVE,
+				deleteAt: null
+			} as any)
+		repo.upsertProductLink.mockResolvedValue({ id: 'link-1' } as any)
+		repo.findProductLinksByIntegration.mockResolvedValue([] as any)
+		repo.finishMoySkladSync.mockResolvedValue(integration as any)
+
+		jest
+			.spyOn(MoySkladClient.prototype, 'getAllAssortment')
+			.mockResolvedValue(assortment as any)
+		jest.spyOn(MoySkladClient.prototype, 'getEntityImages').mockResolvedValue([])
+
+		const result = await service.syncCatalog(catalogId)
+
+		expect(result.ok).toBe(true)
+		expect(result.total).toBe(3)
+		expect(result.created).toBe(3)
+		expect(repo.createProduct).toHaveBeenCalledTimes(3)
+		expect(repo.createProduct.mock.calls.map(call => call[0].name)).toEqual([
+			'Product 1',
+			'Service 1',
+			'Bundle 1'
+		])
+	})
+
 	it('skips missing-product archival during incremental catalog sync', async () => {
 		const catalogId = 'catalog-1'
 		const lastSyncAt = new Date('2026-03-23T15:37:00.336Z')
@@ -237,17 +366,16 @@ describe('MoySkladSyncService', () => {
 		repo.findMoySklad.mockResolvedValue(integration as any)
 		repo.finishMoySkladSync.mockResolvedValue(integration as any)
 
-		jest
-			.spyOn(MoySkladClient.prototype, 'getStockAll')
-			.mockResolvedValue(new Map())
-		jest.spyOn(MoySkladClient.prototype, 'getAllProducts').mockResolvedValue([])
+		jest.spyOn(MoySkladClient.prototype, 'getAllAssortment').mockResolvedValue([])
 
 		const result = await service.syncCatalog(catalogId, {
 			updatedFrom: lastSyncAt
 		})
 
 		expect(result.ok).toBe(true)
-		expect(MoySkladClient.prototype.getAllProducts).toHaveBeenCalledWith(lastSyncAt)
+		expect(MoySkladClient.prototype.getAllAssortment).toHaveBeenCalledWith(
+			lastSyncAt
+		)
 		expect(repo.findProductLinksByIntegration).not.toHaveBeenCalled()
 		expect(repo.finishMoySkladSync).toHaveBeenCalledWith(
 			catalogId,
@@ -255,6 +383,167 @@ describe('MoySkladSyncService', () => {
 				totalProducts: 0,
 				deletedProducts: 0
 			})
+		)
+	})
+
+	it('creates only root and leaf categories for nested MoySklad product folders and links product to leaf category', async () => {
+		const catalogId = 'catalog-1'
+		const integration = {
+			id: 'integration-1',
+			catalogId,
+			metadata: {},
+			isActive: true,
+			lastSyncAt: null
+		}
+		const product = {
+			id: 'external-1',
+			meta: { type: 'product' },
+			name: 'Product 1',
+			code: 'MSK-1',
+			updated: '2026-03-23 14:00:00',
+			archived: false,
+			stock: 5,
+			productFolder: {
+				id: 'folder-child',
+				name: 'Sneakers',
+				meta: {
+					href:
+						'https://api.moysklad.ru/api/remap/1.2/entity/productfolder/folder-child'
+				}
+			},
+			salePrices: [
+				{
+					value: 12500,
+					priceType: {
+						name: 'Retail'
+					}
+				}
+			],
+			images: {
+				rows: []
+			}
+		}
+
+		repo.beginMoySkladSync.mockResolvedValue(integration as any)
+		repo.findMoySklad.mockResolvedValue(integration as any)
+		repo.findProductLinkByExternalId.mockResolvedValue(null)
+		repo.findProductByCatalogAndSku.mockResolvedValue(null)
+		repo.existsProductSlug.mockResolvedValue(false)
+		repo.existsProductSku.mockResolvedValue(false)
+		repo.createProduct.mockResolvedValue({
+			id: 'local-1',
+			catalogId,
+			name: 'Product 1',
+			sku: 'MSK-1',
+			slug: 'product-1',
+			price: 125,
+			status: ProductStatus.ACTIVE,
+			deleteAt: null
+		} as any)
+		repo.findProductMediaIds.mockResolvedValue([])
+		repo.replaceProductMedia.mockResolvedValue(true)
+		repo.upsertProductLink.mockResolvedValue({ id: 'link-1' } as any)
+		repo.createCategory
+			.mockResolvedValueOnce({
+				id: 'category-root',
+				name: 'Shoes',
+				parentId: null
+			} as any)
+			.mockResolvedValueOnce({
+				id: 'category-child',
+				name: 'Sneakers',
+				parentId: 'category-root'
+			} as any)
+		repo.upsertCategoryLink.mockResolvedValue({ id: 'category-link-1' } as any)
+		repo.syncManagedProductCategories.mockResolvedValue({
+			added: 1,
+			removed: 0
+		})
+		repo.findProductLinksByIntegration.mockResolvedValue([] as any)
+		repo.finishMoySkladSync.mockResolvedValue(integration as any)
+
+		jest
+			.spyOn(MoySkladClient.prototype, 'getAllAssortment')
+			.mockResolvedValue([product] as any)
+		jest
+			.spyOn(MoySkladClient.prototype, 'getProductFolderChain')
+			.mockResolvedValue([
+				{
+					id: 'folder-root',
+					name: 'Shoes',
+					meta: {
+						href:
+							'https://api.moysklad.ru/api/remap/1.2/entity/productfolder/folder-root'
+					}
+				},
+				{
+					id: 'folder-middle',
+					name: 'Men',
+					meta: {
+						href:
+							'https://api.moysklad.ru/api/remap/1.2/entity/productfolder/folder-middle'
+					},
+					productFolder: {
+						id: 'folder-root',
+						name: 'Shoes',
+						meta: {
+							href:
+								'https://api.moysklad.ru/api/remap/1.2/entity/productfolder/folder-root'
+						}
+					}
+				},
+				{
+					id: 'folder-child',
+					name: 'Sneakers',
+					meta: {
+						href:
+							'https://api.moysklad.ru/api/remap/1.2/entity/productfolder/folder-child'
+					},
+					productFolder: {
+						id: 'folder-middle',
+						name: 'Men',
+						meta: {
+							href:
+								'https://api.moysklad.ru/api/remap/1.2/entity/productfolder/folder-middle'
+						}
+					}
+				}
+			] as any)
+		jest.spyOn(MoySkladClient.prototype, 'getEntityImages').mockResolvedValue([])
+
+		const result = await service.syncCatalog(catalogId)
+
+		expect(result.ok).toBe(true)
+		expect(repo.createCategory.mock.calls).toEqual([
+			[catalogId, 'Shoes', undefined, undefined],
+			[catalogId, 'Sneakers', 'category-root', undefined]
+		])
+		expect(repo.upsertCategoryLink.mock.calls).toEqual([
+			[
+				expect.objectContaining({
+					integrationId: integration.id,
+					categoryId: 'category-root',
+					externalId: 'folder-root',
+					externalParentId: null
+				}),
+				undefined
+			],
+			[
+				expect.objectContaining({
+					integrationId: integration.id,
+					categoryId: 'category-child',
+					externalId: 'folder-child',
+					externalParentId: 'folder-middle'
+				}),
+				undefined
+			]
+		])
+		expect(repo.syncManagedProductCategories).toHaveBeenCalledWith(
+			'local-1',
+			catalogId,
+			integration.id,
+			['category-child'],
+			undefined
 		)
 	})
 
@@ -269,10 +558,12 @@ describe('MoySkladSyncService', () => {
 		}
 		const product = {
 			id: 'external-1',
+			meta: { type: 'product' },
 			name: 'Product 1',
 			code: 'MSK-1',
 			updated: '2026-03-23 14:00:00',
 			archived: false,
+			stock: 5,
 			salePrices: [
 				{
 					value: 12500,
@@ -322,12 +613,9 @@ describe('MoySkladSyncService', () => {
 		repo.finishMoySkladSync.mockResolvedValue(integration as any)
 
 		jest
-			.spyOn(MoySkladClient.prototype, 'getStockAll')
-			.mockResolvedValue(new Map([['external-1', 5]]))
-		jest
-			.spyOn(MoySkladClient.prototype, 'getAllProducts')
+			.spyOn(MoySkladClient.prototype, 'getAllAssortment')
 			.mockResolvedValue([product] as any)
-		jest.spyOn(MoySkladClient.prototype, 'getProductImages').mockResolvedValue([])
+		jest.spyOn(MoySkladClient.prototype, 'getEntityImages').mockResolvedValue([])
 
 		const result = await service.syncCatalog(catalogId)
 
@@ -382,10 +670,7 @@ describe('MoySkladSyncService', () => {
 		} as any)
 		repo.finishMoySkladSync.mockResolvedValue(integration as any)
 
-		jest
-			.spyOn(MoySkladClient.prototype, 'getStockAll')
-			.mockResolvedValue(new Map())
-		jest.spyOn(MoySkladClient.prototype, 'getAllProducts').mockResolvedValue([])
+		jest.spyOn(MoySkladClient.prototype, 'getAllAssortment').mockResolvedValue([])
 
 		const result = await service.syncCatalog(catalogId)
 
@@ -424,10 +709,12 @@ describe('MoySkladSyncService', () => {
 		}
 		const externalProduct = {
 			id: 'external-1',
+			meta: { type: 'product' },
 			name: 'Product 1',
 			code: 'MSK-1',
 			updated: '2026-03-23 14:00:00',
 			archived: false,
+			stock: 5,
 			salePrices: [
 				{
 					value: 12500,
@@ -466,10 +753,7 @@ describe('MoySkladSyncService', () => {
 		repo.finishMoySkladSync.mockResolvedValue(integration as any)
 
 		jest
-			.spyOn(MoySkladClient.prototype, 'getStockAll')
-			.mockResolvedValue(new Map([['external-1', 5]]))
-		jest
-			.spyOn(MoySkladClient.prototype, 'getAllProducts')
+			.spyOn(MoySkladClient.prototype, 'getAllAssortment')
 			.mockResolvedValue([externalProduct] as any)
 		const downloadImageSpy = jest
 			.spyOn(MoySkladClient.prototype, 'downloadImage')
@@ -509,10 +793,12 @@ describe('MoySkladSyncService', () => {
 		}
 		const externalProduct = {
 			id: 'external-1',
+			meta: { type: 'product' },
 			name: 'Updated Product',
 			code: 'MSK-1',
 			updated: '2026-03-23 14:00:00',
 			archived: false,
+			stock: 5,
 			salePrices: [
 				{
 					value: 13000,
@@ -557,10 +843,7 @@ describe('MoySkladSyncService', () => {
 		} as any)
 
 		jest
-			.spyOn(MoySkladClient.prototype, 'getStockAll')
-			.mockResolvedValue(new Map([['external-1', 5]]))
-		jest
-			.spyOn(MoySkladClient.prototype, 'getProduct')
+			.spyOn(MoySkladClient.prototype, 'getAssortmentItemById')
 			.mockResolvedValue(externalProduct as any)
 		const downloadImageSpy = jest
 			.spyOn(MoySkladClient.prototype, 'downloadImage')

@@ -1,10 +1,12 @@
-import type { Prisma } from '@generated/client'
+import { type Prisma, Prisma as PrismaSql } from '@generated/client'
 import { ProductStatus } from '@generated/enums'
 import { SortOrder } from '@generated/internal/prismaNamespace'
 import { CategoryCreateInput, CategoryUpdateInput } from '@generated/models'
 import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { buildMediaSelect } from '@/shared/media/media-select'
+import { MEDIA_LIST_VARIANT_NAMES } from '@/shared/media/media-url.service'
 
 import {
 	type CategoryProductCursor,
@@ -21,35 +23,25 @@ const categorySelect = {
 	position: true,
 	name: true,
 	imageMedia: {
-		select: {
-			id: true,
-			originalName: true,
-			mimeType: true,
-			size: true,
-			width: true,
-			height: true,
-			status: true,
-			storage: true,
-			key: true,
-			variants: {
-				select: {
-					id: true,
-					kind: true,
-					mimeType: true,
-					size: true,
-					width: true,
-					height: true,
-					storage: true,
-					key: true
-				},
-				orderBy: [{ width: 'desc' as const }, { kind: 'asc' as const }]
-			}
-		}
+		select: buildMediaSelect()
 	},
 	descriptor: true,
 	discount: true,
 	createdAt: true,
 	updatedAt: true
+}
+
+function buildProductMediaSelect() {
+	return {
+		select: {
+			position: true,
+			kind: true,
+			media: {
+				select: buildMediaSelect(MEDIA_LIST_VARIANT_NAMES)
+			}
+		},
+		orderBy: { position: 'asc' as const }
+	}
 }
 
 const productSelect = {
@@ -65,39 +57,7 @@ const productSelect = {
 			slug: true
 		}
 	},
-	media: {
-		select: {
-			position: true,
-			kind: true,
-			media: {
-				select: {
-					id: true,
-					originalName: true,
-					mimeType: true,
-					size: true,
-					width: true,
-					height: true,
-					status: true,
-					storage: true,
-					key: true,
-					variants: {
-						select: {
-							id: true,
-							kind: true,
-							mimeType: true,
-							size: true,
-							width: true,
-							height: true,
-							storage: true,
-							key: true
-						},
-						orderBy: [{ width: 'desc' as const }, { kind: 'asc' as const }]
-					}
-				}
-			}
-		},
-		orderBy: { position: 'asc' as const }
-	},
+	media: buildProductMediaSelect(),
 	integrationLinks: {
 		select: {
 			externalId: true,
@@ -174,30 +134,7 @@ const categorySelectWithRelations = {
 			position: true,
 			name: true,
 			imageMedia: {
-				select: {
-					id: true,
-					originalName: true,
-					mimeType: true,
-					size: true,
-					width: true,
-					height: true,
-					status: true,
-					storage: true,
-					key: true,
-					variants: {
-						select: {
-							id: true,
-							kind: true,
-							mimeType: true,
-							size: true,
-							width: true,
-							height: true,
-							storage: true,
-							key: true
-						},
-						orderBy: [{ width: 'desc' as const }, { kind: 'asc' as const }]
-					}
-				}
+				select: buildMediaSelect()
 			}
 		},
 		orderBy: [{ position: SortOrder.asc }, { name: SortOrder.asc }]
@@ -227,6 +164,16 @@ export class CategoryRepository {
 	findById(
 		id: string,
 		catalogId: string,
+		withRelations: true
+	): Promise<CategorySelectWithRelations | null>
+	findById(
+		id: string,
+		catalogId: string,
+		withRelations?: false
+	): Promise<CategorySelect | null>
+	findById(
+		id: string,
+		catalogId: string,
 		withRelations = false
 	): Promise<CategorySelect | CategorySelectWithRelations | null> {
 		return this.prisma.category.findFirst({
@@ -237,6 +184,28 @@ export class CategoryRepository {
 
 	create(data: CategoryCreateInput) {
 		return this.prisma.category.create({ data, select: categorySelect })
+	}
+
+	async updatePositions(updates: { id: string; position: number }[]) {
+		if (!updates.length) return
+
+		const values = updates.map(
+			update =>
+				PrismaSql.sql`(CAST(${update.id} AS uuid), CAST(${update.position} AS integer))`
+		)
+
+		await this.prisma.$executeRaw(PrismaSql.sql`
+			UPDATE "categories" AS category
+			SET
+				"position" = input."position",
+				"updated_at" = NOW()
+			FROM (
+				VALUES ${PrismaSql.join(values)}
+			) AS input("id", "position")
+			WHERE
+				category."id" = input."id"
+				AND category."delete_at" IS NULL
+		`)
 	}
 
 	async update(
@@ -334,6 +303,45 @@ export class CategoryRepository {
 				productId: true,
 				position: true,
 				product: { select: productSelectWithAttributes }
+			},
+			orderBy: [{ position: SortOrder.asc }, { productId: SortOrder.asc }],
+			take
+		})
+	}
+
+	async findCategoryProductCardsPage(
+		categoryId: string,
+		catalogId: string,
+		options: { cursor?: string; take: number; includeInactive?: boolean }
+	) {
+		const { cursor, take, includeInactive } = options
+		const after = await this.resolveCursor(categoryId, catalogId, cursor)
+		const where: Prisma.CategoryProductWhereInput = {
+			categoryId,
+			category: { catalogId, deleteAt: null },
+			product: {
+				catalogId,
+				deleteAt: null,
+				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
+			}
+		}
+
+		if (after) {
+			where.OR = [
+				{ position: { gt: after.position } },
+				{
+					position: after.position,
+					productId: { gt: after.productId }
+				}
+			]
+		}
+
+		return this.prisma.categoryProduct.findMany({
+			where,
+			select: {
+				productId: true,
+				position: true,
+				product: { select: productSelect }
 			},
 			orderBy: [{ position: SortOrder.asc }, { productId: SortOrder.asc }],
 			take

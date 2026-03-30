@@ -5,12 +5,18 @@ import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import { BadRequestException, Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import {
+	MEDIA_DETAIL_VARIANT_NAMES,
+	MEDIA_LIST_VARIANT_NAMES
+} from '@/shared/media/media-url.service'
+import { buildMediaSelect } from '@/shared/media/media-select'
 
 import type { ProductAttributeValueData } from './product-attribute.builder'
 import type {
 	ProductVariantAttributeInput,
 	ProductVariantData
 } from './product-variant.builder'
+import { tokenizeProductSearchTerm } from './product-search.utils'
 
 export type ProductVariantUpdateData = {
 	variantKey: string
@@ -102,7 +108,25 @@ export type ProductSeededPageCursor = {
 	id: string
 }
 
-const productSelect = {
+const productIdSelect = {
+	id: true
+}
+
+function buildProductMediaSelect(variantNames?: readonly string[]) {
+	return {
+		select: {
+			position: true,
+			kind: true,
+			media: {
+				select: buildMediaSelect(variantNames)
+			}
+		},
+		orderBy: { position: 'asc' as const }
+	}
+}
+
+function buildProductSelect(variantNames?: readonly string[]) {
+	return {
 	id: true,
 	sku: true,
 	name: true,
@@ -115,39 +139,7 @@ const productSelect = {
 			slug: true
 		}
 	},
-	media: {
-		select: {
-			position: true,
-			kind: true,
-			media: {
-				select: {
-					id: true,
-					originalName: true,
-					mimeType: true,
-					size: true,
-					width: true,
-					height: true,
-					status: true,
-					storage: true,
-					key: true,
-					variants: {
-						select: {
-							id: true,
-							kind: true,
-							mimeType: true,
-							size: true,
-							width: true,
-							height: true,
-							storage: true,
-							key: true
-						},
-						orderBy: [{ width: 'desc' as const }, { kind: 'asc' as const }]
-					}
-				}
-			}
-		},
-		orderBy: { position: 'asc' as const }
-	},
+	media: buildProductMediaSelect(variantNames),
 	categoryProducts: {
 		where: {
 			category: {
@@ -185,6 +177,10 @@ const productSelect = {
 	createdAt: true,
 	updatedAt: true
 }
+}
+
+const productListSelect = buildProductSelect(MEDIA_LIST_VARIANT_NAMES)
+const productDetailSelect = buildProductSelect(MEDIA_DETAIL_VARIANT_NAMES)
 
 const attributeRefSelect = {
 	id: true,
@@ -252,8 +248,8 @@ const productVariantSelect = {
 	}
 }
 
-const productSelectWithAttributes = {
-	...productSelect,
+const productListSelectWithAttributes = {
+	...productListSelect,
 	productAttributes: {
 		where: { deleteAt: null },
 		select: productAttributeSelect,
@@ -261,8 +257,17 @@ const productSelectWithAttributes = {
 	}
 }
 
-const productSelectWithDetails = {
-	...productSelectWithAttributes,
+const productDetailSelectWithAttributes = {
+	...productDetailSelect,
+	productAttributes: {
+		where: { deleteAt: null },
+		select: productAttributeSelect,
+		orderBy: { attributeId: 'asc' as const }
+	}
+}
+
+const productDetailSelectWithDetails = {
+	...productDetailSelectWithAttributes,
 	variants: {
 		where: { deleteAt: null },
 		select: productVariantSelect,
@@ -271,15 +276,19 @@ const productSelectWithDetails = {
 }
 
 export type ProductListItem = Prisma.ProductGetPayload<{
-	select: typeof productSelect
+	select: typeof productListSelect
 }>
 
 export type ProductWithAttributesItem = Prisma.ProductGetPayload<{
-	select: typeof productSelectWithAttributes
+	select: typeof productListSelectWithAttributes
+}>
+
+export type ProductPopularItem = Prisma.ProductGetPayload<{
+	select: typeof productListSelectWithAttributes
 }>
 
 export type ProductDetailsItem = Prisma.ProductGetPayload<{
-	select: typeof productSelectWithDetails
+	select: typeof productDetailSelectWithDetails
 }>
 
 type ProductReadExecutor =
@@ -333,14 +342,14 @@ export class ProductRepository {
 	findAll(
 		catalogId: string,
 		includeInactive = false
-	): Promise<ProductListItem[]> {
+	): Promise<ProductWithAttributesItem[]> {
 		return this.prisma.product.findMany({
 			where: {
 				deleteAt: null,
 				catalogId,
 				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
 			},
-			select: productSelect,
+			select: productListSelectWithAttributes,
 			orderBy: { createdAt: 'desc' }
 		})
 	}
@@ -348,7 +357,7 @@ export class ProductRepository {
 	findPopular(
 		catalogId: string,
 		includeInactive = false
-	): Promise<ProductDetailsItem[]> {
+	): Promise<ProductPopularItem[]> {
 		return this.prisma.product.findMany({
 			where: {
 				deleteAt: null,
@@ -356,7 +365,23 @@ export class ProductRepository {
 				isPopular: true,
 				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
 			},
-			select: productSelectWithDetails,
+			select: productListSelectWithAttributes,
+			orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }]
+		})
+	}
+
+	findPopularCards(
+		catalogId: string,
+		includeInactive = false
+	): Promise<ProductWithAttributesItem[]> {
+		return this.prisma.product.findMany({
+			where: {
+				deleteAt: null,
+				catalogId,
+				isPopular: true,
+				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
+			},
+			select: productListSelectWithAttributes,
 			orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }]
 		})
 	}
@@ -373,7 +398,7 @@ export class ProductRepository {
 				deleteAt: null,
 				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
 			},
-			select: productSelectWithDetails
+			select: productDetailSelectWithDetails
 		})
 	}
 
@@ -389,7 +414,25 @@ export class ProductRepository {
 				deleteAt: null,
 				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
 			},
-			select: productSelectWithDetails
+			select: productDetailSelectWithDetails
+		})
+	}
+
+	findByIds(
+		ids: string[],
+		catalogId: string,
+		includeInactive = false
+	): Promise<ProductWithAttributesItem[]> {
+		if (!ids.length) return Promise.resolve<ProductWithAttributesItem[]>([])
+
+		return this.prisma.product.findMany({
+			where: {
+				id: { in: ids },
+				catalogId,
+				deleteAt: null,
+				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
+			},
+			select: productListSelectWithAttributes
 		})
 	}
 
@@ -407,7 +450,7 @@ export class ProductRepository {
 				deleteAt: null,
 				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
 			},
-			select: productSelectWithAttributes
+			select: productListSelectWithAttributes
 		})
 	}
 
@@ -446,7 +489,48 @@ export class ProductRepository {
 						}
 					: {})
 			},
-			select: productSelectWithAttributes,
+			select: productListSelectWithAttributes,
+			orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+			take
+		})
+	}
+
+	findUncategorizedCardsPage(
+		catalogId: string,
+		options: {
+			cursor?: ProductDefaultPageCursor
+			take: number
+			includeInactive?: boolean
+		}
+	): Promise<ProductWithAttributesItem[]> {
+		const { cursor, take, includeInactive } = options
+
+		return this.prisma.product.findMany({
+			where: {
+				catalogId,
+				deleteAt: null,
+				...(includeInactive ? {} : { status: ProductStatus.ACTIVE }),
+				categoryProducts: {
+					none: {
+						category: {
+							catalogId,
+							deleteAt: null
+						}
+					}
+				},
+				...(cursor
+					? {
+							OR: [
+								{ updatedAt: { lt: cursor.updatedAt } },
+								{
+									updatedAt: cursor.updatedAt,
+									id: { lt: cursor.id }
+								}
+							]
+						}
+					: {})
+			},
+			select: productListSelectWithAttributes,
 			orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
 			take
 		})
@@ -614,7 +698,7 @@ export class ProductRepository {
 		variants?: ProductVariantData[]
 	) {
 		if (!attributes?.length && !variants?.length) {
-			return this.prisma.product.create({ data, select: productSelect })
+			return this.prisma.product.create({ data, select: productIdSelect })
 		}
 
 		return this.prisma.$transaction(tx =>
@@ -784,7 +868,7 @@ export class ProductRepository {
 	) {
 		const product = await tx.product.create({
 			data,
-			select: productSelect
+			select: productIdSelect
 		})
 
 		await this.createProductAttributes(tx, product.id, attributes)
@@ -849,7 +933,7 @@ export class ProductRepository {
 	): Promise<ProductWithAttributesItem | null> {
 		return db.product.findFirst({
 			where: { id, catalogId, deleteAt: null },
-			select: productSelectWithAttributes
+			select: productListSelectWithAttributes
 		})
 	}
 
@@ -860,7 +944,7 @@ export class ProductRepository {
 	): Promise<ProductDetailsItem | null> {
 		return db.product.findFirst({
 			where: { id, catalogId, deleteAt: null },
-			select: productSelectWithDetails
+			select: productDetailSelectWithDetails
 		})
 	}
 
@@ -965,42 +1049,81 @@ export class ProductRepository {
 			const existingByCategoryId = new Map(
 				existing.map(item => [item.categoryId, item] as const)
 			)
+			const removed = existing.filter(
+				current => !nextCategoryIds.has(current.categoryId)
+			)
+			const added = categoryIds.filter(
+				categoryId => !existingByCategoryId.has(categoryId)
+			)
 
-			for (const current of existing) {
-				if (nextCategoryIds.has(current.categoryId)) {
-					continue
-				}
-
-				await tx.categoryProduct.updateMany({
+			if (removed.length) {
+				await this.closeCategoryProductGaps(tx, removed)
+				await tx.categoryProduct.deleteMany({
 					where: {
-						categoryId: current.categoryId,
-						position: { gt: current.position }
-					},
-					data: { position: { decrement: 1 } }
-				})
-				await tx.categoryProduct.delete({
-					where: {
-						categoryId_productId: {
-							categoryId: current.categoryId,
-							productId
-						}
+						productId,
+						categoryId: { in: removed.map(item => item.categoryId) }
 					}
 				})
 			}
 
-			for (const categoryId of categoryIds) {
-				if (existingByCategoryId.has(categoryId)) {
-					continue
-				}
-
-				await tx.categoryProduct.updateMany({
-					where: { categoryId, position: { gte: 0 } },
-					data: { position: { increment: 1 } }
-				})
-				await tx.categoryProduct.create({
-					data: { categoryId, productId, position: 0 }
+			if (added.length) {
+				await this.shiftCategoryProductPositionsRight(tx, added, 0)
+				await tx.categoryProduct.createMany({
+					data: added.map(categoryId => ({
+						categoryId,
+						productId,
+						position: 0
+					}))
 				})
 			}
+		})
+	}
+
+	async prependProductToCategories(
+		productId: string,
+		catalogId: string,
+		categoryIds: string[]
+	) {
+		if (!categoryIds.length) return
+
+		await this.prisma.$transaction(async tx => {
+			const [product, categories] = await Promise.all([
+				tx.product.findFirst({
+					where: { id: productId, catalogId, deleteAt: null },
+					select: { id: true }
+				}),
+				tx.category.findMany({
+					where: {
+						id: { in: categoryIds },
+						catalogId,
+						deleteAt: null
+					},
+					select: { id: true }
+				})
+			])
+
+			if (!product) {
+				throw new BadRequestException('Товар не найден')
+			}
+
+			const foundCategoryIds = new Set(categories.map(category => category.id))
+			const missingCategoryIds = categoryIds.filter(
+				categoryId => !foundCategoryIds.has(categoryId)
+			)
+			if (missingCategoryIds.length) {
+				throw new BadRequestException(
+					`Категории не найдены в каталоге: ${missingCategoryIds.join(', ')}`
+				)
+			}
+
+			await this.shiftCategoryProductPositionsRight(tx, categoryIds, 0)
+			await tx.categoryProduct.createMany({
+				data: categoryIds.map(categoryId => ({
+					categoryId,
+					productId,
+					position: 0
+				}))
+			})
 		})
 	}
 
@@ -1050,10 +1173,11 @@ export class ProductRepository {
 			const targetPosition = Math.min(normalizedPosition, siblingCount)
 
 			if (!current) {
-				await tx.categoryProduct.updateMany({
-					where: { categoryId, position: { gte: targetPosition } },
-					data: { position: { increment: 1 } }
-				})
+				await this.shiftCategoryProductPositionsRight(
+					tx,
+					[categoryId],
+					targetPosition
+				)
 				await tx.categoryProduct.create({
 					data: { categoryId, productId, position: targetPosition }
 				})
@@ -1090,6 +1214,51 @@ export class ProductRepository {
 				data: { position: targetPosition }
 			})
 		})
+	}
+
+	private async shiftCategoryProductPositionsRight(
+		tx: Prisma.TransactionClient,
+		categoryIds: string[],
+		fromPosition: number
+	) {
+		if (!categoryIds.length) return
+
+		const values = categoryIds.map(categoryId =>
+			PrismaSql.sql`(CAST(${categoryId} AS uuid))`
+		)
+
+		await tx.$executeRaw(PrismaSql.sql`
+			UPDATE "category_products" AS category_product
+			SET "position" = category_product."position" + 1
+			FROM (
+				VALUES ${PrismaSql.join(values)}
+			) AS input("category_id")
+			WHERE
+				category_product."category_id" = input."category_id"
+				AND category_product."position" >= ${fromPosition}
+		`)
+	}
+
+	private async closeCategoryProductGaps(
+		tx: Prisma.TransactionClient,
+		removals: Array<{ categoryId: string; position: number }>
+	) {
+		if (!removals.length) return
+
+		const values = removals.map(removal =>
+			PrismaSql.sql`(CAST(${removal.categoryId} AS uuid), ${removal.position})`
+		)
+
+		await tx.$executeRaw(PrismaSql.sql`
+			UPDATE "category_products" AS category_product
+			SET "position" = category_product."position" - 1
+			FROM (
+				VALUES ${PrismaSql.join(values)}
+			) AS input("category_id", "position")
+			WHERE
+				category_product."category_id" = input."category_id"
+				AND category_product."position" > input."position"
+		`)
 	}
 
 	private buildBaseFilterClauses(query: ProductFilterQueryBase): Prisma.Sql[] {
@@ -1485,10 +1654,22 @@ export class ProductRepository {
 	}
 
 	private buildSearchFilterClause(searchTerm?: string): Prisma.Sql | null {
-		if (!searchTerm) return null
+		const tokens = tokenizeProductSearchTerm(searchTerm)
+		if (!tokens.length) return null
 
-		const pattern = `%${escapeLikePattern(searchTerm)}%`
-		return PrismaSql.sql`p.name ILIKE ${pattern} ESCAPE '\'`
+		const clauses = tokens.map(token => this.buildSearchTokenClause(token))
+		return PrismaSql.sql`(${PrismaSql.join(clauses, ' AND ')})`
+	}
+
+	private buildSearchTokenClause(token: string): Prisma.Sql {
+		const pattern = `%${escapeLikePattern(token)}%`
+		return PrismaSql.sql`
+			(
+				LOWER(p.name) LIKE ${pattern} ESCAPE '\'
+				OR LOWER(p.sku) LIKE ${pattern} ESCAPE '\'
+				OR LOWER(p.slug) LIKE ${pattern} ESCAPE '\'
+			)
+		`
 	}
 
 	private buildPopularityFilterClause(isPopular?: boolean): Prisma.Sql | null {

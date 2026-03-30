@@ -11,6 +11,7 @@ import slugify from 'slugify'
 
 import { CacheService } from '@/shared/cache/cache.service'
 import {
+	CATALOG_PRODUCTS_CACHE_TTL_SEC,
 	CATALOG_TYPE_CACHE_VERSION,
 	CATEGORY_PRODUCTS_CACHE_VERSION,
 	CATEGORY_PRODUCTS_FIRST_PAGE_CACHE_TTL_SEC,
@@ -59,6 +60,7 @@ import {
 	ProductVariantBuilder,
 	type ProductVariantData
 } from './product-variant.builder'
+import { ProductSeoSyncService } from './product-seo-sync.service'
 import {
 	type AttributeFilterMeta,
 	type DiscountAttributeIds,
@@ -69,7 +71,10 @@ import {
 	type ProductVariantUpdateData
 } from './product.repository'
 
-type ProductMapped<T> = Omit<T, 'media' | 'categoryProducts' | 'integrationLinks'> & {
+type ProductMapped<T> = Omit<
+	T,
+	'media' | 'categoryProducts' | 'integrationLinks'
+> & {
 	media: { position: number; kind?: string | null; media: MediaDto }[]
 	categories: { id: string; name: string; position: number }[]
 	integration: {
@@ -128,8 +133,6 @@ type PreparedProductUpdatePayload = {
 	categoryPosition: number
 }
 
-const PRODUCTS_CACHE_TTL_SEC =
-	Number(process.env.CATALOG_PRODUCTS_CACHE_TTL_SEC ?? 0) || 0
 const PRODUCT_INFINITE_DEFAULT_LIMIT = 24
 const PRODUCT_INFINITE_MAX_LIMIT = 50
 const PRODUCT_NAME_MAX_LENGTH = 255
@@ -191,7 +194,7 @@ function buildHashedSku(base: string): string {
 
 @Injectable()
 export class ProductService {
-	private readonly cacheTtlSec = PRODUCTS_CACHE_TTL_SEC
+	private readonly cacheTtlSec = CATALOG_PRODUCTS_CACHE_TTL_SEC
 	private readonly uncategorizedFirstPageCacheTtlSec =
 		CATEGORY_PRODUCTS_FIRST_PAGE_CACHE_TTL_SEC
 	private readonly uncategorizedNextPageCacheTtlSec =
@@ -204,7 +207,8 @@ export class ProductService {
 		private readonly variantBuilder: ProductVariantBuilder,
 		private readonly mediaRepo: MediaRepository,
 		private readonly mediaUrl: MediaUrlService,
-		private readonly s3Service: S3Service
+		private readonly s3Service: S3Service,
+		private readonly productSeoSync: ProductSeoSyncService
 	) {}
 
 	async getAll(options?: ProductReadOptions) {
@@ -246,6 +250,29 @@ export class ProductService {
 		if (cached !== null) return cached
 
 		const products = await this.repo.findPopular(catalogId, false)
+		const mapped = products.map(product =>
+			this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
+		)
+		await this.cache.setJson(cacheKey, mapped, this.cacheTtlSec)
+		return mapped
+	}
+
+	async getPopularCards(options?: ProductReadOptions) {
+		const catalogId = mustCatalogId()
+		const includeInactive = options?.includeInactive === true
+
+		if (includeInactive || !this.cacheTtlSec) {
+			const products = await this.repo.findPopularCards(catalogId, includeInactive)
+			return products.map(product =>
+				this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
+			)
+		}
+
+		const cacheKey = await this.buildCatalogPopularProductCardsCacheKey(catalogId)
+		const cached = await this.cache.getJson<ProductList>(cacheKey)
+		if (cached !== null) return cached
+
+		const products = await this.repo.findPopularCards(catalogId, false)
 		const mapped = products.map(product =>
 			this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
 		)
@@ -296,6 +323,13 @@ export class ProductService {
 			nextCursor,
 			seed: seed ?? null
 		}
+	}
+
+	async getInfiniteCards(
+		query: Record<string, unknown>,
+		options?: ProductReadOptions
+	) {
+		return this.loadInfiniteCardsPage(query, options, 'catalog')
 	}
 
 	async getRecommendationsInfinite(
@@ -351,6 +385,91 @@ export class ProductService {
 		}
 	}
 
+	async getRecommendationsInfiniteCards(
+		query: Record<string, unknown>,
+		options?: ProductReadOptions
+	) {
+		return this.loadInfiniteCardsPage(query, options, 'recommendations')
+	}
+
+	private async loadInfiniteCardsPage(
+		query: Record<string, unknown>,
+		options: ProductReadOptions | undefined,
+		kind: 'catalog' | 'recommendations'
+	) {
+		const catalogId = mustCatalogId()
+		const typeId = mustTypeId()
+		const includeInactive = options?.includeInactive === true
+		const parsed = parseProductInfiniteQuery(query, {
+			defaultLimit: PRODUCT_INFINITE_DEFAULT_LIMIT,
+			maxLimit: PRODUCT_INFINITE_MAX_LIMIT
+		})
+		const decodedCursor = decodeProductInfiniteCursor(parsed.cursor)
+		const seed = this.resolveInfiniteSeed(parsed, decodedCursor)
+
+		const attributeFilters = await this.resolveAttributeFilters(
+			typeId,
+			parsed.attributeFilters
+		)
+		const discountAttributeIds = parsed.isDiscount
+			? await this.resolveDiscountAttributeIds(typeId)
+			: undefined
+
+		if (
+			kind === 'recommendations' &&
+			!this.hasRecommendationFilters(parsed, attributeFilters)
+		) {
+			return {
+				items: [],
+				nextCursor: null,
+				seed: seed ?? null
+			}
+		}
+
+		const cacheKey =
+			!includeInactive && !parsed.cursor && this.cacheTtlSec > 0
+				? await this.buildInfiniteCardsCacheKey(
+						catalogId,
+						typeId,
+						parsed,
+						seed,
+						kind
+					)
+				: undefined
+		if (cacheKey) {
+			const cached = await this.cache.getJson<{
+				items: ProductList
+				nextCursor: string | null
+				seed: string | null
+			}>(cacheKey)
+			if (cached !== null) return cached
+		}
+
+		const baseQuery = this.buildInfiniteBaseQuery(
+			catalogId,
+			parsed,
+			attributeFilters,
+			discountAttributeIds,
+			includeInactive
+		)
+		const rows =
+			kind === 'recommendations'
+				? await this.loadRecommendationRows(baseQuery, seed, decodedCursor)
+				: await this.loadInfiniteRows(baseQuery, seed, decodedCursor)
+		const { pageRows, hasMore } = this.buildInfinitePage(rows, parsed.limit)
+		const page = {
+			items: await this.loadInfiniteCardItems(pageRows, catalogId, includeInactive),
+			nextCursor: this.buildInfiniteNextCursor(pageRows, hasMore, seed),
+			seed: seed ?? null
+		}
+
+		if (cacheKey) {
+			await this.cache.setJson(cacheKey, page, this.cacheTtlSec)
+		}
+
+		return page
+	}
+
 	async getUncategorizedInfinite(options?: {
 		cursor?: string
 		limit?: number | string
@@ -390,6 +509,72 @@ export class ProductService {
 
 		const decodedCursor = decodeProductInfiniteCursor(parsed.cursor)
 		const rows = await this.repo.findUncategorizedPage(catalogId, {
+			cursor: decodedCursor?.mode === 'default' ? decodedCursor.cursor : undefined,
+			take: parsed.limit + 1,
+			includeInactive
+		})
+		const hasMore = rows.length > parsed.limit
+		const pageRows = hasMore ? rows.slice(0, parsed.limit) : rows
+		const lastRow = pageRows[pageRows.length - 1]
+		const page = {
+			items: pageRows.map(product =>
+				this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
+			),
+			nextCursor:
+				hasMore && lastRow
+					? encodeProductDefaultCursor({
+							id: lastRow.id,
+							updatedAt: lastRow.updatedAt
+						})
+					: null
+		}
+
+		if (cacheKey) {
+			await this.cache.setJson(cacheKey, page, cacheTtlSec)
+		}
+
+		return page
+	}
+
+	async getUncategorizedInfiniteCards(options?: {
+		cursor?: string
+		limit?: number | string
+		includeInactive?: boolean
+	}) {
+		const catalogId = mustCatalogId()
+		const includeInactive = options?.includeInactive === true
+		const parsed = parseProductInfiniteQuery(
+			{
+				cursor: options?.cursor,
+				limit: options?.limit
+			},
+			{
+				defaultLimit: PRODUCT_INFINITE_DEFAULT_LIMIT,
+				maxLimit: PRODUCT_INFINITE_MAX_LIMIT
+			}
+		)
+		const cacheTtlSec = parsed.cursor
+			? this.uncategorizedNextPageCacheTtlSec
+			: this.uncategorizedFirstPageCacheTtlSec
+		const cacheKey =
+			!includeInactive && cacheTtlSec > 0
+				? await this.buildUncategorizedProductCardsCacheKey(
+						catalogId,
+						parsed.cursor,
+						parsed.limit
+					)
+				: undefined
+
+		if (cacheKey) {
+			const cached = await this.cache.getJson<{
+				items: ProductList
+				nextCursor: string | null
+			}>(cacheKey)
+			if (cached !== null) return cached
+		}
+
+		const decodedCursor = decodeProductInfiniteCursor(parsed.cursor)
+		const rows = await this.repo.findUncategorizedCardsPage(catalogId, {
 			cursor: decodedCursor?.mode === 'default' ? decodedCursor.cursor : undefined,
 			take: parsed.limit + 1,
 			includeInactive
@@ -460,7 +645,8 @@ export class ProductService {
 			catalogId
 		)
 		const created = await this.repo.findById(product.id, catalogId, true)
-		if (!created) throw new NotFoundException('РўРѕРІР°СЂ РЅРµ РЅР°Р№РґРµРЅ')
+		if (!created) throw new NotFoundException('Товар не найден')
+		await this.productSeoSync.syncProduct(created, catalogId)
 
 		await this.invalidateCatalogProductsCache(catalogId)
 		await this.invalidateCategoryProductsCache(catalogId)
@@ -526,6 +712,7 @@ export class ProductService {
 
 		const duplicated = await this.repo.findById(product.id, catalogId, true)
 		if (!duplicated) throw new NotFoundException('Товар не найден')
+		await this.productSeoSync.syncProduct(duplicated, catalogId)
 
 		await this.invalidateCatalogProductsCache(catalogId)
 		await this.invalidateCategoryProductsCache(catalogId)
@@ -540,7 +727,7 @@ export class ProductService {
 		const typeId = mustTypeId()
 		const payload = await this.prepareUpdatePayload(id, dto, catalogId, typeId)
 
-		const product = await this.repo.update(
+		const updated = await this.repo.update(
 			id,
 			payload.data,
 			catalogId,
@@ -549,7 +736,7 @@ export class ProductService {
 			payload.variants,
 			payload.mediaIds
 		)
-		if (!product) throw new NotFoundException('Товар не найден')
+		if (!updated) throw new NotFoundException('Товар не найден')
 
 		if (payload.categoryIds !== undefined) {
 			await this.repo.syncProductCategories(id, catalogId, payload.categoryIds)
@@ -564,6 +751,13 @@ export class ProductService {
 			)
 		}
 
+		const product =
+			payload.categoryIds !== undefined || payload.categoryId
+				? await this.repo.findById(id, catalogId, true)
+				: updated
+		if (!product) throw new NotFoundException('Товар не найден')
+		await this.productSeoSync.syncProduct(product, catalogId)
+
 		await this.invalidateCatalogProductsCache(catalogId)
 		await this.invalidateCategoryProductsCache(catalogId)
 		return {
@@ -576,6 +770,7 @@ export class ProductService {
 		const catalogId = mustCatalogId()
 		const product = await this.repo.toggleStatus(id, catalogId)
 		if (!product) throw new NotFoundException('Товар не найден')
+		await this.productSeoSync.syncProduct(product, catalogId)
 
 		await this.invalidateCatalogProductsCache(catalogId)
 		await this.invalidateCategoryProductsCache(catalogId)
@@ -770,6 +965,7 @@ export class ProductService {
 		)
 		const updated = await this.repo.setVariants(id, catalogId, variants)
 		if (!updated) throw new NotFoundException('Товар не найден')
+		await this.productSeoSync.syncProduct(updated, catalogId)
 
 		await this.invalidateCatalogProductsCache(catalogId)
 		if (hasCustomVariantValues) {
@@ -785,6 +981,7 @@ export class ProductService {
 		const catalogId = mustCatalogId()
 		const product = await this.repo.softDelete(id, catalogId)
 		if (!product) throw new NotFoundException('Товар не найден')
+		await this.productSeoSync.removeProduct(id, catalogId)
 
 		if (product.mediaIds.length) {
 			const orphanedMedia = await this.mediaRepo.findOrphanedByIds(
@@ -906,6 +1103,28 @@ export class ProductService {
 			catalogId,
 			includeInactive
 		)
+		const productById = new Map(
+			products.map(
+				product =>
+					[
+						product.id,
+						this.mapProductMedia(product, MEDIA_LIST_VARIANT_NAMES)
+					] as const
+			)
+		)
+
+		return ids
+			.map(id => productById.get(id))
+			.filter((item): item is NonNullable<typeof item> => Boolean(item))
+	}
+
+	private async loadInfiniteCardItems(
+		rows: ProductInfiniteRow[],
+		catalogId: string,
+		includeInactive = false
+	): Promise<ProductList> {
+		const ids = rows.map(row => row.id)
+		const products = await this.repo.findByIds(ids, catalogId, includeInactive)
 		const productById = new Map(
 			products.map(
 				product =>
@@ -1266,11 +1485,7 @@ export class ProductService {
 	): Promise<void> {
 		if (!categoryIds.length) return
 
-		await Promise.all(
-			categoryIds.map(categoryId =>
-				this.repo.upsertCategoryProductPosition(productId, categoryId, catalogId, 0)
-			)
-		)
+		await this.repo.prependProductToCategories(productId, catalogId, categoryIds)
 	}
 
 	private assertNoAttributeRemovalConflicts(
@@ -1488,6 +1703,75 @@ export class ProductService {
 		])
 	}
 
+	private async buildCatalogPopularProductCardsCacheKey(
+		catalogId: string
+	): Promise<string> {
+		const version = await this.cache.getVersion(PRODUCTS_CACHE_VERSION, catalogId)
+		return this.cache.buildKey([
+			'catalog',
+			catalogId,
+			'products',
+			'popular',
+			'cards',
+			`v${version}`
+		])
+	}
+
+	private async buildInfiniteCardsCacheKey(
+		catalogId: string,
+		typeId: string,
+		parsed: ParsedProductInfiniteQuery,
+		seed: string | undefined,
+		kind: 'catalog' | 'recommendations'
+	): Promise<string> {
+		const [version, typeVersion] = await Promise.all([
+			this.cache.getVersion(PRODUCTS_CACHE_VERSION, catalogId),
+			this.cache.getVersion(CATALOG_TYPE_CACHE_VERSION, typeId)
+		])
+		const fingerprint = this.buildInfiniteCardsQueryFingerprint(parsed, seed)
+		return this.cache.buildKey([
+			'catalog',
+			catalogId,
+			'products',
+			kind === 'recommendations' ? 'recommendations' : 'infinite',
+			'cards',
+			fingerprint,
+			`v${version}`,
+			`t${typeVersion}`
+		])
+	}
+
+	private buildInfiniteCardsQueryFingerprint(
+		parsed: ParsedProductInfiniteQuery,
+		seed: string | undefined
+	): string {
+		const payload = {
+			limit: parsed.limit,
+			seed: seed ?? null,
+			categoryIds: [...parsed.categoryIds].sort(),
+			brandIds: [...parsed.brandIds].sort(),
+			minPrice: parsed.minPrice ?? null,
+			maxPrice: parsed.maxPrice ?? null,
+			searchTerm: parsed.searchTerm ?? null,
+			isPopular: parsed.isPopular ?? null,
+			isDiscount: parsed.isDiscount ?? null,
+			attributeFilters: [...parsed.attributeFilters]
+				.map(filter => ({
+					key: filter.key,
+					values: [...filter.values].sort(),
+					min: filter.min ?? null,
+					max: filter.max ?? null,
+					bool: filter.bool ?? null
+				}))
+				.sort((left, right) => left.key.localeCompare(right.key))
+		}
+
+		return createHash('sha1')
+			.update(JSON.stringify(payload))
+			.digest('hex')
+			.slice(0, 16)
+	}
+
 	private async buildUncategorizedProductsCacheKey(
 		catalogId: string,
 		cursor: string | undefined,
@@ -1502,6 +1786,28 @@ export class ProductService {
 			catalogId,
 			'products',
 			'uncategorized',
+			'infinite',
+			`limit-${limit}`,
+			cursor ? `cursor-${encodeURIComponent(cursor)}` : 'cursor-first',
+			`v${version}`
+		])
+	}
+
+	private async buildUncategorizedProductCardsCacheKey(
+		catalogId: string,
+		cursor: string | undefined,
+		limit: number
+	): Promise<string> {
+		const version = await this.cache.getVersion(
+			CATEGORY_PRODUCTS_CACHE_VERSION,
+			catalogId
+		)
+		return this.cache.buildKey([
+			'catalog',
+			catalogId,
+			'products',
+			'uncategorized',
+			'cards',
 			'infinite',
 			`limit-${limit}`,
 			cursor ? `cursor-${encodeURIComponent(cursor)}` : 'cursor-first',

@@ -1,4 +1,4 @@
-// Р—РґРµСЃСЊ РЅР°СЃС‚СЂРѕРёМ†РєРё РёРЅС‚РµРіСЂР°С†РёРё
+// Здесь настройки интеграции
 model Integration {
     id String @id @default(uuid()) @db.Uuid
 
@@ -21,9 +21,10 @@ model Integration {
 
     catalog      Catalog               @relation(fields: [catalogId], references: [id], onDelete: Cascade)
     productLinks IntegrationProductLink[]
+    categoryLinks IntegrationCategoryLink[]
     syncRuns     IntegrationSyncRun[]
 
-    deleteAt  DateTime? @map("delete_at") // Р”Р°С‚Р° СѓРґР°Р»РµРЅРёСЏ
+    deleteAt  DateTime? @map("delete_at") // Дата удаления
     createdAt DateTime  @default(now()) @map("created_at")
     updatedAt DateTime  @updatedAt @map("updated_at")
 
@@ -55,6 +56,29 @@ model IntegrationProductLink {
     @@unique([integrationId, productId])
     @@index([productId])
     @@map("integration_product_links")
+}
+
+model IntegrationCategoryLink {
+    id String @id @default(uuid()) @db.Uuid
+
+    integrationId String @map("integration_id") @db.Uuid
+    categoryId    String @map("category_id") @db.Uuid
+
+    externalId       String  @map("external_id") @db.VarChar(64)
+    externalParentId String? @map("external_parent_id") @db.VarChar(64)
+    rawMeta          Json?   @map("raw_meta")
+
+    integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+    category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@unique([integrationId, externalId])
+    @@unique([integrationId, categoryId])
+    @@index([categoryId])
+    @@index([externalParentId])
+    @@map("integration_category_links")
 }
 
 model IntegrationSyncRun {

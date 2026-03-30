@@ -73,6 +73,9 @@ model Product {
     @@unique([catalogId, slug])
     @@index([catalogId, status])
     @@index([catalogId]) // Быстрый листинг товаров каталога
+    @@index([catalogId, deleteAt, createdAt])
+    @@index([catalogId, deleteAt, updatedAt, id])
+    @@index([catalogId, isPopular, deleteAt, updatedAt])
     @@index([brandId])
     @@index([status]) // Фильтр по статусу (только активные)
     @@index([slug]) // Поиск по slug

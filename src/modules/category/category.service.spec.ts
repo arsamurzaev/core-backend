@@ -2,6 +2,10 @@ import { NotFoundException } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 
 import { CacheService } from '@/shared/cache/cache.service'
+import {
+	CATEGORY_LIST_CACHE_VERSION,
+	CATEGORY_PRODUCTS_CACHE_VERSION
+} from '@/shared/cache/catalog-cache.constants'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 
@@ -13,6 +17,7 @@ import { CategoryService } from './category.service'
 describe('CategoryService', () => {
 	let service: CategoryService
 	let serviceState: {
+		listCacheTtlSec: number
 		firstPageCacheTtlSec: number
 		nextPageCacheTtlSec: number
 	}
@@ -40,10 +45,12 @@ describe('CategoryService', () => {
 						findById: jest.fn(),
 						create: jest.fn(),
 						update: jest.fn(),
+						updatePositions: jest.fn(),
 						softDelete: jest.fn(),
 						findProductsByIds: jest.fn(),
 						findCategoryProductPositions: jest.fn(),
-						findCategoryProductsPage: jest.fn()
+						findCategoryProductsPage: jest.fn(),
+						findCategoryProductCardsPage: jest.fn()
 					}
 				},
 				{
@@ -75,6 +82,7 @@ describe('CategoryService', () => {
 
 		service = module.get<CategoryService>(CategoryService)
 		serviceState = service as unknown as {
+			listCacheTtlSec: number
 			firstPageCacheTtlSec: number
 			nextPageCacheTtlSec: number
 		}
@@ -90,12 +98,45 @@ describe('CategoryService', () => {
 		cache.getVersion.mockResolvedValue(0)
 		cache.getJson.mockResolvedValue(null)
 		cache.setJson.mockResolvedValue(undefined)
+		serviceState.listCacheTtlSec = 0
 		serviceState.firstPageCacheTtlSec = 0
 		serviceState.nextPageCacheTtlSec = 0
 	})
 
 	it('should be defined', () => {
 		expect(service).toBeDefined()
+	})
+
+	it('returns categories ordered by normalized global position without writes', async () => {
+		repo.findAll.mockResolvedValue([
+			{ id: 'cat-1', parentId: null, position: 0, name: 'First' },
+			{ id: 'cat-2', parentId: 'parent-1', position: 0, name: 'Jeans' },
+			{ id: 'cat-3', parentId: null, position: 2, name: 'Third' }
+		] as any)
+
+		const result = await runWithCatalog(() => service.getAll())
+
+		expect(repo.updatePositions).not.toHaveBeenCalled()
+		expect(result.map(category => [category.id, category.position])).toEqual([
+			['cat-1', 0],
+			['cat-2', 1],
+			['cat-3', 2]
+		])
+	})
+
+	it('returns cached categories list when cache is warm', async () => {
+		serviceState.listCacheTtlSec = 120
+
+		const cached = [
+			{ id: 'cat-1', name: 'First', position: 0, imageMedia: null }
+		] as any
+		cache.getJson.mockResolvedValue(cached)
+
+		const result = await runWithCatalog(() => service.getAll())
+
+		expect(result).toEqual(cached)
+		expect(repo.findAll).not.toHaveBeenCalled()
+		expect(cache.getJson).toHaveBeenCalled()
 	})
 
 	it('returns integration metadata in category product pages', async () => {
@@ -140,6 +181,59 @@ describe('CategoryService', () => {
 				}
 			}
 		})
+	})
+
+	it('returns category product cards with product attributes and without variants', async () => {
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
+		repo.findCategoryProductCardsPage.mockResolvedValue([
+			{
+				productId: 'p1',
+				position: 0,
+				product: {
+					id: 'p1',
+					media: [],
+					integrationLinks: [],
+					productAttributes: []
+				}
+			},
+			{
+				productId: 'p2',
+				position: 1,
+				product: {
+					id: 'p2',
+					media: [],
+					integrationLinks: [],
+					productAttributes: []
+				}
+			},
+			{
+				productId: 'p3',
+				position: 2,
+				product: {
+					id: 'p3',
+					media: [],
+					integrationLinks: [],
+					productAttributes: []
+				}
+			}
+		] as any)
+
+		const result = await runWithCatalog(() =>
+			service.getProductCardsByCategory('cat-1', { limit: 2 })
+		)
+
+		expect(result.items.map(item => item.productId)).toEqual(['p1', 'p2'])
+		expect(repo.findCategoryProductCardsPage).toHaveBeenCalledWith(
+			'cat-1',
+			'catalog-1',
+			{ cursor: undefined, take: 3, includeInactive: false }
+		)
+		expect(repo.findCategoryProductsPage).not.toHaveBeenCalled()
+		expect(result.items[0]?.product).toHaveProperty('productAttributes', [])
+		expect(result.items[0]?.product).not.toHaveProperty('variants')
 	})
 
 	it('returns page and nextCursor when more items exist', async () => {
@@ -244,6 +338,12 @@ describe('CategoryService', () => {
 	})
 
 	it('appends new products to the end of category when positions are omitted', async () => {
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			parentId: null,
+			position: 0,
+			name: 'Test category'
+		} as any)
 		repo.findProductsByIds.mockResolvedValue([
 			{ id: 'p1' },
 			{ id: 'p2' },
@@ -294,6 +394,16 @@ describe('CategoryService', () => {
 			{ id: 'p2' },
 			{ id: 'p3' }
 		] as any)
+		repo.findAll.mockResolvedValue([
+			{ id: 'cat-1', parentId: null, position: 0, name: 'Test category' }
+		] as any)
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			parentId: null,
+			position: 0,
+			name: 'Test category',
+			catalogId: 'catalog-1'
+		} as any)
 		repo.create.mockResolvedValue({
 			id: 'cat-1',
 			catalogId: 'catalog-1'
@@ -320,6 +430,70 @@ describe('CategoryService', () => {
 					]
 				}
 			})
+		])
+	})
+
+	it('rebuilds global positions when category position changes', async () => {
+		repo.findById
+			.mockResolvedValueOnce({
+				id: 'cat-jeans',
+				parentId: 'parent-1',
+				position: 2,
+				name: 'Jeans'
+			} as any)
+			.mockResolvedValueOnce({
+				id: 'cat-jeans',
+				parentId: 'parent-1',
+				position: 0,
+				name: 'Jeans',
+				imageMedia: null,
+				children: []
+			} as any)
+		repo.findAll.mockResolvedValue([
+			{ id: 'cat-root', parentId: null, position: 0, name: 'Root' },
+			{ id: 'cat-shirts', parentId: 'parent-1', position: 1, name: 'Shirts' },
+			{ id: 'cat-jeans', parentId: 'parent-1', position: 2, name: 'Jeans' }
+		] as any)
+
+		await runWithCatalog(() =>
+			service.updatePosition('cat-jeans', { position: 0 })
+		)
+
+		expect(repo.update).not.toHaveBeenCalled()
+		expect(repo.updatePositions).toHaveBeenCalledWith([
+			{ id: 'cat-jeans', position: 0 },
+			{ id: 'cat-root', position: 1 },
+			{ id: 'cat-shirts', position: 2 }
+		])
+	})
+
+	it('rebuilds global positions after category removal', async () => {
+		repo.findById.mockResolvedValue({
+			id: 'cat-2',
+			parentId: null,
+			position: 1,
+			name: 'Second'
+		} as any)
+		repo.softDelete.mockResolvedValue({
+			id: 'cat-2'
+		} as any)
+		repo.findAll.mockResolvedValue([
+			{ id: 'cat-1', parentId: null, position: 0, name: 'First' },
+			{ id: 'cat-3', parentId: null, position: 2, name: 'Third' }
+		] as any)
+
+		await runWithCatalog(() => service.remove('cat-2'))
+
+		expect(repo.updatePositions).toHaveBeenCalledWith([
+			{ id: 'cat-3', position: 1 }
+		])
+		expect(cache.bumpVersion.mock.calls).toContainEqual([
+			CATEGORY_LIST_CACHE_VERSION,
+			'catalog-1'
+		])
+		expect(cache.bumpVersion.mock.calls).toContainEqual([
+			CATEGORY_PRODUCTS_CACHE_VERSION,
+			'catalog-1'
 		])
 	})
 })

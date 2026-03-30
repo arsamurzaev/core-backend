@@ -251,7 +251,30 @@ export class ProductInfinitePageDto {
 	seed: string | null
 }
 
+export class ProductCardPageDto {
+	@ApiProperty({ type: [ProductWithAttributesDto] })
+	items: ProductWithAttributesDto[]
+
+	@ApiProperty({ type: String, nullable: true })
+	nextCursor: string | null
+
+	@ApiProperty({
+		type: String,
+		nullable: true,
+		description: 'РЎС‚Р°Р±РёР»СЊРЅС‹Р№ seed РґР»СЏ РґРµС‚РµСЂРјРёРЅРёСЂРѕРІР°РЅРЅРѕР№ СЂР°РЅРґРѕРјРёР·Р°С†РёРё'
+	})
+	seed: string | null
+}
+
 export class ProductCursorPageDto {
+	@ApiProperty({ type: [ProductWithAttributesDto] })
+	items: ProductWithAttributesDto[]
+
+	@ApiProperty({ type: String, nullable: true })
+	nextCursor: string | null
+}
+
+export class ProductCursorCardPageDto {
 	@ApiProperty({ type: [ProductWithAttributesDto] })
 	items: ProductWithAttributesDto[]
 

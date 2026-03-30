@@ -6,9 +6,17 @@ model Cart {
     userId String? @map("user_id") @db.Uuid
     token  String?
 
+    status          CartStatus @default(DRAFT)
+    statusChangedAt DateTime   @default(now()) @map("status_changed_at")
+
     publicKey   String?   @unique @map("public_key")
     checkoutKey String?   @map("checkout_key")
     checkoutAt  DateTime? @map("checkout_at")
+
+    assignedManagerId      String?   @map("assigned_manager_id") @db.Uuid
+    managerSessionStartedAt DateTime? @map("manager_session_started_at")
+    managerLastSeenAt      DateTime? @map("manager_last_seen_at")
+    closedAt               DateTime? @map("closed_at")
 
     catalog   Catalog @relation(fields: [catalogId], references: [id])
     catalogId String  @map("catalog_id") @db.Uuid
@@ -17,6 +25,7 @@ model Cart {
     createdAt DateTime  @default(now()) @map("created_at")
     updatedAt DateTime  @updatedAt @map("updated_at")
 
+    @@index([status, managerLastSeenAt])
     @@map("carts")
 }
 

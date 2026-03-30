@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing'
 
+import { SessionGuard } from '@/modules/auth/guards/session.guard'
+
 import { CartController } from './cart.controller'
 import { CartService } from './cart.service'
 
@@ -7,7 +9,7 @@ describe('CartController', () => {
 	let controller: CartController
 
 	beforeEach(async () => {
-		const module: TestingModule = await Test.createTestingModule({
+		const moduleBuilder = Test.createTestingModule({
 			controllers: [CartController],
 			providers: [
 				{
@@ -15,7 +17,13 @@ describe('CartController', () => {
 					useValue: {}
 				}
 			]
-		}).compile()
+		})
+
+		moduleBuilder.overrideGuard(SessionGuard).useValue({
+			canActivate: jest.fn().mockReturnValue(true)
+		})
+
+		const module: TestingModule = await moduleBuilder.compile()
 
 		controller = module.get<CartController>(CartController)
 	})

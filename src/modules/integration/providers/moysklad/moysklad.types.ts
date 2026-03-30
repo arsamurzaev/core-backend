@@ -38,7 +38,22 @@ export type MoySkladSalePrice = {
 	}
 }
 
+export type MoySkladProductFolderRef = {
+	meta: MoySkladMeta
+	id?: string
+	name?: string
+}
+
+export type MoySkladProductFolder = MoySkladProductFolderRef & {
+	path?: string[]
+	namepath?: string
+	productFolder?: MoySkladProductFolderRef
+}
+
+export type MoySkladEntityType = 'product' | 'service' | 'bundle' | 'variant'
+
 export type MoySkladProduct = {
+	meta?: MoySkladMeta
 	id: string
 	name: string
 	description?: string
@@ -47,16 +62,13 @@ export type MoySkladProduct = {
 	article?: string
 	archived: boolean
 	updated: string
+	stock?: number
 	salePrices?: MoySkladSalePrice[]
 	images?: {
 		meta: MoySkladMeta
 		rows?: MoySkladImage[]
 	}
-	productFolder?: {
-		meta: MoySkladMeta
-		id?: string
-		name?: string
-	}
+	productFolder?: MoySkladProductFolderRef
 }
 
 export type MoySkladListResponse<T> = {

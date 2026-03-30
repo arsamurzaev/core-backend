@@ -2,10 +2,12 @@ import { Module } from '@nestjs/common'
 
 import { PrismaModule } from '@/infrastructure/prisma/prisma.module'
 import { S3Module } from '@/modules/s3/s3.module'
+import { SeoRepository } from '@/modules/seo/seo.repository'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 
 import { ProductAttributeBuilder } from './product-attribute.builder'
+import { ProductSeoSyncService } from './product-seo-sync.service'
 import { ProductVariantBuilder } from './product-variant.builder'
 import { ProductController } from './product.controller'
 import { ProductRepository } from './product.repository'
@@ -19,6 +21,8 @@ import { ProductService } from './product.service'
 		ProductRepository,
 		ProductAttributeBuilder,
 		ProductVariantBuilder,
+		ProductSeoSyncService,
+		SeoRepository,
 		MediaRepository,
 		MediaUrlService
 	]
