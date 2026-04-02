@@ -1,8 +1,5 @@
 import { SeoChangeFreq, SeoEntityType } from '@generated/enums'
-import {
-	SeoSettingCreateInput,
-	SeoSettingUpdateInput
-} from '@generated/models'
+import { SeoSettingCreateInput, SeoSettingUpdateInput } from '@generated/models'
 import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import sharp from 'sharp'
 
@@ -11,7 +8,26 @@ import {
 	type UploadGeneratedAssetResult
 } from '@/modules/s3/s3.service'
 import { SeoRepository } from '@/modules/seo/seo.repository'
+import {
+	MEDIA_VARIANT_NAMES,
+	MediaUrlService,
+	normalizeMediaVariantName
+} from '@/shared/media/media-url.service'
 import { normalizeNullableTrimmedString } from '@/shared/utils'
+
+type CatalogSeoMediaVariant = {
+	kind: string
+	mimeType?: string | null
+	storage: string
+	key: string
+}
+
+type CatalogSeoMediaRecord = {
+	mimeType?: string | null
+	storage: string
+	key: string
+	variants?: CatalogSeoMediaVariant[] | null
+}
 
 type CatalogSeoSyncRecord = {
 	id: string
@@ -21,6 +37,8 @@ type CatalogSeoSyncRecord = {
 	config?: {
 		about?: string | null
 		description?: string | null
+		logoMedia?: CatalogSeoMediaRecord | null
+		bgMedia?: CatalogSeoMediaRecord | null
 	} | null
 }
 
@@ -39,13 +57,34 @@ type GeneratedCatalogSeoAssets = {
 	whatsapp: GeneratedSeoAsset | null
 }
 
+type PreparedCatalogSeoVisuals = {
+	background: Buffer | null
+	logo: Buffer | null
+}
+
+type ResolvedCatalogSeoMediaSource = {
+	key: string
+	storage: string
+	mimeType?: string | null
+}
+
+const SOCIAL_IMAGE_WIDTH = 1200
+const SOCIAL_IMAGE_HEIGHT = 630
+const SOCIAL_LOGO_SIZE = 448
+const SOCIAL_OG_LOGO_SIZE = 420
+const SOCIAL_OG_VERTICAL_GAP = 18
+const SOCIAL_FALLBACK_LOGO_FONT_RATIO = 0.37
+const FAVICON_SIZE = 64
+const UPLOADS_DISABLED_MESSAGE = 'Загрузка файлов отключена'
+
 @Injectable()
 export class CatalogSeoSyncService {
 	private readonly logger = new Logger(CatalogSeoSyncService.name)
 
 	constructor(
 		private readonly seoRepo: SeoRepository,
-		private readonly s3Service: S3Service
+		private readonly s3Service: S3Service,
+		private readonly mediaUrl: MediaUrlService
 	) {}
 
 	async syncCatalog(catalog: CatalogSeoSyncRecord): Promise<void> {
@@ -87,6 +126,9 @@ export class CatalogSeoSyncService {
 				twitterDescription: description,
 				...(generatedAssets.telegram
 					? { twitterMedia: { connect: { id: generatedAssets.telegram.mediaId } } }
+					: {}),
+				...(generatedAssets.favicon
+					? { faviconMedia: { connect: { id: generatedAssets.favicon.mediaId } } }
 					: {}),
 				extras: JSON.stringify(mergedExtras),
 				sitemapPriority: 1,
@@ -131,6 +173,11 @@ export class CatalogSeoSyncService {
 				connect: { id: generatedAssets.telegram.mediaId }
 			}
 		}
+		if (generatedAssets.favicon) {
+			updateData.faviconMedia = {
+				connect: { id: generatedAssets.favicon.mediaId }
+			}
+		}
 
 		await this.seoRepo.update(existing.id, catalog.id, updateData)
 	}
@@ -139,47 +186,48 @@ export class CatalogSeoSyncService {
 		catalog: CatalogSeoSyncRecord
 	): Promise<GeneratedCatalogSeoAssets> {
 		try {
-			const [faviconPng, telegramPng, whatsappPng] = await Promise.all([
-				this.renderFaviconPng(catalog),
-				this.renderSocialPng(catalog, 'Telegram'),
-				this.renderSocialPng(catalog, 'WhatsApp')
+			const visuals = await this.prepareSocialVisuals(catalog)
+			const [faviconPng, socialPng] = await Promise.all([
+				this.renderFaviconPng(catalog, visuals.logo),
+				this.renderSocialPng(catalog, visuals)
 			])
 
-			const faviconIco = this.wrapPngAsIco(faviconPng.buffer, 64, 64)
+			const faviconIco = this.wrapPngAsIco(
+				faviconPng.buffer,
+				FAVICON_SIZE,
+				FAVICON_SIZE
+			)
 
 			const [favicon, telegram, whatsapp] = await Promise.all([
 				this.uploadAsset(catalog.id, 'favicon.ico', 'image/x-icon', faviconIco, {
-					width: 64,
-					height: 64
+					width: FAVICON_SIZE,
+					height: FAVICON_SIZE
 				}),
 				this.uploadAsset(
 					catalog.id,
 					'telegram.png',
 					'image/png',
-					telegramPng.buffer,
+					socialPng.buffer,
 					{
-						width: telegramPng.width,
-						height: telegramPng.height
+						width: socialPng.width,
+						height: socialPng.height
 					}
 				),
 				this.uploadAsset(
 					catalog.id,
 					'whatsapp.png',
 					'image/png',
-					whatsappPng.buffer,
+					socialPng.buffer,
 					{
-						width: whatsappPng.width,
-						height: whatsappPng.height
+						width: socialPng.width,
+						height: socialPng.height
 					}
 				)
 			])
 
 			return { favicon, telegram, whatsapp }
 		} catch (error) {
-			if (
-				error instanceof BadRequestException &&
-				error.message === 'Загрузка файлов отключена'
-			) {
+			if (this.isUploadsDisabledError(error)) {
 				this.logger.warn(
 					`SEO assets for catalog ${catalog.id} were skipped because S3 uploads are disabled`
 				)
@@ -192,6 +240,151 @@ export class CatalogSeoSyncService {
 
 			throw error
 		}
+	}
+
+	private async prepareSocialVisuals(
+		catalog: CatalogSeoSyncRecord
+	): Promise<PreparedCatalogSeoVisuals> {
+		const [background, logo] = await Promise.all([
+			this.prepareBackgroundVisual(catalog.config?.bgMedia ?? null),
+			this.prepareLogoVisual(catalog.config?.logoMedia ?? null)
+		])
+
+		return { background, logo }
+	}
+
+	private async prepareBackgroundVisual(
+		media: CatalogSeoMediaRecord | null
+	): Promise<Buffer | null> {
+		const buffer = await this.loadCatalogMediaBuffer(media, [
+			MEDIA_VARIANT_NAMES.detail,
+			MEDIA_VARIANT_NAMES.card
+		])
+		if (!buffer) return null
+
+		try {
+			return await sharp(buffer)
+				.rotate()
+				.resize({
+					width: SOCIAL_IMAGE_WIDTH,
+					height: SOCIAL_IMAGE_HEIGHT,
+					fit: 'cover'
+				})
+				.modulate({
+					brightness: 0.9,
+					saturation: 1.05
+				})
+				.png()
+				.toBuffer()
+		} catch (error) {
+			this.logger.warn(
+				`Failed to prepare catalog background image for SEO preview: ${this.describeError(error)}`
+			)
+			return null
+		}
+	}
+
+	private async prepareLogoVisual(
+		media: CatalogSeoMediaRecord | null
+	): Promise<Buffer | null> {
+		const buffer = await this.loadCatalogMediaBuffer(media, [
+			MEDIA_VARIANT_NAMES.thumb,
+			MEDIA_VARIANT_NAMES.card,
+			MEDIA_VARIANT_NAMES.detail
+		])
+		if (!buffer) return null
+
+		try {
+			const resized = await sharp(buffer)
+				.rotate()
+				.resize({
+					width: SOCIAL_LOGO_SIZE,
+					height: SOCIAL_LOGO_SIZE,
+					fit: 'cover'
+				})
+				.png()
+				.toBuffer()
+			const mask = Buffer.from(`
+				<svg width="${SOCIAL_LOGO_SIZE}" height="${SOCIAL_LOGO_SIZE}" viewBox="0 0 ${SOCIAL_LOGO_SIZE} ${SOCIAL_LOGO_SIZE}" xmlns="http://www.w3.org/2000/svg">
+					<rect width="${SOCIAL_LOGO_SIZE}" height="${SOCIAL_LOGO_SIZE}" rx="${SOCIAL_LOGO_SIZE / 2}" fill="#ffffff" />
+				</svg>
+			`)
+
+			return await sharp(resized)
+				.composite([{ input: mask, blend: 'dest-in' }])
+				.png()
+				.toBuffer()
+		} catch (error) {
+			this.logger.warn(
+				`Failed to prepare catalog logo image for SEO preview: ${this.describeError(error)}`
+			)
+			return null
+		}
+	}
+
+	private async loadCatalogMediaBuffer(
+		media: CatalogSeoMediaRecord | null,
+		preferredVariantNames: readonly string[]
+	): Promise<Buffer | null> {
+		const source = this.resolveMediaSource(media, preferredVariantNames)
+		if (!source) return null
+
+		try {
+			if (source.storage === 's3') {
+				const downloaded = await this.s3Service.downloadObject(source.key)
+				return downloaded.buffer
+			}
+
+			const url = this.mediaUrl.resolveUrl(source.storage, source.key)
+			const response = await fetch(url)
+			if (!response.ok) {
+				throw new BadRequestException(
+					`Failed to download media ${url}: ${response.status}`
+				)
+			}
+
+			const arrayBuffer = await response.arrayBuffer()
+			return Buffer.from(arrayBuffer)
+		} catch (error) {
+			this.logger.warn(
+				`Failed to load catalog media ${source.key} for SEO preview: ${this.describeError(error)}`
+			)
+			return null
+		}
+	}
+
+	private resolveMediaSource(
+		media: CatalogSeoMediaRecord | null,
+		preferredVariantNames: readonly string[]
+	): ResolvedCatalogSeoMediaSource | null {
+		if (!media?.key) return null
+
+		const normalizedPreferredNames = preferredVariantNames.map(variantName =>
+			normalizeMediaVariantName(variantName)
+		)
+
+		for (const preferredName of normalizedPreferredNames) {
+			const variant = (media.variants ?? []).find(
+				item => this.extractVariantName(item.kind) === preferredName
+			)
+			if (variant?.key) {
+				return {
+					key: variant.key,
+					storage: variant.storage,
+					mimeType: variant.mimeType
+				}
+			}
+		}
+
+		return {
+			key: media.key,
+			storage: media.storage,
+			mimeType: media.mimeType
+		}
+	}
+
+	private extractVariantName(kind: string): string {
+		return normalizeMediaVariantName(kind.replace(/-(avif|webp)$/i, ''))
 	}
 
 	private async uploadAsset(
@@ -240,8 +433,7 @@ export class CatalogSeoSyncService {
 		current: unknown,
 		generatedAssets: GeneratedCatalogSeoAssets
 	): Record<string, unknown> {
-		const parsed =
-			this.parseExtras(current) ?? ({} as Record<string, unknown>)
+		const parsed = this.parseExtras(current) ?? ({} as Record<string, unknown>)
 
 		return {
 			...parsed,
@@ -277,69 +469,152 @@ export class CatalogSeoSyncService {
 	}
 
 	private buildDescription(catalog: CatalogSeoSyncRecord): string {
-		const description =
+		return (
 			normalizeNullableTrimmedString(catalog.config?.description) ??
 			normalizeNullableTrimmedString(catalog.config?.about) ??
 			`Каталог ${catalog.name}`
-
-		return description
+		)
 	}
 
-	private async renderFaviconPng(catalog: CatalogSeoSyncRecord): Promise<{
-		buffer: Buffer
-	}> {
+	private buildSocialSubtitle(catalog: CatalogSeoSyncRecord): string {
+		return (
+			normalizeNullableTrimmedString(catalog.config?.about) ??
+			catalog.domain ??
+			catalog.slug ??
+			'Online catalog'
+		)
+	}
+
+	private async renderFaviconPng(
+		catalog: CatalogSeoSyncRecord,
+		logo: Buffer | null
+	): Promise<{ buffer: Buffer }> {
 		const palette = this.resolvePalette(catalog.slug || catalog.name)
 		const initials = this.buildInitials(catalog.name)
 		const svg = `
-			<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+			<svg width="${FAVICON_SIZE}" height="${FAVICON_SIZE}" viewBox="0 0 ${FAVICON_SIZE} ${FAVICON_SIZE}" xmlns="http://www.w3.org/2000/svg">
 				<defs>
 					<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
 						<stop offset="0%" stop-color="${palette.primary}" />
 						<stop offset="100%" stop-color="${palette.secondary}" />
 					</linearGradient>
 				</defs>
-				<rect width="64" height="64" rx="18" fill="url(#bg)" />
-				<text x="32" y="39" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#ffffff">${this.escapeSvgText(initials)}</text>
+				<rect width="${FAVICON_SIZE}" height="${FAVICON_SIZE}" fill="url(#bg)" />
+				${
+					logo
+						? ''
+						: `<text x="32" y="39" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#ffffff">${this.escapeSvgText(initials)}</text>`
+				}
 			</svg>
 		`
 
-		const rendered = await sharp(Buffer.from(svg)).png().toBuffer({
-			resolveWithObject: true
-		})
+		const circleMask = Buffer.from(
+			`<svg width="${FAVICON_SIZE}" height="${FAVICON_SIZE}" viewBox="0 0 ${FAVICON_SIZE} ${FAVICON_SIZE}" xmlns="http://www.w3.org/2000/svg"><circle cx="${FAVICON_SIZE / 2}" cy="${FAVICON_SIZE / 2}" r="${FAVICON_SIZE / 2}" fill="#ffffff"/></svg>`
+		)
+
+		if (logo) {
+			const resized = await sharp(logo)
+				.resize({ width: FAVICON_SIZE, height: FAVICON_SIZE, fit: 'cover' })
+				.png()
+				.toBuffer()
+
+			const rendered = await sharp(resized)
+				.composite([{ input: circleMask, blend: 'dest-in' }])
+				.png()
+				.toBuffer({ resolveWithObject: true })
+
+			return { buffer: rendered.data }
+		}
+
+		const flat = await sharp(Buffer.from(svg)).png().toBuffer()
+
+		const rendered = await sharp(flat)
+			.composite([{ input: circleMask, blend: 'dest-in' }])
+			.png()
+			.toBuffer({ resolveWithObject: true })
 
 		return { buffer: rendered.data }
 	}
 
 	private async renderSocialPng(
 		catalog: CatalogSeoSyncRecord,
-		label: 'Telegram' | 'WhatsApp'
+		visuals: PreparedCatalogSeoVisuals
 	): Promise<{ buffer: Buffer; width: number; height: number }> {
-		const width = 1200
-		const height = 630
 		const palette = this.resolvePalette(catalog.slug || catalog.name)
+		const titleLines = this.wrapText(catalog.name, 20, 2)
 		const initials = this.buildInitials(catalog.name)
-		const [line1, line2] = this.splitTitle(catalog.name)
+		const background = await this.renderSocialBackground(
+			visuals.background,
+			palette
+		)
 
-		const svg = `
-			<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+		const logoTop = SOCIAL_OG_VERTICAL_GAP
+		const logoLeft = Math.round((SOCIAL_IMAGE_WIDTH - SOCIAL_OG_LOGO_SIZE) / 2)
+		const titleTop = logoTop + SOCIAL_OG_LOGO_SIZE + SOCIAL_OG_VERTICAL_GAP
+		const titleBottom = SOCIAL_IMAGE_HEIGHT - SOCIAL_OG_VERTICAL_GAP
+		const titleBlockHeight = Math.max(0, titleBottom - titleTop)
+		const titleLineCount = Math.max(titleLines.length, 1)
+		const titleLineHeight = Math.floor(titleBlockHeight / titleLineCount)
+		const titleFontSize = titleLineHeight
+		const titleShadeTop = Math.max(0, titleTop - SOCIAL_OG_VERTICAL_GAP * 2)
+
+		const overlaySvg = `
+			<svg width="${SOCIAL_IMAGE_WIDTH}" height="${SOCIAL_IMAGE_HEIGHT}" viewBox="0 0 ${SOCIAL_IMAGE_WIDTH} ${SOCIAL_IMAGE_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
 				<defs>
-					<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-						<stop offset="0%" stop-color="${palette.primary}" />
-						<stop offset="100%" stop-color="${palette.secondary}" />
+					<linearGradient id="screenShade" x1="0" y1="0" x2="0" y2="1">
+						<stop offset="0%" stop-color="#030712" stop-opacity="0.06" />
+						<stop offset="50%" stop-color="#030712" stop-opacity="0.16" />
+						<stop offset="100%" stop-color="#030712" stop-opacity="0.55" />
+					</linearGradient>
+					<linearGradient id="titleShade" x1="0" y1="0" x2="0" y2="1">
+						<stop offset="0%" stop-color="#040816" stop-opacity="0" />
+						<stop offset="55%" stop-color="#040816" stop-opacity="0.72" />
+						<stop offset="100%" stop-color="#040816" stop-opacity="0.88" />
 					</linearGradient>
 				</defs>
-				<rect width="${width}" height="${height}" fill="url(#bg)" />
-				<circle cx="1040" cy="110" r="180" fill="${palette.accent}" fill-opacity="0.12" />
-				<circle cx="1120" cy="500" r="220" fill="#ffffff" fill-opacity="0.08" />
-				<rect x="72" y="72" width="168" height="168" rx="42" fill="#ffffff" fill-opacity="0.16" />
-				<text x="156" y="176" text-anchor="middle" font-family="Arial, sans-serif" font-size="68" font-weight="700" fill="#ffffff">${this.escapeSvgText(initials)}</text>
-				<text x="72" y="330" font-family="Arial, sans-serif" font-size="92" font-weight="700" fill="#ffffff">${this.escapeSvgText(line1)}</text>
-				<text x="72" y="432" font-family="Arial, sans-serif" font-size="92" font-weight="700" fill="#ffffff">${this.escapeSvgText(line2)}</text>
-				<text x="72" y="542" font-family="Arial, sans-serif" font-size="34" fill="#ffffff" fill-opacity="0.82">${this.escapeSvgText(label)} preview</text>
+				<rect width="${SOCIAL_IMAGE_WIDTH}" height="${SOCIAL_IMAGE_HEIGHT}" fill="url(#screenShade)" />
+				<rect x="0" y="${titleShadeTop}" width="${SOCIAL_IMAGE_WIDTH}" height="${SOCIAL_IMAGE_HEIGHT - titleShadeTop}" fill="url(#titleShade)" />
+				<rect x="${logoLeft}" y="${logoTop}" width="${SOCIAL_OG_LOGO_SIZE}" height="${SOCIAL_OG_LOGO_SIZE}" rx="${SOCIAL_OG_LOGO_SIZE / 2}" fill="#06101d" fill-opacity="0.64" />
+				<rect x="${logoLeft}" y="${logoTop}" width="${SOCIAL_OG_LOGO_SIZE}" height="${SOCIAL_OG_LOGO_SIZE}" rx="${SOCIAL_OG_LOGO_SIZE / 2}" stroke="#ffffff" stroke-opacity="0.14" stroke-width="1" />
+				${
+					visuals.logo
+						? ''
+						: `<text x="${SOCIAL_IMAGE_WIDTH / 2}" y="${SOCIAL_IMAGE_HEIGHT / 2 + SOCIAL_OG_LOGO_SIZE * 0.14}" text-anchor="middle" font-family="Arial, sans-serif" font-size="${Math.round(SOCIAL_OG_LOGO_SIZE * SOCIAL_FALLBACK_LOGO_FONT_RATIO)}" font-weight="700" fill="#ffffff">${this.escapeSvgText(initials)}</text>`
+				}
+				${this.renderSvgTextLines(titleLines, {
+					x: SOCIAL_IMAGE_WIDTH / 2,
+					y: titleTop,
+					lineHeight: titleLineHeight,
+					fontSize: titleFontSize,
+					fontWeight: 700,
+					fill: '#ffffff',
+					textAnchor: 'middle',
+					dominantBaseline: 'hanging'
+				})}
 			</svg>
 		`
 
-		const rendered = await sharp(Buffer.from(svg)).png().toBuffer({
+		const composite: sharp.OverlayOptions[] = [
+			{ input: Buffer.from(overlaySvg), left: 0, top: 0 }
+		]
+
+		if (visuals.logo) {
+			const logoResized = await sharp(visuals.logo)
+				.resize({
+					width: SOCIAL_OG_LOGO_SIZE,
+					height: SOCIAL_OG_LOGO_SIZE,
+					fit: 'cover'
+				})
+				.png()
+				.toBuffer()
+			composite.push({
+				input: logoResized,
+				left: logoLeft,
+				top: logoTop
+			})
+		}
+
+		const rendered = await sharp(background).composite(composite).png().toBuffer({
 			resolveWithObject: true
 		})
 
@@ -348,6 +623,64 @@ export class CatalogSeoSyncService {
 			width: rendered.info.width,
 			height: rendered.info.height
 		}
+	}
+
+	private async renderSocialBackground(
+		background: Buffer | null,
+		palette: { primary: string; secondary: string; accent: string }
+	): Promise<Buffer> {
+		if (background) {
+			return background
+		}
+
+		const svg = `
+			<svg width="${SOCIAL_IMAGE_WIDTH}" height="${SOCIAL_IMAGE_HEIGHT}" viewBox="0 0 ${SOCIAL_IMAGE_WIDTH} ${SOCIAL_IMAGE_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+				<defs>
+					<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+						<stop offset="0%" stop-color="${palette.primary}" />
+						<stop offset="58%" stop-color="${palette.secondary}" />
+						<stop offset="100%" stop-color="#08111d" />
+					</linearGradient>
+				</defs>
+				<rect width="${SOCIAL_IMAGE_WIDTH}" height="${SOCIAL_IMAGE_HEIGHT}" fill="url(#bg)" />
+				<circle cx="920" cy="110" r="220" fill="${palette.accent}" fill-opacity="0.16" />
+				<circle cx="1040" cy="540" r="260" fill="#ffffff" fill-opacity="0.05" />
+			</svg>
+		`
+
+		return sharp(Buffer.from(svg)).png().toBuffer()
+	}
+
+	private renderSvgTextLines(
+		lines: string[],
+		options: {
+			x: number
+			y: number
+			lineHeight: number
+			fontSize: number
+			fontWeight: number
+			fill: string
+			fillOpacity?: number
+			textAnchor?: string
+			dominantBaseline?: string
+		}
+	): string {
+		const anchor = options.textAnchor
+			? ` text-anchor="${options.textAnchor}"`
+			: ''
+		const dominantBaseline = options.dominantBaseline
+			? ` dominant-baseline="${options.dominantBaseline}"`
+			: ''
+		return lines
+			.map((line, index) => {
+				const fillOpacity =
+					options.fillOpacity !== undefined
+						? ` fill-opacity="${options.fillOpacity}"`
+						: ''
+
+				return `<text x="${options.x}" y="${options.y + index * options.lineHeight}" font-family="Arial, sans-serif" font-size="${options.fontSize}" font-weight="${options.fontWeight}" fill="${options.fill}"${fillOpacity}${anchor}${dominantBaseline}>${this.escapeSvgText(line)}</text>`
+			})
+			.join('')
 	}
 
 	private wrapPngAsIco(buffer: Buffer, width: number, height: number): Buffer {
@@ -382,19 +715,54 @@ export class CatalogSeoSyncService {
 			.toUpperCase()
 	}
 
-	private splitTitle(name: string): [string, string] {
-		const words = name
-			.split(/\s+/)
-			.map(word => word.trim())
-			.filter(Boolean)
-		if (!words.length) return ['Catalog', '']
-		if (words.length === 1) return [words[0], '']
+	private wrapText(
+		value: string | null | undefined,
+		maxChars: number,
+		maxLines: number
+	): string[] {
+		const normalized = normalizeNullableTrimmedString(value)?.replace(/\s+/g, ' ')
+		if (!normalized) return []
 
-		const midpoint = Math.ceil(words.length / 2)
-		return [
-			words.slice(0, midpoint).join(' ').slice(0, 18),
-			words.slice(midpoint).join(' ').slice(0, 18)
-		]
+		const words = normalized.split(' ')
+		const lines: string[] = []
+		let current = ''
+
+		for (const word of words) {
+			const candidate = current ? `${current} ${word}` : word
+			if (candidate.length <= maxChars) {
+				current = candidate
+				continue
+			}
+
+			if (!current) {
+				lines.push(this.truncateText(word, maxChars))
+			} else {
+				lines.push(current)
+				current = word
+			}
+
+			if (lines.length === maxLines - 1) {
+				const remainder = [current, ...words.slice(words.indexOf(word) + 1)]
+					.filter(Boolean)
+					.join(' ')
+				if (remainder) {
+					lines.push(this.truncateText(remainder, maxChars))
+				}
+				return lines.slice(0, maxLines)
+			}
+		}
+
+		if (current) {
+			lines.push(this.truncateText(current, maxChars))
+		}
+
+		return lines.slice(0, maxLines)
+	}
+
+	private truncateText(value: string, maxChars: number): string {
+		if (value.length <= maxChars) return value
+		if (maxChars <= 1) return value.slice(0, maxChars)
+		return `${value.slice(0, maxChars - 1).trimEnd()}…`
 	}
 
 	private resolvePalette(seed: string): {
@@ -422,5 +790,20 @@ export class CatalogSeoSyncService {
 			.replace(/>/g, '&gt;')
 			.replace(/"/g, '&quot;')
 			.replace(/'/g, '&#39;')
+	}
+
+	private isUploadsDisabledError(error: unknown): boolean {
+		return (
+			error instanceof BadRequestException &&
+			error.message === UPLOADS_DISABLED_MESSAGE
+		)
+	}
+
+	private describeError(error: unknown): string {
+		if (error instanceof Error) {
+			return error.message
+		}
+
+		return String(error)
 	}
 }

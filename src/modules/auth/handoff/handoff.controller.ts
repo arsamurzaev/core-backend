@@ -2,6 +2,7 @@ import {
 	Controller,
 	ForbiddenException,
 	Get,
+	Logger,
 	Query,
 	Req,
 	Res,
@@ -17,6 +18,7 @@ import {
 } from '@nestjs/swagger'
 import type { Request, Response } from 'express'
 
+import { ObservabilityService } from '@/modules/observability/observability.service'
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
@@ -29,9 +31,12 @@ import { resolveHandoffNext } from './handoff.utils'
 @ApiTags('Auth')
 @Controller('/auth')
 export class HandoffController {
+	private readonly logger = new Logger(HandoffController.name)
+
 	constructor(
 		private readonly handoff: HandoffService,
-		private readonly auth: AuthService
+		private readonly auth: AuthService,
+		private readonly observability: ObservabilityService
 	) {}
 
 	@Get('/handoff')
@@ -58,33 +63,88 @@ export class HandoffController {
 		@Res() res: Response
 	) {
 		const store = RequestContext.mustGet()
-		if (!store.catalogId) throw new ForbiddenException('Нет контекста каталога')
+		const { ip, userAgent } = getClientInfo(req)
+
+		if (!store.catalogId) {
+			this.recordFailure('other', ip, userAgent, null)
+			throw new ForbiddenException('Нет контекста каталога')
+		}
 
 		const payload = await this.handoff.consume(token)
-		if (!payload)
+		if (!payload) {
+			this.recordFailure('token', ip, userAgent, store.catalogId)
 			throw new UnauthorizedException('Токен недействителен или истёк')
+		}
 
 		if (payload.catalogId !== store.catalogId) {
+			this.recordFailure('access', ip, userAgent, store.catalogId)
 			throw new ForbiddenException('Токен не для этого каталога')
 		}
 
-		await this.auth.assertCatalogAccess(
-			payload.userId,
-			payload.role,
-			store.catalogId,
-			store.ownerUserId ?? null
-		)
+		try {
+			await this.auth.assertCatalogAccess(
+				payload.userId,
+				payload.role,
+				store.catalogId,
+				store.ownerUserId ?? null
+			)
+		} catch (error) {
+			this.recordFailure('access', ip, userAgent, store.catalogId)
+			throw error
+		}
 
-		const { ip, userAgent } = getClientInfo(req)
 		const { sid, csrf } = await this.auth.createSessionForUser(
 			payload.userId,
 			{ ip, userAgent },
 			store.catalogId
 		)
 
+		this.observability.recordAuthEvent(
+			'catalog',
+			'handoff_exchange',
+			'success',
+			'none'
+		)
+		this.logger.log({
+			event: 'auth_event',
+			flow: 'catalog',
+			action: 'handoff_exchange',
+			outcome: 'success',
+			reason: 'none',
+			userId: payload.userId,
+			role: payload.role,
+			catalogId: store.catalogId,
+			clientIp: ip || null,
+			userAgent
+		} as any)
+
 		res.setHeader('Cache-Control', 'no-store')
 		setSessionCookies(res, { sid, csrf })
 
 		return res.redirect(302, resolveHandoffNext(next ?? payload.next))
+	}
+
+	private recordFailure(
+		reason: 'access' | 'token' | 'other',
+		ip: string,
+		userAgent: string | null,
+		catalogId: string | null
+	) {
+		this.observability.recordAuthEvent(
+			'catalog',
+			'handoff_exchange',
+			'failure',
+			reason
+		)
+		this.logger.warn({
+			event: 'auth_event',
+			flow: 'catalog',
+			action: 'handoff_exchange',
+			outcome: 'failure',
+			reason,
+			catalogId,
+			clientIp: ip || null,
+			userAgent
+		} as any)
 	}
 }

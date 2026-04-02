@@ -7,6 +7,7 @@ import {
 import { ApiProperty } from '@nestjs/swagger'
 
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
+import { SeoDto } from '@/modules/seo/dto/responses/seo.dto.res'
 
 export class ProductAttributeEnumValueDto {
 	@ApiProperty({ type: String })
@@ -234,6 +235,9 @@ export class ProductWithAttributesDto extends ProductDto {
 export class ProductWithDetailsDto extends ProductWithAttributesDto {
 	@ApiProperty({ type: [ProductVariantDto] })
 	variants: ProductVariantDto[]
+
+	@ApiProperty({ type: SeoDto, nullable: true })
+	seo: SeoDto | null
 }
 
 export class ProductInfinitePageDto {
@@ -261,7 +265,7 @@ export class ProductCardPageDto {
 	@ApiProperty({
 		type: String,
 		nullable: true,
-		description: 'РЎС‚Р°Р±РёР»СЊРЅС‹Р№ seed РґР»СЏ РґРµС‚РµСЂРјРёРЅРёСЂРѕРІР°РЅРЅРѕР№ СЂР°РЅРґРѕРјРёР·Р°С†РёРё'
+		description: 'Стабильный seed для детерминированной рандомизации'
 	})
 	seed: string | null
 }

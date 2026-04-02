@@ -1,7 +1,9 @@
-﻿import {
+import { Role } from '@generated/enums'
+import {
 	Body,
 	Controller,
 	Get,
+	Logger,
 	Post,
 	Req,
 	Res,
@@ -16,6 +18,7 @@ import {
 } from '@nestjs/swagger'
 import type { Request, Response } from 'express'
 
+import { ObservabilityService } from '@/modules/observability/observability.service'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
@@ -36,9 +39,12 @@ import type { AuthRequest } from './types/auth-request'
 @SkipCatalog()
 @Controller('/auth')
 export class AuthController {
+	private readonly logger = new Logger(AuthController.name)
+
 	constructor(
 		private readonly sessions: SessionService,
-		private readonly auth: AuthService
+		private readonly auth: AuthService,
+		private readonly observability: ObservabilityService
 	) {}
 
 	@Post('/login')
@@ -85,9 +91,30 @@ export class AuthController {
 	@ApiSecurity('csrf')
 	@ApiOkResponse({ description: 'Сессия очищена', type: OkResponseDto })
 	@ApiUnauthorizedResponse({ description: 'Не авторизован' })
-	async logout(@Res({ passthrough: true }) res: Response) {
-		const sid = (res.req as AuthRequest).sessionId
+	async logout(
+		@Req() req: Request,
+		@Res({ passthrough: true }) res: Response
+	) {
+		const authReq = req as AuthRequest
+		const sid = authReq.sessionId
+		const { ip, userAgent } = getClientInfo(req)
+		const flow = authReq.user?.role === Role.CATALOG ? 'catalog' : 'session'
+
 		if (sid) await this.sessions.destroy(sid)
+
+		this.observability.recordAuthEvent(flow, 'logout', 'success', 'none')
+		this.logger.log({
+			event: 'auth_event',
+			flow,
+			action: 'logout',
+			outcome: 'success',
+			reason: 'none',
+			userId: authReq.user?.id ?? null,
+			role: authReq.user?.role ?? null,
+			sessionId: sid ?? null,
+			clientIp: ip || null,
+			userAgent
+		} as any)
 
 		res.setHeader('Cache-Control', 'no-store')
 		clearSessionCookies(res)

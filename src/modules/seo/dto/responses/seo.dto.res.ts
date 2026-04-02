@@ -79,6 +79,9 @@ export class SeoDto {
 	@ApiProperty({ type: MediaDto, nullable: true })
 	twitterMedia: MediaDto | null
 
+	@ApiProperty({ type: MediaDto, nullable: true })
+	faviconMedia: MediaDto | null
+
 	@ApiProperty({ type: String, nullable: true })
 	twitterSite: string | null
 

@@ -21,6 +21,7 @@ import {
 	type OnModuleDestroy
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { SpanStatusCode, trace } from '@opentelemetry/api'
 import { Job, Queue, Worker } from 'bullmq'
 import { randomUUID } from 'crypto'
 import { promises as fs } from 'fs'
@@ -31,6 +32,7 @@ import slugify from 'slugify'
 
 import { AllInterfaces } from '@/core/config'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { ObservabilityService } from '@/modules/observability/observability.service'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 
 const DEFAULT_VARIANT_WIDTHS = [1200, 800, 400]
@@ -214,6 +216,7 @@ type UploadQueueJob = {
 
 @Injectable()
 export class S3Service implements OnModuleDestroy {
+	private readonly queueTracer = trace.getTracer('catalog_backend.queue')
 	private readonly client: S3Client | null
 	private readonly enabled: boolean
 	private readonly bucket: string
@@ -237,7 +240,8 @@ export class S3Service implements OnModuleDestroy {
 
 	constructor(
 		private readonly configService: ConfigService<AllInterfaces>,
-		private readonly prisma: PrismaService
+		private readonly prisma: PrismaService,
+		private readonly observability: ObservabilityService
 	) {
 		const config = this.configService.get('s3', { infer: true })
 
@@ -698,6 +702,16 @@ export class S3Service implements OnModuleDestroy {
 		}
 	}
 
+	async downloadObject(key: string): Promise<{
+		buffer: Buffer
+		contentType?: string
+		size?: number
+	}> {
+		this.assertUploadEnabled()
+		const cleanedKey = this.normalizeRequiredKey(key)
+		return this.downloadObjectBuffer(cleanedKey)
+	}
+
 	private assertUploadEnabled() {
 		if (!this.enabled || !this.client) {
 			throw new BadRequestException('Загрузка файлов отключена')
@@ -741,48 +755,89 @@ export class S3Service implements OnModuleDestroy {
 	private async processUploadJob(
 		job: Job<UploadQueueJob, UploadImageResult[]>
 	): Promise<UploadImageResult[]> {
-		const totalSteps = Math.max(
-			1,
-			this.getExpectedVariantCount() * job.data.items.length
-		)
-		let completed = 0
+		const jobName = job.name || 'upload'
+		const startedAt = process.hrtime.bigint()
 
-		const bump = async () => {
-			completed += 1
-			const progress = Math.min(100, Math.round((completed / totalSteps) * 100))
-			await job.updateProgress(progress)
-		}
+		this.observability.incrementQueueJobActive(UPLOAD_QUEUE_NAME, jobName)
 
-		const results: UploadImageResult[] = []
-
-		for (const item of job.data.items) {
-			if (item.source === 'file' && item.filePath) {
-				const fileBuffer = await fs.readFile(item.filePath)
-				const file: UploadedImageFile = {
-					buffer: fileBuffer,
-					size: item.size ?? fileBuffer.length,
-					mimetype: item.mimetype ?? 'application/octet-stream',
-					originalname: item.originalName
-				}
+		return this.queueTracer.startActiveSpan(
+			`bullmq.${UPLOAD_QUEUE_NAME}.${jobName}`,
+			async span => {
+				span.setAttributes({
+					'queue.name': UPLOAD_QUEUE_NAME,
+					'queue.job.name': jobName,
+					'queue.job.id': String(job.id ?? '<unknown>'),
+					'queue.job.items_count': job.data.items.length
+				})
 
 				try {
-					const result = await this.uploadImageWithProgress(file, item.options, bump)
-					results.push(result)
-				} finally {
-					await fs.unlink(item.filePath).catch(() => null)
-				}
-			} else if (item.source === 's3' && item.key) {
-				const result = await this.uploadFromS3KeyWithProgress(
-					item.key,
-					item.options,
-					bump
-				)
-				results.push(result)
-			}
-		}
+					const totalSteps = Math.max(
+						1,
+						this.getExpectedVariantCount() * job.data.items.length
+					)
+					let completed = 0
 
-		await job.updateProgress(100)
-		return results
+					const bump = async () => {
+						completed += 1
+						const progress = Math.min(
+							100,
+							Math.round((completed / totalSteps) * 100)
+						)
+						await job.updateProgress(progress)
+					}
+
+					const results: UploadImageResult[] = []
+
+					for (const item of job.data.items) {
+						if (item.source === 'file' && item.filePath) {
+							const fileBuffer = await fs.readFile(item.filePath)
+							const file: UploadedImageFile = {
+								buffer: fileBuffer,
+								size: item.size ?? fileBuffer.length,
+								mimetype: item.mimetype ?? 'application/octet-stream',
+								originalname: item.originalName
+							}
+
+							try {
+								const result = await this.uploadImageWithProgress(
+									file,
+									item.options,
+									bump
+								)
+								results.push(result)
+							} finally {
+								await fs.unlink(item.filePath).catch(() => null)
+							}
+						} else if (item.source === 's3' && item.key) {
+							const result = await this.uploadFromS3KeyWithProgress(
+								item.key,
+								item.options,
+								bump
+							)
+							results.push(result)
+						}
+					}
+
+					await job.updateProgress(100)
+					this.recordQueueOutcome(UPLOAD_QUEUE_NAME, jobName, 'success', startedAt)
+					return results
+				} catch (error) {
+					const message =
+						error instanceof Error ? error.message : String(error)
+
+					this.recordQueueOutcome(UPLOAD_QUEUE_NAME, jobName, 'error', startedAt)
+					span.recordException(this.toError(error))
+					span.setStatus({
+						code: SpanStatusCode.ERROR,
+						message
+					})
+					throw error
+				} finally {
+					this.observability.decrementQueueJobActive(UPLOAD_QUEUE_NAME, jobName)
+					span.end()
+				}
+			}
+		)
 	}
 
 	private async prepareFileQueueItems(
@@ -896,6 +951,7 @@ export class S3Service implements OnModuleDestroy {
 		items: UploadQueueItem[]
 	): Promise<UploadQueueResult> {
 		const job = await this.uploadQueue.add('upload', { items })
+		this.observability.recordQueueJobEnqueued(UPLOAD_QUEUE_NAME, 'upload')
 		return {
 			ok: true,
 			jobId: String(job.id),
@@ -1690,5 +1746,19 @@ export class S3Service implements OnModuleDestroy {
 		const filePath = path.join(os.tmpdir(), filename)
 		await fs.writeFile(filePath, file.buffer)
 		return filePath
+	}
+
+	private recordQueueOutcome(
+		queue: string,
+		jobName: string,
+		status: 'success' | 'error' | 'skipped',
+		startedAt: bigint
+	) {
+		const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000
+		this.observability.recordQueueJob(queue, jobName, status, durationMs)
+	}
+
+	private toError(error: unknown): Error {
+		return error instanceof Error ? error : new Error(String(error))
 	}
 }

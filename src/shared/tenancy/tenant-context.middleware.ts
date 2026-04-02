@@ -3,16 +3,22 @@ import { Injectable, NestMiddleware } from '@nestjs/common'
 import type { NextFunction, Request, Response } from 'express'
 import { randomUUID } from 'node:crypto'
 
+import { resolveObservabilitySettings } from '@/infrastructure/observability/observability.settings'
+
 import { CatalogResolver } from './catalog.resolver'
 import { RequestContext, type RequestContextStore } from './request-context'
 
-function isSwaggerRoute(req: Request): boolean {
+const observabilitySettings = resolveObservabilitySettings()
+
+function isPlatformRoute(req: Request): boolean {
 	const url = req.originalUrl ?? req.url ?? ''
 	const path = url.split('?')[0] ?? ''
 	return (
 		path.startsWith('/docs') ||
 		path === '/openapi.json' ||
-		path === '/openapi.yaml'
+		path === '/openapi.yaml' ||
+		path === observabilitySettings.metricsPath ||
+		path === '/observability/health'
 	)
 }
 
@@ -93,7 +99,7 @@ export class CatalogContextMiddleware implements NestMiddleware {
 
 		_res.setHeader('x-request-id', requestId)
 
-		if (isSwaggerRoute(req)) {
+		if (isPlatformRoute(req)) {
 			const store: RequestContextStore = {
 				requestId,
 				host,

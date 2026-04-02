@@ -5,6 +5,7 @@ import {
 	Delete,
 	Get,
 	MessageEvent,
+	NotFoundException,
 	Param,
 	Post,
 	Put,
@@ -85,11 +86,22 @@ export class CartController {
 	@Get('current')
 	@ApiOperation({ summary: 'Get the current cart by cookie token' })
 	@ApiOkResponse({ type: CartResponseDto })
-	async getCurrent(@Req() req: Request) {
+	async getCurrent(
+		@Req() req: Request,
+		@Res({ passthrough: true }) res: Response
+	) {
 		const token = this.readTokenFromRequest(req)
 		const catalogId = mustCatalogId()
-		const result = await this.cartService.getCurrentCartOrThrow(catalogId, token)
-		return { ok: true, cart: result.cart }
+		try {
+			const result = await this.cartService.getCurrentCartOrThrow(catalogId, token)
+			return { ok: true, cart: result.cart }
+		} catch (error) {
+			if (this.isCartNotFoundError(error)) {
+				this.clearTokenCookie(res)
+			}
+
+			throw error
+		}
 	}
 
 	@Post('current/share')
@@ -153,13 +165,21 @@ export class CartController {
 	) {
 		const token = this.readTokenFromRequest(req)
 		const catalogId = mustCatalogId()
-		const result = await this.cartService.removeCurrentItem(
-			catalogId,
-			token,
-			itemId
-		)
-		this.setTokenCookie(res, result.token)
-		return { ok: true, cart: result.cart }
+		try {
+			const result = await this.cartService.removeCurrentItem(
+				catalogId,
+				token,
+				itemId
+			)
+			this.setTokenCookie(res, result.token)
+			return { ok: true, cart: result.cart }
+		} catch (error) {
+			if (this.isCartNotFoundError(error)) {
+				this.clearTokenCookie(res)
+			}
+
+			throw error
+		}
 	}
 
 	@Sse('current/sse')
@@ -411,5 +431,39 @@ export class CartController {
 			sameSite: 'lax',
 			path: '/'
 		})
+	}
+
+	private clearTokenCookie(res: Response) {
+		res.clearCookie(this.cartService.getCookieName(), {
+			httpOnly: true,
+			sameSite: 'lax',
+			path: '/'
+		})
+	}
+
+	private isCartNotFoundError(error: unknown) {
+		if (!(error instanceof NotFoundException)) {
+			return false
+		}
+
+		const response = error.getResponse()
+		if (typeof response === 'string') {
+			return response === 'Корзина не найдена'
+		}
+
+		if (
+			typeof response === 'object' &&
+			response !== null &&
+			'message' in response
+		) {
+			const message = response.message
+			if (Array.isArray(message)) {
+				return message.includes('Корзина не найдена')
+			}
+
+			return message === 'Корзина не найдена'
+		}
+
+		return error.message === 'Корзина не найдена'
 	}
 }

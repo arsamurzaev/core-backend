@@ -7,9 +7,11 @@ import {
 	PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
 import { MediaUrlService } from '@/shared/media/media-url.service'
+import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { RequestContext } from '@/shared/tenancy/request-context'
 import { S3Service } from '@/modules/s3/s3.service'
+import { SeoRepository } from '@/modules/seo/seo.repository'
 
 import type { ProductAttributeValueDto } from './dto/requests/product-attribute.dto.req'
 import { ProductAttributeBuilder } from './product-attribute.builder'
@@ -18,6 +20,7 @@ import {
 	encodeProductDefaultCursor,
 	encodeProductSeedCursor
 } from './product-query.utils'
+import { ProductReadService } from './product-read.service'
 import { ProductSeoSyncService } from './product-seo-sync.service'
 import { ProductVariantBuilder } from './product-variant.builder'
 import { ProductRepository } from './product.repository'
@@ -37,6 +40,7 @@ describe('ProductService', () => {
 	let mediaRepo: jest.Mocked<MediaRepository>
 	let s3Service: jest.Mocked<S3Service>
 	let productSeoSync: jest.Mocked<ProductSeoSyncService>
+	let seoRepo: jest.Mocked<SeoRepository>
 
 	const runWithCatalog = <T>(fn: () => Promise<T>) =>
 		RequestContext.run(
@@ -53,6 +57,8 @@ describe('ProductService', () => {
 		const module: TestingModule = await Test.createTestingModule({
 			providers: [
 				ProductService,
+				ProductReadService,
+				ProductMediaMapper,
 				{
 					provide: CacheService,
 					useValue: {
@@ -88,6 +94,7 @@ describe('ProductService', () => {
 						findBySlug: jest.fn(),
 						findByIds: jest.fn(),
 						findByIdsWithAttributes: jest.fn(),
+						findByIdsWithDetails: jest.fn(),
 						findUncategorizedPage: jest.fn(),
 						findUncategorizedCardsPage: jest.fn(),
 						findFilteredProductIdsPageDefault: jest.fn(),
@@ -105,6 +112,7 @@ describe('ProductService', () => {
 						update: jest.fn(),
 						toggleStatus: jest.fn(),
 						togglePopular: jest.fn(),
+						expireScheduledDiscounts: jest.fn(),
 						softDelete: jest.fn(),
 						syncProductCategories: jest.fn(),
 						prependProductToCategories: jest.fn(),
@@ -133,6 +141,12 @@ describe('ProductService', () => {
 					}
 				},
 				{
+					provide: SeoRepository,
+					useValue: {
+						findByEntity: jest.fn()
+					}
+				},
+				{
 					provide: ProductSeoSyncService,
 					useValue: {
 						syncProduct: jest.fn(),
@@ -143,7 +157,7 @@ describe('ProductService', () => {
 		}).compile()
 
 		service = module.get<ProductService>(ProductService)
-		serviceState = service as unknown as {
+		serviceState = module.get(ProductReadService) as unknown as {
 			cacheTtlSec: number
 			uncategorizedFirstPageCacheTtlSec: number
 			uncategorizedNextPageCacheTtlSec: number
@@ -155,6 +169,7 @@ describe('ProductService', () => {
 		mediaRepo = module.get(MediaRepository)
 		s3Service = module.get(S3Service)
 		productSeoSync = module.get(ProductSeoSyncService)
+		seoRepo = module.get(SeoRepository)
 
 		cache.buildKey.mockImplementation(parts =>
 			parts
@@ -165,6 +180,7 @@ describe('ProductService', () => {
 		cache.getVersion.mockResolvedValue(0)
 		cache.getJson.mockResolvedValue(null)
 		cache.setJson.mockResolvedValue(undefined)
+		seoRepo.findByEntity.mockResolvedValue(null)
 		serviceState.cacheTtlSec = 0
 		serviceState.uncategorizedFirstPageCacheTtlSec = 0
 		serviceState.uncategorizedNextPageCacheTtlSec = 0
@@ -172,6 +188,82 @@ describe('ProductService', () => {
 
 	it('should be defined', () => {
 		expect(service).toBeDefined()
+	})
+
+	it('returns empty discount expiration result when nothing expired', async () => {
+		repo.expireScheduledDiscounts.mockResolvedValue([])
+
+		const now = new Date('2026-04-01T01:00:00.000Z')
+		const result = await service.expireScheduledDiscounts(now)
+
+		expect(repo.expireScheduledDiscounts).toHaveBeenCalledWith(now)
+		expect(result).toEqual({
+			updatedProducts: 0,
+			affectedCatalogs: 0
+		})
+		expect(cache.bumpVersion).not.toHaveBeenCalled()
+		expect(productSeoSync.syncProduct).not.toHaveBeenCalled()
+	})
+
+	it('expires scheduled discounts, invalidates caches and resyncs seo', async () => {
+		repo.expireScheduledDiscounts.mockResolvedValue([
+			{ productId: 'product-1', catalogId: 'catalog-1' },
+			{ productId: 'product-2', catalogId: 'catalog-1' },
+			{ productId: 'product-3', catalogId: 'catalog-2' }
+		])
+		repo.findByIdsWithDetails
+			.mockResolvedValueOnce([{ id: 'product-1' }, { id: 'product-2' }] as any)
+			.mockResolvedValueOnce([{ id: 'product-3' }] as any)
+
+		const result = await service.expireScheduledDiscounts(
+			new Date('2026-04-01T01:00:00.000Z')
+		)
+
+		expect(result).toEqual({
+			updatedProducts: 3,
+			affectedCatalogs: 2
+		})
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			PRODUCTS_CACHE_VERSION,
+			'catalog-1'
+		)
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			CATEGORY_PRODUCTS_CACHE_VERSION,
+			'catalog-1'
+		)
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			PRODUCTS_CACHE_VERSION,
+			'catalog-2'
+		)
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			CATEGORY_PRODUCTS_CACHE_VERSION,
+			'catalog-2'
+		)
+		expect(repo.findByIdsWithDetails).toHaveBeenNthCalledWith(
+			1,
+			['product-1', 'product-2'],
+			'catalog-1'
+		)
+		expect(repo.findByIdsWithDetails).toHaveBeenNthCalledWith(
+			2,
+			['product-3'],
+			'catalog-2'
+		)
+		expect(productSeoSync.syncProduct).toHaveBeenNthCalledWith(
+			1,
+			{ id: 'product-1' },
+			'catalog-1'
+		)
+		expect(productSeoSync.syncProduct).toHaveBeenNthCalledWith(
+			2,
+			{ id: 'product-2' },
+			'catalog-1'
+		)
+		expect(productSeoSync.syncProduct).toHaveBeenNthCalledWith(
+			3,
+			{ id: 'product-3' },
+			'catalog-2'
+		)
 	})
 
 	it('returns integration metadata for integrated products', async () => {
@@ -204,6 +296,40 @@ describe('ProductService', () => {
 				lastSyncedAt: syncedAt
 			}
 		})
+	})
+
+	it('returns seo only for detailed product responses', async () => {
+		repo.findById.mockResolvedValue({
+			id: 'product-1',
+			media: [],
+			productAttributes: [],
+			variants: [],
+			categoryProducts: [],
+			integrationLinks: []
+		} as any)
+		seoRepo.findByEntity.mockResolvedValue({
+			id: 'seo-1',
+			entityType: 'PRODUCT',
+			entityId: 'product-1',
+			title: 'SEO title',
+			ogMedia: null,
+			twitterMedia: null
+		} as any)
+
+		const result = await runWithCatalog(() => service.getById('product-1'))
+
+		expect(result).toMatchObject({
+			id: 'product-1',
+			seo: {
+				id: 'seo-1',
+				title: 'SEO title'
+			}
+		})
+		expect(seoRepo.findByEntity).toHaveBeenCalledWith(
+			'catalog-1',
+			'PRODUCT',
+			'product-1'
+		)
 	})
 
 	it('returns seeded infinite page with next cursor', async () => {

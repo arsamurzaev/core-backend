@@ -7,6 +7,7 @@ import {
 	CATEGORY_PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
 import { MediaUrlService } from '@/shared/media/media-url.service'
+import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
 import { MediaRepository } from '@/shared/media/media.repository'
 
 import { RequestContext } from '../../shared/tenancy/request-context'
@@ -38,6 +39,7 @@ describe('CategoryService', () => {
 		const module: TestingModule = await Test.createTestingModule({
 			providers: [
 				CategoryService,
+				ProductMediaMapper,
 				{
 					provide: CategoryRepository,
 					useValue: {

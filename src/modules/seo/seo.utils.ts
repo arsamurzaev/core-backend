@@ -39,6 +39,7 @@ export function buildSeoCreateInput(
 		entityId: string
 		ogMediaId?: string | null
 		twitterMediaId?: string | null
+		faviconMediaId?: string | null
 	}
 ): SeoSettingCreateInput {
 	const data: SeoSettingCreateInput = {
@@ -50,6 +51,9 @@ export function buildSeoCreateInput(
 			: {}),
 		...(options.twitterMediaId
 			? { twitterMedia: { connect: { id: options.twitterMediaId } } }
+			: {}),
+		...(options.faviconMediaId
+			? { faviconMedia: { connect: { id: options.faviconMediaId } } }
 			: {}),
 		hreflang: dto.hreflang ?? undefined,
 		structuredData: serializeOptionalJson(dto.structuredData),
@@ -73,6 +77,7 @@ export function buildSeoUpdateInput(
 		entityId?: string
 		ogMediaId?: string | null
 		twitterMediaId?: string | null
+		faviconMediaId?: string | null
 	}
 ): SeoSettingUpdateInput {
 	const data: SeoSettingUpdateInput = {}
@@ -100,6 +105,12 @@ export function buildSeoUpdateInput(
 	if (dto.twitterMediaId !== undefined) {
 		data.twitterMedia = options.twitterMediaId
 			? { connect: { id: options.twitterMediaId } }
+			: { disconnect: true }
+	}
+
+	if (dto.faviconMediaId !== undefined) {
+		data.faviconMedia = options.faviconMediaId
+			? { connect: { id: options.faviconMediaId } }
 			: { disconnect: true }
 	}
 

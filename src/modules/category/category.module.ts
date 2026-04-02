@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 
 import { PrismaModule } from '@/infrastructure/prisma/prisma.module'
 import { MediaUrlService } from '@/shared/media/media-url.service'
+import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
 import { MediaRepository } from '@/shared/media/media.repository'
 
 import { CategoryController } from './category.controller'
@@ -15,7 +16,8 @@ import { CategoryService } from './category.service'
 		CategoryService,
 		CategoryRepository,
 		MediaRepository,
-		MediaUrlService
+		MediaUrlService,
+		ProductMediaMapper
 	]
 })
 export class CategoryModule {}

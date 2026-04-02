@@ -158,6 +158,12 @@ export class UpdateSeoDtoReq {
 	@MaxLength(120)
 	twitterMediaId?: string | null
 
+	@ApiPropertyOptional({ type: String, example: 'media-uuid' })
+	@IsOptional()
+	@IsString()
+	@MaxLength(120)
+	faviconMediaId?: string | null
+
 	@ApiPropertyOptional({ type: String, example: '@catalog' })
 	@IsOptional()
 	@IsString()

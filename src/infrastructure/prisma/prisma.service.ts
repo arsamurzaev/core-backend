@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config'
 import { PrismaPg } from '@prisma/adapter-pg'
 
 import { AllInterfaces } from '@/core/config'
+import { ObservabilityService } from '@/modules/observability/observability.service'
 
 import {
 	buildPrismaLogDefinitions,
@@ -25,7 +26,10 @@ export class PrismaService
 	private readonly logger = new Logger(PrismaService.name)
 	private readonly slowQuerySettings: PrismaSlowQuerySettings
 
-	constructor(private readonly configService: ConfigService<AllInterfaces>) {
+	constructor(
+		private readonly configService: ConfigService<AllInterfaces>,
+		private readonly observability: ObservabilityService
+	) {
 		const slowQuerySettings = resolvePrismaSlowQuerySettings()
 		const adapter = new PrismaPg({
 			user: configService.get('database.user', { infer: true }),
@@ -94,6 +98,7 @@ export class PrismaService
 				this.slowQuerySettings.maxQueryLength
 			)
 
+			this.observability.recordPrismaSlowQuery(event.duration)
 			this.logger.warn(
 				`Slow Prisma query (${event.duration}ms${target}): ${query}`
 			)

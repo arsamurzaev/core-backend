@@ -57,6 +57,52 @@ $ yarn run test:e2e
 $ yarn run test:cov
 ```
 
+## Observability
+
+LGTM overlay is started with a separate Compose file:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+```
+
+Collector-only mode for a split deployment is available too:
+
+```bash
+docker compose -f docker-compose.observability.collector.yml up -d
+```
+
+Ready-made split deployment environment templates:
+
+- backend host: `.env.observability.backend-host.example`
+- observability host: `.env.observability.remote-host.example`
+
+After startup:
+
+- Grafana: `http://localhost:3001`
+- Metrics endpoint backend: `http://localhost:4000/metrics`
+- OTLP traces endpoint: `http://localhost:4318/v1/traces`
+- Backend logs file: `runtime/logs/backend.jsonl`
+
+Available dashboards:
+
+- `Backend Overview`
+- `Auth Overview`
+- `Operations Overview`
+
+The backend process itself should be running separately on the host so Alloy can scrape metrics from `http://localhost:4000/metrics` and receive traces through `http://localhost:4318/v1/traces`.
+
+Observability environment template: `.env.observability.example`.
+
+Set `OBSERVABILITY_ENABLED=false` to disable application-side metrics, traces, JSON log export, and HTTP observability without removing the code or Docker overlay.
+
+For a split deployment:
+
+- run `grafana`, `loki`, `tempo`, and `mimir` on the observability host
+- run `alloy` from `docker-compose.observability.collector.yml` on the backend host
+- point `OBSERVABILITY_TEMPO_OTLP_ENDPOINT`, `OBSERVABILITY_MIMIR_REMOTE_WRITE_URL`, and `OBSERVABILITY_LOKI_WRITE_URL` to the remote observability host
+- keep `OBSERVABILITY_OTLP_TRACES_URL` in the backend pointed at the local Alloy endpoint, usually `http://localhost:4318/v1/traces`
+- expose `3100`, `4317`, `4318`, and `9009` only to the backend host IP, not to the whole internet
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
@@ -89,7 +135,7 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 
 ## Stay in touch
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
+- Author - [Kamil Mysliwiec](https://twitter.com/kammysliwiec)
 - Website - [https://nestjs.com](https://nestjs.com/)
 - Twitter - [@nestframework](https://twitter.com/nestframework)
 

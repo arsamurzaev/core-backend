@@ -1,11 +1,11 @@
-﻿// под твой проект (у тебя client в @generated)
-import { Prisma } from '@generated/client'
+﻿import { Prisma } from '@generated/client'
 import {
 	ArgumentsHost,
 	Catch,
 	ExceptionFilter,
 	HttpException,
-	HttpStatus
+	HttpStatus,
+	Logger
 } from '@nestjs/common'
 import type { Request, Response } from 'express'
 
@@ -89,6 +89,8 @@ function prismaToHttp(exception: Prisma.PrismaClientKnownRequestError): {
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
+	private readonly logger = new Logger(GlobalExceptionFilter.name)
+
 	catch(exception: unknown, host: ArgumentsHost) {
 		const ctx = host.switchToHttp()
 		const res = ctx.getResponse<Response>()
@@ -101,8 +103,6 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
 		let status = HttpStatus.INTERNAL_SERVER_ERROR
 		let message: string | string[] = 'Внутренняя ошибка сервера'
-
-		console.log(exception)
 
 		// Nest HttpException
 		if (exception instanceof HttpException) {
@@ -129,6 +129,19 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 		else if (exception instanceof Error) {
 			status = HttpStatus.INTERNAL_SERVER_ERROR
 			message = isDev ? exception.message : 'Внутренняя ошибка сервера'
+		}
+
+		const prefix = `[${requestId ?? '-'}] ${req.method} ${req.originalUrl ?? req.url}`
+
+		if (status >= 500) {
+			this.logger.error(
+				`${prefix} → ${status}`,
+				exception instanceof Error ? exception.stack : String(exception)
+			)
+		} else {
+			this.logger.warn(
+				`${prefix} → ${status}: ${Array.isArray(message) ? message.join(', ') : message}`
+			)
 		}
 
 		const body: ErrorBody = {

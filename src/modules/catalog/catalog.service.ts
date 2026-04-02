@@ -19,9 +19,9 @@ import { ensureMediaInCatalog } from '@/shared/media/media.validation'
 import { RequestContext } from '@/shared/tenancy/request-context'
 import { assertHasUpdateFields, normalizeRequiredString } from '@/shared/utils'
 
+import { CatalogSeoSyncService } from './catalog-seo-sync.service'
 import { mapCatalogRecord } from './catalog.mapper'
 import { CatalogRepository } from './catalog.repository'
-import { CatalogSeoSyncService } from './catalog-seo-sync.service'
 import {
 	applyCatalogSlugSuffix,
 	buildCatalogConfigUpsert,
@@ -108,13 +108,13 @@ export class CatalogService {
 
 	async getById(id: string) {
 		const catalog = await this.repo.getById(id)
-		if (!catalog) throw new NotFoundException('РљР°С‚Р°Р»РѕРі РЅРµ РЅР°Р№РґРµРЅ')
+		if (!catalog) throw new NotFoundException('Каталог не найден')
 		return this.mapCatalog(catalog)
 	}
 
 	async getCurrent() {
 		const store = RequestContext.get()
-		if (!store?.catalogId) throw new NotFoundException('РљР°С‚Р°Р»РѕРі РЅРµ РЅР°Р№РґРµРЅ')
+		if (!store?.catalogId) throw new NotFoundException('Каталог не найден')
 		if (!this.cacheTtlSec) {
 			return this.loadCurrentCatalog(store.catalogId)
 		}
@@ -132,14 +132,17 @@ export class CatalogService {
 
 	async getCurrentShell() {
 		const store = RequestContext.get()
-		if (!store?.catalogId) throw new NotFoundException('Р С™Р В°РЎвЂљР В°Р В»Р С•Р С– Р Р…Р Вµ Р Р…Р В°Р в„–Р Т‘Р ВµР Р…')
+		if (!store?.catalogId) throw new NotFoundException('Каталог не найден')
 
-		return this.loadCurrentCatalogShell(store.catalogId, Boolean(this.cacheTtlSec))
+		return this.loadCurrentCatalogShell(
+			store.catalogId,
+			Boolean(this.cacheTtlSec)
+		)
 	}
 
 	async getCurrentTypeSchema() {
 		const store = RequestContext.get()
-		if (!store?.catalogId) throw new NotFoundException('Р С™Р В°РЎвЂљР В°Р В»Р С•Р С– Р Р…Р Вµ Р Р…Р В°Р в„–Р Т‘Р ВµР Р…')
+		if (!store?.catalogId) throw new NotFoundException('Каталог не найден')
 
 		const shell = store.typeId
 			? undefined
@@ -150,12 +153,15 @@ export class CatalogService {
 		const typeId = store.typeId ?? shell?.typeId
 
 		if (!typeId) {
-			throw new NotFoundException('РўРёРї РєР°С‚Р°Р»РѕРіР° РЅРµ РЅР°Р№РґРµРЅ')
+			throw new NotFoundException('Тип каталога не найден')
 		}
 
-		const type = await this.loadCatalogTypeSchema(typeId, Boolean(this.cacheTtlSec))
+		const type = await this.loadCatalogTypeSchema(
+			typeId,
+			Boolean(this.cacheTtlSec)
+		)
 		if (!type) {
-			throw new NotFoundException('РўРёРї РєР°С‚Р°Р»РѕРіР° РЅРµ РЅР°Р№РґРµРЅ')
+			throw new NotFoundException('Тип каталога не найден')
 		}
 
 		return type
@@ -180,7 +186,7 @@ export class CatalogService {
 
 	async updateCurrent(dto: UpdateCatalogDtoReq) {
 		const store = RequestContext.get()
-		if (!store?.catalogId) throw new NotFoundException('РљР°С‚Р°Р»РѕРі РЅРµ РЅР°Р№РґРµРЅ')
+		if (!store?.catalogId) throw new NotFoundException('Каталог не найден')
 		const data = await this.buildUpdateData(
 			dto,
 			{
@@ -194,7 +200,7 @@ export class CatalogService {
 		await this.repo.update(store.catalogId, data)
 		const catalog = await this.repo.getCurrentShellById(store.catalogId)
 		if (!catalog) {
-			throw new NotFoundException('Р С™Р В°РЎвЂљР В°Р В»Р С•Р С– Р Р…Р Вµ Р Р…Р В°Р в„–Р Т‘Р ВµР Р…')
+			throw new NotFoundException('Каталог не найден')
 		}
 		await this.catalogSeoSync.syncCatalog(catalog as any)
 		await this.invalidateCatalogCache(store.catalogId)
@@ -321,7 +327,7 @@ export class CatalogService {
 		ensureCatalogSlugAllowed(slug)
 		const exists = await this.repo.existsSlug(slug, excludeId)
 		if (exists) {
-			throw new BadRequestException('РЎР»Р°Рі РєР°С‚Р°Р»РѕРіР° СѓР¶Рµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ')
+			throw new BadRequestException('Слаг каталога уже используется')
 		}
 	}
 
@@ -331,7 +337,7 @@ export class CatalogService {
 	): Promise<void> {
 		const exists = await this.repo.existsDomain(domain, excludeId)
 		if (exists) {
-			throw new BadRequestException('Р”РѕРјРµРЅ РєР°С‚Р°Р»РѕРіР° СѓР¶Рµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ')
+			throw new BadRequestException('Домен каталога уже используется')
 		}
 	}
 
@@ -345,14 +351,13 @@ export class CatalogService {
 				: undefined
 
 		if (cacheKey) {
-			const cached = await this.cache.getJson<Omit<CatalogCurrent, 'type'>>(
-				cacheKey
-			)
+			const cached =
+				await this.cache.getJson<Omit<CatalogCurrent, 'type'>>(cacheKey)
 			if (cached !== null) return cached
 		}
 
 		const shell = await this.repo.getCurrentShellById(catalogId)
-		if (!shell) throw new NotFoundException('РљР°С‚Р°Р»РѕРі РЅРµ РЅР°Р№РґРµРЅ')
+		if (!shell) throw new NotFoundException('Каталог не найден')
 		const mapped = this.mapCatalog(shell)
 
 		if (cacheKey) {

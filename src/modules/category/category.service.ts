@@ -1,5 +1,4 @@
-﻿import type { IntegrationProvider } from '@generated/enums'
-import { CategoryCreateInput, CategoryUpdateInput } from '@generated/models'
+﻿import { CategoryCreateInput, CategoryUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
 	Injectable,
@@ -22,6 +21,10 @@ import {
 } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { ensureMediaInCatalog } from '@/shared/media/media.validation'
+import {
+	type ProductMappableRecord,
+	ProductMediaMapper
+} from '@/shared/media/product-media.mapper'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import {
 	assertHasUpdateFields,
@@ -48,13 +51,6 @@ type CategoryOrderItem = Awaited<
 	ReturnType<CategoryRepository['findAll']>
 >[number]
 
-type ProductIntegrationLinkRecord = {
-	externalId: string
-	externalCode?: string | null
-	lastSyncedAt?: Date | string | null
-	integration?: { provider: IntegrationProvider } | null
-}
-
 @Injectable()
 export class CategoryService {
 	private readonly listCacheTtlSec = CATEGORY_LIST_CACHE_TTL_SEC
@@ -67,7 +63,8 @@ export class CategoryService {
 		private readonly repo: CategoryRepository,
 		private readonly cache: CacheService,
 		private readonly mediaRepo: MediaRepository,
-		private readonly mediaUrl: MediaUrlService
+		private readonly mediaUrl: MediaUrlService,
+		private readonly productMapper: ProductMediaMapper
 	) {}
 
 	async getAll() {
@@ -168,12 +165,7 @@ export class CategoryService {
 			: this.firstPageCacheTtlSec
 		const cacheKey =
 			!includeInactive && cacheTtlSec > 0
-				? await this.buildCategoryProductCardsCacheKey(
-						id,
-						catalogId,
-						cursor,
-						limit
-					)
+				? await this.buildCategoryProductCardsCacheKey(id, catalogId, cursor, limit)
 				: undefined
 
 		if (cacheKey) {
@@ -397,41 +389,8 @@ export class CategoryService {
 		}
 	}
 
-	private mapProductMedia<
-		T extends {
-			media: { position: number; kind?: string | null; media: MediaRecord }[]
-			integrationLinks?: ProductIntegrationLinkRecord[]
-		}
-	>(product: T) {
-		const { integrationLinks, ...rest } = product
-
-		return {
-			...rest,
-			media: (product.media ?? []).map(item => ({
-				position: item.position,
-				kind: item.kind ?? null,
-				media: this.mediaUrl.mapMedia(item.media, {
-					variantNames: MEDIA_LIST_VARIANT_NAMES
-				})
-			})),
-			integration: this.mapProductIntegration(integrationLinks)
-		}
-	}
-
-	private mapProductIntegration(
-		integrationLinks?: ProductIntegrationLinkRecord[]
-	) {
-		const link = integrationLinks?.[0]
-		if (!link?.integration?.provider) {
-			return null
-		}
-
-		return {
-			provider: link.integration.provider,
-			externalId: link.externalId,
-			externalCode: link.externalCode ?? null,
-			lastSyncedAt: link.lastSyncedAt ?? null
-		}
+	private mapProductMedia<T extends ProductMappableRecord>(product: T) {
+		return this.productMapper.mapProduct(product, MEDIA_LIST_VARIANT_NAMES)
 	}
 
 	private async prepareCategoryProductsForWrite(

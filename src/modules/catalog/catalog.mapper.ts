@@ -43,6 +43,9 @@ export function mapCatalogRecord(catalog: any, mapMedia: CatalogMapMedia): any {
 						ogMedia: seoCandidate.ogMedia ? mapMedia(seoCandidate.ogMedia) : null,
 						twitterMedia: seoCandidate.twitterMedia
 							? mapMedia(seoCandidate.twitterMedia)
+							: null,
+						faviconMedia: seoCandidate.faviconMedia
+							? mapMedia(seoCandidate.faviconMedia)
 							: null
 					}
 				: null

@@ -291,6 +291,11 @@ export type ProductDetailsItem = Prisma.ProductGetPayload<{
 	select: typeof productDetailSelectWithDetails
 }>
 
+export type ExpiredDiscountProductRef = {
+	productId: string
+	catalogId: string
+}
+
 type ProductReadExecutor =
 	| Pick<PrismaService, 'product'>
 	| Pick<Prisma.TransactionClient, 'product'>
@@ -454,6 +459,22 @@ export class ProductRepository {
 		})
 	}
 
+	findByIdsWithDetails(
+		ids: string[],
+		catalogId: string
+	): Promise<ProductDetailsItem[]> {
+		if (!ids.length) return Promise.resolve<ProductDetailsItem[]>([])
+
+		return this.prisma.product.findMany({
+			where: {
+				id: { in: ids },
+				catalogId,
+				deleteAt: null
+			},
+			select: productDetailSelectWithDetails
+		})
+	}
+
 	findUncategorizedPage(
 		catalogId: string,
 		options: {
@@ -503,37 +524,7 @@ export class ProductRepository {
 			includeInactive?: boolean
 		}
 	): Promise<ProductWithAttributesItem[]> {
-		const { cursor, take, includeInactive } = options
-
-		return this.prisma.product.findMany({
-			where: {
-				catalogId,
-				deleteAt: null,
-				...(includeInactive ? {} : { status: ProductStatus.ACTIVE }),
-				categoryProducts: {
-					none: {
-						category: {
-							catalogId,
-							deleteAt: null
-						}
-					}
-				},
-				...(cursor
-					? {
-							OR: [
-								{ updatedAt: { lt: cursor.updatedAt } },
-								{
-									updatedAt: cursor.updatedAt,
-									id: { lt: cursor.id }
-								}
-							]
-						}
-					: {})
-			},
-			select: productListSelectWithAttributes,
-			orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-			take
-		})
+		return this.findUncategorizedPage(catalogId, options)
 	}
 
 	findAttributesByTypeAndKeys(
@@ -816,6 +807,104 @@ export class ProductRepository {
 		})
 
 		return this.findProductWithDetails(this.prisma, id, catalogId)
+	}
+
+	async expireScheduledDiscounts(
+		now: Date
+	): Promise<ExpiredDiscountProductRef[]> {
+		return this.prisma.$transaction(async tx => {
+			const expiredProducts = await tx.product.findMany({
+				where: {
+					deleteAt: null,
+					productAttributes: {
+						some: {
+							deleteAt: null,
+							valueDateTime: { lte: now },
+							attribute: {
+								is: {
+									key: 'discountEndAt'
+								}
+							}
+						}
+					}
+				},
+				select: {
+					id: true,
+					catalogId: true
+				}
+			})
+
+			if (!expiredProducts.length) return []
+
+			const productIds = expiredProducts.map(product => product.id)
+			const resetAttributeValues = {
+				enumValueId: null,
+				valueString: null,
+				valueInteger: null,
+				valueDecimal: null,
+				valueBoolean: null,
+				valueDateTime: null
+			}
+
+			await Promise.all([
+				tx.productAttribute.updateMany({
+					where: {
+						deleteAt: null,
+						productId: { in: productIds },
+						attribute: {
+							is: {
+								key: 'discount'
+							}
+						}
+					},
+					data: {
+						...resetAttributeValues,
+						valueInteger: 0
+					}
+				}),
+				tx.productAttribute.updateMany({
+					where: {
+						deleteAt: null,
+						productId: { in: productIds },
+						attribute: {
+							is: {
+								key: 'discountedPrice'
+							}
+						}
+					},
+					data: resetAttributeValues
+				}),
+				tx.productAttribute.updateMany({
+					where: {
+						deleteAt: null,
+						productId: { in: productIds },
+						attribute: {
+							is: {
+								key: 'discountStartAt'
+							}
+						}
+					},
+					data: resetAttributeValues
+				}),
+				tx.productAttribute.updateMany({
+					where: {
+						deleteAt: null,
+						productId: { in: productIds },
+						attribute: {
+							is: {
+								key: 'discountEndAt'
+							}
+						}
+					},
+					data: resetAttributeValues
+				})
+			])
+
+			return expiredProducts.map(product => ({
+				productId: product.id,
+				catalogId: product.catalogId
+			}))
+		})
 	}
 
 	async setVariants(

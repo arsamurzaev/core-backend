@@ -26,6 +26,7 @@ model Media {
     catalogConfigBackgrounds CatalogConfig[] @relation("CatalogConfigBg")
     seoOgMedia             SeoSetting[]   @relation("SeoOgMedia")
     seoTwitterMedia        SeoSetting[]   @relation("SeoTwitterMedia")
+    seoFaviconMedia        SeoSetting[]   @relation("SeoFaviconMedia")
 
     createdAt DateTime @default(now()) @map("created_at")
     updatedAt DateTime @updatedAt @map("updated_at")

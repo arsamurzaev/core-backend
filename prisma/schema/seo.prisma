@@ -35,6 +35,9 @@ model SeoSetting {
 
     ogMedia      Media? @relation("SeoOgMedia", fields: [ogMediaId], references: [id], onDelete: SetNull)
     twitterMedia Media? @relation("SeoTwitterMedia", fields: [twitterMediaId], references: [id], onDelete: SetNull)
+
+    faviconMediaId String? @map("favicon_media_id") @db.Uuid
+    faviconMedia   Media?  @relation("SeoFaviconMedia", fields: [faviconMediaId], references: [id], onDelete: SetNull)
     twitterSite        String? @map("twitter_site") @db.VarChar(100)
     twitterCreator     String? @map("twitter_creator") @db.VarChar(100)
 

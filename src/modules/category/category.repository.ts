@@ -341,7 +341,7 @@ export class CategoryRepository {
 			select: {
 				productId: true,
 				position: true,
-				product: { select: productSelect }
+				product: { select: productSelectWithAttributes }
 			},
 			orderBy: [{ position: SortOrder.asc }, { productId: SortOrder.asc }],
 			take

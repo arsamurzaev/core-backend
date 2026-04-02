@@ -92,4 +92,52 @@ describe('ProductRepository', () => {
 			'%hm-001%'
 		])
 	})
+
+	it('expires scheduled discounts in bulk and returns affected products', async () => {
+		const tx = {
+			product: {
+				findMany: jest.fn().mockResolvedValue([
+					{ id: 'product-1', catalogId: 'catalog-1' },
+					{ id: 'product-2', catalogId: 'catalog-2' }
+				])
+			},
+			productAttribute: {
+				updateMany: jest.fn().mockResolvedValue({ count: 2 })
+			}
+		}
+		const prisma = {
+			$transaction: jest.fn(async callback => callback(tx))
+		}
+		const repository = new ProductRepository(prisma as any)
+		const now = new Date('2026-04-01T01:00:00.000Z')
+
+		const result = await repository.expireScheduledDiscounts(now)
+
+		expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+		expect(tx.product.findMany).toHaveBeenCalledWith({
+			where: {
+				deleteAt: null,
+				productAttributes: {
+					some: {
+						deleteAt: null,
+						valueDateTime: { lte: now },
+						attribute: {
+							is: {
+								key: 'discountEndAt'
+							}
+						}
+					}
+				}
+			},
+			select: {
+				id: true,
+				catalogId: true
+			}
+		})
+		expect(tx.productAttribute.updateMany).toHaveBeenCalledTimes(4)
+		expect(result).toEqual([
+			{ productId: 'product-1', catalogId: 'catalog-1' },
+			{ productId: 'product-2', catalogId: 'catalog-2' }
+		])
+	})
 })

@@ -9,6 +9,8 @@ import { ConfigService } from '@nestjs/config'
 import { Test, TestingModule } from '@nestjs/testing'
 import { Queue, Worker } from 'bullmq'
 
+import { ObservabilityService } from '@/modules/observability/observability.service'
+
 import { IntegrationRepository } from '../../integration.repository'
 import {
 	buildMoySkladMetadata,
@@ -47,6 +49,12 @@ describe('MoySkladQueueService', () => {
 	let repo: jest.Mocked<IntegrationRepository>
 	let sync: jest.Mocked<MoySkladSyncService>
 	let metadataCrypto: jest.Mocked<MoySkladMetadataCryptoService>
+	let observability: {
+		recordQueueJobEnqueued: jest.Mock
+		incrementQueueJobActive: jest.Mock
+		decrementQueueJobActive: jest.Mock
+		recordQueueJob: jest.Mock
+	}
 
 	const queueMock = () =>
 		(Queue as unknown as jest.Mock).mock.results[0]?.value as {
@@ -176,6 +184,15 @@ describe('MoySkladQueueService', () => {
 					useValue: {
 						parseStoredMetadata: jest.fn(() => decryptedMetadata)
 					}
+				},
+				{
+					provide: ObservabilityService,
+					useValue: {
+						recordQueueJobEnqueued: jest.fn(),
+						incrementQueueJobActive: jest.fn(),
+						decrementQueueJobActive: jest.fn(),
+						recordQueueJob: jest.fn()
+					}
 				}
 			]
 		}).compile()
@@ -184,6 +201,7 @@ describe('MoySkladQueueService', () => {
 		repo = module.get(IntegrationRepository)
 		sync = module.get(MoySkladSyncService)
 		metadataCrypto = module.get(MoySkladMetadataCryptoService)
+		observability = module.get(ObservabilityService)
 	})
 
 	it('queues manual catalog sync and stores job id', async () => {
@@ -215,6 +233,10 @@ describe('MoySkladQueueService', () => {
 			})
 		)
 		expect(repo.attachSyncRunJobId).toHaveBeenCalledWith('run-1', 'job-1')
+		expect(observability.recordQueueJobEnqueued).toHaveBeenCalledWith(
+			'moysklad-sync',
+			'catalog-sync'
+		)
 		expect(result.jobId).toBe('job-1')
 	})
 
@@ -293,6 +315,20 @@ describe('MoySkladQueueService', () => {
 				imagesImported: 0,
 				durationMs: 250
 			})
+		)
+		expect(observability.incrementQueueJobActive).toHaveBeenCalledWith(
+			'moysklad-sync',
+			'catalog-sync'
+		)
+		expect(observability.recordQueueJob).toHaveBeenCalledWith(
+			'moysklad-sync',
+			'catalog-sync',
+			'success',
+			expect.any(Number)
+		)
+		expect(observability.decrementQueueJobActive).toHaveBeenCalledWith(
+			'moysklad-sync',
+			'catalog-sync'
 		)
 	})
 })

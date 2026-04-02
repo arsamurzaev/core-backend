@@ -1,11 +1,7 @@
-import {
-	MiddlewareConsumer,
-	Module,
-	NestModule,
-	ValidationPipe
-} from '@nestjs/common'
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
-import { APP_FILTER, APP_GUARD, APP_PIPE } from '@nestjs/core'
+import { APP_FILTER, APP_GUARD } from '@nestjs/core'
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler'
 
 import { AdminModule } from '@/modules/admin/admin.module'
 import { AttributeModule } from '@/modules/attribute/attribute.module'
@@ -14,7 +10,9 @@ import { BrandModule } from '@/modules/brand/brand.module'
 import { CartModule } from '@/modules/cart/cart.module'
 import { CatalogModule } from '@/modules/catalog/catalog.module'
 import { CategoryModule } from '@/modules/category/category.module'
+import { CronModule } from '@/modules/cron/cron.module'
 import { IntegrationModule } from '@/modules/integration/integration.module'
+import { ObservabilityModule } from '@/modules/observability/observability.module'
 import { ProductModule } from '@/modules/product/product.module'
 import { S3Module } from '@/modules/s3/s3.module'
 import { SeoModule } from '@/modules/seo/seo.module'
@@ -42,6 +40,8 @@ import {
 			isGlobal: true,
 			load: [databaseEnv, redisEnv, httpEnv, s3Env, integrationCryptoEnv]
 		}),
+		ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
+		ObservabilityModule,
 		CacheModule,
 		PrismaModule,
 		TypeModule,
@@ -52,6 +52,7 @@ import {
 		UserModule,
 		CatalogModule,
 		CategoryModule,
+		CronModule,
 		IntegrationModule,
 		CartModule,
 		ProductModule,
@@ -60,18 +61,10 @@ import {
 	],
 	providers: [
 		{ provide: APP_FILTER, useClass: GlobalExceptionFilter },
-		{
-			provide: APP_PIPE,
-			useValue: new ValidationPipe({
-				whitelist: true,
-				transform: true,
-				forbidNonWhitelisted: true,
-				transformOptions: { enableImplicitConversion: true }
-			})
-		},
+		{ provide: APP_GUARD, useClass: ThrottlerGuard },
+		{ provide: APP_GUARD, useClass: CatalogGuard },
 		CatalogResolver,
-		CatalogContextMiddleware,
-		{ provide: APP_GUARD, useClass: CatalogGuard }
+		CatalogContextMiddleware
 	]
 })
 export class AppModule implements NestModule {

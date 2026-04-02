@@ -55,6 +55,7 @@ const seoSelect = {
 	twitterTitle: true,
 	twitterDescription: true,
 	twitterMedia: { select: mediaSelect },
+	faviconMedia: { select: mediaSelect },
 	twitterSite: true,
 	twitterCreator: true,
 	hreflang: true,

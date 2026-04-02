@@ -11,6 +11,7 @@ import { Test, TestingModule } from '@nestjs/testing'
 
 import { AllInterfaces } from '@/core/config'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { ObservabilityService } from '@/modules/observability/observability.service'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
 import { S3Service } from './s3.service'
@@ -67,8 +68,8 @@ describe('S3Service', () => {
 	}
 	let sendMock: jest.Mock
 
-	const mockedGetSignedUrl = jest.mocked(getSignedUrl)
-	const mockedCreatePresignedPost = jest.mocked(createPresignedPost)
+	const mockedGetSignedUrl = getSignedUrl as jest.Mock
+	const mockedCreatePresignedPost = createPresignedPost as jest.Mock
 
 	const runWithCatalog = <T>(fn: () => Promise<T>) =>
 		RequestContext.run(
@@ -134,6 +135,15 @@ describe('S3Service', () => {
 				{
 					provide: PrismaService,
 					useValue: prisma
+				},
+				{
+					provide: ObservabilityService,
+					useValue: {
+						recordQueueJobEnqueued: jest.fn(),
+						incrementQueueJobActive: jest.fn(),
+						decrementQueueJobActive: jest.fn(),
+						recordQueueJob: jest.fn()
+					}
 				}
 			]
 		}).compile()

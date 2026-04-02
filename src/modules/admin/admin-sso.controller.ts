@@ -1,5 +1,13 @@
-﻿import { Role } from '@generated/client'
-import { Controller, Get, Param, Query, Res, UseGuards } from '@nestjs/common'
+import { Role } from '@generated/client'
+import {
+	Controller,
+	Get,
+	Logger,
+	Param,
+	Query,
+	Res,
+	UseGuards
+} from '@nestjs/common'
 import {
 	ApiForbiddenResponse,
 	ApiFoundResponse,
@@ -14,21 +22,25 @@ import {
 import type { Response } from 'express'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { ObservabilityService } from '@/modules/observability/observability.service'
+import { getClientInfo } from '@/shared/http/utils/client-info'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { SessionGuard } from '../auth/guards/session.guard'
 import { HandoffService } from '../auth/handoff/handoff.service'
 import type { AuthRequest } from '../auth/types/auth-request'
 
-// Тут поставь guard админ-панели, который уже делает req.user
 @ApiTags('Admin')
 @ApiSecurity('csrf')
 @UseGuards(SessionGuard)
 @Controller('/admin/sso')
 export class AdminSsoController {
+	private readonly logger = new Logger(AdminSsoController.name)
+
 	constructor(
 		private readonly prisma: PrismaService,
-		private readonly handoff: HandoffService
+		private readonly handoff: HandoffService,
+		private readonly observability: ObservabilityService
 	) {}
 
 	@ApiOperation({
@@ -55,11 +67,22 @@ export class AdminSsoController {
 		@Query('next') next: string | undefined,
 		@Res() res: Response
 	) {
-		const currentUser = (res.req as AuthRequest).user as
-			| { id: string; role: Role }
-			| undefined
+		const req = res.req as AuthRequest
+		const currentUser = req.user as { id: string; role: Role } | undefined
+		const { ip, userAgent } = getClientInfo(req)
+
 		if (!currentUser) {
+			this.recordFailure('session', catalogId, ip, userAgent, null)
 			return res.status(401).send('Пользователь не найден')
+		}
+
+		const catalog = await this.prisma.catalog.findUnique({
+			where: { id: catalogId },
+			select: { slug: true, domain: true }
+		})
+		if (!catalog) {
+			this.recordFailure('not_found', catalogId, ip, userAgent, currentUser.id)
+			return res.status(404).send('Каталог не найден')
 		}
 
 		const token = await this.handoff.createForCatalog({
@@ -69,11 +92,24 @@ export class AdminSsoController {
 			next
 		})
 
-		const catalog = await this.prisma.catalog.findUnique({
-			where: { id: catalogId },
-			select: { slug: true, domain: true }
-		})
-		if (!catalog) return res.status(404).send('Каталог не найден')
+		this.observability.recordAuthEvent(
+			'admin_sso',
+			'handoff_issue',
+			'success',
+			'none'
+		)
+		this.logger.log({
+			event: 'auth_event',
+			flow: 'admin_sso',
+			action: 'handoff_issue',
+			outcome: 'success',
+			reason: 'none',
+			userId: currentUser.id,
+			role: currentUser.role,
+			catalogId,
+			clientIp: ip || null,
+			userAgent
+		} as any)
 
 		const host = catalog.domain?.trim()
 			? catalog.domain.trim()
@@ -83,5 +119,31 @@ export class AdminSsoController {
 			(next ? `&next=${encodeURIComponent(next)}` : '')
 
 		return res.redirect(302, url)
+	}
+
+	private recordFailure(
+		reason: 'session' | 'not_found',
+		catalogId: string,
+		ip: string,
+		userAgent: string | null,
+		userId: string | null
+	) {
+		this.observability.recordAuthEvent(
+			'admin_sso',
+			'handoff_issue',
+			'failure',
+			reason
+		)
+		this.logger.warn({
+			event: 'auth_event',
+			flow: 'admin_sso',
+			action: 'handoff_issue',
+			outcome: 'failure',
+			reason,
+			userId,
+			catalogId,
+			clientIp: ip || null,
+			userAgent
+		} as any)
 	}
 }

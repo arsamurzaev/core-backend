@@ -1,0 +1,92 @@
+services:
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    depends_on:
+      - loki
+      - tempo
+      - mimir
+    ports:
+      - '${OBSERVABILITY_HOST_BIND_IP:-0.0.0.0}:${GRAFANA_PORT:-3001}:3000'
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./ops/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - backend-core
+
+  loki:
+    image: grafana/loki:latest
+    restart: unless-stopped
+    command: ['-config.file=/etc/loki/config.yaml']
+    ports:
+      - '${OBSERVABILITY_HOST_BIND_IP:-0.0.0.0}:${OBSERVABILITY_LOKI_PORT:-3100}:3100'
+    volumes:
+      - loki_data:/loki
+      - ./ops/observability/loki/config.yaml:/etc/loki/config.yaml:ro
+    networks:
+      - backend-core
+
+  tempo:
+    image: grafana/tempo:2.9.0
+    restart: unless-stopped
+    command: ['-config.file=/etc/tempo/config.yaml']
+    ports:
+      - '${OBSERVABILITY_HOST_BIND_IP:-0.0.0.0}:${OBSERVABILITY_TEMPO_OTLP_GRPC_PORT:-4317}:4317'
+      - '${OBSERVABILITY_HOST_BIND_IP:-0.0.0.0}:${OBSERVABILITY_TEMPO_OTLP_HTTP_PORT:-4318}:4318'
+    volumes:
+      - tempo_data:/var/tempo
+      - ./ops/observability/tempo/config.yaml:/etc/tempo/config.yaml:ro
+    networks:
+      - backend-core
+
+  mimir:
+    image: grafana/mimir:latest
+    restart: unless-stopped
+    command: ['-config.file=/etc/mimir/config.yaml']
+    ports:
+      - '${OBSERVABILITY_HOST_BIND_IP:-0.0.0.0}:${OBSERVABILITY_MIMIR_PORT:-9009}:9009'
+    volumes:
+      - mimir_data:/tmp/mimir
+      - ./ops/observability/mimir/config.yaml:/etc/mimir/config.yaml:ro
+    networks:
+      - backend-core
+
+  alloy:
+    image: grafana/alloy:latest
+    restart: unless-stopped
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - /etc/alloy/config.alloy
+    ports:
+      - '${ALLOY_OTLP_GRPC_PORT:-4317}:4317'
+      - '${ALLOY_OTLP_HTTP_PORT:-4318}:4318'
+      - '${ALLOY_HTTP_PORT:-12345}:12345'
+    environment:
+      OBSERVABILITY_APP_METRICS_TARGET: ${OBSERVABILITY_APP_METRICS_TARGET:-host.docker.internal:4000}
+      OBSERVABILITY_SERVICE_NAME: ${OBSERVABILITY_SERVICE_NAME:-catalog_backend}
+      OBSERVABILITY_ALLOY_LOG_GLOB: ${OBSERVABILITY_ALLOY_LOG_GLOB:-/workspace/runtime/logs/*.jsonl}
+      OBSERVABILITY_TEMPO_OTLP_ENDPOINT: ${OBSERVABILITY_TEMPO_OTLP_ENDPOINT:-tempo:4317}
+      OBSERVABILITY_MIMIR_REMOTE_WRITE_URL: ${OBSERVABILITY_MIMIR_REMOTE_WRITE_URL:-http://mimir:9009/api/v1/push}
+      OBSERVABILITY_LOKI_WRITE_URL: ${OBSERVABILITY_LOKI_WRITE_URL:-http://loki:3100/loki/api/v1/push}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    volumes:
+      - alloy_data:/var/lib/alloy
+      - ./ops/observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - ./runtime/logs:/workspace/runtime/logs:ro
+    networks:
+      - backend-core
+
+volumes:
+  grafana_data:
+  loki_data:
+  tempo_data:
+  mimir_data:
+  alloy_data:

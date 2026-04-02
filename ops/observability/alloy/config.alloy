@@ -1,0 +1,74 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+otelcol.receiver.otlp "backend" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces = [otelcol.processor.batch.backend.input]
+  }
+}
+
+otelcol.processor.batch "backend" {
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = sys.env("OBSERVABILITY_TEMPO_OTLP_ENDPOINT")
+
+    tls {
+      insecure = true
+    }
+  }
+}
+
+prometheus.scrape "backend" {
+  targets = [
+    {
+      __address__ = sys.env("OBSERVABILITY_APP_METRICS_TARGET"),
+      job         = sys.env("OBSERVABILITY_SERVICE_NAME"),
+      service     = sys.env("OBSERVABILITY_SERVICE_NAME"),
+    },
+  ]
+
+  forward_to = [prometheus.remote_write.mimir.receiver]
+}
+
+prometheus.remote_write "mimir" {
+  endpoint {
+    url = sys.env("OBSERVABILITY_MIMIR_REMOTE_WRITE_URL")
+  }
+}
+
+loki.source.file "backend" {
+  targets = [
+    {
+      __path__ = sys.env("OBSERVABILITY_ALLOY_LOG_GLOB"),
+      job      = sys.env("OBSERVABILITY_SERVICE_NAME"),
+      service  = sys.env("OBSERVABILITY_SERVICE_NAME"),
+    },
+  ]
+
+  forward_to = [loki.write.local.receiver]
+
+  file_match {
+    enabled = true
+  }
+}
+
+loki.write "local" {
+  endpoint {
+    url = sys.env("OBSERVABILITY_LOKI_WRITE_URL")
+  }
+}

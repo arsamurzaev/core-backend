@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /c/Users/krush/Desktop/www/catalog/backend/src/**/*.ts)",
+      "Bash(find /c/Users/krush/Desktop/www/catalog/backend/src -type f -name \"*.ts\" -exec wc -l {} +)",
+      "Bash(npx tsc:*)",
+      "Bash(grep -rn \"og\\\\|twitter\\\\|opengraph\\\\|satori\\\\|canvas\\\\|sharp\\\\|generateImage\\\\|ogImage\" /c/Users/krush/Desktop/www/catalog/backend/src --include=*.ts -l)",
+      "Bash(grep -rn \"subtitle\\\\|subTitle\\\\|CatalogConfig\\\\|catalogConfig\" /c/Users/krush/Desktop/www/catalog/backend/prisma --include=*.prisma)",
+      "Bash(grep -n \"favicon\\\\|faviconMedia\\\\|faviconUrl\\\\|favicon_media\" /c/Users/krush/Desktop/www/catalog/backend/prisma/schema/*.prisma)",
+      "Bash(grep -n \"favicon\\\\|ogMedia\\\\|twitterMedia\\\\|SeoSetting\" /c/Users/krush/Desktop/www/catalog/backend/prisma/schema/*.prisma)",
+      "Bash(npx prisma:*)",
+      "Bash(xargs grep:*)"
+    ]
+  }
+}

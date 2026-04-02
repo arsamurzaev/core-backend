@@ -102,13 +102,20 @@ export class SeoService {
 	}
 
 	private mapSeo<
-		T extends { ogMedia?: MediaRecord | null; twitterMedia?: MediaRecord | null }
+		T extends {
+			ogMedia?: MediaRecord | null
+			twitterMedia?: MediaRecord | null
+			faviconMedia?: MediaRecord | null
+		}
 	>(seo: T) {
 		return {
 			...seo,
 			ogMedia: seo.ogMedia ? this.mediaUrl.mapMedia(seo.ogMedia) : null,
 			twitterMedia: seo.twitterMedia
 				? this.mediaUrl.mapMedia(seo.twitterMedia)
+				: null,
+			faviconMedia: seo.faviconMedia
+				? this.mediaUrl.mapMedia(seo.faviconMedia)
 				: null
 		}
 	}
@@ -126,15 +133,20 @@ export class SeoService {
 
 	private async resolveSeoMediaIds(
 		catalogId: string,
-		dto: Pick<CreateSeoDtoReq, 'ogMediaId' | 'twitterMediaId'>
+		dto: Pick<CreateSeoDtoReq, 'ogMediaId' | 'twitterMediaId' | 'faviconMediaId'>
 	): Promise<{
 		ogMediaId?: string | null
 		twitterMediaId?: string | null
+		faviconMediaId?: string | null
 	}> {
 		const ogMediaId = normalizeOptionalNonEmptyString(dto.ogMediaId, 'ogMediaId')
 		const twitterMediaId = normalizeOptionalNonEmptyString(
 			dto.twitterMediaId,
 			'twitterMediaId'
+		)
+		const faviconMediaId = normalizeOptionalNonEmptyString(
+			dto.faviconMediaId,
+			'faviconMediaId'
 		)
 
 		if (ogMediaId) {
@@ -143,8 +155,11 @@ export class SeoService {
 		if (twitterMediaId) {
 			await ensureMediaInCatalog(this.mediaRepo, twitterMediaId, catalogId)
 		}
+		if (faviconMediaId) {
+			await ensureMediaInCatalog(this.mediaRepo, faviconMediaId, catalogId)
+		}
 
-		return { ogMediaId, twitterMediaId }
+		return { ogMediaId, twitterMediaId, faviconMediaId }
 	}
 
 	private async invalidateCatalogCache(catalogId: string): Promise<void> {
