@@ -148,4 +148,38 @@ export class SessionService {
 			}
 		}
 	}
+
+	async listForUser(userId: string): Promise<SessionLoginEntry[]> {
+		const raw = await this.redis.lrange(this.loginsKey(userId), 0, -1)
+		const primarySid = await this.redis.get(this.primaryKey(userId))
+
+		return raw.flatMap(entry => {
+			try {
+				const parsed = JSON.parse(entry) as SessionLoginEntry
+				parsed.isPrimary = parsed.sid === primarySid
+				return [parsed]
+			} catch {
+				return []
+			}
+		})
+	}
+
+	async destroyAllForUser(userId: string): Promise<void> {
+		const entries = await this.listForUser(userId)
+		const sids = entries.map(e => e.sid)
+
+		if (sids.length > 0) {
+			const pipeline = this.redis.pipeline()
+			for (const sid of sids) {
+				pipeline.del(this.key(sid))
+			}
+			await pipeline.exec()
+		}
+
+		await this.redis
+			.multi()
+			.del(this.primaryKey(userId))
+			.del(this.loginsKey(userId))
+			.exec()
+	}
 }

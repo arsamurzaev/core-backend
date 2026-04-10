@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import { CatalogCreateInput, CatalogUpdateInput } from '@generated/models'
 import {
@@ -297,7 +298,7 @@ export class CatalogService {
 	}
 
 	private mapCatalogType<T>(type: T) {
-		return this.mapCatalog({ type }).type ?? null
+		return (this.mapCatalog({ type }) as { type?: T | null }).type ?? null
 	}
 
 	private async generateCatalogSlug(name: string): Promise<string> {

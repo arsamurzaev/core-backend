@@ -49,7 +49,7 @@ export class ProductAttributeBuilder {
 		const attributeIds = inputs.map(input => {
 			const attributeId = String(input).trim()
 			if (!attributeId) {
-				throw new BadRequestException('attributeId обязателен')
+				throw new BadRequestException('Поле attributeId обязательно')
 			}
 			return attributeId
 		})

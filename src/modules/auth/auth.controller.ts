@@ -16,12 +16,14 @@ import {
 	ApiTags,
 	ApiUnauthorizedResponse
 } from '@nestjs/swagger'
+import { SkipThrottle } from '@nestjs/throttler'
 import type { Request, Response } from 'express'
 
 import { ObservabilityService } from '@/modules/observability/observability.service'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
+import { AuthThrottle } from '@/shared/throttler/auth-throttle.decorator'
 
 import {
 	clearSessionCookies,
@@ -48,6 +50,7 @@ export class AuthController {
 	) {}
 
 	@Post('/login')
+	@AuthThrottle()
 	@ApiOperation({ summary: 'Login' })
 	@ApiOkResponse({
 		description: 'Аутентифицирован, cookies установлены',
@@ -74,6 +77,7 @@ export class AuthController {
 	}
 
 	@UseGuards(SessionGuard)
+	@SkipThrottle()
 	@Get('/me')
 	@ApiOperation({ summary: 'Get current user' })
 	@ApiOkResponse({
@@ -86,15 +90,13 @@ export class AuthController {
 	}
 
 	@UseGuards(SessionGuard)
+	@SkipThrottle()
 	@Post('/logout')
 	@ApiOperation({ summary: 'Logout' })
 	@ApiSecurity('csrf')
 	@ApiOkResponse({ description: 'Сессия очищена', type: OkResponseDto })
 	@ApiUnauthorizedResponse({ description: 'Не авторизован' })
-	async logout(
-		@Req() req: Request,
-		@Res({ passthrough: true }) res: Response
-	) {
+	async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
 		const authReq = req as AuthRequest
 		const sid = authReq.sessionId
 		const { ip, userAgent } = getClientInfo(req)

@@ -1,0 +1,63 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: default
+    receivers:
+      # Uncomment and configure one of the channels below.
+      # Grafana docs: https://grafana.com/docs/grafana/latest/alerting/configure-notifications/manage-contact-points/
+
+      # --- Telegram ---
+      # - uid: telegram-default
+      #   type: telegram
+      #   settings:
+      #     botToken: ${GRAFANA_ALERT_TELEGRAM_TOKEN}
+      #     chatid: ${GRAFANA_ALERT_TELEGRAM_CHAT_ID}
+      #     message: |
+      #       {{ range .Alerts }}
+      #       [{{ .Labels.severity | toUpper }}] {{ .Annotations.summary }}
+      #       {{ .Annotations.description }}
+      #       {{ end }}
+      #   disableResolveMessage: false
+
+      # --- Slack ---
+      # - uid: slack-default
+      #   type: slack
+      #   settings:
+      #     url: ${GRAFANA_ALERT_SLACK_WEBHOOK_URL}
+      #     title: '[{{ .Status | toUpper }}] {{ .CommonLabels.severity }} alert'
+      #     text: |
+      #       {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+      #   disableResolveMessage: false
+
+      # --- Email ---
+      # - uid: email-default
+      #   type: email
+      #   settings:
+      #     addresses: ${GRAFANA_ALERT_EMAIL}
+      #     subject: '[{{ .Status | toUpper }}] {{ .CommonLabels.severity }} — {{ .CommonAnnotations.summary }}'
+      #   disableResolveMessage: false
+
+      # --- Webhook (generic) ---
+      # - uid: webhook-default
+      #   type: webhook
+      #   settings:
+      #     url: ${GRAFANA_ALERT_WEBHOOK_URL}
+      #     httpMethod: POST
+      #   disableResolveMessage: false
+
+policies:
+  - orgId: 1
+    receiver: default
+    group_by:
+      - severity
+      - component
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+    routes:
+      - receiver: default
+        matchers:
+          - severity = critical
+        group_wait: 10s
+        repeat_interval: 1h

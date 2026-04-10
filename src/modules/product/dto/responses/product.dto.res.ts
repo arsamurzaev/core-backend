@@ -6,8 +6,8 @@ import {
 } from '@generated/enums'
 import { ApiProperty } from '@nestjs/swagger'
 
-import { MediaDto } from '@/shared/media/dto/media.dto.res'
 import { SeoDto } from '@/modules/seo/dto/responses/seo.dto.res'
+import { MediaDto } from '@/shared/media/dto/media.dto.res'
 
 export class ProductAttributeEnumValueDto {
 	@ApiProperty({ type: String })

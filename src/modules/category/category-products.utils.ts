@@ -33,7 +33,7 @@ export function normalizeCategoryProducts(
 	const normalized = products.map((product, index) => {
 		const productId = product.productId?.trim()
 		if (!productId) {
-			throw new BadRequestException('productId обязателен')
+			throw new BadRequestException('Поле productId обязательно')
 		}
 
 		if (
@@ -55,7 +55,7 @@ export function normalizeCategoryProducts(
 
 	const unique = new Set(normalized.map(product => product.productId))
 	if (unique.size !== normalized.length) {
-		throw new BadRequestException('Дублирующиеся productId')
+		throw new BadRequestException('Значения productId не должны повторяться')
 	}
 
 	return normalized

@@ -13,7 +13,10 @@ import {
 	MediaUrlService,
 	normalizeMediaVariantName
 } from '@/shared/media/media-url.service'
-import { normalizeNullableTrimmedString } from '@/shared/utils'
+import {
+	formatUnknownValue,
+	normalizeNullableTrimmedString
+} from '@/shared/utils'
 
 type CatalogSeoMediaVariant = {
 	kind: string
@@ -804,6 +807,6 @@ export class CatalogSeoSyncService {
 			return error.message
 		}
 
-		return String(error)
+		return formatUnknownValue(error)
 	}
 }

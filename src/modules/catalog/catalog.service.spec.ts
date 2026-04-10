@@ -5,8 +5,8 @@ import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
-import { CatalogRepository } from './catalog.repository'
 import { CatalogSeoSyncService } from './catalog-seo-sync.service'
+import { CatalogRepository } from './catalog.repository'
 import { CatalogService } from './catalog.service'
 
 describe('CatalogService', () => {
@@ -107,18 +107,21 @@ describe('CatalogService', () => {
 		cache.getVersion.mockResolvedValue(0)
 		cache.getJson.mockResolvedValue(null)
 		cache.setJson.mockResolvedValue(undefined)
-		mediaUrl.mapMedia.mockImplementation(media => ({
-			id: media.id,
-			originalName: media.originalName ?? null,
-			mimeType: media.mimeType ?? null,
-			size: media.size ?? null,
-			width: media.width ?? null,
-			height: media.height ?? null,
-			status: media.status,
-			key: media.key,
-			url: `https://cdn.example.com/${media.key}`,
-			variants: []
-		}) as any)
+		mediaUrl.mapMedia.mockImplementation(
+			media =>
+				({
+					id: media.id,
+					originalName: media.originalName ?? null,
+					mimeType: media.mimeType ?? null,
+					size: media.size ?? null,
+					width: media.width ?? null,
+					height: media.height ?? null,
+					status: media.status,
+					key: media.key,
+					url: `https://cdn.example.com/${media.key}`,
+					variants: []
+				}) as any
+		)
 		serviceState.cacheTtlSec = 0
 	})
 

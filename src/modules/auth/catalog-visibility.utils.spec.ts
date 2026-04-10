@@ -7,19 +7,13 @@ describe('canReadInactiveCatalogProducts', () => {
 
 	it('returns true for admin', () => {
 		expect(
-			canReadInactiveCatalogProducts(
-				{ id: 'admin-1', role: 'ADMIN' },
-				null
-			)
+			canReadInactiveCatalogProducts({ id: 'admin-1', role: 'ADMIN' }, null)
 		).toBe(true)
 	})
 
 	it('returns true for catalog owner', () => {
 		expect(
-			canReadInactiveCatalogProducts(
-				{ id: 'owner-1', role: 'CATALOG' },
-				'owner-1'
-			)
+			canReadInactiveCatalogProducts({ id: 'owner-1', role: 'CATALOG' }, 'owner-1')
 		).toBe(true)
 	})
 
@@ -34,10 +28,7 @@ describe('canReadInactiveCatalogProducts', () => {
 
 	it('returns false for regular user', () => {
 		expect(
-			canReadInactiveCatalogProducts(
-				{ id: 'user-1', role: 'USER' },
-				'owner-1'
-			)
+			canReadInactiveCatalogProducts({ id: 'user-1', role: 'USER' }, 'owner-1')
 		).toBe(false)
 	})
 })

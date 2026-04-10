@@ -127,7 +127,9 @@ export class MoySkladClient {
 		)
 		const item = response.rows?.[0]
 		if (!item) {
-			throw new Error(`MoySklad assortment item not found: ${itemId}`)
+			throw new Error(
+				`Позиция ассортимента MoySklad с идентификатором ${itemId} не найдена`
+			)
 		}
 		return item
 	}
@@ -150,7 +152,7 @@ export class MoySkladClient {
 		if (!cacheKey) return null
 
 		const cached = this.productFolderCache.get(cacheKey)
-		if (cached) {
+		if (cached !== undefined) {
 			return cached
 		}
 
@@ -322,7 +324,7 @@ export class MoySkladClient {
 				if (!response.ok) {
 					const errorBody = await response.text()
 					throw new Error(
-						`MoySklad API error ${response.status}: ${errorBody || response.statusText}`
+						`Ошибка API MoySklad ${response.status}: ${errorBody || response.statusText}`
 					)
 				}
 

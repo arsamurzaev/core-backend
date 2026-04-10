@@ -1,6 +1,5 @@
-import { Injectable } from '@nestjs/common'
-
 import type { IntegrationProvider } from '@generated/enums'
+import { Injectable } from '@nestjs/common'
 
 import type { MediaDto } from './dto/media.dto.res'
 import type { MediaRecord } from './media-url.service'
@@ -58,7 +57,11 @@ export class ProductMediaMapper {
 			categories: (categoryProducts ?? [])
 				.map(item =>
 					item.category
-						? { id: item.category.id, name: item.category.name, position: item.position }
+						? {
+								id: item.category.id,
+								name: item.category.name,
+								position: item.position
+							}
 						: null
 				)
 				.filter((item): item is NonNullable<typeof item> => item !== null),

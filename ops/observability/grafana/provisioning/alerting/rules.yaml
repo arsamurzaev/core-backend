@@ -2,6 +2,68 @@ apiVersion: 1
 
 groups:
   - orgId: 1
+    name: backend-availability
+    folder: General
+    interval: 1m
+    rules:
+      - uid: backend-service-down
+        title: Backend service unavailable
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: mimir
+            model:
+              datasource:
+                type: prometheus
+                uid: mimir
+              editorMode: code
+              expr: absent_over_time(catalog_backend_http_requests_total[5m])
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: "-100"
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: "-100"
+              hide: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        noDataState: OK
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: Backend has not reported any HTTP metrics for 5 minutes — service may be down.
+          description: 'No data from catalog_backend_http_requests_total. Check if the process is running and Alloy can reach the /metrics endpoint.'
+        labels:
+          severity: critical
+          component: http
+          stack: observability
+        isPaused: false
+
+  - orgId: 1
     name: backend-application
     folder: General
     interval: 1m
@@ -55,7 +117,8 @@ groups:
         execErrState: Alerting
         for: 5m
         annotations:
-          summary: Backend is returning sustained 5xx responses.
+          summary: Backend is returning sustained 5xx responses (> 0.1 rps for 5 min).
+          description: 'Current rate: {{ $values.A }}. Check application logs and recent deployments.'
         labels:
           severity: critical
           component: http
@@ -111,7 +174,8 @@ groups:
         execErrState: Alerting
         for: 10m
         annotations:
-          summary: Backend p95 latency is above 1 second.
+          summary: Backend p95 latency is above 1 second for 10 minutes.
+          description: 'p95 = {{ $values.A }}s. Investigate slow routes using Tempo traces.'
         labels:
           severity: warning
           component: http
@@ -167,7 +231,8 @@ groups:
         execErrState: Alerting
         for: 0s
         annotations:
-          summary: Prisma reported at least one slow query in the last 10 minutes.
+          summary: Prisma reported {{ $values.A }} slow query(s) in the last 10 minutes.
+          description: 'Check Loki logs filtered by context=PrismaService for full query text and duration.'
         labels:
           severity: warning
           component: database
@@ -221,9 +286,10 @@ groups:
               type: classic_conditions
         noDataState: OK
         execErrState: Alerting
-        for: 5m
+        for: 0s
         annotations:
-          summary: Login failures exceeded 5 attempts in the last 10 minutes.
+          summary: '{{ $values.A }} login failures in the last 10 minutes — possible brute-force.'
+          description: 'Filter Loki by context=AuthService and level=warn to see source IPs and usernames.'
         labels:
           severity: warning
           component: auth
@@ -280,11 +346,12 @@ groups:
               maxDataPoints: 43200
               refId: B
               type: classic_conditions
-        noDataState: OK
+        noDataState: NoData
         execErrState: Alerting
         for: 0s
         annotations:
-          summary: At least one cron execution failed in the last 15 minutes.
+          summary: '{{ $values.A }} cron execution(s) failed in the last 15 minutes.'
+          description: 'Filter Loki by component=cron for stack traces. Check Tempo for the failed span.'
         labels:
           severity: critical
           component: cron
@@ -340,7 +407,8 @@ groups:
         execErrState: Alerting
         for: 0s
         annotations:
-          summary: At least one BullMQ job failed in the last 15 minutes.
+          summary: '{{ $values.A }} BullMQ job(s) failed in the last 15 minutes.'
+          description: 'Check Loki filtered by component=queue. Traces available in Tempo under queue span.'
         labels:
           severity: critical
           component: queue
@@ -392,11 +460,12 @@ groups:
               maxDataPoints: 43200
               refId: B
               type: classic_conditions
-        noDataState: OK
+        noDataState: NoData
         execErrState: Alerting
         for: 0s
         annotations:
-          summary: Cache operations are returning errors.
+          summary: '{{ $values.A }} cache operation error(s) in the last 15 minutes.'
+          description: 'CacheService is logging WARN on every error. Check Loki filtered by context=CacheService.'
         labels:
           severity: warning
           component: cache

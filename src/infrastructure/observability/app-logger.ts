@@ -13,6 +13,62 @@ import {
 
 type LogLevel = 'log' | 'error' | 'warn' | 'debug' | 'verbose' | 'fatal'
 
+const RESET = '\x1b[0m'
+const DIM = '\x1b[2m'
+const BOLD = '\x1b[1m'
+
+const LEVEL_COLOR: Record<LogLevel, string> = {
+	log: '\x1b[32m', // green
+	error: '\x1b[31m', // red
+	fatal: '\x1b[35m', // magenta
+	warn: '\x1b[33m', // yellow
+	debug: '\x1b[34m', // blue
+	verbose: '\x1b[36m' // cyan
+}
+
+const LEVEL_LABEL: Record<LogLevel, string> = {
+	log: ' LOG ',
+	error: ' ERR ',
+	fatal: ' FTL ',
+	warn: ' WRN ',
+	debug: ' DBG ',
+	verbose: ' VRB '
+}
+
+function formatTime(iso: string): string {
+	return `${DIM}${iso.slice(11, 23)}${RESET}`
+}
+
+function formatLevel(level: LogLevel): string {
+	const color = LEVEL_COLOR[level] ?? RESET
+	return `${BOLD}${color}${LEVEL_LABEL[level]}${RESET}`
+}
+
+function formatContext(context?: string): string {
+	if (!context) return ''
+	return ` ${DIM}\x1b[36m[${context}]${RESET}`
+}
+
+function formatPretty(
+	level: LogLevel,
+	timestamp: string,
+	message: string,
+	context?: string,
+	stack?: string
+): string {
+	const time = formatTime(timestamp)
+	const lvl = formatLevel(level)
+	const ctx = formatContext(context)
+	const msg =
+		level === 'error' || level === 'fatal'
+			? `\x1b[31m${message}${RESET}`
+			: level === 'warn'
+				? `\x1b[33m${message}${RESET}`
+				: message
+
+	return `${time} ${lvl}${ctx} ${msg}${stack ? `\n${DIM}${stack}${RESET}` : ''}\n`
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return (
 		typeof value === 'object' &&
@@ -23,9 +79,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function serializeMessage(value: unknown): string {
 	if (typeof value === 'string') return value
-	if (typeof value === 'number' || typeof value === 'boolean' || value == null) {
-		return String(value)
-	}
+	if (typeof value === 'number' || typeof value === 'boolean')
+		return value.toString()
+	if (typeof value === 'bigint') return value.toString()
+	if (typeof value === 'symbol') return value.toString()
+	if (value === null) return 'null'
+	if (value === undefined) return 'undefined'
 	if (value instanceof Error) return value.message
 
 	return inspect(value, { depth: 6, breakLength: Infinity, compact: true })
@@ -152,9 +211,13 @@ export class AppLogger implements LoggerService {
 		if (details?.length) entry.details = details
 
 		const jsonLine = `${JSON.stringify(entry)}\n`
-		const textLine = `[${entry.timestamp}] ${String(level).toUpperCase()}${
-			context ? ` [${context}]` : ''
-		} ${serializeMessage(entry.message)}${stack ? `\n${stack}` : ''}\n`
+		const textLine = formatPretty(
+			level,
+			entry.timestamp as string,
+			serializeMessage(entry.message),
+			context,
+			stack
+		)
 
 		const line = this.settings.jsonLogsEnabled ? jsonLine : textLine
 		if (level === 'error' || level === 'fatal') {

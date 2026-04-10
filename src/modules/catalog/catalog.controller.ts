@@ -89,7 +89,9 @@ export class CatalogController {
 	async updateCurrent(
 		@Body() dto: UpdateCatalogDtoReq
 	): Promise<CatalogCurrentShellDto> {
-		return this.catalogService.updateCurrent(dto) as Promise<CatalogCurrentShellDto>
+		return this.catalogService.updateCurrent(
+			dto
+		) as Promise<CatalogCurrentShellDto>
 	}
 
 	@Get()

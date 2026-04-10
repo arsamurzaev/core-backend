@@ -17,6 +17,7 @@ import { Job, Queue, Worker } from 'bullmq'
 
 import { AllInterfaces } from '@/core/config'
 import { ObservabilityService } from '@/modules/observability/observability.service'
+import { formatUnknownValue } from '@/shared/utils'
 
 import {
 	type IntegrationRecord,
@@ -154,7 +155,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		} catch (error) {
 			await this.repo.failSyncRun(run.id, this.renderErrorMessage(error))
 			throw new InternalServerErrorException(
-				`Не удалось поставить sync MoySklad в очередь: ${this.renderErrorMessage(error)}`
+				`Не удалось поставить синхронизацию MoySklad в очередь: ${this.renderErrorMessage(error)}`
 			)
 		}
 	}
@@ -211,7 +212,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		} catch (error) {
 			await this.repo.failSyncRun(run.id, this.renderErrorMessage(error))
 			throw new InternalServerErrorException(
-				`Не удалось поставить sync товара MoySklad в очередь: ${this.renderErrorMessage(error)}`
+				`Не удалось поставить синхронизацию товара с MoySklad в очередь: ${this.renderErrorMessage(error)}`
 			)
 		}
 	}
@@ -323,10 +324,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		const startedAt = process.hrtime.bigint()
 		let runId = job.data.runId ?? null
 
-		this.observability.incrementQueueJobActive(
-			MOYSKLAD_SYNC_QUEUE_NAME,
-			jobName
-		)
+		this.observability.incrementQueueJobActive(MOYSKLAD_SYNC_QUEUE_NAME, jobName)
 
 		return this.queueTracer.startActiveSpan(
 			`bullmq.${MOYSKLAD_SYNC_QUEUE_NAME}.${jobName}`,
@@ -359,14 +357,14 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 					const runningRun = await this.repo.markSyncRunRunning(runId, jobId)
 					if (!runningRun) {
 						throw new InternalServerErrorException(
-							`Не найден sync run MoySklad ${runId}`
+							`Не найден запуск синхронизации MoySklad ${runId}`
 						)
 					}
 
 					if (job.data.mode === IntegrationSyncRunMode.PRODUCT) {
 						if (!job.data.productId) {
 							throw new InternalServerErrorException(
-								'Для product sync MoySklad не указан productId'
+								'Для синхронизации товара с MoySklad не указан productId'
 							)
 						}
 
@@ -570,6 +568,6 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 	}
 
 	private toError(error: unknown): Error {
-		return error instanceof Error ? error : new Error(String(error))
+		return error instanceof Error ? error : new Error(formatUnknownValue(error))
 	}
 }

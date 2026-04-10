@@ -73,7 +73,7 @@ export class BrandService {
 	): Promise<void> {
 		const exists = await this.repo.existsSlug(catalogId, slug, excludeId)
 		if (exists) {
-			throw new BadRequestException('slug уже используется в каталоге')
+			throw new BadRequestException('Слаг уже используется в каталоге')
 		}
 	}
 

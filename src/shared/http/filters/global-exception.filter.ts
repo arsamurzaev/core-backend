@@ -9,7 +9,12 @@ import {
 } from '@nestjs/common'
 import type { Request, Response } from 'express'
 
+import {
+	getDefaultHttpErrorMessage,
+	normalizeErrorMessages
+} from '@/shared/http/error-message.utils'
 import { RequestContext } from '@/shared/tenancy/request-context'
+import { formatUnknownValue } from '@/shared/utils'
 
 type ErrorBody = {
 	statusCode: number
@@ -17,6 +22,19 @@ type ErrorBody = {
 	path: string
 	requestId?: string
 	timestamp: string
+	clearCartKeys?: string[]
+}
+
+const HTTP_STATUS_VALUES = new Set<number>(
+	Object.values(HttpStatus).filter(
+		(value): value is number => typeof value === 'number'
+	)
+)
+
+function toHttpStatus(status: number): HttpStatus {
+	return HTTP_STATUS_VALUES.has(status)
+		? (status as HttpStatus)
+		: HttpStatus.INTERNAL_SERVER_ERROR
 }
 
 function extractMetaTarget(meta: unknown): string | null {
@@ -51,8 +69,31 @@ function extractHttpMessage(
 	return fallback
 }
 
+function messageIncludes(
+	message: string | string[],
+	expected: string
+): boolean {
+	if (Array.isArray(message)) {
+		return message.includes(expected)
+	}
+
+	return message === expected
+}
+
+function shouldClearPublicCartKeys(
+	path: string,
+	status: HttpStatus,
+	message: string | string[]
+): boolean {
+	return (
+		status === HttpStatus.NOT_FOUND &&
+		path.includes('/cart/public/') &&
+		messageIncludes(message, 'Корзина не найдена')
+	)
+}
+
 function prismaToHttp(exception: Prisma.PrismaClientKnownRequestError): {
-	status: number
+	status: HttpStatus
 	message: string
 } {
 	switch (exception.code) {
@@ -61,29 +102,34 @@ function prismaToHttp(exception: Prisma.PrismaClientKnownRequestError): {
 			const fields = extractMetaTarget(exception.meta)
 			return {
 				status: HttpStatus.CONFLICT,
-				message: fields ? `Уже существует: ${fields}` : 'Уже существует'
+				message: fields
+					? `Запись с такими данными уже существует: ${fields}`
+					: 'Запись с такими данными уже существует'
 			}
 		}
 		case 'P2025':
 			// Record not found
-			return { status: HttpStatus.NOT_FOUND, message: 'Не найдено' }
+			return { status: HttpStatus.NOT_FOUND, message: 'Запись не найдена' }
 
 		case 'P2003':
 			// Foreign key constraint failed
 			return {
 				status: HttpStatus.BAD_REQUEST,
-				message: 'Неверная связь (FK constraint)'
+				message: 'Указана несуществующая связанная запись'
 			}
 
 		case 'P2000':
 			// Value too long
 			return {
 				status: HttpStatus.BAD_REQUEST,
-				message: 'Слишком длинное значение поля'
+				message: 'Значение одного из полей слишком длинное'
 			}
 
 		default:
-			return { status: HttpStatus.BAD_REQUEST, message: 'Ошибка базы данных' }
+			return {
+				status: HttpStatus.BAD_REQUEST,
+				message: 'Ошибка при обращении к базе данных'
+			}
 	}
 }
 
@@ -101,15 +147,18 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
 		const isDev = process.env.NODE_ENV !== 'production'
 
-		let status = HttpStatus.INTERNAL_SERVER_ERROR
-		let message: string | string[] = 'Внутренняя ошибка сервера'
+		let status: HttpStatus = HttpStatus.INTERNAL_SERVER_ERROR
+		let message: string | string[] = getDefaultHttpErrorMessage(status)
 
 		// Nest HttpException
 		if (exception instanceof HttpException) {
-			status = exception.getStatus()
+			status = toHttpStatus(exception.getStatus())
 
 			const response = exception.getResponse()
-			message = extractHttpMessage(response, exception.message)
+			message = extractHttpMessage(
+				response,
+				exception.message || getDefaultHttpErrorMessage(status)
+			)
 		}
 		// Prisma known errors
 		else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
@@ -128,15 +177,21 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 		// Any other error
 		else if (exception instanceof Error) {
 			status = HttpStatus.INTERNAL_SERVER_ERROR
-			message = isDev ? exception.message : 'Внутренняя ошибка сервера'
+			message = isDev
+				? exception.message
+				: getDefaultHttpErrorMessage(HttpStatus.INTERNAL_SERVER_ERROR)
 		}
 
-		const prefix = `[${requestId ?? '-'}] ${req.method} ${req.originalUrl ?? req.url}`
+		message = normalizeErrorMessages(message, status)
 
-		if (status >= 500) {
+		const prefix = `[${requestId ?? '-'}] ${req.method} ${req.originalUrl ?? req.url}`
+		const path = req.originalUrl ?? req.url ?? ''
+		const clearPublicCartKeys = shouldClearPublicCartKeys(path, status, message)
+
+		if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
 			this.logger.error(
 				`${prefix} → ${status}`,
-				exception instanceof Error ? exception.stack : String(exception)
+				exception instanceof Error ? exception.stack : formatUnknownValue(exception)
 			)
 		} else {
 			this.logger.warn(
@@ -147,13 +202,20 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 		const body: ErrorBody = {
 			statusCode: status,
 			message,
-			path: req.originalUrl ?? req.url ?? '',
+			path,
 			requestId,
-			timestamp: new Date().toISOString()
+			timestamp: new Date().toISOString(),
+			...(clearPublicCartKeys
+				? { clearCartKeys: ['publicKey', 'checkoutKey'] }
+				: {})
 		}
 
 		// корреляция в ответе
 		if (requestId) res.setHeader('x-request-id', requestId)
+		if (clearPublicCartKeys) {
+			res.setHeader('x-cart-clear-public-key', 'true')
+			res.setHeader('x-cart-clear-checkout-key', 'true')
+		}
 
 		res.status(status).json(body)
 	}

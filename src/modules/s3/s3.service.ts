@@ -34,6 +34,7 @@ import { AllInterfaces } from '@/core/config'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { ObservabilityService } from '@/modules/observability/observability.service'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
+import { formatUnknownValue } from '@/shared/utils'
 
 const DEFAULT_VARIANT_WIDTHS = [1200, 800, 400]
 const DEFAULT_IMAGE_FORMATS = ['avif']
@@ -534,7 +535,7 @@ export class S3Service implements OnModuleDestroy {
 
 		const response = await this.client.send(command)
 		if (!response.UploadId) {
-			throw new BadRequestException('Не удалось создать multipart загрузку')
+			throw new BadRequestException('Не удалось создать multipart-загрузку')
 		}
 
 		const mediaId = await this.createPresignRecord({
@@ -669,7 +670,9 @@ export class S3Service implements OnModuleDestroy {
 	}
 
 	async deleteObjectsByKeys(keys: string[]): Promise<void> {
-		const normalizedKeys = [...new Set(keys.map(key => key.trim()).filter(Boolean))]
+		const normalizedKeys = [
+			...new Set(keys.map(key => key.trim()).filter(Boolean))
+		]
 		if (!normalizedKeys.length || !this.client || !this.enabled) {
 			return
 		}
@@ -779,10 +782,7 @@ export class S3Service implements OnModuleDestroy {
 
 					const bump = async () => {
 						completed += 1
-						const progress = Math.min(
-							100,
-							Math.round((completed / totalSteps) * 100)
-						)
+						const progress = Math.min(100, Math.round((completed / totalSteps) * 100))
 						await job.updateProgress(progress)
 					}
 
@@ -822,8 +822,7 @@ export class S3Service implements OnModuleDestroy {
 					this.recordQueueOutcome(UPLOAD_QUEUE_NAME, jobName, 'success', startedAt)
 					return results
 				} catch (error) {
-					const message =
-						error instanceof Error ? error.message : String(error)
+					const message = error instanceof Error ? error.message : String(error)
 
 					this.recordQueueOutcome(UPLOAD_QUEUE_NAME, jobName, 'error', startedAt)
 					span.recordException(this.toError(error))
@@ -1181,7 +1180,9 @@ export class S3Service implements OnModuleDestroy {
 		}
 
 		if (partSize > MULTIPART_MAX_PART_BYTES) {
-			throw new BadRequestException('Размер файла слишком большой для multipart')
+			throw new BadRequestException(
+				'Размер файла слишком большой для multipart-загрузки'
+			)
 		}
 
 		return partSize
@@ -1401,8 +1402,7 @@ export class S3Service implements OnModuleDestroy {
 			Key: key,
 			Body: body,
 			ContentType: contentType,
-			CacheControl:
-				options?.cacheControl ?? 'public, max-age=31536000, immutable',
+			CacheControl: options?.cacheControl ?? 'public, max-age=31536000, immutable',
 			...(this.publicRead ? { ACL: 'public-read' } : {})
 		})
 
@@ -1543,7 +1543,7 @@ export class S3Service implements OnModuleDestroy {
 	private normalizeFilename(value: string): string {
 		const trimmed = value.trim()
 		if (!trimmed) {
-			throw new BadRequestException('filename обязателен')
+			throw new BadRequestException('Параметр filename обязателен')
 		}
 
 		const extension = path.extname(trimmed).toLowerCase()
@@ -1559,7 +1559,7 @@ export class S3Service implements OnModuleDestroy {
 	private normalizeRequiredContentType(contentType: string): string {
 		const normalizedType = contentType?.trim().toLowerCase()
 		if (!normalizedType) {
-			throw new BadRequestException('contentType обязателен')
+			throw new BadRequestException('Параметр contentType обязателен')
 		}
 		this.assertContentType(normalizedType)
 		return normalizedType
@@ -1568,7 +1568,7 @@ export class S3Service implements OnModuleDestroy {
 	private normalizeAnyRequiredContentType(contentType: string): string {
 		const normalizedType = contentType?.trim().toLowerCase()
 		if (!normalizedType) {
-			throw new BadRequestException('contentType обязателен')
+			throw new BadRequestException('Параметр contentType обязателен')
 		}
 
 		return normalizedType
@@ -1585,7 +1585,7 @@ export class S3Service implements OnModuleDestroy {
 	private normalizeRequiredUploadId(uploadId?: string): string {
 		const cleanedUploadId = uploadId?.trim()
 		if (!cleanedUploadId) {
-			throw new BadRequestException('uploadId обязателен')
+			throw new BadRequestException('Параметр uploadId обязателен')
 		}
 		return cleanedUploadId
 	}
@@ -1759,6 +1759,6 @@ export class S3Service implements OnModuleDestroy {
 	}
 
 	private toError(error: unknown): Error {
-		return error instanceof Error ? error : new Error(String(error))
+		return error instanceof Error ? error : new Error(formatUnknownValue(error))
 	}
 }

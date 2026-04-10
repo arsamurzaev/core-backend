@@ -27,11 +27,10 @@ const MEDIA_VARIANT_KIND_ALIASES: Record<string, string[]> = {
 	[MEDIA_VARIANT_NAMES.detail]: [MEDIA_VARIANT_NAMES.detail, 'xl']
 }
 
-function buildVariantKindClauses(kind: string): Prisma.MediaVariantWhereInput[] {
-	return [
-		{ kind },
-		{ kind: { startsWith: `${kind}-` } }
-	]
+function buildVariantKindClauses(
+	kind: string
+): Prisma.MediaVariantWhereInput[] {
+	return [{ kind }, { kind: { startsWith: `${kind}-` } }]
 }
 
 export function buildMediaVariantWhere(
@@ -45,8 +44,7 @@ export function buildMediaVariantWhere(
 				.map(variantName => normalizeMediaVariantName(variantName))
 				.filter(Boolean)
 				.flatMap(
-					variantName =>
-						MEDIA_VARIANT_KIND_ALIASES[variantName] ?? [variantName]
+					variantName => MEDIA_VARIANT_KIND_ALIASES[variantName] ?? [variantName]
 				)
 		)
 	)

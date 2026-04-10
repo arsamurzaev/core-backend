@@ -1,6 +1,8 @@
 import { Role } from '@generated/enums'
 import {
 	ForbiddenException,
+	HttpException,
+	HttpStatus,
 	Injectable,
 	Logger,
 	UnauthorizedException
@@ -8,10 +10,15 @@ import {
 import { verify } from 'argon2'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { RedisService } from '@/infrastructure/redis/redis.service'
 import { ObservabilityService } from '@/modules/observability/observability.service'
 
 import { LoginDtoReq } from './dto/requests/login.dto.req'
 import { SessionService } from './session/session.service'
+
+const LOCKOUT_MAX_ATTEMPTS = 20
+const LOCKOUT_WINDOW_SEC = 900
+const LOCKOUT_DURATION_SEC = 1800
 
 type LoginMeta = {
 	ip?: string | null
@@ -34,8 +41,45 @@ export class AuthService {
 	constructor(
 		private readonly prisma: PrismaService,
 		private readonly sessions: SessionService,
-		private readonly observability: ObservabilityService
+		private readonly observability: ObservabilityService,
+		private readonly redis: RedisService
 	) {}
+
+	private lockoutKey(ip: string) {
+		return `auth:lock:${ip}`
+	}
+
+	private failKey(ip: string) {
+		return `auth:fail:${ip}`
+	}
+
+	private async checkLockout(ip: string | null | undefined) {
+		if (!ip) return
+		const locked = await this.redis.exists(this.lockoutKey(ip))
+		if (locked) {
+			const ttl = await this.redis.ttl(this.lockoutKey(ip))
+			throw new HttpException(
+				`Слишком много попыток входа. Попробуйте через ${Math.ceil(ttl / 60)} мин.`,
+				HttpStatus.TOO_MANY_REQUESTS
+			)
+		}
+	}
+
+	private async recordFailedAttempt(ip: string | null | undefined) {
+		if (!ip) return
+		const key = this.failKey(ip)
+		const count = await this.redis.incr(key)
+		if (count === 1) await this.redis.expire(key, LOCKOUT_WINDOW_SEC)
+		if (count >= LOCKOUT_MAX_ATTEMPTS) {
+			await this.redis.set(this.lockoutKey(ip), '1', 'EX', LOCKOUT_DURATION_SEC)
+			await this.redis.del(key)
+		}
+	}
+
+	private async clearFailedAttempts(ip: string | null | undefined) {
+		if (!ip) return
+		await this.redis.del(this.failKey(ip))
+	}
 
 	async createSessionForUser(
 		userId: string,
@@ -98,6 +142,7 @@ export class AuthService {
 	}
 
 	async login(dto: LoginDtoReq, meta?: LoginMeta, existingSid?: string | null) {
+		await this.checkLockout(meta?.ip)
 		try {
 			const user = await this.validateUser(dto)
 			const { sid, csrf, reused } = await this.createSessionForUser(
@@ -107,6 +152,7 @@ export class AuthService {
 				existingSid ?? null
 			)
 
+			await this.clearFailedAttempts(meta?.ip)
 			this.recordAuthSuccess('admin', 'login', user.id, meta, {
 				role: user.role,
 				sessionReused: reused
@@ -114,6 +160,9 @@ export class AuthService {
 
 			return { sid, csrf, user }
 		} catch (error) {
+			if (error instanceof UnauthorizedException) {
+				await this.recordFailedAttempt(meta?.ip)
+			}
 			this.recordAuthFailure(
 				'admin',
 				'login',
@@ -131,6 +180,7 @@ export class AuthService {
 		meta?: LoginMeta,
 		existingSid?: string | null
 	) {
+		await this.checkLockout(meta?.ip)
 		try {
 			const user = await this.validateUser(dto)
 			await this.assertCatalogAccess(
@@ -147,6 +197,7 @@ export class AuthService {
 				existingSid ?? null
 			)
 
+			await this.clearFailedAttempts(meta?.ip)
 			this.recordAuthSuccess('catalog', 'login', user.id, meta, {
 				role: user.role,
 				catalogId,
@@ -155,6 +206,9 @@ export class AuthService {
 
 			return { sid, csrf, user, catalogId }
 		} catch (error) {
+			if (error instanceof UnauthorizedException) {
+				await this.recordFailedAttempt(meta?.ip)
+			}
 			this.recordAuthFailure(
 				'catalog',
 				'login',

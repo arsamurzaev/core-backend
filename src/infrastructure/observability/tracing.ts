@@ -4,6 +4,10 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 import { resourceFromAttributes } from '@opentelemetry/resources'
 import { NodeSDK } from '@opentelemetry/sdk-node'
 import {
+	ParentBasedSampler,
+	TraceIdRatioBasedSampler
+} from '@opentelemetry/sdk-trace-base'
+import {
 	ATTR_SERVICE_NAME,
 	ATTR_SERVICE_VERSION
 } from '@opentelemetry/semantic-conventions'
@@ -32,8 +36,12 @@ export function initTracing() {
 			[ATTR_SERVICE_VERSION]: settings.serviceVersion,
 			'deployment.environment.name': settings.deploymentEnvironment
 		}),
+		sampler: new ParentBasedSampler({
+			root: new TraceIdRatioBasedSampler(settings.tracesSampleRate)
+		}),
 		traceExporter: new OTLPTraceExporter({
-			url: settings.otlpTracesUrl
+			url: settings.otlpTracesUrl,
+			timeoutMillis: 5000
 		}),
 		instrumentations: [
 			getNodeAutoInstrumentations({

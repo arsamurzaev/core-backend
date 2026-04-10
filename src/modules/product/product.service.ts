@@ -42,8 +42,8 @@ import {
 	type ProductAttributeValueData
 } from './product-attribute.builder'
 import {
-	ProductReadService,
-	type ProductReadOptions
+	type ProductReadOptions,
+	ProductReadService
 } from './product-read.service'
 import { ProductSeoSyncService } from './product-seo-sync.service'
 import {
@@ -170,7 +170,10 @@ export class ProductService {
 		return this.reads.getInfinite(query, options)
 	}
 
-	getInfiniteCards(query: Record<string, unknown>, options?: ProductReadOptions) {
+	getInfiniteCards(
+		query: Record<string, unknown>,
+		options?: ProductReadOptions
+	) {
 		return this.reads.getInfiniteCards(query, options)
 	}
 
@@ -229,7 +232,11 @@ export class ProductService {
 			payload.attributes,
 			payload.variants
 		)
-		await this.assignProductToCategories(product.id, payload.categoryIds, catalogId)
+		await this.assignProductToCategories(
+			product.id,
+			payload.categoryIds,
+			catalogId
+		)
 		const created = await this.repo.findById(product.id, catalogId, true)
 		if (!created) throw new NotFoundException('Товар не найден')
 		await this.productSeoSync.syncProduct(created, catalogId)
@@ -271,11 +278,13 @@ export class ProductService {
 					duplicatedSku
 				)
 			: undefined
-		const duplicatedCategoryIds = [...new Set(
-			source.categoryProducts
-				.map(item => item.category?.id?.trim() ?? '')
-				.filter(Boolean)
-		)]
+		const duplicatedCategoryIds = [
+			...new Set(
+				source.categoryProducts
+					.map(item => item.category?.id?.trim() ?? '')
+					.filter(Boolean)
+			)
+		]
 		const brandId = source.brand?.id
 			? await this.resolveExistingBrandId(source.brand.id, catalogId)
 			: null
@@ -400,7 +409,7 @@ export class ProductService {
 
 		const variantAttributeId = String(dto.variantAttributeId).trim()
 		if (!variantAttributeId) {
-			throw new BadRequestException('variantAttributeId обязателен')
+			throw new BadRequestException('Поле variantAttributeId обязательно')
 		}
 
 		const productPrice =
@@ -420,10 +429,15 @@ export class ProductService {
 			]
 		}))
 
-		const variants = await this.variantBuilder.build(typeId, inputs, product.sku, {
-			variantAttributeId,
-			defaultPrice
-		})
+		const variants = await this.variantBuilder.build(
+			typeId,
+			inputs,
+			product.sku,
+			{
+				variantAttributeId,
+				defaultPrice
+			}
+		)
 		const hasCustomVariantValues = variants.some(variant =>
 			variant.attributes.some(attribute => Boolean(attribute.value))
 		)
@@ -599,11 +613,11 @@ export class ProductService {
 		if (!value) return []
 		const normalized = value.map(item => String(item).trim())
 		if (normalized.some(item => item.length === 0)) {
-			throw new BadRequestException('mediaId не может быть пустым')
+			throw new BadRequestException('Поле mediaId не может быть пустым')
 		}
 		const unique = new Set(normalized)
 		if (unique.size !== normalized.length) {
-			throw new BadRequestException('Нельзя передавать дублирующиеся mediaId')
+			throw new BadRequestException('Значения mediaId не должны повторяться')
 		}
 		return normalized
 	}
@@ -740,8 +754,9 @@ export class ProductService {
 		catalogId: string
 	): Promise<void> {
 		if (!categoryIds.length) return
-		const found = await this.repo.findCategoriesByIds(categoryIds, catalogId)
-		const foundSet = new Set(found.map(item => item.id))
+		const found: Awaited<ReturnType<ProductRepository['findCategoriesByIds']>> =
+			await this.repo.findCategoriesByIds(categoryIds, catalogId)
+		const foundSet = new Set<string>(found.map((item: { id: string }) => item.id))
 		const missing = categoryIds.filter(id => !foundSet.has(id))
 		if (missing.length) {
 			throw new BadRequestException(

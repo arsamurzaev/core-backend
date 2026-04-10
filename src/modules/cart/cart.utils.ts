@@ -88,7 +88,7 @@ export function normalizeCartItemInput(
 	const quantity = input.quantity
 
 	if (!productId) {
-		throw new BadRequestException('productId обязателен')
+		throw new BadRequestException('Поле productId обязательно')
 	}
 
 	if (!Number.isInteger(quantity) || quantity < 0) {

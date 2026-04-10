@@ -1,7 +1,6 @@
-import { MediaUrlService } from '@/shared/media/media-url.service'
-
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { SeoRepository } from '@/modules/seo/seo.repository'
+import { MediaUrlService } from '@/shared/media/media-url.service'
 
 import { ProductSeoSyncService } from './product-seo-sync.service'
 

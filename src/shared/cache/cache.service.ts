@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 
-import { ObservabilityService } from '@/modules/observability/observability.service'
 import { RedisService } from '@/infrastructure/redis/redis.service'
+import { ObservabilityService } from '@/modules/observability/observability.service'
 
 const CACHE_PREFIX = 'cache'
 const VERSION_PREFIX = 'cache:version'
@@ -120,12 +120,7 @@ export class CacheService {
 	}
 
 	private recordOperation(
-		operation:
-			| 'get_version'
-			| 'bump_version'
-			| 'get_json'
-			| 'set_json'
-			| 'del',
+		operation: 'get_version' | 'bump_version' | 'get_json' | 'set_json' | 'del',
 		outcome: 'success' | 'error' | 'hit' | 'miss' | 'corrupted',
 		startedAt: bigint
 	) {

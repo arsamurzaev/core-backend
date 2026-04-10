@@ -11,6 +11,7 @@ export type ObservabilitySettings = {
 	logFilePath?: string
 	tracesEnabled: boolean
 	otlpTracesUrl?: string
+	tracesSampleRate: number
 	metricPrefix: string
 }
 
@@ -86,7 +87,8 @@ export function resolveObservabilitySettings(
 			enabled && parseBoolean(env.OBSERVABILITY_METRICS_ENABLED, true),
 		metricsPath,
 		jsonLogsEnabled:
-			enabled && parseBoolean(env.OBSERVABILITY_JSON_LOGS, true),
+			enabled &&
+			parseBoolean(env.OBSERVABILITY_JSON_LOGS, env.NODE_ENV === 'production'),
 		logFilePath,
 		tracesEnabled:
 			enabled &&
@@ -94,6 +96,10 @@ export function resolveObservabilitySettings(
 			Boolean(otlpTracesUrl) &&
 			env.NODE_ENV !== 'test',
 		otlpTracesUrl,
+		tracesSampleRate: Math.min(
+			1,
+			Math.max(0, parseFloat(env.OBSERVABILITY_TRACES_SAMPLE_RATE ?? '1') || 1)
+		),
 		metricPrefix: normalizeMetricPrefix(serviceName)
 	}
 }

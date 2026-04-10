@@ -2,6 +2,9 @@ import { Logger, ValidationPipe } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
+import compression from 'compression'
+import * as express from 'express'
+import type { Express, NextFunction, Request, Response } from 'express'
 import helmet from 'helmet'
 
 import { AppModule } from './core/app.module'
@@ -16,14 +19,36 @@ async function bootstrap() {
 	const appLogger = new AppLogger()
 	const app = await NestFactory.create(AppModule, {
 		bufferLogs: true,
-		logger: appLogger
+		logger: appLogger,
+		bodyParser: false
 	})
 	const config = app.get(ConfigService<AllInterfaces>)
+	const expressApp = app.getHttpAdapter().getInstance() as Express
 
 	app.useLogger(appLogger)
 	Logger.overrideLogger(appLogger)
 
-	app.use(helmet())
+	expressApp.set('trust proxy', 1)
+
+	app.use(express.json({ limit: '2mb' }))
+	app.use(express.urlencoded({ extended: true, limit: '2mb' }))
+	app.use(compression())
+	app.use(
+		helmet({
+			hsts: { maxAge: 31_536_000, includeSubDomains: true, preload: true },
+			referrerPolicy: { policy: 'no-referrer' },
+			contentSecurityPolicy: false,
+			permittedCrossDomainPolicies: { permittedPolicies: 'none' },
+			crossOriginEmbedderPolicy: false
+		})
+	)
+	app.use((_req: Request, res: Response, next: NextFunction) => {
+		res.setHeader(
+			'Permissions-Policy',
+			'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()'
+		)
+		next()
+	})
 	app.enableCors(getCorsConfig(config))
 	app.useGlobalPipes(new ValidationPipe(getValidationPipeConfig()))
 

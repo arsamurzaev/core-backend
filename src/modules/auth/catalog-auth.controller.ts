@@ -18,6 +18,7 @@ import type { Request, Response } from 'express'
 
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { RequestContext } from '@/shared/tenancy/request-context'
+import { AuthThrottle } from '@/shared/throttler/auth-throttle.decorator'
 
 import { getSessionCookie, setSessionCookies } from './auth-cookie.utils'
 import { AuthService } from './auth.service'
@@ -30,6 +31,7 @@ export class CatalogAuthController {
 	constructor(private readonly auth: AuthService) {}
 
 	@Post('login')
+	@AuthThrottle()
 	@ApiOperation({ summary: 'Catalog login' })
 	@ApiOkResponse({
 		description: 'Аутентифицирован для каталога, cookies установлены',

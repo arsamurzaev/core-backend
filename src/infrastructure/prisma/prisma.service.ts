@@ -14,8 +14,8 @@ import { ObservabilityService } from '@/modules/observability/observability.serv
 import {
 	buildPrismaLogDefinitions,
 	normalizePrismaQueryText,
-	resolvePrismaSlowQuerySettings,
-	type PrismaSlowQuerySettings
+	type PrismaSlowQuerySettings,
+	resolvePrismaSlowQuerySettings
 } from './prisma-observability'
 
 @Injectable()

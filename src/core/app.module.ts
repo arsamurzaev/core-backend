@@ -1,8 +1,16 @@
-import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common'
+import {
+	ExecutionContext,
+	MiddlewareConsumer,
+	Module,
+	NestModule
+} from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { APP_FILTER, APP_GUARD } from '@nestjs/core'
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler'
+import { ThrottlerModule } from '@nestjs/throttler'
+import { createHash } from 'crypto'
 
+import { RedisModule } from '@/infrastructure/redis/redis.module'
+import { RedisService } from '@/infrastructure/redis/redis.service'
 import { AdminModule } from '@/modules/admin/admin.module'
 import { AttributeModule } from '@/modules/attribute/attribute.module'
 import { AuthModule } from '@/modules/auth/auth.module'
@@ -19,10 +27,14 @@ import { SeoModule } from '@/modules/seo/seo.module'
 import { TypeModule } from '@/modules/type/type.module'
 import { UserModule } from '@/modules/user/user.module'
 import { CacheModule } from '@/shared/cache/cache.module'
+import { readCookieValue } from '@/shared/http/cookie.utils'
 import { GlobalExceptionFilter } from '@/shared/http/filters/global-exception.filter'
 import { CatalogGuard } from '@/shared/tenancy/catalog.guard'
 import { CatalogResolver } from '@/shared/tenancy/catalog.resolver'
 import { CatalogContextMiddleware } from '@/shared/tenancy/tenant-context.middleware'
+import { shouldApplyAuthThrottle } from '@/shared/throttler/auth-throttle.decorator'
+import { CustomThrottlerGuard } from '@/shared/throttler/custom-throttler.guard'
+import { RedisThrottlerStorage } from '@/shared/throttler/redis-throttler.storage'
 
 import { PrismaModule } from '../infrastructure/prisma/prisma.module'
 
@@ -34,13 +46,82 @@ import {
 	s3Env
 } from './config/env'
 
+const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
+type TrackerRequest = Record<string, unknown>
+
+function readTrackerHeader(
+	req: TrackerRequest,
+	name: string
+): string | string[] | undefined {
+	const headers = req.headers
+	if (!headers || typeof headers !== 'object') return undefined
+
+	const value = (headers as Record<string, unknown>)[name]
+	if (typeof value === 'string') return value
+	if (Array.isArray(value) && value.every(item => typeof item === 'string')) {
+		return value
+	}
+
+	return undefined
+}
+
+function stringifyTrackerHeader(req: TrackerRequest, name: string): string {
+	const value = readTrackerHeader(req, name)
+	if (Array.isArray(value)) return value.join(', ')
+	return value ?? ''
+}
+
+function readTrackerIp(req: TrackerRequest): string {
+	if (typeof req.ip === 'string' && req.ip) return req.ip
+
+	const socket = req.socket
+	if (!socket || typeof socket !== 'object') return 'unknown'
+
+	const remoteAddress = (socket as { remoteAddress?: unknown }).remoteAddress
+	return typeof remoteAddress === 'string' && remoteAddress
+		? remoteAddress
+		: 'unknown'
+}
+
+function shouldSkipAuthThrottler(context: ExecutionContext): boolean {
+	return !shouldApplyAuthThrottle(context)
+}
+
 @Module({
 	imports: [
 		ConfigModule.forRoot({
 			isGlobal: true,
 			load: [databaseEnv, redisEnv, httpEnv, s3Env, integrationCryptoEnv]
 		}),
-		ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
+		ThrottlerModule.forRootAsync({
+			imports: [RedisModule],
+			inject: [RedisService],
+			useFactory: (redis: RedisService) => ({
+				throttlers: [
+					{ name: 'global', ttl: 60_000, limit: 600 },
+					{
+						name: 'auth',
+						ttl: 900_000,
+						limit: 10,
+						skipIf: shouldSkipAuthThrottler
+					}
+				],
+				storage: new RedisThrottlerStorage(redis),
+				getTracker: (req: TrackerRequest) => {
+					const sid = readCookieValue(readTrackerHeader(req, 'cookie'), SID_COOKIE)
+					if (sid) return `sess:${sid}`
+
+					const ip = readTrackerIp(req)
+					const ua = stringifyTrackerHeader(req, 'user-agent')
+					const lang = stringifyTrackerHeader(req, 'accept-language')
+					const fingerprint = createHash('sha256')
+						.update(`${ip}:${ua}:${lang}`)
+						.digest('hex')
+						.slice(0, 16)
+					return `anon:${fingerprint}`
+				}
+			})
+		}),
 		ObservabilityModule,
 		CacheModule,
 		PrismaModule,
@@ -61,7 +142,7 @@ import {
 	],
 	providers: [
 		{ provide: APP_FILTER, useClass: GlobalExceptionFilter },
-		{ provide: APP_GUARD, useClass: ThrottlerGuard },
+		{ provide: APP_GUARD, useClass: CustomThrottlerGuard },
 		{ provide: APP_GUARD, useClass: CatalogGuard },
 		CatalogResolver,
 		CatalogContextMiddleware

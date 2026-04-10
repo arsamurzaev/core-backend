@@ -14,9 +14,26 @@ distributor:
 ingester:
  max_block_duration: 5m
 
+overrides:
+ defaults:
+  metrics_generator:
+   processors: [service-graphs, span-metrics]
+   generate_native_histograms: both
+
 compactor:
  compaction:
   block_retention: 168h
+
+metrics_generator:
+ registry:
+  external_labels:
+   source: tempo
+   service: catalog_backend
+ storage:
+  path: /var/tempo/generator/wal
+  remote_write:
+   - url: http://mimir:9009/api/v1/push
+     send_exemplars: true
 
 storage:
  trace:

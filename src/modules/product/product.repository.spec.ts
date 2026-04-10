@@ -7,10 +7,9 @@ describe('ProductRepository', () => {
 				findFirst: jest.fn().mockResolvedValue({ id: 'product-1' })
 			},
 			category: {
-				findMany: jest.fn().mockResolvedValue([
-					{ id: 'category-1' },
-					{ id: 'category-2' }
-				])
+				findMany: jest
+					.fn()
+					.mockResolvedValue([{ id: 'category-1' }, { id: 'category-2' }])
 			},
 			categoryProduct: {
 				createMany: jest.fn().mockResolvedValue({ count: 2 })

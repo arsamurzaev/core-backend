@@ -1,40 +1,73 @@
 services:
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.4.0
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+        reservations:
+          memory: 128m
     depends_on:
-      - loki
-      - tempo
-      - mimir
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+      mimir:
+        condition: service_healthy
     ports:
       - '${OBSERVABILITY_HOST_BIND_IP:-0.0.0.0}:${GRAFANA_PORT:-3001}:3000'
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
       GF_USERS_ALLOW_SIGN_UP: 'false'
       GF_PATHS_PROVISIONING: /etc/grafana/provisioning
     volumes:
       - grafana_data:/var/lib/grafana
       - ./ops/observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./ops/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/api/health']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - backend-core
 
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:3.3.0
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
     command: ['-config.file=/etc/loki/config.yaml']
     ports:
       - '${OBSERVABILITY_HOST_BIND_IP:-0.0.0.0}:${OBSERVABILITY_LOKI_PORT:-3100}:3100'
     volumes:
       - loki_data:/loki
       - ./ops/observability/loki/config.yaml:/etc/loki/config.yaml:ro
+    healthcheck:
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3100/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - backend-core
 
   tempo:
     image: grafana/tempo:2.9.0
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
     command: ['-config.file=/etc/tempo/config.yaml']
     ports:
       - '${OBSERVABILITY_HOST_BIND_IP:-0.0.0.0}:${OBSERVABILITY_TEMPO_OTLP_GRPC_PORT:-4317}:4317'
@@ -42,24 +75,48 @@ services:
     volumes:
       - tempo_data:/var/tempo
       - ./ops/observability/tempo/config.yaml:/etc/tempo/config.yaml:ro
+    healthcheck:
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3200/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - backend-core
 
   mimir:
-    image: grafana/mimir:latest
+    image: grafana/mimir:2.14.0
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+        reservations:
+          memory: 256m
     command: ['-config.file=/etc/mimir/config.yaml']
     ports:
       - '${OBSERVABILITY_HOST_BIND_IP:-0.0.0.0}:${OBSERVABILITY_MIMIR_PORT:-9009}:9009'
     volumes:
       - mimir_data:/tmp/mimir
       - ./ops/observability/mimir/config.yaml:/etc/mimir/config.yaml:ro
+    healthcheck:
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:9009/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - backend-core
 
   alloy:
-    image: grafana/alloy:latest
+    image: grafana/alloy:v1.5.0
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+        reservations:
+          memory: 128m
     command:
       - run
       - --server.http.listen-addr=0.0.0.0:12345
@@ -81,6 +138,12 @@ services:
       - alloy_data:/var/lib/alloy
       - ./ops/observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - ./runtime/logs:/workspace/runtime/logs:ro
+    healthcheck:
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:12345/-/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - backend-core
 
@@ -90,3 +153,7 @@ volumes:
   tempo_data:
   mimir_data:
   alloy_data:
+
+networks:
+  backend-core:
+    external: true

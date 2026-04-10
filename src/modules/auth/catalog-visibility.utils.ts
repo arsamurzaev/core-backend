@@ -8,5 +8,7 @@ export function canReadInactiveCatalogProducts(
 ): boolean {
 	if (!user) return false
 	if (user.role === Role.ADMIN) return true
-	return user.role === Role.CATALOG && Boolean(ownerUserId) && ownerUserId === user.id
+	return (
+		user.role === Role.CATALOG && Boolean(ownerUserId) && ownerUserId === user.id
+	)
 }

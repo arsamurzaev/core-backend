@@ -6,15 +6,13 @@ import {
 	NotFoundException
 } from '@nestjs/common'
 
+import { CacheService } from '@/shared/cache/cache.service'
+import { CATALOG_CACHE_VERSION } from '@/shared/cache/catalog-cache.constants'
 import type { MediaRecord } from '@/shared/media/media-url.service'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { ensureMediaInCatalog } from '@/shared/media/media.validation'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
-import {
-	CATALOG_CACHE_VERSION
-} from '@/shared/cache/catalog-cache.constants'
-import { CacheService } from '@/shared/cache/cache.service'
 import {
 	assertHasUpdateFields,
 	normalizeOptionalNonEmptyString,

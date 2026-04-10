@@ -12,6 +12,7 @@ import { Queue, Worker } from 'bullmq'
 import { ObservabilityService } from '@/modules/observability/observability.service'
 
 import { IntegrationRepository } from '../../integration.repository'
+
 import {
 	buildMoySkladMetadata,
 	MoySkladMetadataCryptoService

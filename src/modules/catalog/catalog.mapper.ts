@@ -30,9 +30,9 @@ export function mapCatalogRecord(catalog: any, mapMedia: CatalogMapMedia): any {
 
 	if (Object.prototype.hasOwnProperty.call(result, 'seoSettings')) {
 		const seoCandidate = Array.isArray(result.seoSettings)
-			? result.seoSettings.find((item: any) => item?.entityId === result.id) ??
+			? (result.seoSettings.find((item: any) => item?.entityId === result.id) ??
 				result.seoSettings[0] ??
-				null
+				null)
 			: null
 
 		result = {

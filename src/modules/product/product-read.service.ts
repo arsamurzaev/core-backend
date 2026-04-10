@@ -1,5 +1,9 @@
 import { SeoEntityType } from '@generated/enums'
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import {
+	BadRequestException,
+	Injectable,
+	NotFoundException
+} from '@nestjs/common'
 import { createHash } from 'crypto'
 
 import { CacheService } from '@/shared/cache/cache.service'
@@ -11,12 +15,12 @@ import {
 	CATEGORY_PRODUCTS_NEXT_PAGE_CACHE_TTL_SEC,
 	PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
+import type { MediaDto } from '@/shared/media/dto/media.dto.res'
 import {
 	MEDIA_DETAIL_VARIANT_NAMES,
 	MEDIA_LIST_VARIANT_NAMES,
 	MediaUrlService
 } from '@/shared/media/media-url.service'
-import type { MediaDto } from '@/shared/media/dto/media.dto.res'
 import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
 import { mustCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
 
@@ -37,8 +41,8 @@ import {
 	type AttributeFilterMeta,
 	type DiscountAttributeIds,
 	type ProductAttributeFilter,
-	type ProductFilterQueryBase,
 	type ProductDetailsItem,
+	type ProductFilterQueryBase,
 	ProductRepository
 } from './product.repository'
 
@@ -103,10 +107,16 @@ export class ProductReadService {
 		}
 
 		const key = await this.buildCatalogProductsCacheKey(catalogId)
-		return this.withCache(key, async () => {
-			const products = await this.repo.findAll(catalogId, false)
-			return products.map(p => this.mapper.mapProduct(p, MEDIA_LIST_VARIANT_NAMES))
-		}, this.cacheTtlSec)
+		return this.withCache(
+			key,
+			async () => {
+				const products = await this.repo.findAll(catalogId, false)
+				return products.map(p =>
+					this.mapper.mapProduct(p, MEDIA_LIST_VARIANT_NAMES)
+				)
+			},
+			this.cacheTtlSec
+		)
 	}
 
 	async getPopular(options?: ProductReadOptions) {
@@ -119,10 +129,16 @@ export class ProductReadService {
 		}
 
 		const key = await this.buildCatalogPopularProductsCacheKey(catalogId)
-		return this.withCache(key, async () => {
-			const products = await this.repo.findPopular(catalogId, false)
-			return products.map(p => this.mapper.mapProduct(p, MEDIA_LIST_VARIANT_NAMES))
-		}, this.cacheTtlSec)
+		return this.withCache(
+			key,
+			async () => {
+				const products = await this.repo.findPopular(catalogId, false)
+				return products.map(p =>
+					this.mapper.mapProduct(p, MEDIA_LIST_VARIANT_NAMES)
+				)
+			},
+			this.cacheTtlSec
+		)
 	}
 
 	async getPopularCards(options?: ProductReadOptions) {
@@ -135,10 +151,16 @@ export class ProductReadService {
 		}
 
 		const key = await this.buildCatalogPopularProductCardsCacheKey(catalogId)
-		return this.withCache(key, async () => {
-			const products = await this.repo.findPopularCards(catalogId, false)
-			return products.map(p => this.mapper.mapProduct(p, MEDIA_LIST_VARIANT_NAMES))
-		}, this.cacheTtlSec)
+		return this.withCache(
+			key,
+			async () => {
+				const products = await this.repo.findPopularCards(catalogId, false)
+				return products.map(p =>
+					this.mapper.mapProduct(p, MEDIA_LIST_VARIANT_NAMES)
+				)
+			},
+			this.cacheTtlSec
+		)
 	}
 
 	async getInfinite(
@@ -246,7 +268,10 @@ export class ProductReadService {
 		const includeInactive = options?.includeInactive === true
 		const parsed = parseProductInfiniteQuery(
 			{ cursor: options?.cursor, limit: options?.limit },
-			{ defaultLimit: PRODUCT_INFINITE_DEFAULT_LIMIT, maxLimit: PRODUCT_INFINITE_MAX_LIMIT }
+			{
+				defaultLimit: PRODUCT_INFINITE_DEFAULT_LIMIT,
+				maxLimit: PRODUCT_INFINITE_MAX_LIMIT
+			}
 		)
 		const cacheTtlSec = parsed.cursor
 			? this.uncategorizedNextPageCacheTtlSec
@@ -300,7 +325,10 @@ export class ProductReadService {
 		const includeInactive = options?.includeInactive === true
 		const parsed = parseProductInfiniteQuery(
 			{ cursor: options?.cursor, limit: options?.limit },
-			{ defaultLimit: PRODUCT_INFINITE_DEFAULT_LIMIT, maxLimit: PRODUCT_INFINITE_MAX_LIMIT }
+			{
+				defaultLimit: PRODUCT_INFINITE_DEFAULT_LIMIT,
+				maxLimit: PRODUCT_INFINITE_MAX_LIMIT
+			}
 		)
 		const cacheTtlSec = parsed.cursor
 			? this.uncategorizedNextPageCacheTtlSec
@@ -396,19 +424,33 @@ export class ProductReadService {
 
 	private buildCatalogProductsCacheKey(catalogId: string): Promise<string> {
 		return this.buildVersionedCacheKey(PRODUCTS_CACHE_VERSION, catalogId, [
-			'catalog', catalogId, 'products', 'list'
+			'catalog',
+			catalogId,
+			'products',
+			'list'
 		])
 	}
 
-	private buildCatalogPopularProductsCacheKey(catalogId: string): Promise<string> {
+	private buildCatalogPopularProductsCacheKey(
+		catalogId: string
+	): Promise<string> {
 		return this.buildVersionedCacheKey(PRODUCTS_CACHE_VERSION, catalogId, [
-			'catalog', catalogId, 'products', 'popular'
+			'catalog',
+			catalogId,
+			'products',
+			'popular'
 		])
 	}
 
-	private buildCatalogPopularProductCardsCacheKey(catalogId: string): Promise<string> {
+	private buildCatalogPopularProductCardsCacheKey(
+		catalogId: string
+	): Promise<string> {
 		return this.buildVersionedCacheKey(PRODUCTS_CACHE_VERSION, catalogId, [
-			'catalog', catalogId, 'products', 'popular', 'cards'
+			'catalog',
+			catalogId,
+			'products',
+			'popular',
+			'cards'
 		])
 	}
 
@@ -475,7 +517,11 @@ export class ProductReadService {
 			CATEGORY_PRODUCTS_CACHE_VERSION,
 			catalogId,
 			[
-				'catalog', catalogId, 'products', 'uncategorized', 'infinite',
+				'catalog',
+				catalogId,
+				'products',
+				'uncategorized',
+				'infinite',
 				`limit-${limit}`,
 				cursor ? `cursor-${encodeURIComponent(cursor)}` : 'cursor-first'
 			]
@@ -491,7 +537,12 @@ export class ProductReadService {
 			CATEGORY_PRODUCTS_CACHE_VERSION,
 			catalogId,
 			[
-				'catalog', catalogId, 'products', 'uncategorized', 'cards', 'infinite',
+				'catalog',
+				catalogId,
+				'products',
+				'uncategorized',
+				'cards',
+				'infinite',
 				`limit-${limit}`,
 				cursor ? `cursor-${encodeURIComponent(cursor)}` : 'cursor-first'
 			]
@@ -586,9 +637,19 @@ export class ProductReadService {
 		includeInactive = false
 	) {
 		const ids = rows.map(row => row.id)
-		const products = await this.repo.findByIdsWithAttributes(ids, catalogId, includeInactive)
-		const byId = new Map(products.map(p => [p.id, this.mapper.mapProduct(p, MEDIA_LIST_VARIANT_NAMES)] as const))
-		return ids.map(id => byId.get(id)).filter((p): p is NonNullable<typeof p> => p !== undefined)
+		const products = await this.repo.findByIdsWithAttributes(
+			ids,
+			catalogId,
+			includeInactive
+		)
+		const byId = new Map(
+			products.map(
+				p => [p.id, this.mapper.mapProduct(p, MEDIA_LIST_VARIANT_NAMES)] as const
+			)
+		)
+		return ids
+			.map(id => byId.get(id))
+			.filter((p): p is NonNullable<typeof p> => p !== undefined)
 	}
 
 	private async loadInfiniteCardItems(
@@ -598,8 +659,14 @@ export class ProductReadService {
 	) {
 		const ids = rows.map(row => row.id)
 		const products = await this.repo.findByIds(ids, catalogId, includeInactive)
-		const byId = new Map(products.map(p => [p.id, this.mapper.mapProduct(p, MEDIA_LIST_VARIANT_NAMES)] as const))
-		return ids.map(id => byId.get(id)).filter((p): p is NonNullable<typeof p> => p !== undefined)
+		const byId = new Map(
+			products.map(
+				p => [p.id, this.mapper.mapProduct(p, MEDIA_LIST_VARIANT_NAMES)] as const
+			)
+		)
+		return ids
+			.map(id => byId.get(id))
+			.filter((p): p is NonNullable<typeof p> => p !== undefined)
 	}
 
 	private buildInfiniteNextCursor(
@@ -626,8 +693,11 @@ export class ProductReadService {
 		if (!filters.length) return []
 
 		const keys = uniqueNonEmptyValues(filters.map(f => f.key))
-		const meta: AttributeFilterMeta[] = await this.repo.findAttributesByTypeAndKeys(typeId, keys)
-		const metaByKey = new Map(meta.map(item => [item.key.toLowerCase(), item] as const))
+		const meta: AttributeFilterMeta[] =
+			await this.repo.findAttributesByTypeAndKeys(typeId, keys)
+		const metaByKey = new Map(
+			meta.map(item => [item.key.toLowerCase(), item] as const)
+		)
 
 		const missing = keys.filter(key => !metaByKey.has(key))
 		if (missing.length) {
@@ -733,7 +803,10 @@ export class ProductReadService {
 			? await this.resolveDiscountAttributeIds(typeId)
 			: undefined
 
-		if (kind === 'recommendations' && !this.hasRecommendationFilters(parsed, attributeFilters)) {
+		if (
+			kind === 'recommendations' &&
+			!this.hasRecommendationFilters(parsed, attributeFilters)
+		) {
 			return { items: [], nextCursor: null, seed: seed ?? null }
 		}
 
@@ -765,7 +838,11 @@ export class ProductReadService {
 				const { pageRows, hasMore } = this.buildInfinitePage(rows, parsed.limit)
 
 				return {
-					items: await this.loadInfiniteCardItems(pageRows, catalogId, includeInactive),
+					items: await this.loadInfiniteCardItems(
+						pageRows,
+						catalogId,
+						includeInactive
+					),
 					nextCursor: this.buildInfiniteNextCursor(pageRows, hasMore, seed),
 					seed: seed ?? null
 				}

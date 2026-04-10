@@ -221,7 +221,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	async issueCheckoutKey(publicKey: string) {
 		const key = publicKey.trim()
 		if (!key) {
-			throw new BadRequestException('publicKey обязателен')
+			throw new BadRequestException('Параметр publicKey обязателен')
 		}
 
 		const cart = await this.findByPublicKeyOrThrow(key)
@@ -424,7 +424,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		this.ensureCartIsOpen(cart.status)
 
 		if (!cart.items.length) {
-			throw new BadRequestException('Cannot complete an empty cart')
+			throw new BadRequestException('Нельзя оформить пустую корзину')
 		}
 
 		const now = new Date()
@@ -433,7 +433,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 			this.ensureCartIsOpen(freshCart.status)
 
 			if (!freshCart.items.length) {
-				throw new BadRequestException('Cannot complete an empty cart')
+				throw new BadRequestException('Нельзя оформить пустую корзину')
 			}
 
 			const snapshotItems = freshCart.items.map(item => {
@@ -530,7 +530,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	): Promise<CartMutationResult> {
 		const normalizedItemId = itemId.trim()
 		if (!normalizedItemId) {
-			throw new BadRequestException('itemId обязателен')
+			throw new BadRequestException('Параметр itemId обязателен')
 		}
 
 		return this.prisma.$transaction(async tx => {
@@ -633,13 +633,13 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	private ensureCheckoutAccess(cart: CartEntity, checkoutKey?: string | null) {
 		const key = checkoutKey?.trim()
 		if (!key || !cart.checkoutKey || key !== cart.checkoutKey) {
-			throw new UnauthorizedException('Неверный checkoutKey')
+			throw new UnauthorizedException('Неверный ключ доступа к корзине')
 		}
 	}
 
 	private ensureCartIsOpen(status: CartStatus) {
 		if (!TERMINAL_CART_STATUSES.has(status)) return
-		throw new BadRequestException('Cart is already closed')
+		throw new BadRequestException('Корзина уже закрыта')
 	}
 
 	private ensureManagerCanTakeCart(cart: CartEntity, user: SessionUser) {
@@ -649,7 +649,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 			cart.assignedManagerId !== user.id &&
 			user.role !== Role.ADMIN
 		) {
-			throw new ForbiddenException('Cart is already being processed')
+			throw new ForbiddenException('Эту корзину уже обрабатывает другой менеджер')
 		}
 	}
 
@@ -659,7 +659,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 			cart.assignedManagerId !== user.id &&
 			user.role !== Role.ADMIN
 		) {
-			throw new ForbiddenException('Cart is assigned to another manager')
+			throw new ForbiddenException('Корзина закреплена за другим менеджером')
 		}
 	}
 
@@ -669,7 +669,9 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	): Promise<void> {
 		if (user.role === Role.ADMIN) return
 		if (user.role !== Role.CATALOG) {
-			throw new ForbiddenException('Only catalog managers can manage carts')
+			throw new ForbiddenException(
+				'Управлять корзинами могут только менеджеры каталога'
+			)
 		}
 
 		const catalog = await this.prisma.catalog.findFirst({
@@ -678,11 +680,11 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		})
 
 		if (!catalog) {
-			throw new NotFoundException('Catalog not found')
+			throw new NotFoundException('Каталог не найден')
 		}
 
 		if (!catalog.userId || catalog.userId !== user.id) {
-			throw new ForbiddenException('You do not have access to this cart')
+			throw new ForbiddenException('У вас нет доступа к этой корзине')
 		}
 	}
 
@@ -710,7 +712,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	private async findByPublicKeyOrThrow(publicKey: string) {
 		const normalized = publicKey.trim()
 		if (!normalized) {
-			throw new BadRequestException('publicKey обязателен')
+			throw new BadRequestException('Параметр publicKey обязателен')
 		}
 
 		const cart = await this.prisma.cart.findFirst({

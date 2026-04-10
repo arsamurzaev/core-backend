@@ -260,12 +260,7 @@ export class ObservabilityService {
 	}
 
 	recordCacheOperation(
-		operation:
-			| 'get_version'
-			| 'bump_version'
-			| 'get_json'
-			| 'set_json'
-			| 'del',
+		operation: 'get_version' | 'bump_version' | 'get_json' | 'set_json' | 'del',
 		outcome: 'success' | 'error' | 'hit' | 'miss' | 'corrupted',
 		durationMs: number
 	) {

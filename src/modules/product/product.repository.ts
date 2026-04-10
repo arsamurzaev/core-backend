@@ -5,18 +5,18 @@ import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import { BadRequestException, Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { buildMediaSelect } from '@/shared/media/media-select'
 import {
 	MEDIA_DETAIL_VARIANT_NAMES,
 	MEDIA_LIST_VARIANT_NAMES
 } from '@/shared/media/media-url.service'
-import { buildMediaSelect } from '@/shared/media/media-select'
 
 import type { ProductAttributeValueData } from './product-attribute.builder'
+import { tokenizeProductSearchTerm } from './product-search.utils'
 import type {
 	ProductVariantAttributeInput,
 	ProductVariantData
 } from './product-variant.builder'
-import { tokenizeProductSearchTerm } from './product-search.utils'
 
 export type ProductVariantUpdateData = {
 	variantKey: string
@@ -127,56 +127,56 @@ function buildProductMediaSelect(variantNames?: readonly string[]) {
 
 function buildProductSelect(variantNames?: readonly string[]) {
 	return {
-	id: true,
-	sku: true,
-	name: true,
-	slug: true,
-	price: true,
-	brand: {
-		select: {
-			id: true,
-			name: true,
-			slug: true
-		}
-	},
-	media: buildProductMediaSelect(variantNames),
-	categoryProducts: {
-		where: {
-			category: {
-				deleteAt: null
+		id: true,
+		sku: true,
+		name: true,
+		slug: true,
+		price: true,
+		brand: {
+			select: {
+				id: true,
+				name: true,
+				slug: true
 			}
 		},
-		select: {
-			position: true,
-			category: {
-				select: {
-					id: true,
-					name: true
+		media: buildProductMediaSelect(variantNames),
+		categoryProducts: {
+			where: {
+				category: {
+					deleteAt: null
 				}
-			}
-		},
-		orderBy: { position: 'asc' as const }
-	},
-	integrationLinks: {
-		select: {
-			externalId: true,
-			externalCode: true,
-			lastSyncedAt: true,
-			integration: {
-				select: {
-					provider: true
+			},
+			select: {
+				position: true,
+				category: {
+					select: {
+						id: true,
+						name: true
+					}
 				}
-			}
+			},
+			orderBy: { position: 'asc' as const }
 		},
-		orderBy: { createdAt: 'asc' as const },
-		take: 1
-	},
-	isPopular: true,
-	status: true,
-	position: true,
-	createdAt: true,
-	updatedAt: true
-}
+		integrationLinks: {
+			select: {
+				externalId: true,
+				externalCode: true,
+				lastSyncedAt: true,
+				integration: {
+					select: {
+						provider: true
+					}
+				}
+			},
+			orderBy: { createdAt: 'asc' as const },
+			take: 1
+		},
+		isPopular: true,
+		status: true,
+		position: true,
+		createdAt: true,
+		updatedAt: true
+	}
 }
 
 const productListSelect = buildProductSelect(MEDIA_LIST_VARIANT_NAMES)
@@ -1312,8 +1312,8 @@ export class ProductRepository {
 	) {
 		if (!categoryIds.length) return
 
-		const values = categoryIds.map(categoryId =>
-			PrismaSql.sql`(CAST(${categoryId} AS uuid))`
+		const values = categoryIds.map(
+			categoryId => PrismaSql.sql`(CAST(${categoryId} AS uuid))`
 		)
 
 		await tx.$executeRaw(PrismaSql.sql`
@@ -1334,8 +1334,9 @@ export class ProductRepository {
 	) {
 		if (!removals.length) return
 
-		const values = removals.map(removal =>
-			PrismaSql.sql`(CAST(${removal.categoryId} AS uuid), ${removal.position})`
+		const values = removals.map(
+			removal =>
+				PrismaSql.sql`(CAST(${removal.categoryId} AS uuid), ${removal.position})`
 		)
 
 		await tx.$executeRaw(PrismaSql.sql`

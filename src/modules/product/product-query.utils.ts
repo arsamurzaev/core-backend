@@ -1,12 +1,12 @@
 import { DataType } from '@generated/enums'
 import { BadRequestException } from '@nestjs/common'
 
+import { normalizeProductSearchTerm } from './product-search.utils'
 import type {
 	ProductAttributeFilter,
 	ProductDefaultPageCursor,
 	ProductSeededPageCursor
 } from './product.repository'
-import { normalizeProductSearchTerm } from './product-search.utils'
 
 type ScalarQueryValue = string | number | boolean | bigint
 
@@ -103,9 +103,7 @@ export function parseProductInfiniteQuery(
 		brandIds: extractCsvValues(query.brands),
 		minPrice,
 		maxPrice,
-		searchTerm: normalizeProductSearchTerm(
-			getSingleQueryValue(query.searchTerm)
-		),
+		searchTerm: normalizeProductSearchTerm(getSingleQueryValue(query.searchTerm)),
 		isPopular: parseOptionalBoolean(
 			getSingleQueryValue(query.isPopular),
 			'isPopular'

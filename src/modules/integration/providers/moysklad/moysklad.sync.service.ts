@@ -742,7 +742,7 @@ export class MoySkladSyncService {
 		if (product.images?.rows && product.images.rows.length > 0) {
 			imageUrls = product.images.rows
 				.filter(img => img.meta.downloadHref)
-				.map(img => img.meta.downloadHref!)
+				.map(img => img.meta.downloadHref)
 		} else {
 			// Fallback to separate API call
 			try {

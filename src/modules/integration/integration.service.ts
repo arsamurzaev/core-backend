@@ -261,9 +261,7 @@ export class IntegrationService {
 			return 20
 		}
 		if (!Number.isInteger(limit) || limit < 1) {
-			throw new BadRequestException(
-				'limit должен быть положительным целым числом'
-			)
+			throw new BadRequestException('limit должен быть положительным целым числом')
 		}
 		return Math.min(limit, 100)
 	}
@@ -298,9 +296,7 @@ export class IntegrationService {
 		if (params.previous?.lastSyncAt) return
 
 		try {
-			const queued = await this.moySkladQueue.enqueueCatalogSync(
-				params.catalogId
-			)
+			const queued = await this.moySkladQueue.enqueueCatalogSync(params.catalogId)
 			this.logger.log(
 				`Initial MoySklad import queued after integration ${params.context} for catalog ${params.catalogId}: runId=${queued.runId}, jobId=${queued.jobId}`
 			)

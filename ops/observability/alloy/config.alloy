@@ -51,20 +51,19 @@ prometheus.remote_write "mimir" {
   }
 }
 
-loki.source.file "backend" {
-  targets = [
+local.file_match "backend_logs" {
+  path_targets = [
     {
       __path__ = sys.env("OBSERVABILITY_ALLOY_LOG_GLOB"),
       job      = sys.env("OBSERVABILITY_SERVICE_NAME"),
       service  = sys.env("OBSERVABILITY_SERVICE_NAME"),
     },
   ]
+}
 
+loki.source.file "backend" {
+  targets    = local.file_match.backend_logs.targets
   forward_to = [loki.write.local.receiver]
-
-  file_match {
-    enabled = true
-  }
 }
 
 loki.write "local" {

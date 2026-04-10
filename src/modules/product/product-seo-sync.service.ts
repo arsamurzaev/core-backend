@@ -1,8 +1,5 @@
 import { ProductStatus, SeoChangeFreq, SeoEntityType } from '@generated/enums'
-import {
-	SeoSettingCreateInput,
-	SeoSettingUpdateInput
-} from '@generated/models'
+import { SeoSettingCreateInput, SeoSettingUpdateInput } from '@generated/models'
 import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
@@ -30,7 +27,10 @@ export class ProductSeoSyncService {
 		private readonly mediaUrl: MediaUrlService
 	) {}
 
-	async syncProduct(product: ProductDetailsItem, catalogId: string): Promise<void> {
+	async syncProduct(
+		product: ProductDetailsItem,
+		catalogId: string
+	): Promise<void> {
 		const catalog = await this.loadCatalogContext(catalogId)
 		const existing = await this.seoRepo.findByEntity(
 			catalogId,
@@ -150,7 +150,10 @@ export class ProductSeoSyncService {
 		}
 	}
 
-	private buildSeoMeta(product: ProductDetailsItem, catalog: ProductSeoCatalogContext) {
+	private buildSeoMeta(
+		product: ProductDetailsItem,
+		catalog: ProductSeoCatalogContext
+	) {
 		const primaryMedia = product.media[0]?.media ?? null
 		const primaryMediaId = primaryMedia?.id ?? null
 		const primaryMediaUrl = primaryMedia
@@ -384,7 +387,8 @@ export class ProductSeoSyncService {
 		if (attribute.enumValue?.value) return attribute.enumValue.value
 		if (attribute.valueString) return attribute.valueString
 		if (attribute.valueInteger !== null) return String(attribute.valueInteger)
-		if (attribute.valueDecimal !== null) return this.formatPrice(attribute.valueDecimal)
+		if (attribute.valueDecimal !== null)
+			return this.formatPrice(attribute.valueDecimal)
 		if (attribute.valueBoolean !== null) {
 			return attribute.valueBoolean ? 'да' : 'нет'
 		}
@@ -412,8 +416,7 @@ export class ProductSeoSyncService {
 	}
 
 	private formatPrice(value: number | string | { toString(): string }): string {
-		const numeric =
-			typeof value === 'number' ? value : Number(String(value ?? 0))
+		const numeric = typeof value === 'number' ? value : Number(String(value ?? 0))
 		if (!Number.isFinite(numeric)) return '0'
 		return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(2)
 	}

@@ -124,7 +124,9 @@ export class ProductVariantBuilder {
 			const status = this.resolveStatus(input, stock)
 
 			if (!Number.isInteger(stock) || stock < 0) {
-				throw new BadRequestException(`Некорректный stock для ${variantLabel}`)
+				throw new BadRequestException(
+					`Некорректное значение остатка для ${variantLabel}`
+				)
 			}
 			if (!Number.isFinite(price) || price < 0) {
 				throw new BadRequestException(`Некорректная цена для ${variantLabel}`)
@@ -150,7 +152,9 @@ export class ProductVariantBuilder {
 				const hasEnumValueId = Boolean(enumValueId)
 				const hasValue = Boolean(valueLabel)
 				if (!attributeId) {
-					throw new BadRequestException(`attributeId обязателен для ${variantLabel}`)
+					throw new BadRequestException(
+						`Для ${variantLabel} обязательно поле attributeId`
+					)
 				}
 				if (!hasEnumValueId && !hasValue) {
 					throw new BadRequestException(

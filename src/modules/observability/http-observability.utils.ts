@@ -16,7 +16,8 @@ function looksDynamicSegment(segment: string): boolean {
 
 export function normalizeHttpRouteForMetrics(req: Request): string {
 	const baseUrl = typeof req.baseUrl === 'string' ? req.baseUrl : ''
-	const routePath = req.route?.path
+	const route = req.route as { path?: string | string[] } | undefined
+	const routePath = route?.path
 
 	if (typeof routePath === 'string') {
 		const normalized = `${baseUrl}${routePath}` || '/'

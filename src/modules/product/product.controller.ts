@@ -42,14 +42,14 @@ import { SetProductVariantsDtoReq } from './dto/requests/set-product-variants.dt
 import { UpdateProductCategoryPositionDtoReq } from './dto/requests/update-product-category-position.dto.req'
 import { UpdateProductDtoReq } from './dto/requests/update-product.dto.req'
 import {
+	ProductCardPageDto,
 	ProductCreateResponseDto,
 	ProductCursorCardPageDto,
 	ProductCursorPageDto,
-	ProductCardPageDto,
 	ProductInfinitePageDto,
-	ProductWithAttributesDto,
 	ProductUpdateResponseDto,
 	ProductVariantsResponseDto,
+	ProductWithAttributesDto,
 	ProductWithDetailsDto
 } from './dto/responses/product.dto.res'
 import { ProductService } from './product.service'

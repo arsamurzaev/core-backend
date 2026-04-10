@@ -1,7 +1,4 @@
-import {
-	buildMediaSelect,
-	buildMediaVariantWhere
-} from './media-select'
+import { buildMediaSelect, buildMediaVariantWhere } from './media-select'
 
 describe('media-select', () => {
 	it('does not add variant filter when variant names are omitted', () => {

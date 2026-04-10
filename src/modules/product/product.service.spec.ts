@@ -1,5 +1,7 @@
 ﻿import { Test, TestingModule } from '@nestjs/testing'
 
+import { S3Service } from '@/modules/s3/s3.service'
+import { SeoRepository } from '@/modules/seo/seo.repository'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_TYPE_CACHE_VERSION,
@@ -7,11 +9,9 @@ import {
 	PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
 import { MediaUrlService } from '@/shared/media/media-url.service'
-import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
 import { MediaRepository } from '@/shared/media/media.repository'
+import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
 import { RequestContext } from '@/shared/tenancy/request-context'
-import { S3Service } from '@/modules/s3/s3.service'
-import { SeoRepository } from '@/modules/seo/seo.repository'
 
 import type { ProductAttributeValueDto } from './dto/requests/product-attribute.dto.req'
 import { ProductAttributeBuilder } from './product-attribute.builder'
@@ -157,11 +157,7 @@ describe('ProductService', () => {
 		}).compile()
 
 		service = module.get<ProductService>(ProductService)
-		serviceState = module.get(ProductReadService) as unknown as {
-			cacheTtlSec: number
-			uncategorizedFirstPageCacheTtlSec: number
-			uncategorizedNextPageCacheTtlSec: number
-		}
+		serviceState = module.get(ProductReadService)
 		repo = module.get(ProductRepository)
 		attributeBuilder = module.get(ProductAttributeBuilder)
 		variantBuilder = module.get(ProductVariantBuilder)
@@ -708,7 +704,9 @@ describe('ProductService', () => {
 	it('returns cached uncategorized page when cache is warm', async () => {
 		serviceState.uncategorizedFirstPageCacheTtlSec = 120
 		const cached = {
-			items: [{ id: 'product-1', media: [], categories: [], productAttributes: [] }],
+			items: [
+				{ id: 'product-1', media: [], categories: [], productAttributes: [] }
+			],
 			nextCursor: null
 		}
 		cache.getJson.mockResolvedValue(cached as any)
@@ -884,7 +882,10 @@ describe('ProductService', () => {
 		repo.existsSlug.mockResolvedValue(false)
 		repo.existsName.mockResolvedValue(false)
 		repo.existsSku.mockResolvedValue(false)
-		repo.create.mockResolvedValue({ id: 'product-1', slug: 'with-variants' } as any)
+		repo.create.mockResolvedValue({
+			id: 'product-1',
+			slug: 'with-variants'
+		} as any)
 		repo.findById.mockResolvedValue({
 			id: 'product-1',
 			slug: 'with-variants',
