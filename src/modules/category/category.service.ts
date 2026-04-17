@@ -25,7 +25,7 @@ import {
 	type ProductMappableRecord,
 	ProductMediaMapper
 } from '@/shared/media/product-media.mapper'
-import { mustCatalogId } from '@/shared/tenancy/ctx'
+import { effectiveCatalogId, mustCatalogId } from '@/shared/tenancy/ctx'
 import {
 	assertHasUpdateFields,
 	normalizeOptionalId,
@@ -68,7 +68,7 @@ export class CategoryService {
 	) {}
 
 	async getAll() {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		const cacheKey =
 			this.listCacheTtlSec > 0
 				? await this.buildCategoryListCacheKey(catalogId)
@@ -92,7 +92,7 @@ export class CategoryService {
 	}
 
 	async getById(id: string) {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		const category = await this.repo.findById(id, catalogId, true)
 		if (!category) throw new NotFoundException('Категория не найдена')
 		return this.mapCategoryWithRelations(category)
@@ -106,7 +106,7 @@ export class CategoryService {
 			includeInactive?: boolean
 		}
 	) {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		const category = await this.repo.findById(id, catalogId)
 		if (!category) throw new NotFoundException('Категория не найдена')
 
@@ -153,7 +153,7 @@ export class CategoryService {
 			includeInactive?: boolean
 		}
 	) {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		const category = await this.repo.findById(id, catalogId)
 		if (!category) throw new NotFoundException('Категория не найдена')
 

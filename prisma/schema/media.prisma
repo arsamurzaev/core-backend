@@ -1,65 +1,65 @@
 model Media {
-    id           String @id @default(uuid()) @db.Uuid
-    originalName String @map("original_name")
-    mimeType     String @map("mime_type")
-    size         Int?
-    width        Int?
-    height       Int?
+  id           String @id @default(uuid()) @db.Uuid
+  originalName String @map("original_name")
+  mimeType     String @map("mime_type")
+  size         Int?
+  width        Int?
+  height       Int?
 
-    catalogId String @map("catalog_id") @db.Uuid
-    catalog   Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  catalogId String  @map("catalog_id") @db.Uuid
+  catalog   Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
 
-    path     String? @db.VarChar(255)
-    entityId String? @map("entity_id") @db.VarChar(255)
+  path     String? @db.VarChar(255)
+  entityId String? @map("entity_id") @db.VarChar(255)
 
-    storage String // "s3", "local", ...
-    key     String // path/storageKey
+  storage String // "s3", "local", ...
+  key     String // path/storageKey
 
-    checksum String? // sha256/etag
-    status   MediaStatus @default(UPLOADED)
+  checksum String? // sha256/etag
+  status   MediaStatus @default(UPLOADED)
 
-    variants MediaVariant[]
+  variants MediaVariant[]
 
-    productMedia           ProductMedia[]
-    categoryImages         Category[]     @relation("CategoryImageMedia")
-    catalogConfigLogos     CatalogConfig[] @relation("CatalogConfigLogo")
-    catalogConfigBackgrounds CatalogConfig[] @relation("CatalogConfigBg")
-    seoOgMedia             SeoSetting[]   @relation("SeoOgMedia")
-    seoTwitterMedia        SeoSetting[]   @relation("SeoTwitterMedia")
-    seoFaviconMedia        SeoSetting[]   @relation("SeoFaviconMedia")
+  productMedia             ProductMedia[]
+  categoryImages           Category[]      @relation("CategoryImageMedia")
+  catalogConfigLogos       CatalogConfig[] @relation("CatalogConfigLogo")
+  catalogConfigBackgrounds CatalogConfig[] @relation("CatalogConfigBg")
+  seoOgMedia               SeoSetting[]    @relation("SeoOgMedia")
+  seoTwitterMedia          SeoSetting[]    @relation("SeoTwitterMedia")
+  seoFaviconMedia          SeoSetting[]    @relation("SeoFaviconMedia")
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-    @@unique([catalogId, key])
-    @@index([catalogId])
-    @@map("media")
+  @@unique([catalogId, key])
+  @@index([catalogId])
+  @@map("media")
 }
 
 model MediaVariant {
-    id      String @id @default(uuid()) @db.Uuid
-    mediaId String @map("media_id") @db.Uuid
-    media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  id      String @id @default(uuid()) @db.Uuid
+  mediaId String @map("media_id") @db.Uuid
+  media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
 
-    kind     String // "miniature" | "medium" | "large" | "webp" | "avif" | "square_256" ...
-    mimeType String? @map("mime_type")
-    size     Int?
-    width    Int?
-    height   Int?
+  kind     String // "miniature" | "medium" | "large" | "webp" | "avif" | "square_256" ...
+  mimeType String? @map("mime_type")
+  size     Int?
+  width    Int?
+  height   Int?
 
-    storage String
-    key     String
+  storage String
+  key     String
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-    @@unique([mediaId, kind])
-    @@map("media_variants")
+  @@unique([mediaId, kind])
+  @@map("media_variants")
 }
 
 enum MediaStatus {
-    UPLOADED
-    PROCESSING
-    READY
-    FAILED
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
 }

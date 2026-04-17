@@ -1,154 +1,154 @@
 model AnalyticsSession {
-    id String @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-    catalogId String @map("catalog_id") @db.Uuid
+  catalogId String @map("catalog_id") @db.Uuid
 
-    userId String? @map("user_id") @db.Uuid
+  userId String? @map("user_id") @db.Uuid
 
-    // удобно склеивать с гостевыми корзинами (Cart.token)
-    token String?
+  // удобно склеивать с гостевыми корзинами (Cart.token)
+  token String?
 
-    // связь с Метрикой (если забираешь clientID на фронте)
-    metrikaClientId  String? @map("metrika_client_id")
-    metrikaCounterId String? @map("metrika_counter_id")
+  // связь с Метрикой (если забираешь clientID на фронте)
+  metrikaClientId  String? @map("metrika_client_id")
+  metrikaCounterId String? @map("metrika_counter_id")
 
-    deviceType DeviceType? @map("device_type")
-    userAgent  String?     @map("user_agent")
+  deviceType DeviceType? @map("device_type")
+  userAgent  String?     @map("user_agent")
 
-    referrer   String?
-    landingUrl String? @map("landing_url")
+  referrer   String?
+  landingUrl String? @map("landing_url")
 
-    utm Json? // {source, medium, campaign, content, term}
+  utm Json? // {source, medium, campaign, content, term}
 
-    startedAt  DateTime @default(now()) @map("started_at")
-    lastSeenAt DateTime @updatedAt @map("last_seen_at")
+  startedAt  DateTime @default(now()) @map("started_at")
+  lastSeenAt DateTime @updatedAt @map("last_seen_at")
 
-    events AnalyticsEvent[]
-    leads  Lead[]
+  events AnalyticsEvent[]
+  leads  Lead[]
 
-    @@index([catalogId, startedAt])
-    @@index([metrikaClientId])
-    @@index([token])
-    @@map("analytics_sessions")
+  @@index([catalogId, startedAt])
+  @@index([metrikaClientId])
+  @@index([token])
+  @@map("analytics_sessions")
 }
 
 model AnalyticsEvent {
-    id BigInt @id @default(autoincrement())
+  id BigInt @id @default(autoincrement())
 
-    catalogId String @map("catalog_id") @db.Uuid
+  catalogId String @map("catalog_id") @db.Uuid
 
-    sessionId String?           @map("session_id") @db.Uuid
-    session   AnalyticsSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  sessionId String?           @map("session_id") @db.Uuid
+  session   AnalyticsSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
 
-    userId String? @map("user_id") @db.Uuid
+  userId String? @map("user_id") @db.Uuid
 
-    type     AnalyticsEventType
-    pageType AnalyticsPageType? @map("page_type")
+  type     AnalyticsEventType
+  pageType AnalyticsPageType? @map("page_type")
 
-    url   String?
-    title String?
+  url   String?
+  title String?
 
-    // привязки к сущностям
-    productId  String? @map("product_id") @db.Uuid
-    categoryId String? @map("category_id") @db.Uuid
-    variantId  String? @map("variant_id") @db.Uuid
+  // привязки к сущностям
+  productId  String? @map("product_id") @db.Uuid
+  categoryId String? @map("category_id") @db.Uuid
+  variantId  String? @map("variant_id") @db.Uuid
 
-    position Int? // позиция в листинге (CTR/ранжирование)
+  position Int? // позиция в листинге (CTR/ранжирование)
 
-    // поиск/фильтры
-    query      String?
-    resultsCnt Int?    @map("results_cnt")
-    filters    Json?
-    sort       String?
+  // поиск/фильтры
+  query      String?
+  resultsCnt Int?    @map("results_cnt")
+  filters    Json?
+  sort       String?
 
-    // ошибки/перф
-    statusCode Int?    @map("status_code")
-    errorName  String? @map("error_name")
-    errorMsg   String? @map("error_msg")
-    perf       Json? // {ttfb,fcp,lcp,cls,inp,apiMs,...}
+  // ошибки/перф
+  statusCode Int?    @map("status_code")
+  errorName  String? @map("error_name")
+  errorMsg   String? @map("error_msg")
+  perf       Json? // {ttfb,fcp,lcp,cls,inp,apiMs,...}
 
-    payload Json?
+  payload Json?
 
-    createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
-    @@index([catalogId, createdAt])
-    @@index([sessionId, createdAt])
-    @@index([type, createdAt])
-    @@index([productId, createdAt])
-    @@index([categoryId, createdAt])
-    @@index([variantId, createdAt])
-    @@map("analytics_events")
+  @@index([catalogId, createdAt])
+  @@index([sessionId, createdAt])
+  @@index([type, createdAt])
+  @@index([productId, createdAt])
+  @@index([categoryId, createdAt])
+  @@index([variantId, createdAt])
+  @@map("analytics_events")
 }
 
 model Lead {
-    id String @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-    catalogId String @map("catalog_id") @db.Uuid
+  catalogId String @map("catalog_id") @db.Uuid
 
-    sessionId String?           @map("session_id") @db.Uuid
-    session   AnalyticsSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  sessionId String?           @map("session_id") @db.Uuid
+  session   AnalyticsSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
 
-    userId String? @map("user_id") @db.Uuid
+  userId String? @map("user_id") @db.Uuid
 
-    channel LeadChannel
-    status  LeadStatus  @default(SUBMITTED)
+  channel LeadChannel
+  status  LeadStatus  @default(SUBMITTED)
 
-    productId  String? @map("product_id") @db.Uuid
-    categoryId String? @map("category_id") @db.Uuid
+  productId  String? @map("product_id") @db.Uuid
+  categoryId String? @map("category_id") @db.Uuid
 
-    name    String?
-    phone   String?
-    email   String?
-    message String?
+  name    String?
+  phone   String?
+  email   String?
+  message String?
 
-    qualifiedAt DateTime? @map("qualified_at")
-    meta        Json?
+  qualifiedAt DateTime? @map("qualified_at")
+  meta        Json?
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-    @@index([catalogId, createdAt])
-    @@index([status, createdAt])
-    @@map("leads")
+  @@index([catalogId, createdAt])
+  @@index([status, createdAt])
+  @@map("leads")
 }
 
 // ✅ агрегаты из Метрики, чтобы быстро строить отчёты "визиты → заказы/лиды"
 model MetrikaDailyStat {
-    id String @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-    catalogId String @map("catalog_id") @db.Uuid
+  catalogId String @map("catalog_id") @db.Uuid
 
-    counterId String   @map("counter_id")
-    date      DateTime @db.Date
+  counterId String   @map("counter_id")
+  date      DateTime @db.Date
 
-    visits    Int @default(0)
-    users     Int @default(0)
-    pageviews Int @default(0)
+  visits    Int @default(0)
+  users     Int @default(0)
+  pageviews Int @default(0)
 
-    bounceRate          Decimal? @map("bounce_rate") @db.Decimal(6, 3)
-    avgVisitDurationSec Int?     @map("avg_visit_duration_sec")
+  bounceRate          Decimal? @map("bounce_rate") @db.Decimal(6, 3)
+  avgVisitDurationSec Int?     @map("avg_visit_duration_sec")
 
-    createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
-    @@unique([catalogId, date])
-    @@index([date])
-    @@map("metrika_daily_stats")
+  @@unique([catalogId, date])
+  @@index([date])
+  @@map("metrika_daily_stats")
 }
 
 model MetrikaSourceDailyStat {
-    id String @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-    catalogId String @map("catalog_id") @db.Uuid
+  catalogId String @map("catalog_id") @db.Uuid
 
-    date DateTime @db.Date
+  date DateTime @db.Date
 
-    source   String?
-    medium   String?
-    campaign String?
+  source   String?
+  medium   String?
+  campaign String?
 
-    visits Int @default(0)
-    users  Int @default(0)
+  visits Int @default(0)
+  users  Int @default(0)
 
-    @@index([catalogId, date])
-    @@map("metrika_source_daily_stats")
+  @@index([catalogId, date])
+  @@map("metrika_source_daily_stats")
 }

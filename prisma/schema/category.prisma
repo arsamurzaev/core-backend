@@ -1,49 +1,49 @@
 model Category {
-    // Уникальный идентификатор категории
-    // Пример: "550e8400-e29b-41d4-a716-446655440000"
-    id String @id @default(uuid()) @db.Uuid
+  // Уникальный идентификатор категории
+  // Пример: "550e8400-e29b-41d4-a716-446655440000"
+  id String @id @default(uuid()) @db.Uuid
 
-    position Int @default(0)
+  position Int @default(0)
 
-    name       String  @db.VarChar(255)
-    imageMediaId String? @map("image_media_id") @db.Uuid
-    imageMedia   Media?  @relation("CategoryImageMedia", fields: [imageMediaId], references: [id], onDelete: SetNull)
-    descriptor String? @map("descriptor")
+  name         String  @db.VarChar(255)
+  imageMediaId String? @map("image_media_id") @db.Uuid
+  imageMedia   Media?  @relation("CategoryImageMedia", fields: [imageMediaId], references: [id], onDelete: SetNull)
+  descriptor   String? @map("descriptor")
 
-    discount Int?
+  discount Int?
 
-    // ─── Связи ───
-    // Каталоги этого типа (H&M, Zara для clothing)
-    catalog   Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
-    catalogId String  @map("catalog_id") @db.Uuid
+  // ─── Связи ───
+  // Каталоги этого типа (H&M, Zara для clothing)
+  catalog   Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  catalogId String  @map("catalog_id") @db.Uuid
 
-    parent   Category? @relation("CategoryToCategory", fields: [parentId], references: [id], onDelete: Cascade)
-    parentId String?   @map("parent_id") @db.Uuid
+  parent   Category? @relation("CategoryToCategory", fields: [parentId], references: [id], onDelete: Cascade)
+  parentId String?   @map("parent_id") @db.Uuid
 
-    categoryProducts CategoryProduct[]
-    integrationLinks IntegrationCategoryLink[]
+  categoryProducts CategoryProduct[]
+  integrationLinks IntegrationCategoryLink[]
 
-    children Category[] @relation("CategoryToCategory")
+  children Category[] @relation("CategoryToCategory")
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+  deleteAt  DateTime? @map("delete_at") // Дата удаления 
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
-    @@index([catalogId, deleteAt, position, name])
-    @@index([parentId, deleteAt, position, name])
-    @@map("categories")
+  @@index([catalogId, deleteAt, position, name])
+  @@index([parentId, deleteAt, position, name])
+  @@map("categories")
 }
 
 model CategoryProduct {
-    categoryId String @map("category_id") @db.Uuid
-    productId  String @map("product_id") @db.Uuid
+  categoryId String @map("category_id") @db.Uuid
+  productId  String @map("product_id") @db.Uuid
 
-    position Int @default(0)
+  position Int @default(0)
 
-    category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-    product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-    @@id([categoryId, productId])
-    @@index([categoryId, position, productId])
-    @@map("category_products")
+  @@id([categoryId, productId])
+  @@index([categoryId, position, productId])
+  @@map("category_products")
 }

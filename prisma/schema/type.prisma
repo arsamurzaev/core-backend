@@ -14,29 +14,29 @@
 // └─────────────────────────────────────────────┘
 
 model Type {
-    // Уникальный идентификатор типа каталога
-    // Пример: "550e8400-e29b-41d4-a716-446655440000"
-    id String @id @default(uuid()) @db.Uuid
+  // Уникальный идентификатор типа каталога
+  // Пример: "550e8400-e29b-41d4-a716-446655440000"
+  id String @id @default(uuid()) @db.Uuid
 
-    // Программный код типа (используется в URL, API, коде)
-    // Пример: "clothing", "restaurant", "electronics"
-    // Уникален — нельзя создать два типа с одинаковым кодом
-    code String @unique @db.VarChar(50)
+  // Программный код типа (используется в URL, API, коде)
+  // Пример: "clothing", "restaurant", "electronics"
+  // Уникален — нельзя создать два типа с одинаковым кодом
+  code String @unique @db.VarChar(50)
 
-    // Отображаемое название для UI
-    // Пример: "Одежда и аксессуары", "Рестораны и кафе"
-    name String @db.VarChar(255)
+  // Отображаемое название для UI
+  // Пример: "Одежда и аксессуары", "Рестораны и кафе"
+  name String @db.VarChar(255)
 
-    // ─── Связи ───
-    // Каталоги этого типа (H&M, Zara для clothing)
-    catalogs   Catalog[]
-    // Атрибуты, определённые для этого типа (size, color для clothing)
-    attributes Attribute[]
-    activities Activity[]
+  // ─── Связи ───
+  // Каталоги этого типа (H&M, Zara для clothing)
+  catalogs   Catalog[]
+  // Атрибуты, определённые для этого типа (size, color для clothing)
+  attributes Attribute[]
+  activities Activity[]
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+  deleteAt  DateTime? @map("delete_at") // Дата удаления 
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
-    @@map("types")
+  @@map("types")
 }

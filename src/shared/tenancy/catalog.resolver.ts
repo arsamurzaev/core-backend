@@ -8,6 +8,7 @@ export type ResolvedCatalog = {
 	typeId: string
 
 	ownerUserId?: string | null
+	parentId?: string | null
 }
 
 type CacheEntry = { value: ResolvedCatalog | null; expiresAt: number }
@@ -45,7 +46,7 @@ export class CatalogResolver {
 
 		const catalog = await this.prisma.catalog.findFirst({
 			where: { slug, deleteAt: null },
-			select: { id: true, slug: true, typeId: true, userId: true }
+			select: { id: true, slug: true, typeId: true, userId: true, parentId: true }
 		})
 
 		const value = catalog
@@ -53,7 +54,8 @@ export class CatalogResolver {
 					catalogId: catalog.id,
 					slug: catalog.slug,
 					typeId: catalog.typeId,
-					ownerUserId: catalog.userId ?? null
+					ownerUserId: catalog.userId ?? null,
+					parentId: catalog.parentId ?? null
 				}
 			: null
 
@@ -69,7 +71,7 @@ export class CatalogResolver {
 		// Лучше если domain в Prisma: domain String? @unique
 		const catalog = await this.prisma.catalog.findFirst({
 			where: { domain, deleteAt: null },
-			select: { id: true, slug: true, typeId: true, userId: true }
+			select: { id: true, slug: true, typeId: true, userId: true, parentId: true }
 		})
 
 		const value = catalog
@@ -77,7 +79,8 @@ export class CatalogResolver {
 					catalogId: catalog.id,
 					slug: catalog.slug,
 					typeId: catalog.typeId,
-					ownerUserId: catalog.userId ?? null
+					ownerUserId: catalog.userId ?? null,
+					parentId: catalog.parentId ?? null
 				}
 			: null
 

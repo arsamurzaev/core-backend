@@ -1,58 +1,58 @@
 model SeoSetting {
-    id String @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-    catalogId String  @map("catalog_id") @db.Uuid
-    catalog   Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  catalogId String  @map("catalog_id") @db.Uuid
+  catalog   Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
 
-    entityType SeoEntityType @map("entity_type")
-    entityId   String        @map("entity_id") @db.Uuid
+  entityType SeoEntityType @map("entity_type")
+  entityId   String        @map("entity_id") @db.Uuid
 
-    urlPath      String? @map("url_path") @db.VarChar(1024)
-    canonicalUrl String? @map("canonical_url") @db.VarChar(2048)
+  urlPath      String? @map("url_path") @db.VarChar(1024)
+  canonicalUrl String? @map("canonical_url") @db.VarChar(2048)
 
-    title       String? @db.VarChar(255)
-    description String? @db.VarChar(500)
-    keywords    String? @db.VarChar(500)
-    h1          String? @db.VarChar(255)
-    seoText     String? @db.Text
+  title       String? @db.VarChar(255)
+  description String? @db.VarChar(500)
+  keywords    String? @db.VarChar(500)
+  h1          String? @db.VarChar(255)
+  seoText     String? @db.Text
 
-    robots       String? @db.VarChar(100)
-    isIndexable  Boolean @default(true) @map("is_indexable")
-    isFollowable Boolean @default(true) @map("is_followable")
+  robots       String? @db.VarChar(100)
+  isIndexable  Boolean @default(true) @map("is_indexable")
+  isFollowable Boolean @default(true) @map("is_followable")
 
-    ogTitle       String? @map("og_title") @db.VarChar(255)
-    ogDescription String? @map("og_description") @db.VarChar(500)
-    ogMediaId     String? @map("og_media_id") @db.Uuid
-    ogType        String? @map("og_type") @db.VarChar(100)
-    ogUrl         String? @map("og_url") @db.VarChar(2048)
-    ogSiteName    String? @map("og_site_name") @db.VarChar(255)
-    ogLocale      String? @map("og_locale") @db.VarChar(20)
+  ogTitle       String? @map("og_title") @db.VarChar(255)
+  ogDescription String? @map("og_description") @db.VarChar(500)
+  ogMediaId     String? @map("og_media_id") @db.Uuid
+  ogType        String? @map("og_type") @db.VarChar(100)
+  ogUrl         String? @map("og_url") @db.VarChar(2048)
+  ogSiteName    String? @map("og_site_name") @db.VarChar(255)
+  ogLocale      String? @map("og_locale") @db.VarChar(20)
 
-    twitterCard        String? @map("twitter_card") @db.VarChar(50)
-    twitterTitle       String? @map("twitter_title") @db.VarChar(255)
-    twitterDescription String? @map("twitter_description") @db.VarChar(500)
-    twitterMediaId     String? @map("twitter_media_id") @db.Uuid
+  twitterCard        String? @map("twitter_card") @db.VarChar(50)
+  twitterTitle       String? @map("twitter_title") @db.VarChar(255)
+  twitterDescription String? @map("twitter_description") @db.VarChar(500)
+  twitterMediaId     String? @map("twitter_media_id") @db.Uuid
 
-    ogMedia      Media? @relation("SeoOgMedia", fields: [ogMediaId], references: [id], onDelete: SetNull)
-    twitterMedia Media? @relation("SeoTwitterMedia", fields: [twitterMediaId], references: [id], onDelete: SetNull)
+  ogMedia      Media? @relation("SeoOgMedia", fields: [ogMediaId], references: [id], onDelete: SetNull)
+  twitterMedia Media? @relation("SeoTwitterMedia", fields: [twitterMediaId], references: [id], onDelete: SetNull)
 
-    faviconMediaId String? @map("favicon_media_id") @db.Uuid
-    faviconMedia   Media?  @relation("SeoFaviconMedia", fields: [faviconMediaId], references: [id], onDelete: SetNull)
-    twitterSite        String? @map("twitter_site") @db.VarChar(100)
-    twitterCreator     String? @map("twitter_creator") @db.VarChar(100)
+  faviconMediaId String? @map("favicon_media_id") @db.Uuid
+  faviconMedia   Media?  @relation("SeoFaviconMedia", fields: [faviconMediaId], references: [id], onDelete: SetNull)
+  twitterSite    String? @map("twitter_site") @db.VarChar(100)
+  twitterCreator String? @map("twitter_creator") @db.VarChar(100)
 
-    hreflang       Json? @map("hreflang")
-    structuredData Json? @map("structured_data")
-    extras         Json?
+  hreflang       Json? @map("hreflang")
+  structuredData Json? @map("structured_data")
+  extras         Json?
 
-    sitemapPriority   Decimal?       @map("sitemap_priority") @db.Decimal(3, 2)
-    sitemapChangeFreq SeoChangeFreq? @map("sitemap_changefreq")
+  sitemapPriority   Decimal?       @map("sitemap_priority") @db.Decimal(3, 2)
+  sitemapChangeFreq SeoChangeFreq? @map("sitemap_changefreq")
 
-    deleteAt  DateTime? @map("delete_at")
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+  deleteAt  DateTime? @map("delete_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
-    @@unique([catalogId, entityType, entityId])
-    @@index([catalogId, entityType])
-    @@map("seo_settings")
+  @@unique([catalogId, entityType, entityId])
+  @@index([catalogId, entityType])
+  @@map("seo_settings")
 }

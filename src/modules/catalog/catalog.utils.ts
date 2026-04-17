@@ -1,4 +1,4 @@
-import { ContactType } from '@generated/enums'
+import { CatalogExperienceMode, ContactType } from '@generated/enums'
 import type { CatalogUpdateInput } from '@generated/models'
 import { BadRequestException } from '@nestjs/common'
 import slugify from 'slugify'
@@ -27,6 +27,11 @@ export type CatalogUpdateAccess = {
 	allowOwner: boolean
 	allowParent: boolean
 }
+
+type CatalogSettingsSnapshot = {
+	defaultMode: CatalogExperienceMode
+	allowedModes: CatalogExperienceMode[]
+} | null
 
 export function normalizeCatalogSlug(value: string): string {
 	return value.trim().toLowerCase()
@@ -182,7 +187,8 @@ export function buildCatalogConfigUpsert(
 }
 
 export function buildCatalogSettingsUpsert(
-	dto: UpdateCatalogDtoReq
+	dto: UpdateCatalogDtoReq,
+	currentSettings: CatalogSettingsSnapshot = null
 ): CatalogUpdateInput['settings'] | undefined {
 	const update: Record<string, unknown> = {}
 	const create: Record<string, unknown> = {}
@@ -200,6 +206,29 @@ export function buildCatalogSettingsUpsert(
 	if (dto.yandexVerification !== undefined) {
 		update.yandexVerification = dto.yandexVerification
 		create.yandexVerification = dto.yandexVerification
+	}
+
+	const nextAllowedModes =
+		dto.allowedModes !== undefined
+			? normalizeCatalogAllowedModes(dto.allowedModes)
+			: currentSettings?.allowedModes ?? [CatalogExperienceMode.DELIVERY]
+	const nextDefaultMode =
+		dto.defaultMode !== undefined
+			? dto.defaultMode
+			: currentSettings?.defaultMode ?? CatalogExperienceMode.DELIVERY
+
+	if (dto.allowedModes !== undefined || dto.defaultMode !== undefined) {
+		ensureCatalogExperienceSettingsValid(nextDefaultMode, nextAllowedModes)
+	}
+
+	if (dto.defaultMode !== undefined) {
+		update.defaultMode = dto.defaultMode
+		create.defaultMode = dto.defaultMode
+	}
+
+	if (dto.allowedModes !== undefined) {
+		update.allowedModes = nextAllowedModes
+		create.allowedModes = nextAllowedModes
 	}
 
 	if (!hasValues(update)) return undefined
@@ -246,4 +275,27 @@ export function buildCatalogContactsUpdate(
 
 function hasValues(value: Record<string, unknown>): boolean {
 	return Object.keys(value).length > 0
+}
+
+function normalizeCatalogAllowedModes(
+	allowedModes: CatalogExperienceMode[]
+): CatalogExperienceMode[] {
+	const normalized = Array.from(new Set(allowedModes))
+
+	if (normalized.length === 0) {
+		throw new BadRequestException('allowedModes must contain at least one mode')
+	}
+
+	return normalized
+}
+
+function ensureCatalogExperienceSettingsValid(
+	defaultMode: CatalogExperienceMode,
+	allowedModes: CatalogExperienceMode[]
+): void {
+	if (!allowedModes.includes(defaultMode)) {
+		throw new BadRequestException(
+			'defaultMode must be included in allowedModes'
+		)
+	}
 }

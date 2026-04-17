@@ -127,7 +127,8 @@ export class CatalogContextMiddleware implements NestMiddleware {
 				catalogId: resolved?.catalogId,
 				catalogSlug: resolved?.slug,
 				typeId: resolved?.typeId,
-				ownerUserId: resolved?.ownerUserId ?? null
+				ownerUserId: resolved?.ownerUserId ?? null,
+				parentId: resolved?.parentId ?? null
 			}
 
 			RequestContext.run(store, () => {

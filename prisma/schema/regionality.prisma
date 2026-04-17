@@ -1,15 +1,15 @@
 model Regionality {
-    id String @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-    code String @unique
-    name String
+  code String @unique
+  name String
 
-    catalogs Catalog[]
-    users    User[]
+  catalogs Catalog[]
+  users    User[]
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+  deleteAt  DateTime? @map("delete_at") // Дата удаления 
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
-    @@map("regionality")
+  @@map("regionality")
 }

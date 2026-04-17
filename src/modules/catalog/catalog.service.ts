@@ -225,7 +225,10 @@ export class CatalogService {
 			data.config = config
 		}
 
-		const settings = buildCatalogSettingsUpsert(dto)
+		const currentSettings = this.hasCatalogSettingsChanges(dto)
+			? await this.loadCatalogSettingsSnapshot(catalogId)
+			: null
+		const settings = buildCatalogSettingsUpsert(dto, currentSettings)
 		if (settings) {
 			data.settings = settings
 		}
@@ -238,6 +241,33 @@ export class CatalogService {
 		assertHasUpdateFields(data)
 
 		return data
+	}
+
+	private hasCatalogSettingsChanges(dto: UpdateCatalogDtoReq): boolean {
+		return (
+			dto.isActive !== undefined ||
+			dto.defaultMode !== undefined ||
+			dto.allowedModes !== undefined ||
+			dto.googleVerification !== undefined ||
+			dto.yandexVerification !== undefined
+		)
+	}
+
+	private async loadCatalogSettingsSnapshot(catalogId: string) {
+		const catalog = await this.repo.getById(catalogId, {
+			settings: {
+				select: {
+					defaultMode: true,
+					allowedModes: true
+				}
+			}
+		})
+
+		if (!catalog) {
+			throw new NotFoundException('Catalog not found')
+		}
+
+		return catalog.settings
 	}
 
 	private async applyCatalogIdentityUpdates(

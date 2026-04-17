@@ -41,6 +41,8 @@ lerna-debug.log*
 .env.test.local
 .env.production.local
 .env.local
+/migration/.env
+/migration/.env.local
 
 # temp directory
 .temp
@@ -52,6 +54,9 @@ pids
 *.seed
 *.pid.lock
 runtime/
+/migration/dist
+/migration/dist-legacy
+/migration/runtime
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json

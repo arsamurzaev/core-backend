@@ -1,12 +1,25 @@
 model Payment {
-    id String @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-    catalog   Catalog @relation(fields: [catalogId], references: [id])
-    catalogId String  @map("catalog_id") @db.Uuid
+  kind PaymentKind @default(SUBSCRIPTION)
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+  catalog   Catalog @relation(fields: [catalogId], references: [id])
+  catalogId String  @map("catalog_id") @db.Uuid
 
-    @@map("payments")
+  promoCodeId String?    @map("promo_code_id") @db.Uuid
+  promoCode   PromoCode? @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
+
+  paidAt        DateTime? @map("paid_at")
+  amount        Decimal?  @db.Decimal(12, 2)
+  licenseEndsAt DateTime? @map("license_ends_at")
+  proofUrl      String?   @map("proof_url") @db.Text
+  metadata      Json?
+
+  deleteAt  DateTime? @map("delete_at") // Дата удаления
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@index([catalogId, kind, createdAt])
+  @@index([promoCodeId])
+  @@map("payments")
 }

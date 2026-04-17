@@ -666,6 +666,9 @@ const catalogSeeds: CatalogSeed[] = ensureProductsPerCategory(
 
 async function clearDatabase() {
 	await prisma.$transaction([
+		prisma.migrationIssue.deleteMany(),
+		prisma.migrationEntityMap.deleteMany(),
+		prisma.migrationRun.deleteMany(),
 		prisma.analyticsEvent.deleteMany(),
 		prisma.lead.deleteMany(),
 		prisma.analyticsSession.deleteMany(),
@@ -673,7 +676,6 @@ async function clearDatabase() {
 		prisma.metrikaDailyStat.deleteMany(),
 		prisma.cartItem.deleteMany(),
 		prisma.cart.deleteMany(),
-		prisma.orderItem.deleteMany(),
 		prisma.order.deleteMany(),
 		prisma.variantAttribute.deleteMany(),
 		prisma.productVariant.deleteMany(),
@@ -696,6 +698,7 @@ async function clearDatabase() {
 		prisma.integration.deleteMany(),
 		prisma.s3.deleteMany(),
 		prisma.catalog.deleteMany(),
+		prisma.promoCode.deleteMany(),
 		prisma.activity.deleteMany(),
 		prisma.type.deleteMany(),
 		prisma.user.deleteMany(),

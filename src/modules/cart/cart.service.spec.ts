@@ -33,13 +33,19 @@ function createCompletedOrderEntity(overrides: Record<string, unknown> = {}) {
 		catalogId: 'catalog-1',
 		totalAmount: 3998,
 		createdAt: new Date('2026-03-25T09:10:00.000Z'),
-		items: [
+		products: [
 			{
-				id: 'order-item-1',
+				id: 'cart-item-1',
 				productId: 'product-1',
 				variantId: null,
 				quantity: 2,
-				unitPrice: 1999
+				unitPrice: 1999,
+				lineTotal: 3998,
+				product: {
+					id: 'product-1',
+					name: 'Product 1',
+					slug: 'product-1'
+				}
 			}
 		],
 		...overrides

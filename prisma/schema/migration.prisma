@@ -1,0 +1,68 @@
+model MigrationRun {
+  id String @id @default(uuid()) @db.Uuid
+
+  source String @default("old-code") @db.VarChar(100)
+  phase  String @db.VarChar(100)
+
+  status MigrationRunStatus @default(RUNNING)
+  dryRun Boolean            @default(true) @map("dry_run")
+
+  options Json?
+  summary Json?
+  error   String?
+
+  issues     MigrationIssue[]
+  entityMaps MigrationEntityMap[]
+
+  startedAt  DateTime  @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+
+  @@index([source, phase, startedAt])
+  @@map("migration_runs")
+}
+
+model MigrationEntityMap {
+  id String @id @default(uuid()) @db.Uuid
+
+  runId String       @map("run_id") @db.Uuid
+  run   MigrationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  source String              @default("old-code") @db.VarChar(100)
+  entity MigrationEntityKind
+
+  legacyId       String  @map("legacy_id") @db.VarChar(191)
+  targetId       String  @map("target_id") @db.VarChar(191)
+  legacyParentId String? @map("legacy_parent_id") @db.VarChar(191)
+  payload        Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([source, entity, legacyId])
+  @@index([entity, targetId])
+  @@index([runId, entity])
+  @@map("migration_entity_maps")
+}
+
+model MigrationIssue {
+  id String @id @default(uuid()) @db.Uuid
+
+  runId String       @map("run_id") @db.Uuid
+  run   MigrationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  source String               @default("old-code") @db.VarChar(100)
+  entity MigrationEntityKind?
+
+  legacyId String? @map("legacy_id") @db.VarChar(191)
+
+  severity MigrationIssueSeverity @default(ERROR)
+  code     String                 @db.VarChar(100)
+  message  String
+  details  Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([runId, severity])
+  @@index([source, entity, legacyId])
+  @@map("migration_issues")
+}

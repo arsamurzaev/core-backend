@@ -49,6 +49,8 @@ export const PUBLIC_KEY_BYTES = 16
 export const CHECKOUT_KEY_BYTES = 18
 export const CART_COOKIE_NAME = 'cart_token'
 export const CART_SSE_HEARTBEAT_MS = 20_000
+export const MAX_ITEM_QUANTITY = 999
+export const MAX_CART_ITEMS = 50
 
 function getCartStatusMessage(status: CartStatus): string | null {
 	if (status === CartStatus.IN_PROGRESS) {
@@ -100,10 +102,14 @@ export function normalizeCartItemInput(
 	return { productId, variantId, quantity }
 }
 
+function toCents(price: any): number {
+	return Math.round(Number(String(price)) * 100)
+}
+
 export function mapCartEntity(cart: CartEntityLike) {
 	const items = cart.items.map(item => {
-		const unitPrice = Number(item.product.price)
-		const lineTotal = Number((unitPrice * item.quantity).toFixed(2))
+		const unitPriceCents = toCents(item.product.price)
+		const lineTotalCents = unitPriceCents * item.quantity
 
 		return {
 			id: item.id,
@@ -114,18 +120,21 @@ export function mapCartEntity(cart: CartEntityLike) {
 				id: item.product.id,
 				name: item.product.name,
 				slug: item.product.slug,
-				price: unitPrice
+				price: unitPriceCents / 100
 			},
-			lineTotal,
+			lineTotal: lineTotalCents / 100,
 			createdAt: item.createdAt,
 			updatedAt: item.updatedAt
 		}
 	})
 
 	const itemsCount = items.reduce((acc, item) => acc + item.quantity, 0)
-	const subtotal = Number(
-		items.reduce((acc, item) => acc + item.lineTotal, 0).toFixed(2)
+	const subtotalCents = cart.items.reduce(
+		(acc, item) => acc + toCents(item.product.price) * item.quantity,
+		0
 	)
+	const subtotal = subtotalCents / 100
+	const total = subtotal
 
 	return {
 		id: cart.id,
@@ -142,7 +151,8 @@ export function mapCartEntity(cart: CartEntityLike) {
 		items,
 		totals: {
 			itemsCount,
-			subtotal
+			subtotal,
+			total
 		},
 		createdAt: cart.createdAt,
 		updatedAt: cart.updatedAt

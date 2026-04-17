@@ -1,4 +1,4 @@
-import { CatalogStatus, ContactType } from '@generated/enums'
+import { CatalogExperienceMode, CatalogStatus, ContactType } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
 import { AttributeDto } from '@/modules/attribute/dto/responses/attribute.dto.res'
@@ -32,6 +32,12 @@ export class CatalogConfigDto {
 export class CatalogSettingsDto {
 	@ApiProperty({ type: Boolean })
 	isActive: boolean
+
+	@ApiProperty({ enum: CatalogExperienceMode })
+	defaultMode: CatalogExperienceMode
+
+	@ApiProperty({ enum: CatalogExperienceMode, isArray: true })
+	allowedModes: CatalogExperienceMode[]
 
 	@ApiProperty({ type: String, nullable: true })
 	googleVerification: string | null

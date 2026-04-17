@@ -11,6 +11,10 @@ export type RequestContextStore = {
 
 	ownerUserId?: string | null
 
+	// Если каталог является дочерним — id родительского каталога.
+	// Используется для наследования товаров, категорий и брендов.
+	parentId?: string | null
+
 	// bypass tenant scoping for SkipCatalog routes
 	skipCatalog?: boolean
 }

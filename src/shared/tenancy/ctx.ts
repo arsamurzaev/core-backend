@@ -13,3 +13,17 @@ export const mustTypeId = (): string => {
 	if (!id) throw new Error('В RequestContext отсутствует typeId')
 	return id
 }
+
+/**
+ * Возвращает catalogId родителя если текущий каталог является дочерним,
+ * иначе возвращает catalogId текущего каталога.
+ *
+ * Используется в read-методах для прозрачного наследования товаров,
+ * категорий и брендов от родительского каталога.
+ */
+export const effectiveCatalogId = (): string => {
+	const store = RequestContext.mustGet()
+	const id = store.parentId ?? store.catalogId
+	if (!id) throw new Error('В RequestContext отсутствует catalogId')
+	return id
+}

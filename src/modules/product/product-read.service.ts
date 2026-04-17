@@ -22,7 +22,7 @@ import {
 	MediaUrlService
 } from '@/shared/media/media-url.service'
 import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
-import { mustCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
+import { effectiveCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
 
 import { SeoRepository } from '../seo/seo.repository'
 
@@ -98,7 +98,7 @@ export class ProductReadService {
 	// ─── Public read methods ─────────────────────────────────────────────────
 
 	async getAll(options?: ProductReadOptions) {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		const includeInactive = options?.includeInactive === true
 
 		if (includeInactive || !this.cacheTtlSec) {
@@ -120,7 +120,7 @@ export class ProductReadService {
 	}
 
 	async getPopular(options?: ProductReadOptions) {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		const includeInactive = options?.includeInactive === true
 
 		if (includeInactive || !this.cacheTtlSec) {
@@ -142,7 +142,7 @@ export class ProductReadService {
 	}
 
 	async getPopularCards(options?: ProductReadOptions) {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		const includeInactive = options?.includeInactive === true
 
 		if (includeInactive || !this.cacheTtlSec) {
@@ -167,7 +167,7 @@ export class ProductReadService {
 		query: Record<string, unknown>,
 		options?: ProductReadOptions
 	) {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		const typeId = mustTypeId()
 		const includeInactive = options?.includeInactive === true
 		const parsed = parseProductInfiniteQuery(query, {
@@ -213,7 +213,7 @@ export class ProductReadService {
 		query: Record<string, unknown>,
 		options?: ProductReadOptions
 	) {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		const typeId = mustTypeId()
 		const includeInactive = options?.includeInactive === true
 		const parsed = parseProductInfiniteQuery(query, {
@@ -264,7 +264,7 @@ export class ProductReadService {
 		limit?: number | string
 		includeInactive?: boolean
 	}) {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		const includeInactive = options?.includeInactive === true
 		const parsed = parseProductInfiniteQuery(
 			{ cursor: options?.cursor, limit: options?.limit },
@@ -321,7 +321,7 @@ export class ProductReadService {
 		limit?: number | string
 		includeInactive?: boolean
 	}) {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		const includeInactive = options?.includeInactive === true
 		const parsed = parseProductInfiniteQuery(
 			{ cursor: options?.cursor, limit: options?.limit },
@@ -374,7 +374,7 @@ export class ProductReadService {
 	}
 
 	async getById(id: string, options?: ProductReadOptions) {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		const product = await this.repo.findById(
 			id,
 			catalogId,
@@ -385,7 +385,7 @@ export class ProductReadService {
 	}
 
 	async getBySlug(slug: string, options?: ProductReadOptions) {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		const product = await this.repo.findBySlug(
 			normalizeSlug(slug),
 			catalogId,
@@ -785,7 +785,7 @@ export class ProductReadService {
 		options: ProductReadOptions | undefined,
 		kind: 'catalog' | 'recommendations'
 	) {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		const typeId = mustTypeId()
 		const includeInactive = options?.includeInactive === true
 		const parsed = parseProductInfiniteQuery(query, {

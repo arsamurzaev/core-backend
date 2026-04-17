@@ -1,53 +1,34 @@
 model Order {
-    id String @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-    status OrderStatus @default(PENDING)
+  status OrderStatus @default(PENDING)
 
-    token   String?
-    comment String?
+  legacyOrderId String? @map("legacy_order_id") @db.VarChar(191)
+  legacyUserId  String? @map("legacy_user_id") @db.VarChar(191)
 
-    commentByAdmin String? @map("comment_by_admin")
+  token      String?
+  comment    String?
+  address    String?
+  isDelivery Boolean @default(false) @map("is_delivery")
 
-    paymentMethod PaymentMethod? @map("payment_method")
-    paymentProof  String[]       @map("payment_proof")
-    products      Json
+  commentByAdmin String? @map("comment_by_admin")
 
-    totalAmount Int @default(0) @map("total_amount")
+  paymentMethod PaymentMethod? @map("payment_method")
+  paymentProof  String[]       @map("payment_proof")
 
-    catalog   Catalog @relation(fields: [catalogId], references: [id])
-    catalogId String  @map("catalog_id") @db.Uuid
+  // Source of truth for both migrated and newly created orders.
+  products Json
 
-    // ✅ позиции заказа
-    items OrderItem[]
+  totalAmount Decimal @default(0) @map("total_amount") @db.Decimal(12, 2)
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+  catalog   Catalog @relation(fields: [catalogId], references: [id])
+  catalogId String  @map("catalog_id") @db.Uuid
 
-    @@map("orders")
-}
+  deleteAt  DateTime? @map("delete_at") // Дата удаления
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
-model OrderItem {
-    id String @id @default(uuid()) @db.Uuid
-
-    orderId String @map("order_id") @db.Uuid
-    order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
-
-    productId String  @map("product_id") @db.Uuid
-    product   Product @relation(fields: [productId], references: [id])
-
-    // если покупают конкретный вариант
-    variantId String? @map("variant_id") @db.Uuid
-
-    quantity Int @default(1)
-
-    // цена на момент покупки (лучше хранить снапшотом)
-    unitPrice Decimal @map("unit_price") @db.Decimal(12, 2)
-
-    createdAt DateTime @default(now()) @map("created_at")
-
-    @@index([orderId])
-    @@index([productId, createdAt])
-    @@index([variantId, createdAt])
-    @@map("order_items")
+  @@index([catalogId, createdAt])
+  @@index([catalogId, legacyOrderId])
+  @@map("orders")
 }

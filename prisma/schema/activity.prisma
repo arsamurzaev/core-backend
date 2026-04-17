@@ -1,13 +1,13 @@
 model Activity {
-    id   String @id @default(uuid()) @db.Uuid
-    name String
+  id   String @id @default(uuid()) @db.Uuid
+  name String
 
-    type     Type[]
-    catalogs Catalog[]
+  type     Type[]
+  catalogs Catalog[]
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+  deleteAt  DateTime? @map("delete_at") // Дата удаления 
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
-    @@map("activities")
+  @@map("activities")
 }

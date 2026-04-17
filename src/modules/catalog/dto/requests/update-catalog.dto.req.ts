@@ -1,7 +1,8 @@
-import { CatalogStatus, ContactType } from '@generated/enums'
+import { CatalogExperienceMode, CatalogStatus, ContactType } from '@generated/enums'
 import { ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {
+	ArrayNotEmpty,
 	ArrayMaxSize,
 	IsArray,
 	IsBoolean,
@@ -157,6 +158,25 @@ export class UpdateCatalogDtoReq {
 	@IsOptional()
 	@IsBoolean()
 	isActive?: boolean
+
+	@ApiPropertyOptional({
+		enum: CatalogExperienceMode,
+		example: CatalogExperienceMode.DELIVERY
+	})
+	@IsOptional()
+	@IsEnum(CatalogExperienceMode)
+	defaultMode?: CatalogExperienceMode
+
+	@ApiPropertyOptional({
+		enum: CatalogExperienceMode,
+		isArray: true,
+		example: [CatalogExperienceMode.DELIVERY, CatalogExperienceMode.BROWSE]
+	})
+	@IsOptional()
+	@IsArray()
+	@ArrayNotEmpty()
+	@IsEnum(CatalogExperienceMode, { each: true })
+	allowedModes?: CatalogExperienceMode[]
 
 	@ApiPropertyOptional({
 		type: String,

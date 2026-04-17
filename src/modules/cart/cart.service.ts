@@ -15,6 +15,7 @@ import { Observable, Subject } from 'rxjs'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import type { SessionUser } from '@/modules/auth/types/auth-request'
+import { normalizeOrderProducts } from '@/shared/order/order-products.utils'
 
 import {
 	CART_COOKIE_NAME,
@@ -22,6 +23,8 @@ import {
 	CART_TOKEN_BYTES,
 	CHECKOUT_KEY_BYTES,
 	mapCartEntity,
+	MAX_CART_ITEMS,
+	MAX_ITEM_QUANTITY,
 	normalizeCartItemInput,
 	type NormalizedCartItemInput,
 	PUBLIC_KEY_BYTES,
@@ -35,10 +38,16 @@ const CART_MANAGER_INACTIVITY_MS =
 	Number(process.env.CART_MANAGER_INACTIVITY_MS ?? 60_000) || 60_000
 const CART_MANAGER_SWEEP_MS =
 	Number(process.env.CART_MANAGER_SWEEP_MS ?? 15_000) || 15_000
+const CART_DRAFT_TTL_MS =
+	Number(process.env.CART_DRAFT_TTL_MS ?? 7 * 24 * 60 * 60 * 1000) ||
+	7 * 24 * 60 * 60 * 1000
+const CART_DRAFT_SWEEP_MS =
+	Number(process.env.CART_DRAFT_SWEEP_MS ?? 60 * 60 * 1000) || 60 * 60 * 1000
 const CURRENT_CART_VISIBLE_STATUSES = [
 	CartStatus.DRAFT,
 	CartStatus.SHARED,
-	CartStatus.IN_PROGRESS
+	CartStatus.IN_PROGRESS,
+	CartStatus.PAUSED
 ] as const
 const TERMINAL_CART_STATUSES = new Set<CartStatus>([
 	CartStatus.CONVERTED,
@@ -98,16 +107,7 @@ const completedOrderSelect = {
 	catalogId: true,
 	totalAmount: true,
 	createdAt: true,
-	items: {
-		select: {
-			id: true,
-			productId: true,
-			variantId: true,
-			quantity: true,
-			unitPrice: true
-		},
-		orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }]
-	}
+	products: true
 }
 
 type CompletedOrderEntity = Prisma.OrderGetPayload<{
@@ -119,27 +119,42 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	private readonly logger = new Logger(CartService.name)
 	private readonly sseStreams = new Map<string, Set<Subject<MessageEvent>>>()
 	private managerSweepTimer: NodeJS.Timeout | null = null
+	private draftSweepTimer: NodeJS.Timeout | null = null
 
 	constructor(private readonly prisma: PrismaService) {}
 
 	onModuleInit() {
-		if (CART_MANAGER_SWEEP_MS <= 0) return
+		if (CART_MANAGER_SWEEP_MS > 0) {
+			this.managerSweepTimer = setInterval(() => {
+				void this.expireInactiveManagerSessions().catch(error => {
+					const message =
+						error instanceof Error ? (error.stack ?? error.message) : String(error)
+					this.logger.error('Cart manager timeout sweep failed', message)
+				})
+			}, CART_MANAGER_SWEEP_MS)
+			this.managerSweepTimer.unref?.()
+		}
 
-		this.managerSweepTimer = setInterval(() => {
-			void this.expireInactiveManagerSessions().catch(error => {
-				const message =
-					error instanceof Error ? (error.stack ?? error.message) : String(error)
-				this.logger.error('Cart manager timeout sweep failed', message)
-			})
-		}, CART_MANAGER_SWEEP_MS)
-
-		this.managerSweepTimer.unref?.()
+		if (CART_DRAFT_SWEEP_MS > 0) {
+			this.draftSweepTimer = setInterval(() => {
+				void this.expireAbandonedDraftCarts().catch(error => {
+					const message =
+						error instanceof Error ? (error.stack ?? error.message) : String(error)
+					this.logger.error('Cart draft TTL sweep failed', message)
+				})
+			}, CART_DRAFT_SWEEP_MS)
+			this.draftSweepTimer.unref?.()
+		}
 	}
 
 	onModuleDestroy() {
 		if (this.managerSweepTimer) {
 			clearInterval(this.managerSweepTimer)
 			this.managerSweepTimer = null
+		}
+		if (this.draftSweepTimer) {
+			clearInterval(this.draftSweepTimer)
+			this.draftSweepTimer = null
 		}
 	}
 
@@ -436,15 +451,22 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 				throw new BadRequestException('Нельзя оформить пустую корзину')
 			}
 
+			for (const item of freshCart.items) {
+				if (item.variantId) {
+					await this.ensureVariantInStock(tx, item.variantId, item.quantity)
+				}
+			}
+
 			const snapshotItems = freshCart.items.map(item => {
-				const unitPrice = Number(item.product.price)
+				const unitPriceCents = Math.round(Number(String(item.product.price)) * 100)
+				const lineTotalCents = unitPriceCents * item.quantity
 				return {
 					id: item.id,
 					productId: item.productId,
 					variantId: item.variantId,
 					quantity: item.quantity,
-					unitPrice,
-					lineTotal: Number((unitPrice * item.quantity).toFixed(2)),
+					unitPrice: unitPriceCents / 100,
+					lineTotal: lineTotalCents / 100,
 					product: {
 						id: item.product.id,
 						name: item.product.name,
@@ -453,9 +475,11 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 				}
 			})
 
-			const totalAmount = Math.round(
-				snapshotItems.reduce((sum, item) => sum + item.lineTotal, 0)
+			const totalAmountCents = snapshotItems.reduce(
+				(sum, item) => sum + Math.round(item.unitPrice * 100) * item.quantity,
+				0
 			)
+			const totalAmount = Math.round(totalAmountCents / 100)
 
 			const order = await tx.order.create({
 				data: {
@@ -463,15 +487,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 					catalogId: freshCart.catalogId,
 					paymentProof: [],
 					products: snapshotItems,
-					totalAmount,
-					items: {
-						create: freshCart.items.map(item => ({
-							productId: item.productId,
-							variantId: item.variantId,
-							quantity: item.quantity,
-							unitPrice: item.product.price
-						}))
-					}
+					totalAmount
 				},
 				select: completedOrderSelect
 			})
@@ -618,13 +634,13 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 			id: order.id,
 			status: order.status,
 			catalogId: order.catalogId,
-			totalAmount: order.totalAmount,
-			items: order.items.map(item => ({
+			totalAmount: Number(order.totalAmount),
+			items: normalizeOrderProducts(order.products).map(item => ({
 				id: item.id,
-				productId: item.productId,
+				productId: item.productId ?? '',
 				variantId: item.variantId,
 				quantity: item.quantity,
-				unitPrice: Number(item.unitPrice)
+				unitPrice: item.unitPrice
 			})),
 			createdAt: order.createdAt
 		}
@@ -753,12 +769,35 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		await this.ensureProductInCatalog(tx, cart.catalogId, input.productId)
 		await this.ensureVariantMatchesProduct(tx, input.productId, input.variantId)
 
+		if (input.quantity > 0) {
+			if (input.quantity > MAX_ITEM_QUANTITY) {
+				throw new BadRequestException(
+					`Максимальное количество единиц одного товара: ${MAX_ITEM_QUANTITY}`
+				)
+			}
+
+			if (input.variantId) {
+				await this.ensureVariantInStock(tx, input.variantId, input.quantity)
+			}
+		}
+
 		const existing = await this.findExistingItem(
 			tx,
 			cart.id,
 			input.productId,
 			input.variantId
 		)
+
+		if (input.quantity > 0 && (!existing || existing.deleteAt)) {
+			const activeCount = await tx.cartItem.count({
+				where: { cartId: cart.id, deleteAt: null }
+			})
+			if (activeCount >= MAX_CART_ITEMS) {
+				throw new BadRequestException(
+					`Максимальное количество позиций в корзине: ${MAX_CART_ITEMS}`
+				)
+			}
+		}
 
 		const changed = await this.applyCartItemChange(tx, cart.id, existing, input)
 
@@ -769,6 +808,25 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		return {
 			cart: await this.findByIdOrThrow(cart.id, tx),
 			changed
+		}
+	}
+
+	private async ensureVariantInStock(
+		tx: Prisma.TransactionClient,
+		variantId: string,
+		quantity: number
+	): Promise<void> {
+		const variant = await tx.productVariant.findUnique({
+			where: { id: variantId },
+			select: { stock: true, isAvailable: true }
+		})
+
+		if (!variant) return
+
+		if (!variant.isAvailable || variant.stock < quantity) {
+			throw new BadRequestException(
+				`Недостаточно товара на складе. Доступно: ${variant.stock}`
+			)
 		}
 	}
 
@@ -930,6 +988,37 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 				this.broadcastCartStatusChanged(cart)
 			}
 		}
+	}
+
+	private async expireAbandonedDraftCarts() {
+		const threshold = new Date(Date.now() - CART_DRAFT_TTL_MS)
+		const stale = await this.prisma.cart.findMany({
+			where: {
+				deleteAt: null,
+				status: { in: [CartStatus.DRAFT, CartStatus.SHARED] },
+				updatedAt: { lt: threshold }
+			},
+			select: { id: true }
+		})
+
+		if (!stale.length) return
+
+		const staleIds = stale.map(c => c.id)
+
+		await this.prisma.cart.updateMany({
+			where: {
+				id: { in: staleIds },
+				status: { in: [CartStatus.DRAFT, CartStatus.SHARED] }
+			},
+			data: {
+				status: CartStatus.EXPIRED,
+				statusChangedAt: new Date()
+			}
+		})
+
+		this.logger.log(
+			`Cart draft TTL sweep: expired ${staleIds.length} abandoned cart(s)`
+		)
 	}
 
 	private async generateUniqueToken() {

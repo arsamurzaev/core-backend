@@ -5,7 +5,7 @@ import {
 	NotFoundException
 } from '@nestjs/common'
 
-import { mustCatalogId } from '@/shared/tenancy/ctx'
+import { effectiveCatalogId, mustCatalogId } from '@/shared/tenancy/ctx'
 import { assertHasUpdateFields } from '@/shared/utils'
 
 import { BrandRepository } from './brand.repository'
@@ -23,12 +23,12 @@ export class BrandService {
 	constructor(private readonly repo: BrandRepository) {}
 
 	async getAll() {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		return this.repo.findAll(catalogId)
 	}
 
 	async getById(id: string) {
-		const catalogId = mustCatalogId()
+		const catalogId = effectiveCatalogId()
 		return this.requireBrand(await this.repo.findById(id, catalogId))
 	}
 

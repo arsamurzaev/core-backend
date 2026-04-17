@@ -37,7 +37,18 @@
       "Bash(ls /c/Users/krush/Desktop/www/catalog/backend/.env*)",
       "Bash(ls /c/Users/krush/Desktop/www/catalog/backend/docker-compose*.yml)",
       "Bash(grep -r \"enum \" /c/Users/krush/Desktop/www/catalog/backend/prisma/schema/*.prisma)",
-      "Bash(grep -r \"^enum\\\\|^export enum\" /c/Users/krush/Desktop/www/catalog/backend/prisma/schema/*.prisma)"
+      "Bash(grep -r \"^enum\\\\|^export enum\" /c/Users/krush/Desktop/www/catalog/backend/prisma/schema/*.prisma)",
+      "Bash(node -e \"require\\('p-limit'\\)\")",
+      "Bash(tsc -p tsconfig.legacy-migration.json --noEmit)",
+      "Bash(./node_modules/.bin/tsc -p tsconfig.legacy-migration.json --noEmit)",
+      "Bash(node ./node_modules/.bin/tsc -p tsconfig.legacy-migration.json --noEmit)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(bun x:*)",
+      "Bash(find \"c:\\\\Users\\\\krush\\\\Desktop\\\\www\\\\catalog\\\\backend\\\\prisma\\\\schema\" -name \"*.prisma\" -exec grep -l \"model Type\" {} \\\\;)",
+      "Bash(find /c/Users/krush/Desktop/www/catalog/backend/prisma/schema -name \"*.prisma\" -exec grep -l \"discount\\\\|Discount\\\\|price\" {} \\\\;)",
+      "Bash(ls -la /c/Users/krush/Desktop/www/catalog/backend/prisma/schema/*.prisma)",
+      "Bash(awk '{print $NF}')",
+      "Bash(xargs -I {} basename {})"
     ]
   }
 }

@@ -156,6 +156,8 @@ describe('CatalogService', () => {
 			},
 			settings: {
 				isActive: true,
+				defaultMode: 'DELIVERY',
+				allowedModes: ['DELIVERY'],
 				googleVerification: null,
 				yandexVerification: null
 			},
@@ -479,5 +481,74 @@ describe('CatalogService', () => {
 				})
 			})
 		)
+	})
+
+	it('updates catalog settings with catalog experience modes', async () => {
+		repo.getById.mockResolvedValue({
+			id: 'catalog-1',
+			settings: {
+				isActive: true,
+				defaultMode: 'DELIVERY',
+				allowedModes: ['DELIVERY']
+			}
+		} as any)
+		repo.update.mockResolvedValue({
+			id: 'catalog-1',
+			slug: 'store',
+			domain: 'store.test',
+			name: 'Store',
+			typeId: 'type-1',
+			parentId: null,
+			userId: null,
+			config: null,
+			settings: {
+				isActive: true,
+				defaultMode: 'HALL',
+				allowedModes: ['DELIVERY', 'HALL']
+			}
+		} as any)
+
+		await service.updateById(
+			'catalog-1',
+			{
+				defaultMode: 'HALL',
+				allowedModes: ['DELIVERY', 'HALL']
+			} as any
+		)
+
+		expect(repo.update).toHaveBeenCalledWith(
+			'catalog-1',
+			expect.objectContaining({
+				settings: expect.objectContaining({
+					upsert: expect.objectContaining({
+						update: expect.objectContaining({
+							defaultMode: 'HALL',
+							allowedModes: ['DELIVERY', 'HALL']
+						})
+					})
+				})
+			})
+		)
+	})
+
+	it('rejects catalog experience settings when default mode is not allowed', async () => {
+		repo.getById.mockResolvedValue({
+			id: 'catalog-1',
+			settings: {
+				isActive: true,
+				defaultMode: 'DELIVERY',
+				allowedModes: ['DELIVERY']
+			}
+		} as any)
+
+		await expect(
+			service.updateById(
+				'catalog-1',
+				{
+					defaultMode: 'HALL',
+					allowedModes: ['DELIVERY']
+				} as any
+			)
+		).rejects.toThrow('defaultMode must be included in allowedModes')
 	})
 })

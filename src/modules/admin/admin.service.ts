@@ -8,6 +8,10 @@ import {
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { SessionService } from '@/modules/auth/session/session.service'
 import { MoySkladQueueService } from '@/modules/integration/providers/moysklad/moysklad.queue.service'
+import {
+	countOrderProductLines,
+	normalizeOrderProducts
+} from '@/shared/order/order-products.utils'
 
 import type { AdminCatalogsQueryDto } from './dto/requests/admin-catalogs-query.dto'
 import type { AdminOrdersQueryDto } from './dto/requests/admin-orders-query.dto'
@@ -85,7 +89,13 @@ export class AdminService {
 						note: true
 					}
 				},
-				settings: { select: { isActive: true } },
+				settings: {
+					select: {
+						isActive: true,
+						defaultMode: true,
+						allowedModes: true
+					}
+				},
 				_count: {
 					select: {
 						products: true,
@@ -105,7 +115,7 @@ export class AdminService {
 			_sum: { totalAmount: true }
 		})
 
-		return { ...catalog, revenue: revenue._sum.totalAmount ?? 0 }
+		return { ...catalog, revenue: Number(revenue._sum.totalAmount ?? 0) }
 	}
 
 	async updateCatalog(id: string, dto: AdminUpdateCatalogDto) {
@@ -335,15 +345,24 @@ export class AdminService {
 					totalAmount: true,
 					paymentMethod: true,
 					comment: true,
+					products: true,
 					createdAt: true,
-					catalog: { select: { id: true, name: true, slug: true } },
-					_count: { select: { items: true } }
+					catalog: { select: { id: true, name: true, slug: true } }
 				}
 			}),
 			this.prisma.order.count({ where })
 		])
 
-		return { items, total, page: query.page, limit: query.limit }
+		return {
+			items: items.map(({ products, totalAmount, ...item }) => ({
+				...item,
+				totalAmount: Number(totalAmount),
+				_count: { items: countOrderProductLines(products) }
+			})),
+			total,
+			page: query.page,
+			limit: query.limit
+		}
 	}
 
 	async getOrderById(id: string) {
@@ -357,21 +376,29 @@ export class AdminService {
 				paymentProof: true,
 				comment: true,
 				commentByAdmin: true,
+				address: true,
+				isDelivery: true,
+				products: true,
 				createdAt: true,
 				updatedAt: true,
-				catalog: { select: { id: true, name: true, slug: true } },
-				items: {
-					select: {
-						quantity: true,
-						unitPrice: true,
-						product: { select: { id: true, name: true } }
-					}
-				}
+				catalog: { select: { id: true, name: true, slug: true } }
 			}
 		})
 
 		if (!order) throw new NotFoundException('Заказ не найден')
-		return order
+		const { products, totalAmount, ...rest } = order
+		return {
+			...rest,
+			totalAmount: Number(totalAmount),
+			items: normalizeOrderProducts(products).map(item => ({
+				quantity: item.quantity,
+				unitPrice: item.unitPrice,
+				product: {
+					id: item.product?.id ?? item.productId,
+					name: item.product?.name
+				}
+			}))
+		}
 	}
 
 	async updateOrder(id: string, dto: AdminUpdateOrderDto) {
@@ -496,7 +523,7 @@ export class AdminService {
 				conversionRate:
 					totalOrders > 0 ? Math.round((completedOrders / totalOrders) * 100) : 0
 			},
-			revenue: { total: revenue._sum.totalAmount ?? 0 }
+			revenue: { total: Number(revenue._sum.totalAmount ?? 0) }
 		}
 	}
 }

@@ -15,129 +15,135 @@
 // └──────────────────────────────────────────────────────────────┘
 
 model Catalog {
-    // Уникальный идентификатор каталога
-    id String @id @default(uuid()) @db.Uuid
+  // Уникальный идентификатор каталога
+  id String @id @default(uuid()) @db.Uuid
 
-    // URL-friendly идентификатор (уникален глобально)
-    // Пример: "hm", "zara", "kfc"
-    // Используется: hm.myctlg.ru
-    slug String @unique
+  // URL-friendly идентификатор (уникален глобально)
+  // Пример: "hm", "zara", "kfc"
+  // Используется: hm.myctlg.ru
+  slug String @unique
 
-    // Доменное имя каталога (уникален глобально)
-    // Пример: "paradox.ru", "c4.ru", "attarcha.ru"
-    // Используется: hm.myctlg.ru
-    domain String? @unique
+  // Доменное имя каталога (уникален глобально)
+  // Пример: "paradox.ru", "c4.ru", "attarcha.ru"
+  // Используется: hm.myctlg.ru
+  domain String? @unique
 
-    // Название каталога для UI
-    // Пример: "H&M", "Zara", "KFC", "McDonald's"
-    name String
+  // Название каталога для UI
+  // Пример: "H&M", "Zara", "KFC", "McDonald's"
+  name String
 
-    // FK на тип каталога — определяет доступные атрибуты товаров
-    // Пример: ссылка на "clothing" или "restaurant"
-    type   Type   @relation(fields: [typeId], references: [id])
-    typeId String @map("type_id") @db.Uuid
+  // FK на тип каталога — определяет доступные атрибуты товаров
+  // Пример: ссылка на "clothing" или "restaurant"
+  type   Type   @relation(fields: [typeId], references: [id])
+  typeId String @map("type_id") @db.Uuid
 
-    // ─── Связи ───
-    // Родительский каталог
-    parent   Catalog? @relation("CatalogToCatalog", fields: [parentId], references: [id], onDelete: Cascade)
-    parentId String?  @map("catalog_id") @db.Uuid
+  // ─── Связи ───
+  // Родительский каталог
+  parent   Catalog? @relation("CatalogToCatalog", fields: [parentId], references: [id], onDelete: Cascade)
+  parentId String?  @map("catalog_id") @db.Uuid
 
-    // Дочерний каталог
-    children Catalog[] @relation("CatalogToCatalog")
+  // Дочерний каталог
+  children Catalog[] @relation("CatalogToCatalog")
 
-    user   User?   @relation(fields: [userId], references: [id])
-    userId String? @db.Uuid
+  user   User?   @relation(fields: [userId], references: [id])
+  userId String? @db.Uuid
 
-    payments    Payment[]
-    activity    Activity[]
-    region      Regionality[]
-    config      CatalogConfig?
-    settings    CatalogSettings?
-    seoSettings SeoSetting[]
-    metrics     Metrics[]
-    contacts    CatalogContact[]
-    products    Product[]
-    integrations Integration[]
-    category    Category[]
-    brands      Brand[]
-    order       Order[]
-    cart        Cart[]
-    media       Media[]
+  promoCodeId String?    @map("promo_code_id") @db.Uuid
+  promoCode   PromoCode? @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
 
-    subscriptionEndsAt DateTime? @map("subscription_ends_at") // Дата окончания подписки
+  payments     Payment[]
+  activity     Activity[]
+  region       Regionality[]
+  config       CatalogConfig?
+  settings     CatalogSettings?
+  seoSettings  SeoSetting[]
+  metrics      Metrics[]
+  contacts     CatalogContact[]
+  products     Product[]
+  integrations Integration[]
+  category     Category[]
+  brands       Brand[]
+  order        Order[]
+  cart         Cart[]
+  media        Media[]
 
-    deleteAt DateTime? @map("delete_at") // Дата удаления 
+  subscriptionEndsAt DateTime? @map("subscription_ends_at") // Дата окончания подписки
 
-    createdAt DateTime @default(now()) @map("created_at")
-    updatedAt DateTime @updatedAt @map("updated_at")
+  deleteAt DateTime? @map("delete_at") // Дата удаления 
 
-    @@index([typeId])
-    @@map("catalogs")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([typeId])
+  @@map("catalogs")
 }
 
 // Здесь основные ключи отображения
 model CatalogConfig {
-    id String @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-    catalogId String  @unique @map("catalog_id") @db.Uuid
-    catalog   Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  catalogId String  @unique @map("catalog_id") @db.Uuid
+  catalog   Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
 
-    about String @default("")
+  about String @default("")
 
-    description String?
+  description String?
 
-    currency String @default("₽")
+  currency String @default("₽")
 
-    logoMediaId String? @map("logo_media_id") @db.Uuid
-    bgMediaId   String? @map("bg_media_id") @db.Uuid
+  logoMediaId String? @map("logo_media_id") @db.Uuid
+  bgMediaId   String? @map("bg_media_id") @db.Uuid
 
-    logoMedia Media? @relation("CatalogConfigLogo", fields: [logoMediaId], references: [id], onDelete: SetNull)
-    bgMedia   Media? @relation("CatalogConfigBg", fields: [bgMediaId], references: [id], onDelete: SetNull)
+  logoMedia Media? @relation("CatalogConfigLogo", fields: [logoMediaId], references: [id], onDelete: SetNull)
+  bgMedia   Media? @relation("CatalogConfigBg", fields: [bgMediaId], references: [id], onDelete: SetNull)
 
-    status CatalogStatus @default(PROPOSAL)
+  status CatalogStatus @default(PROPOSAL)
 
-    note String?
+  note String?
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+  deleteAt  DateTime? @map("delete_at") // Дата удаления 
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
-    @@map("catalog_configs")
+  @@map("catalog_configs")
 }
 
 model CatalogContact {
-    id String @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-    type     ContactType // PHONE, EMAIL, WHATSAPP, TELEGRAM
-    position Int
+  type     ContactType // PHONE, EMAIL, WHATSAPP, TELEGRAM
+  position Int
 
-    value String
+  value String
 
-    catalog   Catalog @relation(fields: [catalogId], references: [id])
-    catalogId String  @map("catalog_id") @db.Uuid
+  catalog   Catalog @relation(fields: [catalogId], references: [id])
+  catalogId String  @map("catalog_id") @db.Uuid
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+  deleteAt  DateTime? @map("delete_at") // Дата удаления 
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
-    @@map("catalog_contacts")
+  @@map("catalog_contacts")
 }
 
 // Здесь настройки бизнес логики
 model CatalogSettings {
-    id String @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-    catalog   Catalog @relation(fields: [catalogId], references: [id])
-    catalogId String  @unique @map("catalog_id") @db.Uuid
+  catalog   Catalog @relation(fields: [catalogId], references: [id])
+  catalogId String  @unique @map("catalog_id") @db.Uuid
 
-    isActive Boolean @default(true) @map("is_active")
+  isActive Boolean @default(true) @map("is_active")
 
-    googleVerification String? @map("google_verification")
-    yandexVerification String? @map("yandex_verification")
+  defaultMode  CatalogExperienceMode   @default(DELIVERY) @map("default_mode")
+  allowedModes CatalogExperienceMode[] @default([DELIVERY]) @map("allowed_modes")
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+  googleVerification String? @map("google_verification")
+  yandexVerification String? @map("yandex_verification")
 
-    @@map("catalog_settings")
+  deleteAt  DateTime? @map("delete_at") // Дата удаления 
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@map("catalog_settings")
 }

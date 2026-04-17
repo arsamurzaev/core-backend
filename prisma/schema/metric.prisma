@@ -1,15 +1,17 @@
 model Metrics {
-    id String @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-    catalog   Catalog @relation(fields: [catalogId], references: [id])
-    catalogId String  @map("catalog_id") @db.Uuid
+  catalog   Catalog @relation(fields: [catalogId], references: [id])
+  catalogId String  @map("catalog_id") @db.Uuid
 
-    provider  Metric @default(YANDEX) // yandex, google, custom
-    counterId String @default("104676804") @map("counter_id") // идентификатор счётчика
+  provider  Metric      @default(YANDEX)
+  scope     MetricScope @default(CATALOG)
+  counterId String      @map("counter_id")
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+  deleteAt  DateTime? @map("delete_at") // Дата удаления
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
-    @@map("metrics")
+  @@unique([catalogId, provider, scope])
+  @@map("metrics")
 }

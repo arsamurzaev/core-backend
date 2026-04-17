@@ -139,6 +139,8 @@ const catalogSelect: Prisma.CatalogSelect = {
 	settings: {
 		select: {
 			isActive: true,
+			defaultMode: true,
+			allowedModes: true,
 			googleVerification: true,
 			yandexVerification: true
 		}

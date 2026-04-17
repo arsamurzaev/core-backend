@@ -164,7 +164,7 @@ export class ProductSeoSyncService {
 		const categoryNames = this.extractCategoryNames(product)
 		const attributeSummary = this.buildAttributeSummary(product)
 		const canonicalUrl = catalog.domain
-			? `https://${catalog.domain}/products/${product.slug}`
+			? `https://${catalog.domain}/product/${product.slug}`
 			: null
 		const title = this.truncateText(
 			[
@@ -213,7 +213,7 @@ export class ProductSeoSyncService {
 		})
 
 		return {
-			urlPath: `/products/${product.slug}`,
+			urlPath: `/product/${product.slug}`,
 			canonicalUrl,
 			title,
 			description,

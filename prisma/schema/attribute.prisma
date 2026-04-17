@@ -18,60 +18,60 @@
 // └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 
 model Attribute {
-    // Уникальный идентификатор определения атрибута
-    id String @id @default(uuid()) @db.Uuid
+  // Уникальный идентификатор определения атрибута
+  id String @id @default(uuid()) @db.Uuid
 
-    // Программный ключ атрибута (используется в коде, API)
-    // Пример: "size", "color", "brand", "ingredients", "calories"
-    key String @db.VarChar(100)
+  // Программный ключ атрибута (используется в коде, API)
+  // Пример: "size", "color", "brand", "ingredients", "calories"
+  key String @db.VarChar(100)
 
-    // Отображаемое название для UI
-    // Пример: "Размер", "Цвет", "Бренд", "Состав", "Калории"
-    displayName String @map("display_name") @db.VarChar(255)
+  // Отображаемое название для UI
+  // Пример: "Размер", "Цвет", "Бренд", "Состав", "Калории"
+  displayName String @map("display_name") @db.VarChar(255)
 
-    // Тип данных атрибута (определяет колонку для хранения значения)
-    // STRING → valueString, INTEGER → valueInteger, и т.д.
-    dataType DataType @map("data_type")
+  // Тип данных атрибута (определяет колонку для хранения значения)
+  // STRING → valueString, INTEGER → valueInteger, и т.д.
+  dataType DataType @map("data_type")
 
-    // Обязателен ли атрибут при создании товара
-    // true: товар нельзя сохранить без этого атрибута
-    // Пример: brand обязателен, material — нет
-    isRequired Boolean @default(false) @map("is_required")
+  // Обязателен ли атрибут при создании товара
+  // true: товар нельзя сохранить без этого атрибута
+  // Пример: brand обязателен, material — нет
+  isRequired Boolean @default(false) @map("is_required")
 
-    // Участвует ли в формировании вариантов товара
-    // true: создаёт отдельные SKU (размер S + цвет белый = отдельный вариант)
-    // Пример: size, color — вариантные; brand, material — нет
-    isVariantAttribute Boolean @default(false) @map("is_variant_attribute")
+  // Участвует ли в формировании вариантов товара
+  // true: создаёт отдельные SKU (размер S + цвет белый = отдельный вариант)
+  // Пример: size, color — вариантные; brand, material — нет
+  isVariantAttribute Boolean @default(false) @map("is_variant_attribute")
 
-    // Доступен ли в фильтрах каталога
-    // true: появляется в панели фильтров
-    // Пример: brand, size, color — фильтруемые; description — нет
-    isFilterable Boolean @default(false) @map("is_filterable")
+  // Доступен ли в фильтрах каталога
+  // true: появляется в панели фильтров
+  // Пример: brand, size, color — фильтруемые; description — нет
+  isFilterable Boolean @default(false) @map("is_filterable")
 
-    // Порядок отображения в UI (формы, карточки)
-    // Пример: brand=1, size=2, color=3, material=4
-    displayOrder Int @default(0) @map("display_order")
+  // Порядок отображения в UI (формы, карточки)
+  // Пример: brand=1, size=2, color=3, material=4
+  displayOrder Int @default(0) @map("display_order")
 
-    isHidden Boolean @default(false) @map("is_hidden")
+  isHidden Boolean @default(false) @map("is_hidden")
 
-    // ─── Связи ───
-    // Типы каталога, где доступен этот атрибут
-    types             Type[]
-    // Допустимые значения для ENUM-атрибутов
-    enumValues        AttributeEnumValue[]
-    // Значения этого атрибута у товаров
-    productAttributes ProductAttribute[]
-    // Значения этого атрибута у вариантов
-    variantAttributes VariantAttribute[]
+  // ─── Связи ───
+  // Типы каталога, где доступен этот атрибут
+  types             Type[]
+  // Допустимые значения для ENUM-атрибутов
+  enumValues        AttributeEnumValue[]
+  // Значения этого атрибута у товаров
+  productAttributes ProductAttribute[]
+  // Значения этого атрибута у вариантов
+  variantAttributes VariantAttribute[]
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+  deleteAt  DateTime? @map("delete_at") // Дата удаления 
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
-    // ─── Ограничения ───
-    // Уникальность ключа по типу контролируется на уровне приложения
-    @@index([key])
-    @@map("attributes")
+  // ─── Ограничения ───
+  // Уникальность ключа по типу контролируется на уровне приложения
+  @@index([key])
+  @@map("attributes")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -96,43 +96,43 @@ model Attribute {
 // └─────────────────────────────────────────────────────────┘
 
 model AttributeEnumValue {
-    // Уникальный идентификатор значения
-    id String @id @default(uuid()) @db.Uuid
+  // Уникальный идентификатор значения
+  id String @id @default(uuid()) @db.Uuid
 
-    // FK на определение атрибута (size, color, brand)
-    attributeId String @map("attribute_id") @db.Uuid
+  // FK на определение атрибута (size, color, brand)
+  attributeId String @map("attribute_id") @db.Uuid
 
-    // Программное значение (используется в коде, API, URL фильтров)
-    // Пример: "xs", "s", "m", "white", "black", "nike"
-    value String @db.VarChar(255)
+  // Программное значение (используется в коде, API, URL фильтров)
+  // Пример: "xs", "s", "m", "white", "black", "nike"
+  value String @db.VarChar(255)
 
-    // Отображаемое название для UI
-    // Пример: "XS", "S", "M", "Белый", "Чёрный", "Nike"
-    // Может отличаться от value для локализации
-    displayName String? @map("display_name") @db.VarChar(255)
+  // Отображаемое название для UI
+  // Пример: "XS", "S", "M", "Белый", "Чёрный", "Nike"
+  // Может отличаться от value для локализации
+  displayName String? @map("display_name") @db.VarChar(255)
 
-    // Порядок в списке (для селектов, кнопок размеров)
-    // Пример: XS=1, S=2, M=3, L=4, XL=5
-    displayOrder Int @default(0) @map("display_order")
+  // Порядок в списке (для селектов, кнопок размеров)
+  // Пример: XS=1, S=2, M=3, L=4, XL=5
+  displayOrder Int @default(0) @map("display_order")
 
-    businessId String? @map("business_id")
+  businessId String? @map("business_id")
 
-    // ─── Связи ───
-    attribute         Attribute          @relation(fields: [attributeId], references: [id], onDelete: Cascade)
-    // Товары с этим значением атрибута
-    productAttributes ProductAttribute[]
-    // Варианты с этим значением
-    variantAttributes VariantAttribute[]
+  // ─── Связи ───
+  attribute         Attribute          @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  // Товары с этим значением атрибута
+  productAttributes ProductAttribute[]
+  // Варианты с этим значением
+  variantAttributes VariantAttribute[]
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+  deleteAt  DateTime? @map("delete_at") // Дата удаления 
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
-    // ─── Ограничения ───
-    // Значение уникально в рамках атрибута
-    // Нельзя создать два "m" для атрибута size
-    @@unique([attributeId, value])
-    @@map("attribute_enum_values")
+  // ─── Ограничения ───
+  // Значение уникально в рамках атрибута
+  // Нельзя создать два "m" для атрибута size
+  @@unique([attributeId, value])
+  @@map("attribute_enum_values")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -154,33 +154,33 @@ model AttributeEnumValue {
 // └────────────────────────────────────────────┘
 
 model VariantAttribute {
-    // Уникальный идентификатор записи
-    id String @id @default(uuid()) @db.Uuid
+  // Уникальный идентификатор записи
+  id String @id @default(uuid()) @db.Uuid
 
-    // FK на вариант товара
-    variantId String @map("variant_id") @db.Uuid
+  // FK на вариант товара
+  variantId String @map("variant_id") @db.Uuid
 
-    // FK на определение атрибута (size, color)
-    // Должен быть isVariantAttribute = true
-    attributeId String @map("attribute_id") @db.Uuid
+  // FK на определение атрибута (size, color)
+  // Должен быть isVariantAttribute = true
+  attributeId String @map("attribute_id") @db.Uuid
 
-    // FK на допустимое значение (обязателен, т.к. варианты только ENUM)
-    // Пример: ссылка на "s", "m", "white", "black"
-    enumValueId String @map("enum_value_id") @db.Uuid
+  // FK на допустимое значение (обязателен, т.к. варианты только ENUM)
+  // Пример: ссылка на "s", "m", "white", "black"
+  enumValueId String @map("enum_value_id") @db.Uuid
 
-    // ─── Связи ───
-    variant   ProductVariant     @relation(fields: [variantId], references: [id], onDelete: Cascade)
-    attribute Attribute          @relation(fields: [attributeId], references: [id])
-    enumValue AttributeEnumValue @relation(fields: [enumValueId], references: [id])
+  // ─── Связи ───
+  variant   ProductVariant     @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  attribute Attribute          @relation(fields: [attributeId], references: [id])
+  enumValue AttributeEnumValue @relation(fields: [enumValueId], references: [id])
 
-    deleteAt  DateTime? @map("delete_at") // Дата удаления 
-    createdAt DateTime  @default(now()) @map("created_at")
-    updatedAt DateTime  @updatedAt @map("updated_at")
+  deleteAt  DateTime? @map("delete_at") // Дата удаления 
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
-    // ─── Ограничения ───
-    // Один атрибут — одно значение на вариант
-    // Вариант не может иметь два размера
-    @@unique([variantId, attributeId])
-    @@index([attributeId, enumValueId])
-    @@map("variant_attributes")
+  // ─── Ограничения ───
+  // Один атрибут — одно значение на вариант
+  // Вариант не может иметь два размера
+  @@unique([variantId, attributeId])
+  @@index([attributeId, enumValueId])
+  @@map("variant_attributes")
 }

@@ -49,6 +49,9 @@ export class CartTotalsDto {
 
 	@ApiProperty({ type: Number, example: 4997 })
 	subtotal: number
+
+	@ApiProperty({ type: Number, example: 4997, description: 'Итого к оплате (subtotal с учётом скидок)' })
+	total: number
 }
 
 export class CartDto {

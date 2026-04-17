@@ -1,0 +1,12 @@
+{
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		"rootDir": "..",
+		"outDir": "./dist",
+		"declaration": false,
+		"sourceMap": false,
+		"incremental": false,
+		"isolatedModules": false
+	},
+	"include": ["scripts/**/*.ts", "../prisma/generated/**/*.ts"]
+}

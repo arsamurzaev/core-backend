@@ -1,84 +1,131 @@
 enum Role {
-    CATALOG
-    USER
-    ADMIN
+  CATALOG
+  USER
+  ADMIN
 }
 
 enum IntegrationProvider {
-    MOYSKLAD
+  MOYSKLAD
 }
 
 enum IntegrationSyncStatus {
-    IDLE
-    SYNCING
-    SUCCESS
-    ERROR
+  IDLE
+  SYNCING
+  SUCCESS
+  ERROR
 }
 
 enum IntegrationSyncRunMode {
-    FULL
-    PRODUCT
+  FULL
+  PRODUCT
 }
 
 enum IntegrationSyncRunTrigger {
-    MANUAL
-    SCHEDULED
+  MANUAL
+  SCHEDULED
 }
 
 enum IntegrationSyncRunStatus {
-    PENDING
-    RUNNING
-    SUCCESS
-    ERROR
-    SKIPPED
+  PENDING
+  RUNNING
+  SUCCESS
+  ERROR
+  SKIPPED
 }
 
 enum ProductsDisplayMode {
-    LIST
-    CATEGORY
+  LIST
+  CATEGORY
+}
+
+enum CatalogExperienceMode {
+  DELIVERY
+  BROWSE
+  HALL
 }
 
 enum CatalogStatus {
-    PROPOSAL
-    IMPLEMENTATION
-    OPERATIONAL
-    REFUSAL
+  PROPOSAL
+  IMPLEMENTATION
+  OPERATIONAL
+  REFUSAL
 }
 
 enum PaymentMethod {
-    CASH
-    TRANSFER
-    ACQUIRING
+  CASH
+  TRANSFER
+  ACQUIRING
+}
+
+enum PaymentKind {
+  SUBSCRIPTION
+  PROMOCODE
 }
 
 enum OrderStatus {
-    PENDING
-    COMPLETED
+  PENDING
+  COMPLETED
 }
 
 enum CartStatus {
-    DRAFT
-    SHARED
-    IN_PROGRESS
-    PAUSED
-    CONVERTED
-    CANCELLED
-    EXPIRED
+  DRAFT
+  SHARED
+  IN_PROGRESS
+  PAUSED
+  CONVERTED
+  CANCELLED
+  EXPIRED
 }
 
 enum Metric {
-    YANDEX
+  YANDEX
+}
+
+enum MetricScope {
+  GLOBAL
+  MAIN
+  CATALOG
+}
+
+enum MigrationRunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum MigrationIssueSeverity {
+  INFO
+  WARNING
+  ERROR
+}
+
+enum MigrationEntityKind {
+  BUSINESS
+  USER
+  CATALOG
+  CATALOG_CONFIG
+  CATALOG_SETTINGS
+  CATALOG_CONTACT
+  METRIC
+  INTEGRATION
+  MEDIA
+  BRAND
+  CATEGORY
+  PRODUCT
+  PAYMENT
+  PROMO_CODE
+  ORDER
 }
 
 enum ContactType {
-    PHONE
-    EMAIL
-    WHATSAPP
-    MAX
-    BIP
-    TELEGRAM
-    SMS
-    MAP
+  PHONE
+  EMAIL
+  WHATSAPP
+  MAX
+  BIP
+  TELEGRAM
+  SMS
+  MAP
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -91,104 +138,104 @@ enum ContactType {
 // HIDDEN   — скрыт
 
 enum ProductStatus {
-    DRAFT
-    ACTIVE
-    ARCHIVED
-    HIDDEN
-    DELETE
+  DRAFT
+  ACTIVE
+  ARCHIVED
+  HIDDEN
+  DELETE
 }
 
 enum ProductVariantStatus {
-    ACTIVE
-    OUT_OF_STOCK
-    DISABLED
+  ACTIVE
+  OUT_OF_STOCK
+  DISABLED
 }
 
 enum DataType {
-    STRING
-    INTEGER
-    DECIMAL
-    DATETIME
-    BOOLEAN
-    ENUM
+  STRING
+  INTEGER
+  DECIMAL
+  DATETIME
+  BOOLEAN
+  ENUM
 }
 
 enum AnalyticsEventType {
-    PAGE_VIEW
-    VIEW_PRODUCT
-    PRODUCT_CLICK_FROM_LIST
+  PAGE_VIEW
+  VIEW_PRODUCT
+  PRODUCT_CLICK_FROM_LIST
 
-    SEARCH_SUBMIT
-    SEARCH_RESULTS
-    SEARCH_ZERO_RESULTS
+  SEARCH_SUBMIT
+  SEARCH_RESULTS
+  SEARCH_ZERO_RESULTS
 
-    FILTER_APPLY
-    FILTER_RESET
-    SORT_CHANGE
+  FILTER_APPLY
+  FILTER_RESET
+  SORT_CHANGE
 
-    ADD_TO_CART
-    REMOVE_FROM_CART
-    BEGIN_CHECKOUT
+  ADD_TO_CART
+  REMOVE_FROM_CART
+  BEGIN_CHECKOUT
 
-    CLICK_CONTACT
-    LEAD_SUBMIT
+  CLICK_CONTACT
+  LEAD_SUBMIT
 
-    ERROR_CLIENT
-    ERROR_API
-    PERF
+  ERROR_CLIENT
+  ERROR_API
+  PERF
 }
 
 enum AnalyticsPageType {
-    HOME
-    CATALOG
-    CATEGORY
-    PRODUCT
-    SEARCH
-    CART
-    CHECKOUT
-    OTHER
+  HOME
+  CATALOG
+  CATEGORY
+  PRODUCT
+  SEARCH
+  CART
+  CHECKOUT
+  OTHER
 }
 
 enum DeviceType {
-    MOBILE
-    DESKTOP
-    TABLET
-    OTHER
+  MOBILE
+  DESKTOP
+  TABLET
+  OTHER
 }
 
 enum LeadChannel {
-    FORM
-    PHONE
-    EMAIL
-    WHATSAPP
-    TELEGRAM
-    SMS
-    OTHER
+  FORM
+  PHONE
+  EMAIL
+  WHATSAPP
+  TELEGRAM
+  SMS
+  OTHER
 }
 
 enum LeadStatus {
-    SUBMITTED
-    QUALIFIED
-    DISQUALIFIED
-    EXPIRED
+  SUBMITTED
+  QUALIFIED
+  DISQUALIFIED
+  EXPIRED
 }
 
 enum SeoEntityType {
-    CATALOG
-    CATEGORY
-    PRODUCT
-    PAGE
-    BRAND
-    ARTICLE
-    OTHER
+  CATALOG
+  CATEGORY
+  PRODUCT
+  PAGE
+  BRAND
+  ARTICLE
+  OTHER
 }
 
 enum SeoChangeFreq {
-    ALWAYS
-    HOURLY
-    DAILY
-    WEEKLY
-    MONTHLY
-    YEARLY
-    NEVER
+  ALWAYS
+  HOURLY
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+  NEVER
 }
