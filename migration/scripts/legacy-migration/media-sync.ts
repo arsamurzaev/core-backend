@@ -232,6 +232,8 @@ export async function collectLegacyMediaIssues(
 	source: string
 ): Promise<LegacyMediaIssue[]> {
 	const issues: LegacyMediaIssue[] = []
+	const allowSourceDrift = isSourceDriftAllowed()
+	const missingTargetSeverity = resolveMissingTargetSeverity(allowSourceDrift)
 	const assets = buildLegacyMediaAssets(businesses, products)
 	const mappings = await loadMediaTargetMaps(
 		prisma,
@@ -248,12 +250,13 @@ export async function collectLegacyMediaIssues(
 		issues.push({
 			entity: MigrationEntityKind.MEDIA,
 			legacyId: business.id,
-			severity: MigrationIssueSeverity.ERROR,
+			severity: missingTargetSeverity,
 			code: 'CATALOG_MAPPING_MISSING',
 			message:
 				'Для переноса catalog media не найден target Catalog. Сначала выполните фазу catalog-bootstrap.',
 			details: {
-				legacyBusinessId: business.id
+				legacyBusinessId: business.id,
+				sourceDriftAllowed: allowSourceDrift
 			} satisfies Prisma.InputJsonValue
 		})
 	}
@@ -266,13 +269,14 @@ export async function collectLegacyMediaIssues(
 		issues.push({
 			entity: MigrationEntityKind.MEDIA,
 			legacyId,
-			severity: MigrationIssueSeverity.ERROR,
+			severity: missingTargetSeverity,
 			code: 'CATEGORY_MAPPING_MISSING',
 			message:
 				'Для переноса изображения категории не найден target Category. Сначала выполните фазу products.',
 			details: {
 				legacyBusinessId: category.businessId,
-				url: category.imageUrl
+				url: category.imageUrl,
+				sourceDriftAllowed: allowSourceDrift
 			} satisfies Prisma.InputJsonValue
 		})
 	}
@@ -285,13 +289,14 @@ export async function collectLegacyMediaIssues(
 		issues.push({
 			entity: MigrationEntityKind.MEDIA,
 			legacyId,
-			severity: MigrationIssueSeverity.ERROR,
+			severity: missingTargetSeverity,
 			code: 'PRODUCT_MAPPING_MISSING',
 			message:
 				'Для переноса изображений товара не найден target Product. Сначала выполните фазу products.',
 			details: {
 				legacyBusinessId: product.businessId,
-				imagesCount: product.imagesUrl.length
+				imagesCount: product.imagesUrl.length,
+				sourceDriftAllowed: allowSourceDrift
 			} satisfies Prisma.InputJsonValue
 		})
 	}
@@ -323,6 +328,8 @@ export async function applyLegacyMedia(
 ): Promise<ApplyLegacyMediaResult> {
 	const s3 = createS3ConfigFromEnv()
 	const issues: LegacyMediaIssue[] = []
+	const allowSourceDrift = isSourceDriftAllowed()
+	const missingTargetSeverity = resolveMissingTargetSeverity(allowSourceDrift)
 	const assets = buildLegacyMediaAssets(businesses, products)
 	const mappings = await loadMediaTargetMaps(
 		prisma,
@@ -353,7 +360,8 @@ export async function applyLegacyMedia(
 	logMediaStep('phase', 'media apply started', {
 		businesses: businesses.length,
 		assets: assets.length,
-		maxFileMb: Math.round(s3.maxFileBytes / 1024 / 1024)
+		maxFileMb: Math.round(s3.maxFileBytes / 1024 / 1024),
+		sourceDriftAllowed: allowSourceDrift
 	})
 
 	const limit = pLimit(4)
@@ -381,7 +389,7 @@ export async function applyLegacyMedia(
 					issues.push({
 						entity: MigrationEntityKind.MEDIA,
 						legacyId: asset.legacyId,
-						severity: MigrationIssueSeverity.ERROR,
+						severity: missingTargetSeverity,
 						code: 'MEDIA_TARGET_UNRESOLVED',
 						message:
 							'Legacy media asset skipped because target entity mapping was not found.',
@@ -389,7 +397,8 @@ export async function applyLegacyMedia(
 							kind: asset.kind,
 							legacyBusinessId: asset.legacyBusinessId,
 							legacyEntityId: asset.legacyEntityId,
-							url: asset.url
+							url: asset.url,
+							sourceDriftAllowed: allowSourceDrift
 						} satisfies Prisma.InputJsonValue
 					})
 					finalizeMediaAssetProgress(
@@ -422,16 +431,20 @@ export async function applyLegacyMedia(
 				}
 
 				try {
+					const normalizedAsset = {
+						...resolvedAsset,
+						url
+					}
 					logMediaStep(assetLabel, 'checking existing media map')
 					const existing = await resolveExistingMediaTarget(
 						prisma,
 						options.source,
-						resolvedAsset.legacyId
+						normalizedAsset.legacyId
 					)
 					const mediaId = existing?.mediaId
 						? existing.mediaId
 						: await withRetry(() =>
-								importLegacyMediaAsset(prisma, s3, resolvedAsset, options, assetLabel)
+								importLegacyMediaAsset(prisma, s3, normalizedAsset, options, assetLabel)
 							)
 
 					if (existing?.mediaId) {
@@ -1486,10 +1499,26 @@ function parseStringList(
 	return parsed.length ? parsed : [...fallback]
 }
 
+function isSourceDriftAllowed(): boolean {
+	return parseBoolean(process.env.LEGACY_MIGRATION_ALLOW_SOURCE_DRIFT)
+}
+
+function resolveMissingTargetSeverity(
+	allowSourceDrift: boolean
+): MigrationIssueSeverity {
+	return allowSourceDrift
+		? MigrationIssueSeverity.WARNING
+		: MigrationIssueSeverity.ERROR
+}
+
 function normalizeHttpUrl(value: string | null | undefined): string | null {
 	if (typeof value !== 'string') return null
-	const normalized = value.trim()
+	let normalized = value.trim()
 	if (!normalized) return null
+
+	normalized = normalized.replace(/^https:\/(?!\/)/i, 'https://')
+	normalized = normalized.replace(/^http:\/(?!\/)/i, 'http://')
+
 	return /^https?:\/\//i.test(normalized) ? normalized : null
 }
 

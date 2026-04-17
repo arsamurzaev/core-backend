@@ -25,6 +25,7 @@ import {
 } from './legacy-migration/order-sync.js'
 import {
 	analyzeLegacyOrdersData,
+	type LegacyOrdersData,
 	loadLegacyOrdersData
 } from './legacy-migration/orders-source.js'
 import {
@@ -33,6 +34,7 @@ import {
 } from './legacy-migration/payment-sync.js'
 import {
 	analyzeLegacyFinanceData,
+	type LegacyFinanceData,
 	loadLegacyFinanceData
 } from './legacy-migration/payments-source.js'
 import {
@@ -41,6 +43,7 @@ import {
 } from './legacy-migration/product-sync.js'
 import {
 	analyzeLegacyProductsData,
+	type LegacyProductsData,
 	loadLegacyProductsData
 } from './legacy-migration/products-source.js'
 import { buildLegacyReconciliationReport } from './legacy-migration/report-sync.js'
@@ -52,6 +55,7 @@ import {
 import {
 	analyzeLegacyBusinesses,
 	collectLegacyBusinessIssues,
+	type LegacyBusinessRow,
 	loadLegacyBusinesses
 } from './legacy-migration/source.js'
 
@@ -66,6 +70,13 @@ type CliOptions = {
 }
 
 type DatabaseEnvPrefix = 'DATABASE' | 'LEGACY_DATABASE'
+
+type MigrationSourceSnapshot = {
+	businesses?: LegacyBusinessRow[]
+	finance?: LegacyFinanceData
+	orders?: LegacyOrdersData
+	products?: LegacyProductsData
+}
 
 const SOURCE_NAME = 'old-code'
 const ALL_PHASE = 'all'
@@ -105,6 +116,7 @@ async function main() {
 
 async function runAllPhases(options: CliOptions) {
 	const startedAt = Date.now()
+	const sourceSnapshot: MigrationSourceSnapshot = {}
 
 	logPhaseStep(ALL_PHASE, 'starting full migration pipeline', {
 		mode: options.apply ? 'apply' : 'dry-run',
@@ -122,11 +134,14 @@ async function runAllPhases(options: CliOptions) {
 			mode: phaseApply ? 'apply' : 'dry-run'
 		})
 
-		await runSinglePhase({
-			...options,
-			phase,
-			apply: phaseApply
-		})
+		await runSinglePhase(
+			{
+				...options,
+				phase,
+				apply: phaseApply
+			},
+			sourceSnapshot
+		)
 
 		logPhaseStep(ALL_PHASE, 'pipeline phase completed', {
 			step: index + 1,
@@ -152,7 +167,10 @@ async function runAllPhases(options: CliOptions) {
 	})
 }
 
-async function runSinglePhase(options: CliOptions) {
+async function runSinglePhase(
+	options: CliOptions,
+	sourceSnapshot?: MigrationSourceSnapshot
+) {
 	const targetDatabaseUrl = readRequiredEnv('DATABASE_URI', 'DATABASE_URL')
 	const legacyDatabaseUrl = readRequiredEnv(
 		'LEGACY_DATABASE_URI',
@@ -212,16 +230,11 @@ async function runSinglePhase(options: CliOptions) {
 			runId: run.id
 		})
 
-		logPhaseStep(options.phase, 'loading legacy businesses')
-		const businesses = await loadLegacyBusinesses(legacyPool, {
-			businessIds: options.businessIds,
-			businessHosts: options.businessHosts,
-			limit: options.limit
-		})
-		logPhaseStep(options.phase, 'legacy businesses loaded', {
-			selectedBusinesses: businesses.length,
-			preview: businesses.slice(0, 5).map(business => business.host || business.id)
-		})
+		const businesses = await loadPhaseBusinesses(
+			legacyPool,
+			options,
+			sourceSnapshot
+		)
 
 		if (options.businessIds.length > 0) {
 			const loadedIds = new Set(businesses.map(b => b.id))
@@ -293,10 +306,12 @@ async function runSinglePhase(options: CliOptions) {
 			}
 
 			case PAYMENTS_PHASE: {
-				logPhaseStep(options.phase, 'loading legacy finance data')
-				const finance = await loadLegacyFinanceData(legacyPool, {
-					businessIds: businesses.map(business => business.id)
-				})
+				const finance = await loadPhaseFinance(
+					legacyPool,
+					businesses,
+					options.phase,
+					sourceSnapshot
+				)
 
 				logPhaseStep(options.phase, 'analyzing finance data')
 				summary = {
@@ -324,10 +339,12 @@ async function runSinglePhase(options: CliOptions) {
 			}
 
 			case ORDERS_PHASE: {
-				logPhaseStep(options.phase, 'loading legacy orders')
-				const orders = await loadLegacyOrdersData(legacyPool, {
-					businessIds: businesses.map(business => business.id)
-				})
+				const orders = await loadPhaseOrders(
+					legacyPool,
+					businesses,
+					options.phase,
+					sourceSnapshot
+				)
 
 				logPhaseStep(options.phase, 'analyzing orders')
 				summary = {
@@ -355,10 +372,12 @@ async function runSinglePhase(options: CliOptions) {
 			}
 
 			case PRODUCTS_PHASE: {
-				logPhaseStep(options.phase, 'loading legacy products')
-				const products = await loadLegacyProductsData(legacyPool, {
-					businessIds: businesses.map(business => business.id)
-				})
+				const products = await loadPhaseProducts(
+					legacyPool,
+					businesses,
+					options.phase,
+					sourceSnapshot
+				)
 
 				logPhaseStep(options.phase, 'analyzing products')
 				summary = {
@@ -386,10 +405,12 @@ async function runSinglePhase(options: CliOptions) {
 			}
 
 			case MEDIA_PHASE: {
-				logPhaseStep(options.phase, 'loading legacy products for media phase')
-				const products = await loadLegacyProductsData(legacyPool, {
-					businessIds: businesses.map(business => business.id)
-				})
+				const products = await loadPhaseProducts(
+					legacyPool,
+					businesses,
+					options.phase,
+					sourceSnapshot
+				)
 
 				logPhaseStep(options.phase, 'analyzing media assets')
 				summary = {
@@ -448,15 +469,9 @@ async function runSinglePhase(options: CliOptions) {
 					'loading finance, orders and products for reconciliation'
 				)
 				const [finance, orders, products] = await Promise.all([
-					loadLegacyFinanceData(legacyPool, {
-						businessIds: businesses.map(business => business.id)
-					}),
-					loadLegacyOrdersData(legacyPool, {
-						businessIds: businesses.map(business => business.id)
-					}),
-					loadLegacyProductsData(legacyPool, {
-						businessIds: businesses.map(business => business.id)
-					})
+					loadPhaseFinance(legacyPool, businesses, options.phase, sourceSnapshot),
+					loadPhaseOrders(legacyPool, businesses, options.phase, sourceSnapshot),
+					loadPhaseProducts(legacyPool, businesses, options.phase, sourceSnapshot)
 				])
 
 				logPhaseStep(options.phase, 'building reconciliation report')
@@ -593,6 +608,111 @@ async function runSinglePhase(options: CliOptions) {
 	} finally {
 		await Promise.allSettled([prisma.$disconnect(), legacyPool.end()])
 	}
+}
+
+async function loadPhaseBusinesses(
+	legacyPool: pg.Pool,
+	options: CliOptions,
+	sourceSnapshot?: MigrationSourceSnapshot
+): Promise<LegacyBusinessRow[]> {
+	if (sourceSnapshot?.businesses) {
+		logPhaseStep(options.phase, 'using cached legacy businesses', {
+			selectedBusinesses: sourceSnapshot.businesses.length,
+			preview: sourceSnapshot.businesses
+				.slice(0, 5)
+				.map(business => business.host || business.id)
+		})
+		return sourceSnapshot.businesses
+	}
+
+	logPhaseStep(options.phase, 'loading legacy businesses')
+	const businesses = await loadLegacyBusinesses(legacyPool, {
+		businessIds: options.businessIds,
+		businessHosts: options.businessHosts,
+		limit: options.limit
+	})
+	if (sourceSnapshot) {
+		sourceSnapshot.businesses = businesses
+	}
+	logPhaseStep(options.phase, 'legacy businesses loaded', {
+		selectedBusinesses: businesses.length,
+		preview: businesses.slice(0, 5).map(business => business.host || business.id)
+	})
+	return businesses
+}
+
+async function loadPhaseFinance(
+	legacyPool: pg.Pool,
+	businesses: LegacyBusinessRow[],
+	phase: string,
+	sourceSnapshot?: MigrationSourceSnapshot
+): Promise<LegacyFinanceData> {
+	if (sourceSnapshot?.finance) {
+		logPhaseStep(phase, 'using cached legacy finance data', {
+			promoCodes: sourceSnapshot.finance.promoCodes.length,
+			subscriptionPayments: sourceSnapshot.finance.subscriptionPayments.length,
+			promoPayments: sourceSnapshot.finance.promoPayments.length
+		})
+		return sourceSnapshot.finance
+	}
+
+	logPhaseStep(phase, 'loading legacy finance data')
+	const finance = await loadLegacyFinanceData(legacyPool, {
+		businessIds: businesses.map(business => business.id)
+	})
+	if (sourceSnapshot) {
+		sourceSnapshot.finance = finance
+	}
+	return finance
+}
+
+async function loadPhaseOrders(
+	legacyPool: pg.Pool,
+	businesses: LegacyBusinessRow[],
+	phase: string,
+	sourceSnapshot?: MigrationSourceSnapshot
+): Promise<LegacyOrdersData> {
+	if (sourceSnapshot?.orders) {
+		logPhaseStep(phase, 'using cached legacy orders', {
+			orders: sourceSnapshot.orders.orders.length
+		})
+		return sourceSnapshot.orders
+	}
+
+	logPhaseStep(phase, 'loading legacy orders')
+	const orders = await loadLegacyOrdersData(legacyPool, {
+		businessIds: businesses.map(business => business.id)
+	})
+	if (sourceSnapshot) {
+		sourceSnapshot.orders = orders
+	}
+	return orders
+}
+
+async function loadPhaseProducts(
+	legacyPool: pg.Pool,
+	businesses: LegacyBusinessRow[],
+	phase: string,
+	sourceSnapshot?: MigrationSourceSnapshot
+): Promise<LegacyProductsData> {
+	if (sourceSnapshot?.products) {
+		logPhaseStep(phase, 'using cached legacy products', {
+			brands: sourceSnapshot.products.brands.length,
+			categories: sourceSnapshot.products.categories.length,
+			products: sourceSnapshot.products.products.length,
+			categoryProductLinks: sourceSnapshot.products.categoryProductLinks.length
+		})
+		return sourceSnapshot.products
+	}
+
+	logPhaseStep(phase, 'loading legacy products')
+	const products = await loadLegacyProductsData(legacyPool, {
+		businessIds: businesses.map(business => business.id)
+	})
+	if (sourceSnapshot) {
+		sourceSnapshot.products = products
+	}
+	return products
 }
 
 function logPhaseStep(
@@ -757,11 +877,13 @@ Environment:
   LEGACY_DATABASE_SSL_MODE=no-verify -> useful for self-signed TLS
   LEGACY_DATABASE_SSL_REJECT_UNAUTHORIZED=false -> explicit TLS override
   LEGACY_MIGRATION_MEDIA_MAX_FILE_MB=100 -> optional larger source-file limit for phase=media
+  LEGACY_MIGRATION_ALLOW_SOURCE_DRIFT=true -> media skips missing target mappings as warnings for live legacy DB changes
 
 What it does now:
   - connects to the new and legacy PostgreSQL databases
   - creates a migration run entry in the new database
   - phase=all sequentially runs catalog-bootstrap -> payments -> orders -> products -> media -> seo -> report
+  - phase=all reuses one in-memory legacy data snapshot across phases to avoid live-source drift within the run
   - phase=catalog-bootstrap scans legacy businesses
   - phase=catalog-bootstrap in --apply mode creates User + Catalog + child Catalog links
   - phase=catalog-bootstrap syncs CatalogConfig, CatalogSettings, CatalogContact, Metrics, Integration
