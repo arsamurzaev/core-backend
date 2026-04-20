@@ -97,7 +97,7 @@ services:
       - mimir_data:/tmp/mimir
       - ./ops/observability/mimir/config.yaml:/etc/mimir/config.yaml:ro
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:9009/ready']
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:9009/ready']
       interval: 15s
       timeout: 5s
       retries: 5
@@ -136,7 +136,7 @@ services:
       - ./ops/observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - ./runtime/logs:/workspace/runtime/logs:ro
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:12345/-/ready']
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:12345/-/ready']
       interval: 15s
       timeout: 5s
       retries: 5

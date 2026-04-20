@@ -49,7 +49,9 @@
       "Bash(ls -la /c/Users/krush/Desktop/www/catalog/backend/prisma/schema/*.prisma)",
       "Bash(awk '{print $NF}')",
       "Bash(xargs -I {} basename {})",
-      "Bash(cmd /c \"cd c:\\\\Users\\\\krush\\\\Desktop\\\\www\\\\catalog\\\\frontend && npx tsc --noEmit 2>&1\")"
+      "Bash(cmd /c \"cd c:\\\\Users\\\\krush\\\\Desktop\\\\www\\\\catalog\\\\frontend && npx tsc --noEmit 2>&1\")",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }
