@@ -1065,6 +1065,16 @@ export class S3Service implements OnModuleDestroy {
 			await onStep()
 		}
 
+		// Raw file has been processed — delete it to free space
+		await this.client!
+			.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: cleanedKey }))
+			.catch(err =>
+				this.logger.warn('Не удалось удалить raw-файл после обработки', {
+					key: cleanedKey,
+					error: err instanceof Error ? err.message : String(err)
+				})
+			)
+
 		const pathInfo = this.extractPathInfoFromKey(cleanedKey)
 		const mediaId = await this.createMediaRecord({
 			catalogId,
@@ -1143,9 +1153,8 @@ export class S3Service implements OnModuleDestroy {
 		const uniqueWidths = [...new Set(widths)].filter(width => width > 0)
 		const formats = this.getImageFormats()
 		const formatCount = Math.max(1, formats.length)
-		return (
-			uniqueWidths.length * formatCount + (this.storeOriginal ? formatCount : 0)
-		)
+		// orig variant always generated (+formatCount)
+		return uniqueWidths.length * formatCount + formatCount
 	}
 
 	private prepareRawObjectTarget(
@@ -1203,16 +1212,14 @@ export class S3Service implements OnModuleDestroy {
 		const uniqueWidths = [...new Set(widths)].filter(width => width > 0)
 		const sorted = uniqueWidths.sort((a, b) => b - a)
 
-		if (this.storeOriginal) {
-			for (const format of formats) {
-				const original = await this.renderVariant(buffer, metadata.width, {
-					name: 'orig',
-					format,
-					key: `${baseKey}-orig.${format}`,
-					quality: Math.min(95, Math.max(1, this.imageQuality + 8))
-				})
-				variants.push(original)
-			}
+		for (const format of formats) {
+			const original = await this.renderVariant(buffer, metadata.width, {
+				name: 'orig',
+				format,
+				key: `${baseKey}-orig.${format}`,
+				quality: Math.min(95, Math.max(1, this.imageQuality + 8))
+			})
+			variants.push(original)
 		}
 
 		for (const [index, width] of sorted.entries()) {

@@ -15,6 +15,8 @@ import { Observable, Subject } from 'rxjs'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import type { SessionUser } from '@/modules/auth/types/auth-request'
+import { buildMediaSelect } from '@/shared/media/media-select'
+import { MEDIA_VARIANT_NAMES, MediaUrlService } from '@/shared/media/media-url.service'
 import { normalizeOrderProducts } from '@/shared/order/order-products.utils'
 
 import {
@@ -84,7 +86,15 @@ const cartSelect = {
 					id: true,
 					name: true,
 					slug: true,
-					price: true
+					price: true,
+					media: {
+						select: {
+							position: true,
+							media: { select: buildMediaSelect([MEDIA_VARIANT_NAMES.thumb]) }
+						},
+						orderBy: { position: 'asc' as const },
+						take: 1
+					}
 				}
 			}
 		},
@@ -121,7 +131,10 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	private managerSweepTimer: NodeJS.Timeout | null = null
 	private draftSweepTimer: NodeJS.Timeout | null = null
 
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		private readonly prisma: PrismaService,
+		private readonly mediaUrl: MediaUrlService
+	) {}
 
 	onModuleInit() {
 		if (CART_MANAGER_SWEEP_MS > 0) {
@@ -626,7 +639,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	}
 
 	private mapCart(cart: CartEntity) {
-		return mapCartEntity(cart)
+		return mapCartEntity(cart, media => this.mediaUrl.mapMedia(media))
 	}
 
 	private mapCompletedOrder(order: CompletedOrderEntity) {

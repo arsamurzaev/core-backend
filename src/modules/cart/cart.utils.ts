@@ -1,6 +1,8 @@
 import { CartStatus } from '@generated/client'
 import { BadRequestException } from '@nestjs/common'
 
+import type { MediaRecord } from '@/shared/media/media-url.service'
+
 export type UpsertCartItemInput = {
 	productId: string
 	variantId?: string
@@ -29,6 +31,12 @@ type CartEntityLike = {
 	updatedAt: unknown
 }
 
+// ProductMedia junction: { position, media }
+type CartProductMedia = {
+	position: number
+	media: MediaRecord
+}
+
 type CartItemLike = {
 	id: string
 	productId: string
@@ -41,6 +49,7 @@ type CartItemLike = {
 		name: string
 		slug: string
 		price: unknown
+		media?: CartProductMedia[] | null
 	}
 }
 
@@ -106,10 +115,14 @@ function toCents(price: any): number {
 	return Math.round(Number(String(price)) * 100)
 }
 
-export function mapCartEntity(cart: CartEntityLike) {
+export function mapCartEntity(
+	cart: CartEntityLike,
+	mapMedia?: (media: MediaRecord) => unknown
+) {
 	const items = cart.items.map(item => {
 		const unitPriceCents = toCents(item.product.price)
 		const lineTotalCents = unitPriceCents * item.quantity
+		const primaryMedia = item.product.media?.[0]?.media ?? null
 
 		return {
 			id: item.id,
@@ -120,7 +133,8 @@ export function mapCartEntity(cart: CartEntityLike) {
 				id: item.product.id,
 				name: item.product.name,
 				slug: item.product.slug,
-				price: unitPriceCents / 100
+				price: unitPriceCents / 100,
+				media: primaryMedia && mapMedia ? mapMedia(primaryMedia) : null
 			},
 			lineTotal: lineTotalCents / 100,
 			createdAt: item.createdAt,
