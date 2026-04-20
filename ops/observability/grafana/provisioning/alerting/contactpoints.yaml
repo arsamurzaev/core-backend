@@ -8,17 +8,17 @@ contactPoints:
       # Grafana docs: https://grafana.com/docs/grafana/latest/alerting/configure-notifications/manage-contact-points/
 
       # --- Telegram ---
-      # - uid: telegram-default
-      #   type: telegram
-      #   settings:
-      #     botToken: ${GRAFANA_ALERT_TELEGRAM_TOKEN}
-      #     chatid: ${GRAFANA_ALERT_TELEGRAM_CHAT_ID}
-      #     message: |
-      #       {{ range .Alerts }}
-      #       [{{ .Labels.severity | toUpper }}] {{ .Annotations.summary }}
-      #       {{ .Annotations.description }}
-      #       {{ end }}
-      #   disableResolveMessage: false
+      - uid: telegram-default
+        type: telegram
+        settings:
+          botToken: ${GRAFANA_ALERT_TELEGRAM_TOKEN}
+          chatid: ${GRAFANA_ALERT_TELEGRAM_CHAT_ID}
+          message: |
+            {{ range .Alerts }}
+            [{{ .Labels.severity | toUpper }}] {{ .Annotations.summary }}
+            {{ .Annotations.description }}
+            {{ end }}
+        disableResolveMessage: false
 
       # --- Slack ---
       # - uid: slack-default

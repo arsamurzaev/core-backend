@@ -484,10 +484,11 @@ async function generateCatalogSeoAssets(
 		}
 	}
 
-	const [background, logo] = await Promise.all([
+	const [background, sourceLogo] = await Promise.all([
 		loadSeoSourceMediaBuffer(s3, catalog.config?.bgMedia ?? null),
 		loadSeoSourceMediaBuffer(s3, catalog.config?.logoMedia ?? null)
 	])
+	const logo = await prepareCatalogSeoLogoVisual(sourceLogo)
 
 	const faviconPng = await renderCatalogFaviconPng(catalog, logo)
 	const faviconIco = wrapPngAsIco(faviconPng, FAVICON_SIZE, FAVICON_SIZE)
@@ -1173,6 +1174,32 @@ async function loadSeoSourceMediaBuffer(
 	if (!response.Body) return null
 	const bytes = await response.Body.transformToByteArray()
 	return Buffer.from(bytes)
+}
+
+async function prepareCatalogSeoLogoVisual(
+	logo: Buffer | null
+): Promise<Buffer | null> {
+	if (!logo) return null
+
+	const resized = await sharp(logo)
+		.rotate()
+		.resize({
+			width: SOCIAL_LOGO_SIZE,
+			height: SOCIAL_LOGO_SIZE,
+			fit: 'cover'
+		})
+		.png()
+		.toBuffer()
+	const mask = Buffer.from(`
+		<svg width="${SOCIAL_LOGO_SIZE}" height="${SOCIAL_LOGO_SIZE}" viewBox="0 0 ${SOCIAL_LOGO_SIZE} ${SOCIAL_LOGO_SIZE}" xmlns="http://www.w3.org/2000/svg">
+			<rect width="${SOCIAL_LOGO_SIZE}" height="${SOCIAL_LOGO_SIZE}" rx="${SOCIAL_LOGO_SIZE / 2}" fill="#ffffff" />
+		</svg>
+	`)
+
+	return sharp(resized)
+		.composite([{ input: mask, blend: 'dest-in' }])
+		.png()
+		.toBuffer()
 }
 
 async function renderCatalogFaviconPng(

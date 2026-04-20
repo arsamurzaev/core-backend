@@ -710,7 +710,9 @@ async function importLegacyMediaAsset(
 		: downloaded
 	const rawKey = buildRawKey(asset, image.extension)
 	const baseKey = buildBaseKeyFromRawKey(rawKey)
-	const variants = await buildVariants(image.buffer, baseKey, image, s3)
+	const variants = shouldBuildMediaVariants(asset)
+		? await buildVariants(image.buffer, baseKey, image, s3)
+		: []
 	logMediaStep(assetLabel, 'variants built', {
 		rawKey,
 		variants: variants.length
@@ -1243,6 +1245,10 @@ function buildBaseKeyFromRawKey(key: string): string {
 function buildVariantKind(variant: UploadedVariant): string {
 	const format = variant.contentType === 'image/avif' ? 'avif' : 'webp'
 	return `${variant.name}-${format}`
+}
+
+function shouldBuildMediaVariants(asset: LegacyMediaAsset): boolean {
+	return asset.kind !== 'catalog-logo' && asset.kind !== 'catalog-background'
 }
 
 function resolveVariantNameByOrder(
