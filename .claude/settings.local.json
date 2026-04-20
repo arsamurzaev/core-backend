@@ -51,7 +51,10 @@
       "Bash(xargs -I {} basename {})",
       "Bash(cmd /c \"cd c:\\\\Users\\\\krush\\\\Desktop\\\\www\\\\catalog\\\\frontend && npx tsc --noEmit 2>&1\")",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebSearch",
+      "WebFetch(domain:hub.docker.com)",
+      "WebFetch(domain:grafana.com)"
     ]
   }
 }
