@@ -1,4 +1,3 @@
-# Do not use this configuration in production.
 multitenancy_enabled: false
 
 blocks_storage:
@@ -14,19 +13,19 @@ compactor:
  data_dir: /tmp/mimir/compactor
  sharding_ring:
   kvstore:
-   store: memberlist
+   store: inmemory
 
 distributor:
  ring:
-  instance_addr: 0.0.0.0
+  instance_addr: 127.0.0.1
   kvstore:
-   store: memberlist
+   store: inmemory
 
 ingester:
  ring:
-  instance_addr: 0.0.0.0
+  instance_addr: 127.0.0.1
   kvstore:
-   store: memberlist
+   store: inmemory
   replication_factor: 1
 
 ruler_storage:
