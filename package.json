@@ -21,6 +21,7 @@
 		"test:e2e": "jest --config ./test/jest-e2e.json",
 		"prisma:push": "prisma db push",
 		"prisma:generate": "prisma generate",
+		"db:add-clothes-size": "node --loader ts-node/esm prisma/add-clothes-size-attribute.ts",
 		"legacy:migrate": "tsc -p migration/tsconfig.json && node migration/dist/migration/scripts/migrate-legacy.js",
 		"legacy:migrate:all": "tsc -p migration/tsconfig.json && node migration/dist/migration/scripts/migrate-legacy.js --phase=all --apply"
 	},

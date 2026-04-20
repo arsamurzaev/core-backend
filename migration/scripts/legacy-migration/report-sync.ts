@@ -41,6 +41,7 @@ const CONTACT_FIELDS = [
 	'message',
 	'map'
 ] as const
+const QUERY_IN_CHUNK_SIZE = 5000
 
 export async function buildLegacyReconciliationReport(
 	prisma: PrismaClient,
@@ -546,81 +547,12 @@ async function loadTargetState(
 ) {
 	const [catalogs, users, categories, products, seoSettings, mediaRows] =
 		await Promise.all([
-			catalogIds.length === 0
-				? Promise.resolve([])
-				: prisma.catalog.findMany({
-						where: { id: { in: catalogIds } },
-						select: {
-							id: true,
-							userId: true,
-							parentId: true,
-							promoCodeId: true,
-							config: {
-								select: {
-									logoMediaId: true,
-									bgMediaId: true
-								}
-							},
-							_count: {
-								select: {
-									contacts: true,
-									region: true,
-									activity: true,
-									metrics: true,
-									integrations: true,
-									media: true
-								}
-							}
-						}
-					}),
-			userIds.length === 0
-				? Promise.resolve([])
-				: prisma.user.findMany({
-						where: { id: { in: userIds } },
-						select: { id: true, role: true }
-					}),
-			catalogIds.length === 0
-				? Promise.resolve([])
-				: prisma.category.findMany({
-						where: { catalogId: { in: catalogIds }, deleteAt: null },
-						select: { id: true, catalogId: true, imageMediaId: true }
-					}),
-			catalogIds.length === 0
-				? Promise.resolve([])
-				: prisma.product.findMany({
-						where: { catalogId: { in: catalogIds }, deleteAt: null },
-						select: { id: true, catalogId: true }
-					}),
-			catalogIds.length === 0
-				? Promise.resolve([])
-				: prisma.seoSetting.findMany({
-						where: {
-							catalogId: { in: catalogIds },
-							deleteAt: null,
-							entityType: {
-								in: [
-									SeoEntityType.CATALOG,
-									SeoEntityType.CATEGORY,
-									SeoEntityType.PRODUCT
-								]
-							}
-						},
-						select: {
-							catalogId: true,
-							entityType: true
-						}
-					}),
-			catalogIds.length === 0
-				? Promise.resolve([])
-				: prisma.media.findMany({
-						where: {
-							catalogId: { in: catalogIds }
-						},
-						select: {
-							catalogId: true,
-							path: true
-						}
-					})
+			loadCatalogReportRows(prisma, catalogIds),
+			loadUserReportRows(prisma, userIds),
+			loadCategoryReportRows(prisma, catalogIds),
+			loadProductReportRows(prisma, catalogIds),
+			loadSeoReportRows(prisma, catalogIds),
+			loadMediaReportRows(prisma, catalogIds)
 		])
 
 	const productIdToCatalogId = new Map(
@@ -629,10 +561,14 @@ async function loadTargetState(
 	const productMedia =
 		products.length === 0
 			? []
-			: await prisma.productMedia.findMany({
-					where: { productId: { in: products.map(product => product.id) } },
-					select: { productId: true }
-				})
+			: await findManyByChunks(
+					products.map(product => product.id),
+					ids =>
+						prisma.productMedia.findMany({
+							where: { productId: { in: ids } },
+							select: { productId: true }
+						})
+				)
 
 	const coreMediaRows = mediaRows.filter(
 		media => !media.path || !media.path.startsWith('seo/')
@@ -690,6 +626,104 @@ async function loadTargetState(
 		),
 		mediaRows: countByKey(coreMediaRows.map(media => media.catalogId))
 	}
+}
+
+async function loadCatalogReportRows(
+	prisma: PrismaClient,
+	catalogIds: string[]
+) {
+	return findManyByChunks(catalogIds, ids =>
+		prisma.catalog.findMany({
+			where: { id: { in: ids } },
+			select: {
+				id: true,
+				userId: true,
+				parentId: true,
+				promoCodeId: true,
+				config: {
+					select: {
+						logoMediaId: true,
+						bgMediaId: true
+					}
+				},
+				_count: {
+					select: {
+						contacts: true,
+						region: true,
+						activity: true,
+						metrics: true,
+						integrations: true,
+						media: true
+					}
+				}
+			}
+		})
+	)
+}
+
+async function loadUserReportRows(prisma: PrismaClient, userIds: string[]) {
+	return findManyByChunks(userIds, ids =>
+		prisma.user.findMany({
+			where: { id: { in: ids } },
+			select: { id: true, role: true }
+		})
+	)
+}
+
+async function loadCategoryReportRows(
+	prisma: PrismaClient,
+	catalogIds: string[]
+) {
+	return findManyByChunks(catalogIds, ids =>
+		prisma.category.findMany({
+			where: { catalogId: { in: ids }, deleteAt: null },
+			select: { id: true, catalogId: true, imageMediaId: true }
+		})
+	)
+}
+
+async function loadProductReportRows(
+	prisma: PrismaClient,
+	catalogIds: string[]
+) {
+	return findManyByChunks(catalogIds, ids =>
+		prisma.product.findMany({
+			where: { catalogId: { in: ids }, deleteAt: null },
+			select: { id: true, catalogId: true }
+		})
+	)
+}
+
+async function loadSeoReportRows(prisma: PrismaClient, catalogIds: string[]) {
+	return findManyByChunks(catalogIds, ids =>
+		prisma.seoSetting.findMany({
+			where: {
+				catalogId: { in: ids },
+				deleteAt: null,
+				entityType: {
+					in: [SeoEntityType.CATALOG, SeoEntityType.CATEGORY, SeoEntityType.PRODUCT]
+				}
+			},
+			select: {
+				catalogId: true,
+				entityType: true
+			}
+		})
+	)
+}
+
+async function loadMediaReportRows(prisma: PrismaClient, catalogIds: string[]) {
+	return findManyByChunks(catalogIds, ids =>
+		prisma.media.findMany({
+			where: {
+				catalogId: { in: ids }
+			},
+			select: {
+				catalogId: true,
+				path: true
+			}
+		})
+	)
 }
 
 function buildLegacyStats(
@@ -1021,20 +1055,22 @@ async function loadEntityMapByLegacyId(
 	entity: MigrationEntityKind,
 	legacyIds: string[]
 ): Promise<Map<string, EntityMap>> {
-	const uniqueIds = Array.from(new Set(legacyIds.filter(Boolean)))
+	const uniqueIds = uniqueNonEmptyIds(legacyIds)
 	if (uniqueIds.length === 0) return new Map()
 
-	const rows = await prisma.migrationEntityMap.findMany({
-		where: {
-			source,
-			entity,
-			legacyId: { in: uniqueIds }
-		},
-		select: {
-			legacyId: true,
-			targetId: true
-		}
-	})
+	const rows = await findManyByChunks(uniqueIds, ids =>
+		prisma.migrationEntityMap.findMany({
+			where: {
+				source,
+				entity,
+				legacyId: { in: ids }
+			},
+			select: {
+				legacyId: true,
+				targetId: true
+			}
+		})
+	)
 
 	return new Map(
 		rows.map(row => [
@@ -1042,6 +1078,32 @@ async function loadEntityMapByLegacyId(
 			{ legacyId: row.legacyId, targetId: row.targetId }
 		])
 	)
+}
+
+async function findManyByChunks<T>(
+	ids: string[],
+	query: (chunk: string[]) => Promise<T[]>
+): Promise<T[]> {
+	const uniqueIds = uniqueNonEmptyIds(ids)
+	if (uniqueIds.length === 0) return []
+
+	const rows: T[] = []
+	for (const chunk of chunkArray(uniqueIds, QUERY_IN_CHUNK_SIZE)) {
+		rows.push(...(await query(chunk)))
+	}
+	return rows
+}
+
+function uniqueNonEmptyIds(ids: string[]): string[] {
+	return Array.from(new Set(ids.filter(Boolean)))
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+	const chunks: T[][] = []
+	for (let index = 0; index < items.length; index += size) {
+		chunks.push(items.slice(index, index + size))
+	}
+	return chunks
 }
 
 function collectIdsByBusiness(
