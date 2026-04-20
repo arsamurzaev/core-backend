@@ -69,9 +69,6 @@ services:
         reservations:
           memory: 256m
     command: ['-config.file=/etc/tempo/config.yaml']
-    ports:
-      - '${OBSERVABILITY_HOST_BIND_IP:-0.0.0.0}:${OBSERVABILITY_TEMPO_OTLP_GRPC_PORT:-4317}:4317'
-      - '${OBSERVABILITY_HOST_BIND_IP:-0.0.0.0}:${OBSERVABILITY_TEMPO_OTLP_HTTP_PORT:-4318}:4318'
     volumes:
       - tempo_data:/var/tempo
       - ./ops/observability/tempo/config.yaml:/etc/tempo/config.yaml:ro
