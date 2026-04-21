@@ -5,6 +5,7 @@ import {
 	IsNotEmpty,
 	IsOptional,
 	IsString,
+	Max,
 	MaxLength,
 	Min
 } from 'class-validator'
@@ -31,6 +32,7 @@ export class MultipartStartDtoReq {
 	})
 	@IsInt()
 	@Min(1)
+	@Max(524288000)
 	fileSize: number
 
 	@ApiPropertyOptional({

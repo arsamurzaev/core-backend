@@ -344,20 +344,25 @@ export class S3Service implements OnModuleDestroy {
 			)
 		)
 
-		const mediaId = await this.createMediaRecord({
-			catalogId,
-			originalName: file.originalname,
-			mimeType: file.mimetype,
-			size: file.size,
-			width: metadata.width,
-			height: metadata.height,
-			rawKey: variants[0]?.key ?? baseKey,
-			variants,
-			path: options.path ?? options.folder,
-			entityId: options.entityId
-		})
+		try {
+			const mediaId = await this.createMediaRecord({
+				catalogId,
+				originalName: file.originalname,
+				mimeType: file.mimetype,
+				size: file.size,
+				width: metadata.width,
+				height: metadata.height,
+				rawKey: variants[0]?.key ?? baseKey,
+				variants,
+				path: options.path ?? options.folder,
+				entityId: options.entityId
+			})
 
-		return this.buildResponse(variants, mediaId)
+			return this.buildResponse(variants, mediaId)
+		} catch (error) {
+			await this.deleteObjectsByKeys(variants.map(v => v.key))
+			throw error
+		}
 	}
 
 	async uploadGeneratedAsset(
@@ -378,24 +383,29 @@ export class S3Service implements OnModuleDestroy {
 			cacheControl: 'public, max-age=0, must-revalidate'
 		})
 
-		const mediaId = await this.createMediaRecord({
-			catalogId,
-			originalName: asset.originalName ?? options.filename,
-			mimeType: contentType,
-			size: asset.size ?? asset.buffer.length,
-			width: asset.width,
-			height: asset.height,
-			rawKey: key,
-			variants: [],
-			path: options.path ?? options.folder,
-			entityId: options.entityId
-		})
+		try {
+			const mediaId = await this.createMediaRecord({
+				catalogId,
+				originalName: asset.originalName ?? options.filename,
+				mimeType: contentType,
+				size: asset.size ?? asset.buffer.length,
+				width: asset.width,
+				height: asset.height,
+				rawKey: key,
+				variants: [],
+				path: options.path ?? options.folder,
+				entityId: options.entityId
+			})
 
-		return {
-			ok: true,
-			mediaId,
-			key,
-			url: this.buildPublicUrl(key)
+			return {
+				ok: true,
+				mediaId,
+				key,
+				url: this.buildPublicUrl(key)
+			}
+		} catch (error) {
+			await this.deleteObjectsByKeys([key])
+			throw error
 		}
 	}
 

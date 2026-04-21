@@ -32,6 +32,7 @@ import { Roles } from '@/modules/auth/decorators/roles.decorator'
 import { User } from '@/modules/auth/decorators/user.decorator'
 import { SessionGuard } from '@/modules/auth/guards/session.guard'
 import type { SessionUser } from '@/modules/auth/types/auth-request'
+import { AuthThrottle } from '@/shared/throttler/auth-throttle.decorator'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
@@ -206,6 +207,7 @@ export class CartController {
 
 	@SkipCatalog()
 	@Post('public/:publicKey/checkout')
+	@AuthThrottle()
 	@ApiOperation({ summary: 'Issue a checkoutKey for a public cart' })
 	@ApiParam({
 		name: 'publicKey',

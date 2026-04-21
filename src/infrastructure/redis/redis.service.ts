@@ -24,12 +24,15 @@ export class RedisService
 			}),
 			host: configService.get<string>('redis.host', { infer: true }),
 			port: configService.get('redis.port', { infer: true }),
-			maxLoadingRetryTime: 5,
-			enableOfflineQueue: true
+			commandTimeout: 5000,
+			connectTimeout: 10000,
+			maxLoadingRetryTime: 5000,
+			enableOfflineQueue: true,
+			retryStrategy: times => Math.min(times * 500, 5000)
 		})
 	}
 
-	onModuleInit() {
+	async onModuleInit() {
 		const start = Date.now()
 
 		this.logger.log('Подключение к Redis...')
@@ -40,11 +43,11 @@ export class RedisService
 
 		this.on('ready', () => {
 			const ms = Date.now() - start
-			this.logger.log(`Подключение к Redis успешно установлено за ${ms}мс`)
+			this.logger.log(`Redis готов за ${ms}мс`)
 		})
 
 		this.on('error', error => {
-			this.logger.error('Подключение к Redis не удалось', {
+			this.logger.error('Ошибка подключения к Redis', {
 				error: error.message ?? error
 			})
 		})
@@ -54,8 +57,18 @@ export class RedisService
 		})
 
 		this.on('reconnecting', () => {
-			this.logger.warn('Подключение к Redis переподключается')
+			this.logger.warn('Redis переподключается...')
 		})
+
+		try {
+			await this.ping()
+			this.logger.log('Redis ping успешен')
+		} catch (error) {
+			this.logger.error('Redis недоступен при старте приложения', {
+				error: error instanceof Error ? error.message : String(error)
+			})
+			throw error
+		}
 	}
 
 	async onModuleDestroy() {

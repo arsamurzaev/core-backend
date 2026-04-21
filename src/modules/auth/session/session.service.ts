@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import geoip from 'geoip-lite'
 import { randomUUID } from 'node:crypto'
 
@@ -32,6 +32,7 @@ type CreateSessionOptions = {
 
 @Injectable()
 export class SessionService {
+	private readonly logger = new Logger(SessionService.name)
 	private readonly prefix = 'sess:'
 	private readonly isDev = process.env.NODE_ENV !== 'production'
 	private readonly ttlSeconds = Number(
@@ -113,55 +114,85 @@ export class SessionService {
 
 	async touch(sid: string, userId: string, ttlSeconds?: number): Promise<void> {
 		if (!sid || !userId) return
-		const ttl = ttlSeconds ?? this.ttlSeconds
-		const loginsTtlSeconds = this.loginsTtlSeconds
-		const primaryKey = this.primaryKey(userId)
-		const currentPrimary = await this.redis.get(primaryKey)
+		try {
+			const ttl = ttlSeconds ?? this.ttlSeconds
+			const loginsTtlSeconds = this.loginsTtlSeconds
+			const primaryKey = this.primaryKey(userId)
+			const currentPrimary = await this.redis.get(primaryKey)
 
-		const pipeline = this.redis
-			.multi()
-			.expire(this.key(sid), ttl)
-			.expire(this.loginsKey(userId), loginsTtlSeconds)
+			const pipeline = this.redis
+				.multi()
+				.expire(this.key(sid), ttl)
+				.expire(this.loginsKey(userId), loginsTtlSeconds)
 
-		if (currentPrimary === sid) {
-			pipeline.expire(primaryKey, ttl)
+			if (currentPrimary === sid) {
+				pipeline.expire(primaryKey, ttl)
+			}
+
+			await pipeline.exec()
+		} catch (error) {
+			this.logger.warn('Session touch failed', {
+				sid,
+				error: error instanceof Error ? error.message : String(error)
+			})
 		}
-
-		await pipeline.exec()
 	}
 
 	async get(sid: string): Promise<SessionData | null> {
 		if (!sid) return null
-		const raw = await this.redis.get(this.key(sid))
-		return parseStoredSessionData(raw)
+		try {
+			const raw = await this.redis.get(this.key(sid))
+			return parseStoredSessionData(raw)
+		} catch (error) {
+			this.logger.warn('Session get failed', {
+				sid,
+				error: error instanceof Error ? error.message : String(error)
+			})
+			return null
+		}
 	}
 
 	async destroy(sid: string): Promise<void> {
 		if (!sid) return
-		const data = await this.get(sid)
-		await this.redis.del(this.key(sid))
-		if (data?.userId) {
-			const primaryKey = this.primaryKey(data.userId)
-			const currentPrimary = await this.redis.get(primaryKey)
-			if (currentPrimary === sid) {
-				await this.redis.del(primaryKey)
+		try {
+			const data = await this.get(sid)
+			await this.redis.del(this.key(sid))
+			if (data?.userId) {
+				const primaryKey = this.primaryKey(data.userId)
+				const currentPrimary = await this.redis.get(primaryKey)
+				if (currentPrimary === sid) {
+					await this.redis.del(primaryKey)
+				}
 			}
+		} catch (error) {
+			this.logger.warn('Session destroy failed', {
+				sid,
+				error: error instanceof Error ? error.message : String(error)
+			})
 		}
 	}
 
 	async listForUser(userId: string): Promise<SessionLoginEntry[]> {
-		const raw = await this.redis.lrange(this.loginsKey(userId), 0, -1)
-		const primarySid = await this.redis.get(this.primaryKey(userId))
+		try {
+			const raw = await this.redis.lrange(this.loginsKey(userId), 0, -1)
+			const primarySid = await this.redis.get(this.primaryKey(userId))
 
-		return raw.flatMap(entry => {
-			try {
-				const parsed = JSON.parse(entry) as SessionLoginEntry
-				parsed.isPrimary = parsed.sid === primarySid
-				return [parsed]
-			} catch {
-				return []
-			}
-		})
+			return raw.flatMap(entry => {
+				try {
+					const parsed = JSON.parse(entry) as SessionLoginEntry
+					parsed.isPrimary = parsed.sid === primarySid
+					return [parsed]
+				} catch {
+					return []
+				}
+			})
+		} catch (error) {
+			this.logger.warn('Session listForUser failed', {
+				userId,
+				error: error instanceof Error ? error.message : String(error)
+			})
+			return []
+		}
 	}
 
 	async destroyAllForUser(userId: string): Promise<void> {

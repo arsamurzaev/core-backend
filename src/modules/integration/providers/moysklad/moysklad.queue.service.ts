@@ -76,7 +76,8 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		this.queue = new Queue<MoySkladSyncJob>(MOYSKLAD_SYNC_QUEUE_NAME, {
 			connection,
 			defaultJobOptions: {
-				attempts: 1,
+				attempts: 3,
+				backoff: { type: 'exponential', delay: 5000 },
 				removeOnComplete: { age: 86400 },
 				removeOnFail: { age: 86400 }
 			}
