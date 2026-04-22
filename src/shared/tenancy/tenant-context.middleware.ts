@@ -56,32 +56,34 @@ function parseCsvEnv(name: string, fallback: string[]): string[] {
 		.filter(Boolean)
 }
 
-const BASE_DOMAINS = parseCsvEnv('CATALOG_BASE_DOMAINS', ['myctlg.ru'])
-
-const RESERVED_SUBDOMAINS = new Set(
-	parseCsvEnv('CATALOG_RESERVED_SUBDOMAINS', [
-		'www',
-		'api',
-		'admin',
-		'app',
-		'static',
-		'cdn',
-		'assets'
-	])
-)
+const DEFAULT_BASE_DOMAINS = ['myctlg.ru']
+const DEFAULT_RESERVED_SUBDOMAINS = [
+	'www',
+	'api',
+	'admin',
+	'app',
+	'static',
+	'cdn',
+	'assets'
+]
 
 // Вернёт slug, если host = {slug}.{baseDomain}
 function extractSlug(host: string): string | null {
 	if (!host) return null
 
-	for (const base of BASE_DOMAINS) {
+	const baseDomains = parseCsvEnv('CATALOG_BASE_DOMAINS', DEFAULT_BASE_DOMAINS)
+	const reservedSubdomains = new Set(
+		parseCsvEnv('CATALOG_RESERVED_SUBDOMAINS', DEFAULT_RESERVED_SUBDOMAINS)
+	)
+
+	for (const base of baseDomains) {
 		if (host === base) continue
 
 		if (host.endsWith('.' + base)) {
 			const left = host.slice(0, -(base.length + 1)) // убрали ".base"
 			const slug = left.split('.')[0]?.trim() // single-label slug
 			if (!slug) return null
-			if (RESERVED_SUBDOMAINS.has(slug)) return null
+			if (reservedSubdomains.has(slug)) return null
 			return slug
 		}
 	}
@@ -116,10 +118,10 @@ export class CatalogContextMiddleware implements NestMiddleware {
 		try {
 			const slug = extractSlug(host)
 
-			// основной сценарий: поддомен
-			const resolved = slug
-				? await this.resolver.resolveBySlug(slug)
-				: await this.resolver.resolveByDomain(host) // редкий сценарий: кастомный домен
+			// основной сценарий: поддомен; fallback покрывает записи с полным domain
+			const resolved =
+				(slug ? await this.resolver.resolveBySlug(slug) : null) ??
+				(await this.resolver.resolveByDomain(host)) // редкий сценарий: кастомный домен
 
 			const store: RequestContextStore = {
 				requestId,
