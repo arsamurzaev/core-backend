@@ -12,9 +12,23 @@ import { getClientInfo } from '@/shared/http/utils/client-info'
 
 import {
 	normalizeHttpRouteForMetrics,
-	shouldSkipHttpObservability
+	shouldSkipHttpObservability,
+	statusCodeToClass
 } from './http-observability.utils'
 import { ObservabilityService } from './observability.service'
+
+function resolveRequestUrl(req: Request): string {
+	return req.originalUrl || req.url || req.path || '/'
+}
+
+function resolveRequestPath(req: Request): string {
+	return resolveRequestUrl(req).split('?')[0] || '/'
+}
+
+function resolveHeader(value: string | string[] | undefined): string | null {
+	if (Array.isArray(value)) return value[0] ?? null
+	return value ?? null
+}
 
 @Injectable()
 export class HttpObservabilityInterceptor implements NestInterceptor {
@@ -50,19 +64,26 @@ export class HttpObservabilityInterceptor implements NestInterceptor {
 			finalize(() => {
 				const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000
 				const statusCode = res.statusCode || 500
+				const roundedDurationMs = Number(durationMs.toFixed(3))
+				const requestUrl = resolveRequestUrl(req)
 
 				this.observability.decrementHttpInFlight(method, route)
 				this.observability.recordHttpRequest(method, route, statusCode, durationMs)
 
 				this.logger.log({
 					event: 'http_request_completed',
+					message: `${method} ${requestUrl} -> ${statusCode} (${roundedDurationMs}ms)`,
 					method,
 					route,
+					path: resolveRequestPath(req),
+					originalUrl: requestUrl,
 					statusCode,
-					durationMs: Number(durationMs.toFixed(3)),
+					statusClass: statusCodeToClass(statusCode),
+					durationMs: roundedDurationMs,
 					contentLength: res.getHeader('content-length') ?? null,
 					clientIp: clientInfo.ip || null,
-					userAgent: clientInfo.userAgent
+					userAgent: clientInfo.userAgent,
+					referrer: resolveHeader(req.headers.referer ?? req.headers.referrer)
 				} as any)
 			})
 		)
