@@ -14,7 +14,7 @@ function escapeRegExp(value: string): string {
 function wildcardOriginToRegExp(origin: string): RegExp {
 	const normalized = normalizeCorsEntry(origin)
 	const hasProtocol = /^[a-z][a-z\d+\-.]*:\/\//i.test(normalized)
-	const source = escapeRegExp(normalized).replace(/\\\*/g, '[^.]+')
+	const source = escapeRegExp(normalized).replace(/\*/g, '[^.]+')
 	const protocol = hasProtocol ? '' : 'https?:\\/\\/'
 
 	return new RegExp(`^${protocol}${source}(?::\\d+)?$`, 'i')
