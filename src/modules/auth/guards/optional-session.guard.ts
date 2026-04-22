@@ -9,14 +9,12 @@ import type { AuthRequest } from '../types/auth-request'
 const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
 const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
 const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'lax') as 'strict' | 'lax'
-const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN ?? undefined
 const isProd = process.env.NODE_ENV === 'production'
 const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7
 const CLEAR_COOKIE_OPTIONS = {
 	path: '/',
 	sameSite: SAME_SITE,
-	secure: isProd,
-	domain: COOKIE_DOMAIN
+	secure: isProd
 } as const
 
 function parseCookie(
@@ -84,16 +82,14 @@ export class OptionalSessionGuard implements CanActivate {
 					sameSite: SAME_SITE,
 					secure: isProd,
 					path: '/',
-					maxAge: SESSION_MAX_AGE_MS,
-					domain: COOKIE_DOMAIN
+					maxAge: SESSION_MAX_AGE_MS
 				})
 				res.cookie(CSRF_COOKIE, session.csrf, {
 					httpOnly: false,
 					sameSite: SAME_SITE,
 					secure: isProd,
 					path: '/',
-					maxAge: SESSION_MAX_AGE_MS,
-					domain: COOKIE_DOMAIN
+					maxAge: SESSION_MAX_AGE_MS
 				})
 			}
 		} catch {
