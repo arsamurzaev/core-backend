@@ -52,34 +52,37 @@ async function bootstrap() {
 	app.enableCors(getCorsConfig(config))
 	app.useGlobalPipes(new ValidationPipe(getValidationPipeConfig()))
 
-	const swaggerConfig = new DocumentBuilder()
-		.setTitle('Gateway Service')
-		.setDescription('The Gateway Service API description')
-		.addApiKey({ type: 'apiKey', name: 'X-CSRF-Token', in: 'header' }, 'csrf')
-		.setVersion('1.0')
-		.build()
-
-	const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig, {
-		operationIdFactory: (controllerKey, methodKey) =>
-			`${controllerKey}_${methodKey}`
-	})
-
-	SwaggerModule.setup('/docs', app, swaggerDocument, {
-		jsonDocumentUrl: '/openapi.json',
-		yamlDocumentUrl: '/openapi.yaml',
-		swaggerOptions: {
-			withCredentials: true,
-			persistAuthorization: true
-		}
-	})
-
 	const port = config.get('http.port', { infer: true })
 	const host = config.get('http.host', { infer: true })
+
+	if (process.env.NODE_ENV !== 'production') {
+		const swaggerConfig = new DocumentBuilder()
+			.setTitle('Gateway Service')
+			.setDescription('The Gateway Service API description')
+			.addApiKey({ type: 'apiKey', name: 'X-CSRF-Token', in: 'header' }, 'csrf')
+			.setVersion('1.0')
+			.build()
+
+		const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig, {
+			operationIdFactory: (controllerKey, methodKey) =>
+				`${controllerKey}_${methodKey}`
+		})
+
+		SwaggerModule.setup('/docs', app, swaggerDocument, {
+			jsonDocumentUrl: '/openapi.json',
+			yamlDocumentUrl: '/openapi.yaml',
+			swaggerOptions: {
+				withCredentials: true,
+				persistAuthorization: true
+			}
+		})
+
+		appLogger.log(`Swagger available at ${host}/docs`, 'Bootstrap')
+	}
 
 	await app.listen(port)
 
 	appLogger.log(`Service started on ${host}`, 'Bootstrap')
-	appLogger.log(`Swagger available at ${host}/docs`, 'Bootstrap')
 }
 
 void bootstrap()
