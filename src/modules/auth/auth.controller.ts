@@ -23,11 +23,13 @@ import { ObservabilityService } from '@/modules/observability/observability.serv
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
+import { RequestContext } from '@/shared/tenancy/request-context'
 import { AuthThrottle } from '@/shared/throttler/auth-throttle.decorator'
 
 import {
 	clearSessionCookies,
 	getSessionCookie,
+	resolveCookieDomain,
 	setSessionCookies
 } from './auth-cookie.utils'
 import { AuthService } from './auth.service'
@@ -71,7 +73,7 @@ export class AuthController {
 		)
 
 		res.setHeader('Cache-Control', 'no-store')
-		setSessionCookies(res, { sid, csrf })
+		setSessionCookies(res, { sid, csrf }, resolveCookieDomain(RequestContext.get()?.host ?? ''))
 
 		return { ok: true, user }
 	}
@@ -119,7 +121,7 @@ export class AuthController {
 		} as any)
 
 		res.setHeader('Cache-Control', 'no-store')
-		clearSessionCookies(res)
+		clearSessionCookies(res, resolveCookieDomain(RequestContext.get()?.host ?? ''))
 
 		return { ok: true }
 	}

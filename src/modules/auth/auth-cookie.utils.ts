@@ -6,40 +6,62 @@ const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'lax') as 'strict' | 'lax'
 const isProd = process.env.NODE_ENV === 'production'
 const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7
 
+const BASE_DOMAINS = (process.env.CATALOG_BASE_DOMAINS ?? 'myctlg.ru')
+	.split(',')
+	.map(s => s.trim().toLowerCase())
+	.filter(Boolean)
+
+export function resolveCookieDomain(host: string): string | undefined {
+	if (!host) return undefined
+	const h = host.toLowerCase()
+	for (const base of BASE_DOMAINS) {
+		if (h === base || h.endsWith('.' + base)) return '.' + base
+	}
+	// кастомный домен — берём eTLD+1
+	const parts = h.split('.')
+	if (parts.length >= 2) return '.' + parts.slice(-2).join('.')
+	return undefined
+}
+
 export function getSessionCookie(req: Request): string | null {
 	return getCookie(req, SID_COOKIE) ?? null
 }
 
 export function setSessionCookies(
 	res: Response,
-	session: { sid: string; csrf: string }
+	session: { sid: string; csrf: string },
+	cookieDomain?: string
 ): void {
 	res.cookie(SID_COOKIE, session.sid, {
 		httpOnly: true,
 		sameSite: SAME_SITE,
 		secure: isProd,
 		path: '/',
-		maxAge: SESSION_MAX_AGE_MS
+		maxAge: SESSION_MAX_AGE_MS,
+		...(cookieDomain ? { domain: cookieDomain } : {})
 	})
 	res.cookie(CSRF_COOKIE, session.csrf, {
 		httpOnly: false,
 		sameSite: SAME_SITE,
 		secure: isProd,
 		path: '/',
-		maxAge: SESSION_MAX_AGE_MS
+		maxAge: SESSION_MAX_AGE_MS,
+		...(cookieDomain ? { domain: cookieDomain } : {})
 	})
 }
 
-export function clearSessionCookies(res: Response): void {
+export function clearSessionCookies(res: Response, cookieDomain?: string): void {
 	res.clearCookie(SID_COOKIE, {
 		path: '/',
 		sameSite: SAME_SITE,
-		secure: isProd
+		secure: isProd,
+		...(cookieDomain ? { domain: cookieDomain } : {})
 	})
 	res.clearCookie(CSRF_COOKIE, {
 		path: '/',
 		sameSite: SAME_SITE,
-		secure: isProd
+		secure: isProd,
+		...(cookieDomain ? { domain: cookieDomain } : {})
 	})
 }
 

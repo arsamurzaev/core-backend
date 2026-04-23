@@ -11,7 +11,9 @@ import type { Response } from 'express'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { IS_PUBLIC_KEY } from '@/shared/http/decorators/public.decorator'
+import { RequestContext } from '@/shared/tenancy/request-context'
 
+import { resolveCookieDomain } from '../auth-cookie.utils'
 import { ROLES_KEY } from '../decorators/roles.decorator'
 import { SessionService } from '../session/session.service'
 import type { AuthRequest } from '../types/auth-request'
@@ -21,12 +23,6 @@ const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
 const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'lax') as 'strict' | 'lax'
 const isProd = process.env.NODE_ENV === 'production'
 const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7
-const CLEAR_COOKIE_OPTIONS = {
-	path: '/',
-	sameSite: SAME_SITE,
-	secure: isProd
-} as const
-
 function parseCookie(
 	header: string | undefined,
 	name: string
@@ -56,11 +52,16 @@ function requiredRank(required: Role[]) {
 	return Math.max(...required.map(r => ROLE_RANK[r] ?? 999))
 }
 
-function clearSessionCookies(res: Response | undefined): void {
+function clearSessionCookies(res: Response | undefined, cookieDomain?: string): void {
 	if (!res?.clearCookie) return
-
-	res.clearCookie(SID_COOKIE, CLEAR_COOKIE_OPTIONS)
-	res.clearCookie(CSRF_COOKIE, CLEAR_COOKIE_OPTIONS)
+	const opts = {
+		path: '/' as const,
+		sameSite: SAME_SITE,
+		secure: isProd,
+		...(cookieDomain ? { domain: cookieDomain } : {})
+	}
+	res.clearCookie(SID_COOKIE, opts)
+	res.clearCookie(CSRF_COOKIE, opts)
 }
 
 @Injectable()
@@ -131,20 +132,23 @@ export class SessionGuard implements CanActivate {
 				// no-op: do not block request if refresh fails
 			}
 
+			const cookieDomain = resolveCookieDomain(RequestContext.get()?.host ?? '')
 			if (res?.cookie) {
 				res.cookie(SID_COOKIE, sid, {
 					httpOnly: true,
 					sameSite: SAME_SITE,
 					secure: isProd,
 					path: '/',
-					maxAge: SESSION_MAX_AGE_MS
+					maxAge: SESSION_MAX_AGE_MS,
+					...(cookieDomain ? { domain: cookieDomain } : {})
 				})
 				res.cookie(CSRF_COOKIE, session.csrf, {
 					httpOnly: false,
 					sameSite: SAME_SITE,
 					secure: isProd,
 					path: '/',
-					maxAge: SESSION_MAX_AGE_MS
+					maxAge: SESSION_MAX_AGE_MS,
+					...(cookieDomain ? { domain: cookieDomain } : {})
 				})
 			}
 			return true
@@ -153,7 +157,7 @@ export class SessionGuard implements CanActivate {
 				error instanceof UnauthorizedException ||
 				error instanceof ForbiddenException
 			) {
-				clearSessionCookies(res)
+				clearSessionCookies(res, resolveCookieDomain(RequestContext.get()?.host ?? ''))
 			}
 			throw error
 		}

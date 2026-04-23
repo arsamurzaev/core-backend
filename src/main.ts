@@ -12,6 +12,7 @@ import { AllInterfaces } from './core/config'
 import { getCorsConfig, getValidationPipeConfig } from './core/config/cfg'
 import { AppLogger } from './infrastructure/observability/app-logger'
 import { initTracing } from './infrastructure/observability/tracing'
+import { CatalogResolver } from './shared/tenancy/catalog.resolver'
 
 initTracing()
 
@@ -49,7 +50,8 @@ async function bootstrap() {
 		)
 		next()
 	})
-	app.enableCors(getCorsConfig(config))
+	const catalogResolver = app.get(CatalogResolver)
+	app.enableCors(getCorsConfig(config, catalogResolver))
 	app.useGlobalPipes(new ValidationPipe(getValidationPipeConfig()))
 
 	const port = config.get('http.port', { infer: true })

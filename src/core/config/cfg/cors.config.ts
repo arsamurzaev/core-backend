@@ -1,6 +1,8 @@
 import { type CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface'
 import { ConfigService } from '@nestjs/config'
 
+import { CatalogResolver } from '@/shared/tenancy/catalog.resolver'
+
 import { AllInterfaces } from '../interfaces'
 
 function normalizeCorsEntry(entry: string): string {
@@ -42,7 +44,8 @@ function isOriginAllowed(origin: string, allowedOrigins: string[]): boolean {
 }
 
 export function getCorsConfig(
-	configService: ConfigService<AllInterfaces>
+	configService: ConfigService<AllInterfaces>,
+	catalogResolver?: CatalogResolver
 ): CorsOptions {
 	const allowedOrigins = parseCorsOrigins(
 		configService.get('http.cors', { infer: true })
@@ -55,7 +58,28 @@ export function getCorsConfig(
 				return
 			}
 
-			callback(null, isOriginAllowed(origin, allowedOrigins))
+			if (isOriginAllowed(origin, allowedOrigins)) {
+				callback(null, true)
+				return
+			}
+
+			// Кастомный домен: проверяем по БД через resolveByDomain
+			if (catalogResolver) {
+				let hostname: string
+				try {
+					hostname = new URL(origin).hostname
+				} catch {
+					callback(null, false)
+					return
+				}
+				catalogResolver
+					.resolveByDomain(hostname)
+					.then(catalog => callback(null, catalog !== null))
+					.catch(() => callback(null, false))
+				return
+			}
+
+			callback(null, false)
 		},
 		credentials: true
 	}

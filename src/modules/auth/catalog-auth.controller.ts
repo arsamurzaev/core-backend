@@ -20,7 +20,7 @@ import { getClientInfo } from '@/shared/http/utils/client-info'
 import { RequestContext } from '@/shared/tenancy/request-context'
 import { AuthThrottle } from '@/shared/throttler/auth-throttle.decorator'
 
-import { getSessionCookie, setSessionCookies } from './auth-cookie.utils'
+import { getSessionCookie, resolveCookieDomain, setSessionCookies } from './auth-cookie.utils'
 import { AuthService } from './auth.service'
 import { LoginDtoReq } from './dto/requests/login.dto.req'
 import { AuthCatalogLoginResponseDto } from './dto/responses/auth-catalog-login.dto.res'
@@ -61,7 +61,7 @@ export class CatalogAuthController {
 		)
 
 		res.setHeader('Cache-Control', 'no-store')
-		setSessionCookies(res, { sid, csrf })
+		setSessionCookies(res, { sid, csrf }, resolveCookieDomain(RequestContext.get()?.host ?? ''))
 
 		return { ok: true, user, catalogId }
 	}

@@ -2,7 +2,9 @@ import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common'
 import type { Response } from 'express'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { RequestContext } from '@/shared/tenancy/request-context'
 
+import { resolveCookieDomain } from '../auth-cookie.utils'
 import { SessionService } from '../session/session.service'
 import type { AuthRequest } from '../types/auth-request'
 
@@ -11,12 +13,6 @@ const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
 const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'lax') as 'strict' | 'lax'
 const isProd = process.env.NODE_ENV === 'production'
 const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7
-const CLEAR_COOKIE_OPTIONS = {
-	path: '/',
-	sameSite: SAME_SITE,
-	secure: isProd
-} as const
-
 function parseCookie(
 	header: string | undefined,
 	name: string
@@ -29,11 +25,16 @@ function parseCookie(
 	return undefined
 }
 
-function clearSessionCookies(res: Response | undefined): void {
+function clearSessionCookies(res: Response | undefined, cookieDomain?: string): void {
 	if (!res?.clearCookie) return
-
-	res.clearCookie(SID_COOKIE, CLEAR_COOKIE_OPTIONS)
-	res.clearCookie(CSRF_COOKIE, CLEAR_COOKIE_OPTIONS)
+	const opts = {
+		path: '/' as const,
+		sameSite: SAME_SITE,
+		secure: isProd,
+		...(cookieDomain ? { domain: cookieDomain } : {})
+	}
+	res.clearCookie(SID_COOKIE, opts)
+	res.clearCookie(CSRF_COOKIE, opts)
 }
 
 @Injectable()
@@ -54,7 +55,7 @@ export class OptionalSessionGuard implements CanActivate {
 		try {
 			const session = await this.sessions.get(sid)
 			if (!session?.userId) {
-				clearSessionCookies(res)
+				clearSessionCookies(res, resolveCookieDomain(RequestContext.get()?.host ?? ''))
 				return true
 			}
 
@@ -63,7 +64,7 @@ export class OptionalSessionGuard implements CanActivate {
 				select: { id: true, role: true, login: true, name: true }
 			})
 			if (!user) {
-				clearSessionCookies(res)
+				clearSessionCookies(res, resolveCookieDomain(RequestContext.get()?.host ?? ''))
 				return true
 			}
 
@@ -76,24 +77,27 @@ export class OptionalSessionGuard implements CanActivate {
 				// no-op: optional auth should not block public reads
 			}
 
+			const cookieDomain = resolveCookieDomain(RequestContext.get()?.host ?? '')
 			if (res?.cookie) {
 				res.cookie(SID_COOKIE, sid, {
 					httpOnly: true,
 					sameSite: SAME_SITE,
 					secure: isProd,
 					path: '/',
-					maxAge: SESSION_MAX_AGE_MS
+					maxAge: SESSION_MAX_AGE_MS,
+					...(cookieDomain ? { domain: cookieDomain } : {})
 				})
 				res.cookie(CSRF_COOKIE, session.csrf, {
 					httpOnly: false,
 					sameSite: SAME_SITE,
 					secure: isProd,
 					path: '/',
-					maxAge: SESSION_MAX_AGE_MS
+					maxAge: SESSION_MAX_AGE_MS,
+					...(cookieDomain ? { domain: cookieDomain } : {})
 				})
 			}
 		} catch {
-			clearSessionCookies(res)
+			clearSessionCookies(res, resolveCookieDomain(RequestContext.get()?.host ?? ''))
 		}
 
 		return true
