@@ -1778,4 +1778,26 @@ export class S3Service implements OnModuleDestroy {
 	private toError(error: unknown): Error {
 		return error instanceof Error ? error : new Error(formatUnknownValue(error))
 	}
+
+	async uploadProofFile(
+		buffer: Buffer,
+		mimeType: string,
+		originalName?: string
+	): Promise<{ url: string }> {
+		this.assertUploadEnabled()
+
+		if (!buffer?.length) {
+			throw new BadRequestException('Файл не передан')
+		}
+
+		const ext = originalName ? path.extname(originalName) : ''
+		const safeExt = ext && ext.length <= 10 ? ext : ''
+		const key = `proofs/${randomUUID()}${safeExt}`
+
+		await this.putObject(key, buffer, mimeType, {
+			cacheControl: 'public, max-age=31536000, immutable'
+		})
+
+		return { url: this.buildPublicUrl(key) }
+	}
 }

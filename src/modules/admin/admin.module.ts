@@ -1,15 +1,15 @@
 import { Module } from '@nestjs/common'
 
-import { SessionModule } from '@/modules/auth/session/session.module'
-import { IntegrationModule } from '@/modules/integration/integration.module'
+import { S3Module } from '@/modules/s3/s3.module'
+import { MediaUrlService } from '@/shared/media/media-url.service'
 
 import { AdminSsoController } from './admin-sso.controller'
 import { AdminController } from './admin.controller'
 import { AdminService } from './admin.service'
 
 @Module({
-	imports: [SessionModule, IntegrationModule],
+	imports: [S3Module],
 	controllers: [AdminController, AdminSsoController],
-	providers: [AdminService]
+	providers: [AdminService, MediaUrlService]
 })
 export class AdminModule {}

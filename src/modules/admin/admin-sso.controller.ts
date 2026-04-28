@@ -4,6 +4,7 @@ import {
 	Get,
 	Logger,
 	Param,
+	ParseUUIDPipe,
 	Query,
 	Res,
 	UseGuards
@@ -24,6 +25,7 @@ import type { Response } from 'express'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { ObservabilityService } from '@/modules/observability/observability.service'
 import { getClientInfo } from '@/shared/http/utils/client-info'
+import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { SessionGuard } from '../auth/guards/session.guard'
@@ -32,6 +34,7 @@ import type { AuthRequest } from '../auth/types/auth-request'
 
 @ApiTags('Admin')
 @ApiSecurity('csrf')
+@SkipCatalog()
 @UseGuards(SessionGuard)
 @Controller('/admin/sso')
 export class AdminSsoController {
@@ -63,7 +66,7 @@ export class AdminSsoController {
 	@ApiUnauthorizedResponse({ description: 'Не авторизован' })
 	@ApiForbiddenResponse({ description: 'Недостаточно прав' })
 	async enter(
-		@Param('catalogId') catalogId: string,
+		@Param('catalogId', ParseUUIDPipe) catalogId: string,
 		@Query('next') next: string | undefined,
 		@Res() res: Response
 	) {
@@ -76,8 +79,8 @@ export class AdminSsoController {
 			return res.status(401).send('Пользователь не найден')
 		}
 
-		const catalog = await this.prisma.catalog.findUnique({
-			where: { id: catalogId },
+		const catalog = await this.prisma.catalog.findFirst({
+			where: { id: catalogId, deleteAt: null },
 			select: { slug: true, domain: true }
 		})
 		if (!catalog) {

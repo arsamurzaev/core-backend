@@ -320,21 +320,6 @@ async function upsertCatalogBootstrapBusiness(
 			login: resolvedLogin,
 			password
 		}
-
-		if (false && resolvedLogin !== (business.login ?? '').trim()) {
-			txIssues.push({
-				entity: MigrationEntityKind.USER,
-				legacyId: business.id,
-				severity: MigrationIssueSeverity.WARNING,
-				code: 'LOGIN_ADJUSTED',
-				message: 'Логин пользователя был изменён из-за конфликта в target базе',
-				details: {
-					legacyLogin: business.login,
-					resolvedLogin
-				} satisfies Prisma.InputJsonValue
-			})
-		}
-	} else {
 		await tx.user.update({
 			where: { id: userId },
 			data: {
@@ -554,10 +539,15 @@ async function prewarmTypesAndRegions(
 	let createdActivities = 0
 	let createdRegions = 0
 
-	const typeCodes = new Set(
-		businesses.map(b => mapLegacyTypeCode(normalizeText(b.typeSlug) ?? 'legacy'))
-	)
-	for (const code of typeCodes) {
+	const typeNameByCode = new Map<string, string>()
+	for (const b of businesses) {
+		const code = mapLegacyTypeCode(normalizeText(b.typeSlug) ?? 'legacy')
+		if (!typeNameByCode.has(code)) {
+			typeNameByCode.set(code, b.typeName ?? humanizeCode(code))
+		}
+	}
+
+	for (const [code, name] of typeNameByCode) {
 		const existing = await prisma.type.findUnique({
 			where: { code },
 			select: { id: true, deleteAt: true }
@@ -567,9 +557,9 @@ async function prewarmTypesAndRegions(
 
 		await prisma.type.upsert({
 			where: { code },
-			create: { code, name: humanizeCode(code) },
+			create: { code, name },
 			update: {
-				name: humanizeCode(code),
+				name,
 				deleteAt: null
 			}
 		})
@@ -808,51 +798,64 @@ async function syncCatalogMetrics(
 	business: LegacyBusinessRow
 ) {
 	const desired = buildMetricRows(business)
-	const existing = await tx.metrics.findMany({
-		where: {
-			catalogId,
-			provider: Metric.YANDEX
-		},
-		select: { id: true, scope: true, counterId: true }
+	const catalog = await tx.catalog.findUnique({
+		where: { id: catalogId },
+		select: {
+			metrics: {
+				where: { provider: Metric.YANDEX },
+				select: { id: true, scope: true, counterId: true }
+			}
+		}
 	})
+	const existing = catalog?.metrics ?? []
 
 	const desiredByScope = new Map(desired.map(item => [item.scope, item]))
 	const existingByScope = new Map(existing.map(item => [item.scope, item]))
 
 	for (const [scope, metric] of desiredByScope) {
 		const current = existingByScope.get(scope)
-		if (current) {
+		if (current?.counterId === metric.counterId) {
 			await tx.metrics.update({
 				where: { id: current.id },
-				data: {
-					counterId: metric.counterId,
-					deleteAt: null
-				}
+				data: { deleteAt: null }
 			})
 			continue
 		}
 
-		await tx.metrics.create({
+		if (current) {
+			await tx.catalog.update({
+				where: { id: catalogId },
+				data: { metrics: { disconnect: { id: current.id } } }
+			})
+		}
+
+		await tx.catalog.update({
+			where: { id: catalogId },
 			data: {
-				catalogId,
-				provider: Metric.YANDEX,
-				scope,
-				counterId: metric.counterId
+				metrics: {
+					connectOrCreate: {
+						where: { counterId: metric.counterId },
+						create: {
+							provider: Metric.YANDEX,
+							scope,
+							counterId: metric.counterId
+						}
+					}
+				}
 			}
 		})
 	}
 
-	const redundantScopes = existing
-		.map(item => item.scope)
-		.filter(scope => !desiredByScope.has(scope))
+	const redundantMetricIds = existing
+		.filter(item => !desiredByScope.has(item.scope))
+		.map(item => ({ id: item.id }))
 
-	if (redundantScopes.length > 0) {
-		await tx.metrics.deleteMany({
-			where: {
-				catalogId,
-				provider: Metric.YANDEX,
-				scope: {
-					in: redundantScopes
+	if (redundantMetricIds.length > 0) {
+		await tx.catalog.update({
+			where: { id: catalogId },
+			data: {
+				metrics: {
+					disconnect: redundantMetricIds
 				}
 			}
 		})
@@ -1199,22 +1202,12 @@ function resolveCatalogStatus(
 	status: string | null,
 	isActive: boolean
 ): CatalogStatus {
-	switch ((status ?? '').toUpperCase()) {
-		case 'PROPOSAL':
-			return CatalogStatus.PROPOSAL
-		case 'IMPLEMENTATION':
-			return CatalogStatus.IMPLEMENTATION
-		case 'OPERATIONAL':
-			return CatalogStatus.OPERATIONAL
-		case 'REFUSAL':
-			return CatalogStatus.REFUSAL
-		case 'DEMO':
-		case 'PRESENTATION':
-		case 'PROMOTION':
-			return isActive ? CatalogStatus.OPERATIONAL : CatalogStatus.PROPOSAL
-		default:
-			return isActive ? CatalogStatus.OPERATIONAL : CatalogStatus.PROPOSAL
-	}
+	const upper = (status ?? '').toUpperCase()
+	return (Object.values(CatalogStatus) as string[]).includes(upper)
+		? (upper as CatalogStatus)
+		: isActive
+			? CatalogStatus.OPERATIONAL
+			: CatalogStatus.PROPOSAL
 }
 
 function resolveCatalogDefaultMode(): CatalogExperienceMode {

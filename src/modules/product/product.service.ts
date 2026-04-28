@@ -1004,6 +1004,35 @@ export class ProductService {
 		}
 	}
 
+	async rebuildSeoForCatalog(catalogId: string) {
+		const batchSize = 100
+		let cursorId: string | undefined
+		let rebuiltProducts = 0
+
+		for (;;) {
+			const productIds = await this.repo.findIdsByCatalog(
+				catalogId,
+				batchSize,
+				cursorId
+			)
+			if (!productIds.length) break
+
+			const products = await this.repo.findByIdsWithDetails(
+				productIds.map(item => item.id),
+				catalogId
+			)
+			for (const product of products) {
+				await this.productSeoSync.syncProduct(product, catalogId)
+			}
+
+			rebuiltProducts += products.length
+			cursorId = productIds[productIds.length - 1]?.id
+			if (productIds.length < batchSize) break
+		}
+
+		return { rebuiltProducts }
+	}
+
 	private mapSeo(seo?: ProductSeoRecord | null): ProductSeoMapped | null {
 		if (!seo) return null
 		return {

@@ -1,17 +1,15 @@
 model Metrics {
   id String @id @default(uuid()) @db.Uuid
 
-  catalog   Catalog @relation(fields: [catalogId], references: [id])
-  catalogId String  @map("catalog_id") @db.Uuid
+  catalogs Catalog[]
 
   provider  Metric      @default(YANDEX)
   scope     MetricScope @default(CATALOG)
-  counterId String      @map("counter_id")
+  counterId String      @unique @map("counter_id")
 
   deleteAt  DateTime? @map("delete_at") // Дата удаления
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
-  @@unique([catalogId, provider, scope])
   @@map("metrics")
 }

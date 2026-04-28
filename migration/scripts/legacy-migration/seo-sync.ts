@@ -17,6 +17,7 @@ import {
 	SeoEntityType
 } from '../../../prisma/generated/client.js'
 
+import { logLegacyEvent } from './logging.js'
 import type { LegacyBusinessRow } from './source.js'
 
 type ApplyLegacySeoOptions = {
@@ -109,6 +110,10 @@ const SOCIAL_OG_LOGO_SIZE = 420
 const SOCIAL_OG_VERTICAL_GAP = 18
 const SOCIAL_FALLBACK_LOGO_FONT_RATIO = 0.37
 const FAVICON_SIZE = 64
+const SEO_PROGRESS_INTERVAL = Math.max(
+	1,
+	Number(process.env.LEGACY_MIGRATION_SEO_PROGRESS_INTERVAL ?? 100)
+)
 
 type TargetCategory = {
 	id: string
@@ -253,6 +258,8 @@ export async function applyLegacySeo(
 		category => category.catalogId
 	)
 	const productsByCatalogId = groupBy(products, product => product.catalogId)
+	const totalCategories = categories.length
+	const totalProducts = products.length
 
 	let createdCatalogSeo = 0
 	let updatedCatalogSeo = 0
@@ -262,8 +269,33 @@ export async function applyLegacySeo(
 	let updatedProductSeo = 0
 	let createdCatalogSeoAssets = 0
 	let reusedCatalogSeoAssets = 0
+	let processedCategories = 0
+	let processedProducts = 0
 
-	for (const catalog of catalogs) {
+	logSeoProgress('seo apply started', {
+		selectedBusinesses: businesses.length,
+		mappedCatalogs: catalogIds.length,
+		totalCategories,
+		totalProducts,
+		progressInterval: SEO_PROGRESS_INTERVAL
+	})
+
+	for (const [catalogIndex, catalog] of catalogs.entries()) {
+		const catalogCategories = categoriesByCatalogId.get(catalog.id) ?? []
+		const catalogProducts = productsByCatalogId.get(catalog.id) ?? []
+		logSeoProgress('catalog seo started', {
+			catalogId: catalog.id,
+			catalogName: catalog.name,
+			catalogIndex: catalogIndex + 1,
+			totalCatalogs: catalogs.length,
+			catalogCategories: catalogCategories.length,
+			catalogProducts: catalogProducts.length,
+			processedCategories,
+			totalCategories,
+			processedProducts,
+			totalProducts
+		})
+
 		const generatedAssets = await generateCatalogSeoAssets(prisma, catalog)
 		createdCatalogSeoAssets += countGeneratedAssets(generatedAssets, false)
 		reusedCatalogSeoAssets += countGeneratedAssets(generatedAssets, true)
@@ -273,7 +305,7 @@ export async function applyLegacySeo(
 		else createdCatalogSeo += 1
 
 		const categorySlugState = new Set<string>()
-		for (const category of categoriesByCatalogId.get(catalog.id) ?? []) {
+		for (const [categoryIndex, category] of catalogCategories.entries()) {
 			const categoryExists = await upsertCategorySeo(
 				prisma,
 				catalog,
@@ -282,14 +314,81 @@ export async function applyLegacySeo(
 			)
 			if (categoryExists) updatedCategorySeo += 1
 			else createdCategorySeo += 1
+			processedCategories += 1
+			if (
+				shouldLogSeoProgress(categoryIndex + 1, catalogCategories.length) ||
+				shouldLogSeoProgress(processedCategories, totalCategories)
+			) {
+				logSeoProgress('category seo progress', {
+					catalogId: catalog.id,
+					catalogName: catalog.name,
+					categoryId: category.id,
+					categoryName: category.name,
+					catalogCategoryIndex: categoryIndex + 1,
+					catalogCategories: catalogCategories.length,
+					processedCategories,
+					totalCategories
+				})
+			}
 		}
 
-		for (const product of productsByCatalogId.get(catalog.id) ?? []) {
+		for (const [productIndex, product] of catalogProducts.entries()) {
 			const productExists = await upsertProductSeo(prisma, catalog, product)
 			if (productExists) updatedProductSeo += 1
 			else createdProductSeo += 1
+			processedProducts += 1
+			if (
+				shouldLogSeoProgress(productIndex + 1, catalogProducts.length) ||
+				shouldLogSeoProgress(processedProducts, totalProducts)
+			) {
+				logSeoProgress('product seo progress', {
+					catalogId: catalog.id,
+					catalogName: catalog.name,
+					productId: product.id,
+					productName: product.name,
+					catalogProductIndex: productIndex + 1,
+					catalogProducts: catalogProducts.length,
+					processedProducts,
+					totalProducts
+				})
+			}
 		}
+
+		logSeoProgress('catalog seo completed', {
+			catalogId: catalog.id,
+			catalogName: catalog.name,
+			catalogIndex: catalogIndex + 1,
+			totalCatalogs: catalogs.length,
+			processedCategories,
+			totalCategories,
+			processedProducts,
+			totalProducts,
+			createdCatalogSeo,
+			updatedCatalogSeo,
+			createdCategorySeo,
+			updatedCategorySeo,
+			createdProductSeo,
+			updatedProductSeo,
+			createdCatalogSeoAssets,
+			reusedCatalogSeoAssets
+		})
 	}
+
+	logSeoProgress('seo apply completed', {
+		mappedCatalogs: catalogIds.length,
+		processedCategories,
+		totalCategories,
+		processedProducts,
+		totalProducts,
+		createdCatalogSeo,
+		updatedCatalogSeo,
+		createdCategorySeo,
+		updatedCategorySeo,
+		createdProductSeo,
+		updatedProductSeo,
+		createdCatalogSeoAssets,
+		reusedCatalogSeoAssets
+	})
 
 	return {
 		summary: {
@@ -1626,6 +1725,22 @@ function groupBy<T>(items: T[], getKey: (item: T) => string): Map<string, T[]> {
 		else grouped.set(key, [item])
 	}
 	return grouped
+}
+
+function shouldLogSeoProgress(current: number, total: number): boolean {
+	return (
+		total > 0 && (current === total || current % SEO_PROGRESS_INTERVAL === 0)
+	)
+}
+
+function logSeoProgress(message: string, details?: Record<string, unknown>) {
+	logLegacyEvent({
+		channel: 'phase',
+		phase: 'seo',
+		scope: 'progress',
+		message,
+		details
+	})
 }
 
 function buildCatalogUrl(domain: string | null, path = ''): string | null {

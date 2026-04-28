@@ -475,6 +475,20 @@ export class ProductRepository {
 		})
 	}
 
+	findIdsByCatalog(
+		catalogId: string,
+		take: number,
+		cursorId?: string
+	): Promise<Array<{ id: string }>> {
+		return this.prisma.product.findMany({
+			where: { catalogId, deleteAt: null },
+			select: { id: true },
+			orderBy: { id: 'asc' },
+			take,
+			...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {})
+		})
+	}
+
 	findUncategorizedPage(
 		catalogId: string,
 		options: {

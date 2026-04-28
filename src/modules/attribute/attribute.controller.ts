@@ -1,11 +1,13 @@
-﻿import {
+﻿import { Role } from '@generated/enums'
+import {
 	Body,
 	Controller,
 	Delete,
 	Get,
 	Param,
 	Patch,
-	Post
+	Post,
+	UseGuards
 } from '@nestjs/common'
 import {
 	ApiCreatedResponse,
@@ -15,6 +17,8 @@ import {
 	ApiTags
 } from '@nestjs/swagger'
 
+import { Roles } from '@/modules/auth/decorators/roles.decorator'
+import { SessionGuard } from '@/modules/auth/guards/session.guard'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
@@ -51,6 +55,8 @@ export class AttributeController {
 	}
 
 	@Post()
+	@UseGuards(SessionGuard)
+	@Roles(Role.CATALOG)
 	@ApiOperation({ summary: 'Create attribute' })
 	@ApiCreatedResponse({ type: AttributeDto })
 	async create(@Body() dto: CreateAttributeDtoReq) {
@@ -58,6 +64,8 @@ export class AttributeController {
 	}
 
 	@Patch('/:id')
+	@UseGuards(SessionGuard)
+	@Roles(Role.CATALOG)
 	@ApiOperation({ summary: 'Update attribute' })
 	@ApiParam({ name: 'id', description: 'ID атрибута' })
 	@ApiOkResponse({ type: AttributeDto })
@@ -66,6 +74,8 @@ export class AttributeController {
 	}
 
 	@Delete('/:id')
+	@UseGuards(SessionGuard)
+	@Roles(Role.CATALOG)
 	@ApiOperation({ summary: 'Delete attribute' })
 	@ApiParam({ name: 'id', description: 'ID атрибута' })
 	@ApiOkResponse({ type: OkResponseDto })
@@ -82,6 +92,8 @@ export class AttributeController {
 	}
 
 	@Post('/:attributeId/enum')
+	@UseGuards(SessionGuard)
+	@Roles(Role.CATALOG)
 	@ApiOperation({ summary: 'Create enum value' })
 	@ApiParam({ name: 'attributeId', description: 'ID атрибута' })
 	@ApiCreatedResponse({ type: AttributeEnumValueDto })
@@ -93,6 +105,8 @@ export class AttributeController {
 	}
 
 	@Patch('/:attributeId/enum/:id')
+	@UseGuards(SessionGuard)
+	@Roles(Role.CATALOG)
 	@ApiOperation({ summary: 'Update enum value' })
 	@ApiParam({ name: 'attributeId', description: 'ID атрибута' })
 	@ApiParam({ name: 'id', description: 'ID значения перечисления' })
@@ -106,6 +120,8 @@ export class AttributeController {
 	}
 
 	@Delete('/:attributeId/enum/:id')
+	@UseGuards(SessionGuard)
+	@Roles(Role.CATALOG)
 	@ApiOperation({ summary: 'Delete enum value' })
 	@ApiParam({ name: 'attributeId', description: 'ID атрибута' })
 	@ApiParam({ name: 'id', description: 'ID значения перечисления' })

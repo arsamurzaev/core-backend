@@ -117,6 +117,13 @@ export class ObservabilityService {
 		registers: [this.registry]
 	})
 
+	private readonly adminActionsTotal = new Counter({
+		name: `${this.settings.metricPrefix}_admin_actions_total`,
+		help: 'Total number of admin panel actions.',
+		labelNames: ['action', 'outcome', 'actor_id'] as const,
+		registers: [this.registry]
+	})
+
 	constructor() {
 		this.registry.setDefaultLabels({
 			service: this.settings.serviceName,
@@ -276,6 +283,20 @@ export class ObservabilityService {
 
 		this.prismaSlowQueriesTotal.inc()
 		this.prismaSlowQueryDurationSeconds.observe(durationMs / 1000)
+	}
+
+	recordAdminAction(
+		action: string,
+		outcome: 'success' | 'error',
+		actorId: string
+	) {
+		if (!this.settings.metricsEnabled) return
+
+		this.adminActionsTotal.inc({
+			action,
+			outcome,
+			actor_id: actorId
+		})
 	}
 
 	recordAuthEvent(

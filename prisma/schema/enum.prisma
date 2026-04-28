@@ -49,6 +49,9 @@ enum CatalogStatus {
   IMPLEMENTATION
   OPERATIONAL
   REFUSAL
+  DEMO
+  PRESENTATION
+  PROMOTION
 }
 
 enum PaymentMethod {
