@@ -186,7 +186,7 @@ export async function applyCatalogBootstrap(
 	let linkedChildren = 0
 	let skippedParentLinks = 0
 
-	const limit = pLimit(6)
+	const limit = pLimit(10)
 
 	// First pass: root businesses (no parentId) — must run before children
 	const rootBusinesses = pendingBusinesses.filter(b => !b.parentId)

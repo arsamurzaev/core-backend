@@ -364,7 +364,7 @@ export async function applyLegacyMedia(
 		sourceDriftAllowed: allowSourceDrift
 	})
 
-	const limit = pLimit(4)
+	const limit = pLimit(15)
 	await Promise.all(
 		assets.map((asset, assetIndex) =>
 			limit(async () => {
@@ -417,7 +417,7 @@ export async function applyLegacyMedia(
 					failedAssets += 1
 					businessState.failedAssets += 1
 					if (resolvedAsset.kind === 'product-image') {
-						productPlans.get(resolvedAsset.targetEntityId)!.failures += 1
+						productPlans.get(resolvedAsset.targetEntityId).failures += 1
 					}
 					finalizeMediaAssetProgress(
 						assetLabel,
@@ -527,7 +527,7 @@ export async function applyLegacyMedia(
 						return
 					}
 
-					productPlans.get(resolvedAsset.targetEntityId)!.mediaIds.push({
+					productPlans.get(resolvedAsset.targetEntityId).mediaIds.push({
 						mediaId,
 						position: resolvedAsset.position
 					})
@@ -546,7 +546,7 @@ export async function applyLegacyMedia(
 					failedAssets += 1
 					businessState.failedAssets += 1
 					if (resolvedAsset.kind === 'product-image') {
-						productPlans.get(resolvedAsset.targetEntityId)!.failures += 1
+						productPlans.get(resolvedAsset.targetEntityId).failures += 1
 					}
 					issues.push({
 						entity: MigrationEntityKind.MEDIA,

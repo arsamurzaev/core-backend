@@ -13,9 +13,7 @@ import {
 } from '../../../prisma/generated/client.js'
 
 import { runMigrationTransaction, withRetry } from './migration-utils.js'
-import { upsertProductSeoById } from './seo-sync.js'
-import {
-	buildLegacyBrandId,
+import {gacyBrandId,
 	buildLegacyCategoryId,
 	buildLegacyProductId,
 	type LegacyBrandRow,
@@ -24,6 +22,8 @@ import {
 	type LegacyProductRow,
 	type LegacyProductsData
 } from './products-source.js'
+import { upsertProductSeo.js'
+import { upsertProductSeoById } from './seo-syncById } from './seo-sync.js'
 import type { LegacyBusinessRow } from './source.js'
 
 type ApplyLegacyProductsOptions = {
@@ -413,7 +413,7 @@ export async function applyLegacyProducts(
 	let skippedProducts = 0
 	let skippedCategoryLinks = 0
 
-	const limit = pLimit(6)
+	const limit = pLimit(10)
 
 	await Promise.all(
 		businesses.map(business =>
