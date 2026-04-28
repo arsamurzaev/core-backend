@@ -123,7 +123,8 @@ export class HandoffController {
 		setSessionCookies(
 			res,
 			{ sid, csrf },
-			resolveCookieDomain(RequestContext.get()?.host ?? '')
+			resolveCookieDomain(RequestContext.get()?.host ?? ''),
+			payload.role === Role.ADMIN ? null : { catalogId: store.catalogId }
 		)
 
 		return res.redirect(302, resolveHandoffNext(next ?? payload.next))

@@ -13,27 +13,16 @@ import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { IS_PUBLIC_KEY } from '@/shared/http/decorators/public.decorator'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
-import { resolveCookieDomain } from '../auth-cookie.utils'
+import {
+	clearSessionCookies,
+	readSessionCookies,
+	resolveCookieDomain,
+	type SessionCookieScope,
+	setSessionCookies
+} from '../auth-cookie.utils'
 import { ROLES_KEY } from '../decorators/roles.decorator'
 import { SessionService } from '../session/session.service'
 import type { AuthRequest } from '../types/auth-request'
-
-const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
-const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
-const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'lax') as 'strict' | 'lax'
-const isProd = process.env.NODE_ENV === 'production'
-const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7
-function parseCookie(
-	header: string | undefined,
-	name: string
-): string | undefined {
-	if (!header) return undefined
-	for (const part of header.split(';')) {
-		const [k, ...rest] = part.trim().split('=')
-		if (k === name) return decodeURIComponent(rest.join('='))
-	}
-	return undefined
-}
 
 function isUnsafeMethod(method: string | undefined) {
 	const m = (method ?? 'GET').toUpperCase()
@@ -50,21 +39,6 @@ const ROLE_RANK: Record<Role, number> = {
 function requiredRank(required: Role[]) {
 	// Берём максимальный уровень роли среди требуемых
 	return Math.max(...required.map(r => ROLE_RANK[r] ?? 999))
-}
-
-function clearSessionCookies(
-	res: Response | undefined,
-	cookieDomain?: string
-): void {
-	if (!res?.clearCookie) return
-	const opts = {
-		path: '/' as const,
-		sameSite: SAME_SITE,
-		secure: isProd,
-		...(cookieDomain ? { domain: cookieDomain } : {})
-	}
-	res.clearCookie(SID_COOKIE, opts)
-	res.clearCookie(CSRF_COOKIE, opts)
 }
 
 @Injectable()
@@ -85,9 +59,12 @@ export class SessionGuard implements CanActivate {
 		const http = context.switchToHttp()
 		const req = http.getRequest<AuthRequest>()
 		const res = http.getResponse<Response>()
+		let activeCookieScope = this.resolveCookieScope()
 
 		try {
-			const sid = parseCookie(req.headers.cookie, SID_COOKIE)
+			const sessionCookies = readSessionCookies(req, activeCookieScope)
+			activeCookieScope = sessionCookies.scope
+			const sid = sessionCookies.sid
 
 			if (!sid) throw new UnauthorizedException('Не авторизован')
 
@@ -99,7 +76,7 @@ export class SessionGuard implements CanActivate {
 			// CSRF проверяем только для небезопасных методов
 			if (isUnsafeMethod(req.method)) {
 				const csrfHeader = String(req.headers['x-csrf-token'] ?? '')
-				const csrfCookie = parseCookie(req.headers.cookie, CSRF_COOKIE) ?? ''
+				const csrfCookie = sessionCookies.csrf ?? ''
 
 				if (!csrfHeader || !csrfCookie) {
 					throw new ForbiddenException('CSRF токен обязателен')
@@ -139,22 +116,16 @@ export class SessionGuard implements CanActivate {
 
 			const cookieDomain = resolveCookieDomain(RequestContext.get()?.host ?? '')
 			if (res?.cookie) {
-				res.cookie(SID_COOKIE, sid, {
-					httpOnly: true,
-					sameSite: SAME_SITE,
-					secure: isProd,
-					path: '/',
-					maxAge: SESSION_MAX_AGE_MS,
-					...(cookieDomain ? { domain: cookieDomain } : {})
-				})
-				res.cookie(CSRF_COOKIE, session.csrf, {
-					httpOnly: false,
-					sameSite: SAME_SITE,
-					secure: isProd,
-					path: '/',
-					maxAge: SESSION_MAX_AGE_MS,
-					...(cookieDomain ? { domain: cookieDomain } : {})
-				})
+				const responseCookieScope =
+					user.role === Role.CATALOG && session.context?.catalogId
+						? { catalogId: session.context.catalogId }
+						: sessionCookies.scope
+				setSessionCookies(
+					res,
+					{ sid, csrf: session.csrf },
+					cookieDomain,
+					responseCookieScope
+				)
 			}
 			return true
 		} catch (error: unknown) {
@@ -164,11 +135,17 @@ export class SessionGuard implements CanActivate {
 			) {
 				clearSessionCookies(
 					res,
-					resolveCookieDomain(RequestContext.get()?.host ?? '')
+					resolveCookieDomain(RequestContext.get()?.host ?? ''),
+					activeCookieScope
 				)
 			}
 			throw error
 		}
+	}
+
+	private resolveCookieScope(): SessionCookieScope | null {
+		const catalogId = RequestContext.get()?.catalogId ?? null
+		return catalogId ? { catalogId } : null
 	}
 
 	private assertCatalogSessionScope(

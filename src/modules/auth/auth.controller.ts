@@ -66,16 +66,21 @@ export class AuthController {
 	) {
 		const { ip, userAgent } = getClientInfo(req)
 		const existingSid = getSessionCookie(req)
-		const { sid, csrf, user } = await this.auth.login(
+		const { sid, csrf, user, catalogId } = await this.auth.login(
 			dto,
 			{ ip, userAgent },
 			existingSid
 		)
 
 		res.setHeader('Cache-Control', 'no-store')
-		setSessionCookies(res, { sid, csrf }, resolveCookieDomain(RequestContext.get()?.host ?? ''))
+		setSessionCookies(
+			res,
+			{ sid, csrf },
+			resolveCookieDomain(RequestContext.get()?.host ?? ''),
+			catalogId ? { catalogId } : null
+		)
 
-		return { ok: true, user }
+		return { ok: true, user, catalogId }
 	}
 
 	@UseGuards(SessionGuard)
@@ -121,7 +126,13 @@ export class AuthController {
 		} as any)
 
 		res.setHeader('Cache-Control', 'no-store')
-		clearSessionCookies(res, resolveCookieDomain(RequestContext.get()?.host ?? ''))
+		clearSessionCookies(
+			res,
+			resolveCookieDomain(RequestContext.get()?.host ?? ''),
+			authReq.session?.context?.catalogId
+				? { catalogId: authReq.session.context.catalogId }
+				: null
+		)
 
 		return { ok: true }
 	}

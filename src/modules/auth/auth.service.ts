@@ -145,20 +145,31 @@ export class AuthService {
 		await this.checkLockout(meta?.ip)
 		try {
 			const user = await this.validateUser(dto)
+
+			let catalogId: string | null = null
+			if (user.role === Role.CATALOG) {
+				const catalog = await this.prisma.catalog.findFirst({
+					where: { userId: user.id },
+					select: { id: true }
+				})
+				catalogId = catalog?.id ?? null
+			}
+
 			const { sid, csrf, reused } = await this.createSessionForUser(
 				user.id,
 				meta,
-				null,
+				catalogId,
 				existingSid ?? null
 			)
 
 			await this.clearFailedAttempts(meta?.ip)
 			this.recordAuthSuccess('admin', 'login', user.id, meta, {
 				role: user.role,
+				catalogId,
 				sessionReused: reused
 			})
 
-			return { sid, csrf, user }
+			return { sid, csrf, user, catalogId }
 		} catch (error) {
 			if (error instanceof UnauthorizedException) {
 				await this.recordFailedAttempt(meta?.ip)

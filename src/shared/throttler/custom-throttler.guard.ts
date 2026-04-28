@@ -12,6 +12,21 @@ import { readCookieValue } from '@/shared/http/cookie.utils'
 import { buildRateLimitMessage } from '@/shared/http/error-message.utils'
 
 const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
+const CATALOG_SID_COOKIE_PREFIX =
+	process.env.CATALOG_SESSION_COOKIE_PREFIX ?? 'catalog_sid'
+
+function hasAnySessionCookie(
+	cookieHeader: Request['headers']['cookie']
+): boolean {
+	if (readCookieValue(cookieHeader, SID_COOKIE)) return true
+
+	const header = Array.isArray(cookieHeader)
+		? cookieHeader.join(';')
+		: (cookieHeader ?? '')
+	return header
+		.split(';')
+		.some(part => part.trim().startsWith(`${CATALOG_SID_COOKIE_PREFIX}_`))
+}
 
 @Injectable()
 export class CustomThrottlerGuard extends ThrottlerGuard {
@@ -21,7 +36,7 @@ export class CustomThrottlerGuard extends ThrottlerGuard {
 
 		// Анонимные GET/HEAD запросы не ограничиваем — nginx уже защищает
 		// Авторизованные пользователи всегда проходят через throttle по session ID
-		const hasSid = Boolean(readCookieValue(req.headers.cookie, SID_COOKIE))
+		const hasSid = hasAnySessionCookie(req.headers.cookie)
 		return Promise.resolve(!hasSid && (method === 'GET' || method === 'HEAD'))
 	}
 

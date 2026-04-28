@@ -5,41 +5,15 @@ import type { Response } from 'express'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
-import { resolveCookieDomain } from '../auth-cookie.utils'
+import {
+	clearSessionCookies,
+	readSessionCookies,
+	resolveCookieDomain,
+	type SessionCookieScope,
+	setSessionCookies
+} from '../auth-cookie.utils'
 import { SessionService } from '../session/session.service'
 import type { AuthRequest } from '../types/auth-request'
-
-const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
-const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
-const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'lax') as 'strict' | 'lax'
-const isProd = process.env.NODE_ENV === 'production'
-const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7
-function parseCookie(
-	header: string | undefined,
-	name: string
-): string | undefined {
-	if (!header) return undefined
-	for (const part of header.split(';')) {
-		const [key, ...rest] = part.trim().split('=')
-		if (key === name) return decodeURIComponent(rest.join('='))
-	}
-	return undefined
-}
-
-function clearSessionCookies(
-	res: Response | undefined,
-	cookieDomain?: string
-): void {
-	if (!res?.clearCookie) return
-	const opts = {
-		path: '/' as const,
-		sameSite: SAME_SITE,
-		secure: isProd,
-		...(cookieDomain ? { domain: cookieDomain } : {})
-	}
-	res.clearCookie(SID_COOKIE, opts)
-	res.clearCookie(CSRF_COOKIE, opts)
-}
 
 @Injectable()
 export class OptionalSessionGuard implements CanActivate {
@@ -52,7 +26,10 @@ export class OptionalSessionGuard implements CanActivate {
 		const http = context.switchToHttp()
 		const req = http.getRequest<AuthRequest>()
 		const res = http.getResponse<Response>()
-		const sid = parseCookie(req.headers.cookie, SID_COOKIE)
+		let activeCookieScope = this.resolveCookieScope()
+		const sessionCookies = readSessionCookies(req, activeCookieScope)
+		activeCookieScope = sessionCookies.scope
+		const sid = sessionCookies.sid
 
 		if (!sid) return true
 
@@ -61,7 +38,8 @@ export class OptionalSessionGuard implements CanActivate {
 			if (!session?.userId) {
 				clearSessionCookies(
 					res,
-					resolveCookieDomain(RequestContext.get()?.host ?? '')
+					resolveCookieDomain(RequestContext.get()?.host ?? ''),
+					sessionCookies.scope
 				)
 				return true
 			}
@@ -73,7 +51,8 @@ export class OptionalSessionGuard implements CanActivate {
 			if (!user) {
 				clearSessionCookies(
 					res,
-					resolveCookieDomain(RequestContext.get()?.host ?? '')
+					resolveCookieDomain(RequestContext.get()?.host ?? ''),
+					sessionCookies.scope
 				)
 				return true
 			}
@@ -85,7 +64,8 @@ export class OptionalSessionGuard implements CanActivate {
 			) {
 				clearSessionCookies(
 					res,
-					resolveCookieDomain(RequestContext.get()?.host ?? '')
+					resolveCookieDomain(RequestContext.get()?.host ?? ''),
+					sessionCookies.scope
 				)
 				return true
 			}
@@ -102,31 +82,31 @@ export class OptionalSessionGuard implements CanActivate {
 
 			const cookieDomain = resolveCookieDomain(RequestContext.get()?.host ?? '')
 			if (res?.cookie) {
-				res.cookie(SID_COOKIE, sid, {
-					httpOnly: true,
-					sameSite: SAME_SITE,
-					secure: isProd,
-					path: '/',
-					maxAge: SESSION_MAX_AGE_MS,
-					...(cookieDomain ? { domain: cookieDomain } : {})
-				})
-				res.cookie(CSRF_COOKIE, session.csrf, {
-					httpOnly: false,
-					sameSite: SAME_SITE,
-					secure: isProd,
-					path: '/',
-					maxAge: SESSION_MAX_AGE_MS,
-					...(cookieDomain ? { domain: cookieDomain } : {})
-				})
+				const responseCookieScope =
+					user.role === Role.CATALOG && session.context?.catalogId
+						? { catalogId: session.context.catalogId }
+						: sessionCookies.scope
+				setSessionCookies(
+					res,
+					{ sid, csrf: session.csrf },
+					cookieDomain,
+					responseCookieScope
+				)
 			}
 		} catch {
 			clearSessionCookies(
 				res,
-				resolveCookieDomain(RequestContext.get()?.host ?? '')
+				resolveCookieDomain(RequestContext.get()?.host ?? ''),
+				activeCookieScope
 			)
 		}
 
 		return true
+	}
+
+	private resolveCookieScope(): SessionCookieScope | null {
+		const catalogId = RequestContext.get()?.catalogId ?? null
+		return catalogId ? { catalogId } : null
 	}
 
 	private isSessionInCurrentCatalogScope(
