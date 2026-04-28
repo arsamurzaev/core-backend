@@ -13,7 +13,8 @@ import {
 } from '../../../prisma/generated/client.js'
 
 import { runMigrationTransaction, withRetry } from './migration-utils.js'
-import {gacyBrandId,
+import {
+	buildLegacyBrandId,
 	buildLegacyCategoryId,
 	buildLegacyProductId,
 	type LegacyBrandRow,
@@ -22,8 +23,7 @@ import {gacyBrandId,
 	type LegacyProductRow,
 	type LegacyProductsData
 } from './products-source.js'
-import { upsertProductSeo.js'
-import { upsertProductSeoById } from './seo-syncById } from './seo-sync.js'
+import { upsertProductSeoById } from './seo-sync.js'
 import type { LegacyBusinessRow } from './source.js'
 
 type ApplyLegacyProductsOptions = {
