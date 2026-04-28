@@ -2,9 +2,14 @@
 import { ApiCreatedResponse, ApiOperation, ApiTags } from '@nestjs/swagger'
 import type { Request, Response } from 'express'
 
+import {
+	resolveCookieDomain,
+	setSessionCookies
+} from '@/modules/auth/auth-cookie.utils'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
+import { RequestContext } from '@/shared/tenancy/request-context'
 
 import { CreateUserDtoReq } from './dto/requests/create-user.dto.req'
 import { UserService } from './user.service'
@@ -29,24 +34,11 @@ export class UserController {
 		const { ip, userAgent } = getClientInfo(req)
 		const { sid, csrf } = await this.userService.register(dto, { ip, userAgent })
 
-		const isProd = process.env.NODE_ENV === 'production'
-		const sameSite = (process.env.COOKIE_SAMESITE ?? 'lax') as 'lax' | 'strict'
-
-		return res
-			.cookie(process.env.SESSION_COOKIE_NAME ?? 'sid', sid, {
-				httpOnly: true,
-				sameSite,
-				secure: isProd,
-				path: '/',
-				maxAge: 1000 * 60 * 60 * 24 * 7
-			})
-			.cookie(process.env.CSRF_COOKIE_NAME ?? 'csrf', csrf, {
-				httpOnly: false, // ВАЖНО: csrf должен быть доступен JS
-				sameSite,
-				secure: isProd,
-				path: '/',
-				maxAge: 1000 * 60 * 60 * 24 * 7
-			})
-			.send({ ok: true })
+		setSessionCookies(
+			res,
+			{ sid, csrf },
+			resolveCookieDomain(RequestContext.get()?.host ?? '')
+		)
+		return res.send({ ok: true })
 	}
 }

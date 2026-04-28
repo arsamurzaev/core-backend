@@ -28,13 +28,15 @@ import {
 import type { Request, Response } from 'express'
 import type { Observable } from 'rxjs'
 
+import { resolveCookieDomain } from '@/modules/auth/auth-cookie.utils'
 import { Roles } from '@/modules/auth/decorators/roles.decorator'
 import { User } from '@/modules/auth/decorators/user.decorator'
 import { SessionGuard } from '@/modules/auth/guards/session.guard'
 import type { SessionUser } from '@/modules/auth/types/auth-request'
-import { AuthThrottle } from '@/shared/throttler/auth-throttle.decorator'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
+import { RequestContext } from '@/shared/tenancy/request-context'
+import { AuthThrottle } from '@/shared/throttler/auth-throttle.decorator'
 
 import { CartService } from './cart.service'
 import {
@@ -428,18 +430,24 @@ export class CartController {
 	}
 
 	private setTokenCookie(res: Response, token: string) {
+		const cookieDomain = resolveCookieDomain(RequestContext.get()?.host ?? '')
 		res.cookie(this.cartService.getCookieName(), token, {
 			httpOnly: true,
 			sameSite: 'lax',
-			path: '/'
+			secure: process.env.NODE_ENV === 'production',
+			path: '/',
+			...(cookieDomain ? { domain: cookieDomain } : {})
 		})
 	}
 
 	private clearTokenCookie(res: Response) {
+		const cookieDomain = resolveCookieDomain(RequestContext.get()?.host ?? '')
 		res.clearCookie(this.cartService.getCookieName(), {
 			httpOnly: true,
 			sameSite: 'lax',
-			path: '/'
+			secure: process.env.NODE_ENV === 'production',
+			path: '/',
+			...(cookieDomain ? { domain: cookieDomain } : {})
 		})
 	}
 

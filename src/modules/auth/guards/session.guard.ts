@@ -52,7 +52,10 @@ function requiredRank(required: Role[]) {
 	return Math.max(...required.map(r => ROLE_RANK[r] ?? 999))
 }
 
-function clearSessionCookies(res: Response | undefined, cookieDomain?: string): void {
+function clearSessionCookies(
+	res: Response | undefined,
+	cookieDomain?: string
+): void {
 	if (!res?.clearCookie) return
 	const opts = {
 		path: '/' as const,
@@ -111,8 +114,10 @@ export class SessionGuard implements CanActivate {
 				select: { id: true, role: true, login: true, name: true }
 			})
 			if (!user) throw new UnauthorizedException('Пользователь не найден')
+			this.assertCatalogSessionScope(user.role, session.context?.catalogId ?? null)
 			req.user = user
 			req.sessionId = sid
+			req.session = session
 
 			// Roles(...) учитываем с иерархией ролей
 			const required =
@@ -157,9 +162,27 @@ export class SessionGuard implements CanActivate {
 				error instanceof UnauthorizedException ||
 				error instanceof ForbiddenException
 			) {
-				clearSessionCookies(res, resolveCookieDomain(RequestContext.get()?.host ?? ''))
+				clearSessionCookies(
+					res,
+					resolveCookieDomain(RequestContext.get()?.host ?? '')
+				)
 			}
 			throw error
+		}
+	}
+
+	private assertCatalogSessionScope(
+		role: Role,
+		sessionCatalogId: string | null
+	): void {
+		if (role === Role.ADMIN || role !== Role.CATALOG) return
+
+		const currentCatalogId = RequestContext.get()?.catalogId ?? null
+		if (!sessionCatalogId || !currentCatalogId) {
+			throw new ForbiddenException('Сессия не привязана к этому каталогу')
+		}
+		if (sessionCatalogId !== currentCatalogId) {
+			throw new ForbiddenException('Сессия не для этого каталога')
 		}
 	}
 }

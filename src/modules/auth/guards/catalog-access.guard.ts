@@ -27,6 +27,10 @@ export class CatalogAccessGuard implements CanActivate {
 
 		// Владелец — только свой каталог
 		if (user.role === Role.CATALOG) {
+			const sessionCatalogId = req.session?.context?.catalogId ?? null
+			if (sessionCatalogId !== catalogId) {
+				throw new ForbiddenException('Сессия не для этого каталога')
+			}
 			if (store?.ownerUserId && store.ownerUserId === user.id) return true
 			throw new ForbiddenException('Владелец: нет доступа к этому каталогу')
 		}

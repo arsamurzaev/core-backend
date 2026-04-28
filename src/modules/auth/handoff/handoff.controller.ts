@@ -1,3 +1,4 @@
+import { Role } from '@generated/enums'
 import {
 	Controller,
 	ForbiddenException,
@@ -22,7 +23,7 @@ import { ObservabilityService } from '@/modules/observability/observability.serv
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
-import { setSessionCookies } from '../auth-cookie.utils'
+import { resolveCookieDomain, setSessionCookies } from '../auth-cookie.utils'
 import { AuthService } from '../auth.service'
 
 import { HandoffService } from './handoff.service'
@@ -96,7 +97,7 @@ export class HandoffController {
 		const { sid, csrf } = await this.auth.createSessionForUser(
 			payload.userId,
 			{ ip, userAgent },
-			store.catalogId
+			payload.role === Role.ADMIN ? null : store.catalogId
 		)
 
 		this.observability.recordAuthEvent(
@@ -119,7 +120,11 @@ export class HandoffController {
 		} as any)
 
 		res.setHeader('Cache-Control', 'no-store')
-		setSessionCookies(res, { sid, csrf })
+		setSessionCookies(
+			res,
+			{ sid, csrf },
+			resolveCookieDomain(RequestContext.get()?.host ?? '')
+		)
 
 		return res.redirect(302, resolveHandoffNext(next ?? payload.next))
 	}

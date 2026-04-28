@@ -190,10 +190,11 @@ export class AuthService {
 				ownerUserId ?? null
 			)
 
+			const sessionCatalogId = user.role === Role.ADMIN ? null : catalogId
 			const { sid, csrf, reused } = await this.createSessionForUser(
 				user.id,
 				meta,
-				catalogId,
+				sessionCatalogId,
 				existingSid ?? null
 			)
 

@@ -1,3 +1,4 @@
+import { Role } from '@generated/enums'
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common'
 import type { Response } from 'express'
 
@@ -25,7 +26,10 @@ function parseCookie(
 	return undefined
 }
 
-function clearSessionCookies(res: Response | undefined, cookieDomain?: string): void {
+function clearSessionCookies(
+	res: Response | undefined,
+	cookieDomain?: string
+): void {
 	if (!res?.clearCookie) return
 	const opts = {
 		path: '/' as const,
@@ -55,7 +59,10 @@ export class OptionalSessionGuard implements CanActivate {
 		try {
 			const session = await this.sessions.get(sid)
 			if (!session?.userId) {
-				clearSessionCookies(res, resolveCookieDomain(RequestContext.get()?.host ?? ''))
+				clearSessionCookies(
+					res,
+					resolveCookieDomain(RequestContext.get()?.host ?? '')
+				)
 				return true
 			}
 
@@ -64,12 +71,28 @@ export class OptionalSessionGuard implements CanActivate {
 				select: { id: true, role: true, login: true, name: true }
 			})
 			if (!user) {
-				clearSessionCookies(res, resolveCookieDomain(RequestContext.get()?.host ?? ''))
+				clearSessionCookies(
+					res,
+					resolveCookieDomain(RequestContext.get()?.host ?? '')
+				)
+				return true
+			}
+			if (
+				!this.isSessionInCurrentCatalogScope(
+					user.role,
+					session.context?.catalogId ?? null
+				)
+			) {
+				clearSessionCookies(
+					res,
+					resolveCookieDomain(RequestContext.get()?.host ?? '')
+				)
 				return true
 			}
 
 			req.user = user
 			req.sessionId = sid
+			req.session = session
 
 			try {
 				await this.sessions.touch(sid, session.userId)
@@ -97,9 +120,24 @@ export class OptionalSessionGuard implements CanActivate {
 				})
 			}
 		} catch {
-			clearSessionCookies(res, resolveCookieDomain(RequestContext.get()?.host ?? ''))
+			clearSessionCookies(
+				res,
+				resolveCookieDomain(RequestContext.get()?.host ?? '')
+			)
 		}
 
 		return true
+	}
+
+	private isSessionInCurrentCatalogScope(
+		role: Role,
+		sessionCatalogId: string | null
+	): boolean {
+		if (role === Role.ADMIN || role !== Role.CATALOG) return true
+
+		const currentCatalogId = RequestContext.get()?.catalogId ?? null
+		return Boolean(
+			sessionCatalogId && currentCatalogId && sessionCatalogId === currentCatalogId
+		)
 	}
 }
