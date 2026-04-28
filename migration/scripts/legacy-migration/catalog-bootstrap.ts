@@ -1,5 +1,6 @@
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { hash } from 'argon2'
-import { randomInt } from 'node:crypto'
+import { randomInt, randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import pLimit from 'p-limit'
@@ -30,6 +31,11 @@ type ApplyCatalogBootstrapOptions = {
 	runId: string
 	source: string
 	credentialsFile?: string | null
+}
+
+type CredentialsS3Config = {
+	client: S3Client
+	bucket: string
 }
 
 type CatalogBootstrapIssue = {
@@ -1101,17 +1107,27 @@ async function writeCredentialsArtifact(
 	credentials: CatalogBootstrapCredential[],
 	options: ApplyCatalogBootstrapOptions
 ): Promise<string> {
-	const relativePath =
-		options.credentialsFile?.trim() ||
-		path.join(
-			'migration',
-			'runtime',
-			`legacy-bootstrap-credentials-${options.runId}.csv`
-		)
-	const absolutePath = path.resolve(process.cwd(), relativePath)
+	const content = buildCredentialsCsv(credentials)
+	const s3 = createCredentialsS3ConfigFromEnv()
 
-	await mkdir(path.dirname(absolutePath), { recursive: true })
+	if (s3) {
+		const key = buildCredentialsS3Key(options.runId)
+		try {
+			await uploadCredentialsArtifactToS3(s3, key, content)
+			return `s3://${s3.bucket}/${key}`
+		} catch (error) {
+			console.warn(
+				`[legacy-migration] Failed to upload credentials CSV to S3, falling back to local file: ${summarizeError(error)}`
+			)
+		}
+	}
 
+	return writeCredentialsLocalArtifact(content, options)
+}
+
+function buildCredentialsCsv(
+	credentials: CatalogBootstrapCredential[]
+): string {
 	const lines = [
 		['businessName', 'host', 'login', 'password'].join(','),
 		...credentials.map(credential =>
@@ -1126,8 +1142,77 @@ async function writeCredentialsArtifact(
 		)
 	]
 
-	await writeFile(absolutePath, `${lines.join('\n')}\n`, 'utf8')
+	return `${lines.join('\n')}\n`
+}
+
+async function writeCredentialsLocalArtifact(
+	content: string,
+	options: ApplyCatalogBootstrapOptions
+): Promise<string> {
+	const relativePath =
+		options.credentialsFile?.trim() ||
+		path.join(
+			'migration',
+			'runtime',
+			`legacy-bootstrap-credentials-${options.runId}.csv`
+		)
+	const absolutePath = path.resolve(process.cwd(), relativePath)
+
+	await mkdir(path.dirname(absolutePath), { recursive: true })
+	await writeFile(absolutePath, content, 'utf8')
 	return relativePath
+}
+
+async function uploadCredentialsArtifactToS3(
+	s3: CredentialsS3Config,
+	key: string,
+	content: string
+) {
+	await s3.client.send(
+		new PutObjectCommand({
+			Bucket: s3.bucket,
+			Key: key,
+			Body: Buffer.from(content, 'utf8'),
+			ContentType: 'text/csv; charset=utf-8',
+			CacheControl: 'private, max-age=0, no-store'
+		})
+	)
+}
+
+function createCredentialsS3ConfigFromEnv(): CredentialsS3Config | null {
+	if (!parseBoolean(process.env.S3_ENABLED)) return null
+
+	const region = process.env.S3_REGION?.trim()
+	const bucket = process.env.S3_BUCKET?.trim()
+	const accessKeyId = process.env.S3_ACCESS_KEY_ID?.trim()
+	const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY?.trim()
+	const endpoint = process.env.S3_ENDPOINT?.trim() || undefined
+	const forcePathStyle = parseBoolean(process.env.S3_FORCE_PATH_STYLE)
+
+	if (!region || !bucket || !accessKeyId || !secretAccessKey) {
+		return null
+	}
+
+	return {
+		client: new S3Client({
+			region,
+			endpoint,
+			forcePathStyle,
+			credentials: {
+				accessKeyId,
+				secretAccessKey
+			}
+		}),
+		bucket
+	}
+}
+
+function buildCredentialsS3Key(runId: string): string {
+	return [
+		'migration',
+		'runtime',
+		`legacy-bootstrap-credentials-${runId}-${randomUUID()}.csv`
+	].join('/')
 }
 
 function buildCatalogContacts(business: LegacyBusinessRow) {
@@ -1259,4 +1344,16 @@ function csvEscape(value: string): string {
 		return `"${value.replace(/"/g, '""')}"`
 	}
 	return value
+}
+
+function parseBoolean(value: string | undefined, fallback = false): boolean {
+	if (value === undefined) return fallback
+	const normalized = value.trim().toLowerCase()
+	if (['1', 'true', 'yes', 'on'].includes(normalized)) return true
+	if (['0', 'false', 'no', 'off'].includes(normalized)) return false
+	return fallback
+}
+
+function summarizeError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error)
 }

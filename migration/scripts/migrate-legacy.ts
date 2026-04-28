@@ -887,7 +887,7 @@ What it does now:
   - phase=catalog-bootstrap scans legacy businesses
   - phase=catalog-bootstrap in --apply mode creates User + Catalog + child Catalog links
   - phase=catalog-bootstrap syncs CatalogConfig, CatalogSettings, CatalogContact, Metrics, Integration
-  - phase=catalog-bootstrap writes generated credentials to migration/runtime/*.csv
+  - phase=catalog-bootstrap writes generated credentials to S3 migration/runtime/*.csv when available, otherwise to local migration/runtime/*.csv
   - phase=payments loads legacy PromoCode, Payment, PromoCodePayment for selected businesses
   - phase=payments links Catalog.promoCodeId, imports payments, updates subscriptionEndsAt
   - phase=orders loads legacy orders from all type-specific order tables
