@@ -9,6 +9,7 @@ import {
 	clearSessionCookies,
 	readSessionCookies,
 	resolveCookieDomain,
+	resolveServerHost,
 	type SessionCookieScope,
 	setSessionCookies
 } from '../auth-cookie.utils'
@@ -38,7 +39,7 @@ export class OptionalSessionGuard implements CanActivate {
 			if (!session?.userId) {
 				clearSessionCookies(
 					res,
-					resolveCookieDomain(RequestContext.get()?.host ?? ''),
+					resolveCookieDomain(resolveServerHost(req)),
 					sessionCookies.scope
 				)
 				return true
@@ -51,7 +52,7 @@ export class OptionalSessionGuard implements CanActivate {
 			if (!user) {
 				clearSessionCookies(
 					res,
-					resolveCookieDomain(RequestContext.get()?.host ?? ''),
+					resolveCookieDomain(resolveServerHost(req)),
 					sessionCookies.scope
 				)
 				return true
@@ -64,7 +65,7 @@ export class OptionalSessionGuard implements CanActivate {
 			) {
 				clearSessionCookies(
 					res,
-					resolveCookieDomain(RequestContext.get()?.host ?? ''),
+					resolveCookieDomain(resolveServerHost(req)),
 					sessionCookies.scope
 				)
 				return true
@@ -80,7 +81,7 @@ export class OptionalSessionGuard implements CanActivate {
 				// no-op: optional auth should not block public reads
 			}
 
-			const cookieDomain = resolveCookieDomain(RequestContext.get()?.host ?? '')
+			const cookieDomain = resolveCookieDomain(resolveServerHost(req))
 			if (res?.cookie) {
 				const responseCookieScope =
 					user.role === Role.CATALOG && session.context?.catalogId
@@ -96,7 +97,7 @@ export class OptionalSessionGuard implements CanActivate {
 		} catch {
 			clearSessionCookies(
 				res,
-				resolveCookieDomain(RequestContext.get()?.host ?? ''),
+				resolveCookieDomain(resolveServerHost(req)),
 				activeCookieScope
 			)
 		}

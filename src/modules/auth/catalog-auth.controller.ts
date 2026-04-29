@@ -24,6 +24,7 @@ import { AuthThrottle } from '@/shared/throttler/auth-throttle.decorator'
 import {
 	getSessionCookie,
 	resolveCookieDomain,
+	resolveServerHost,
 	setSessionCookies
 } from './auth-cookie.utils'
 import { AuthService } from './auth.service'
@@ -69,7 +70,7 @@ export class CatalogAuthController {
 		setSessionCookies(
 			res,
 			{ sid, csrf },
-			resolveCookieDomain(RequestContext.get()?.host ?? ''),
+			resolveCookieDomain(resolveServerHost(req)),
 			user.role === Role.ADMIN ? null : { catalogId }
 		)
 

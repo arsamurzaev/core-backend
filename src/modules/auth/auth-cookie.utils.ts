@@ -15,6 +15,10 @@ const BASE_DOMAINS = (process.env.CATALOG_BASE_DOMAINS ?? 'myctlg.ru')
 	.map(s => s.trim().toLowerCase())
 	.filter(Boolean)
 
+export function resolveServerHost(req: { headers: { host?: string } }): string {
+	return (req.headers.host ?? '').split(':')[0] ?? ''
+}
+
 export function resolveCookieDomain(host: string): string | undefined {
 	if (!host) return undefined
 	const h = host.toLowerCase()

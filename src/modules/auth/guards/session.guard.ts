@@ -17,6 +17,7 @@ import {
 	clearSessionCookies,
 	readSessionCookies,
 	resolveCookieDomain,
+	resolveServerHost,
 	type SessionCookieScope,
 	setSessionCookies
 } from '../auth-cookie.utils'
@@ -114,7 +115,7 @@ export class SessionGuard implements CanActivate {
 				// no-op: do not block request if refresh fails
 			}
 
-			const cookieDomain = resolveCookieDomain(RequestContext.get()?.host ?? '')
+			const cookieDomain = resolveCookieDomain(resolveServerHost(req))
 			if (res?.cookie) {
 				const responseCookieScope =
 					user.role === Role.CATALOG && session.context?.catalogId
@@ -135,7 +136,7 @@ export class SessionGuard implements CanActivate {
 			) {
 				clearSessionCookies(
 					res,
-					resolveCookieDomain(RequestContext.get()?.host ?? ''),
+					resolveCookieDomain(resolveServerHost(req)),
 					activeCookieScope
 				)
 			}
