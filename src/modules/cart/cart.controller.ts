@@ -28,14 +28,16 @@ import {
 import type { Request, Response } from 'express'
 import type { Observable } from 'rxjs'
 
-import { resolveCookieDomain } from '@/modules/auth/auth-cookie.utils'
+import {
+	resolveCookieDomain,
+	resolveServerHost
+} from '@/modules/auth/auth-cookie.utils'
 import { Roles } from '@/modules/auth/decorators/roles.decorator'
 import { User } from '@/modules/auth/decorators/user.decorator'
 import { SessionGuard } from '@/modules/auth/guards/session.guard'
 import type { SessionUser } from '@/modules/auth/types/auth-request'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
-import { RequestContext } from '@/shared/tenancy/request-context'
 import { AuthThrottle } from '@/shared/throttler/auth-throttle.decorator'
 
 import { CartService } from './cart.service'
@@ -82,7 +84,7 @@ export class CartController {
 		const token = this.readTokenFromRequest(req)
 		const catalogId = mustCatalogId()
 		const result = await this.cartService.getOrCreateCurrentCart(catalogId, token)
-		this.setTokenCookie(res, result.token)
+		this.setTokenCookie(req, res, result.token)
 		return { ok: true, cart: result.cart }
 	}
 
@@ -100,7 +102,7 @@ export class CartController {
 			return { ok: true, cart: result.cart }
 		} catch (error) {
 			if (this.isCartNotFoundError(error)) {
-				this.clearTokenCookie(res)
+				this.clearTokenCookie(req, res)
 			}
 
 			throw error
@@ -117,7 +119,7 @@ export class CartController {
 		const token = this.readTokenFromRequest(req)
 		const catalogId = mustCatalogId()
 		const result = await this.cartService.shareCurrentCart(catalogId, token)
-		this.setTokenCookie(res, result.token)
+		this.setTokenCookie(req, res, result.token)
 		return {
 			ok: true,
 			publicKey: result.cart.publicKey,
@@ -149,7 +151,7 @@ export class CartController {
 		const token = this.readTokenFromRequest(req)
 		const catalogId = mustCatalogId()
 		const result = await this.cartService.upsertCurrentItem(catalogId, token, dto)
-		this.setTokenCookie(res, result.token)
+		this.setTokenCookie(req, res, result.token)
 		return { ok: true, cart: result.cart }
 	}
 
@@ -174,11 +176,11 @@ export class CartController {
 				token,
 				itemId
 			)
-			this.setTokenCookie(res, result.token)
+			this.setTokenCookie(req, res, result.token)
 			return { ok: true, cart: result.cart }
 		} catch (error) {
 			if (this.isCartNotFoundError(error)) {
-				this.clearTokenCookie(res)
+				this.clearTokenCookie(req, res)
 			}
 
 			throw error
@@ -203,7 +205,7 @@ export class CartController {
 		const token = this.readTokenFromRequest(req)
 		const catalogId = mustCatalogId()
 		const result = await this.cartService.connectCurrentSse(catalogId, token)
-		this.setTokenCookie(res, result.token)
+		this.setTokenCookie(req, res, result.token)
 		return result.stream
 	}
 
@@ -429,8 +431,8 @@ export class CartController {
 		return this.cartService.readTokenFromCookie(req.headers.cookie)
 	}
 
-	private setTokenCookie(res: Response, token: string) {
-		const cookieDomain = resolveCookieDomain(RequestContext.get()?.host ?? '')
+	private setTokenCookie(req: Request, res: Response, token: string) {
+		const cookieDomain = resolveCookieDomain(resolveServerHost(req))
 		res.cookie(this.cartService.getCookieName(), token, {
 			httpOnly: true,
 			sameSite: 'lax',
@@ -440,8 +442,8 @@ export class CartController {
 		})
 	}
 
-	private clearTokenCookie(res: Response) {
-		const cookieDomain = resolveCookieDomain(RequestContext.get()?.host ?? '')
+	private clearTokenCookie(req: Request, res: Response) {
+		const cookieDomain = resolveCookieDomain(resolveServerHost(req))
 		res.clearCookie(this.cartService.getCookieName(), {
 			httpOnly: true,
 			sameSite: 'lax',

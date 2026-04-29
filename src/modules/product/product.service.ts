@@ -492,7 +492,6 @@ export class ProductService {
 	): Promise<PreparedProductCreatePayload> {
 		const { mediaIds, attributes, brandId, categories, variants, ...rest } = dto
 		const normalizedName = normalizeRequiredString(dto.name, 'name')
-		await this.ensureUniqueName(normalizedName, catalogId)
 		const resolvedSlug = await this.generateProductSlug(normalizedName, catalogId)
 		const resolvedSku = await this.generateProductSku(normalizedName)
 
@@ -648,7 +647,6 @@ export class ProductService {
 
 		if (dto.name !== undefined) {
 			const normalizedName = normalizeRequiredString(dto.name, 'name')
-			await this.ensureUniqueName(normalizedName, catalogId, id)
 			data.name = normalizedName
 		}
 		if (dto.price !== undefined) data.price = dto.price
@@ -705,17 +703,6 @@ export class ProductService {
 			throw new BadRequestException(
 				`Медиа не найдены в каталоге: ${missing.join(', ')}`
 			)
-		}
-	}
-
-	private async ensureUniqueName(
-		name: string,
-		catalogId: string,
-		excludeProductId?: string
-	): Promise<void> {
-		const exists = await this.repo.existsName(name, catalogId, excludeProductId)
-		if (exists) {
-			throw new BadRequestException('Товар с таким названием уже существует')
 		}
 	}
 

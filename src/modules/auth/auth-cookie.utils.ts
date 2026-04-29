@@ -21,7 +21,8 @@ export function resolveServerHost(req: { headers: { host?: string } }): string {
 
 export function resolveCookieDomain(host: string): string | undefined {
 	if (!host) return undefined
-	const h = host.toLowerCase()
+	const h = host.toLowerCase().split(':')[0] ?? ''
+	if (isLocalCookieHost(h)) return undefined
 	for (const base of BASE_DOMAINS) {
 		if (h === base || h.endsWith('.' + base)) return '.' + base
 	}
@@ -29,6 +30,14 @@ export function resolveCookieDomain(host: string): string | undefined {
 	const parts = h.split('.')
 	if (parts.length >= 2) return '.' + parts.slice(-2).join('.')
 	return undefined
+}
+
+function isLocalCookieHost(host: string): boolean {
+	if (!host) return true
+	if (host === 'localhost' || host.endsWith('.localhost')) return true
+	if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return true
+	if (host === '[::1]' || host === '::1') return true
+	return false
 }
 
 export type SessionCookieScope = {

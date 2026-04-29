@@ -1142,8 +1142,23 @@ describe('ProductService', () => {
 		).rejects.toThrow('Товар не найден')
 	})
 
-	it('rejects duplicate product name in catalog', async () => {
+	it('allows duplicate product name in catalog', async () => {
 		repo.existsName.mockResolvedValue(true)
+		repo.existsSlug.mockResolvedValue(false)
+		repo.existsSku.mockResolvedValue(false)
+		repo.findById.mockResolvedValue({
+			id: 'product-1',
+			slug: 'duplicate-product',
+			media: [],
+			productAttributes: [],
+			variants: [],
+			categoryProducts: []
+		} as any)
+		repo.create.mockResolvedValue({
+			id: 'product-1',
+			slug: 'duplicate-product'
+		} as any)
+		attributeBuilder.buildForCreate.mockResolvedValue([])
 
 		await expect(
 			runWithCatalog(() =>
@@ -1152,7 +1167,12 @@ describe('ProductService', () => {
 					price: 100
 				})
 			)
-		).rejects.toThrow('Товар с таким названием уже существует')
+		).resolves.toMatchObject({
+			ok: true,
+			id: 'product-1',
+			slug: 'duplicate-product'
+		})
+		expect(repo.existsName).not.toHaveBeenCalled()
 	})
 
 	it('rejects removing and updating the same attribute in one request', async () => {
