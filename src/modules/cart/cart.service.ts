@@ -12,7 +12,9 @@ import {
 } from '@nestjs/common'
 import { randomBytes } from 'node:crypto'
 import { Observable, Subject } from 'rxjs'
+import type Redis from 'ioredis'
 
+import { RedisService } from '@/infrastructure/redis/redis.service'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import type { SessionUser } from '@/modules/auth/types/auth-request'
 import { buildMediaSelect } from '@/shared/media/media-select'
@@ -35,6 +37,12 @@ import {
 } from './cart.utils'
 
 type SsePayload = string | Record<string, unknown>
+type CartSsePubSubMessage = {
+	cartId: string
+	originId: string
+	payload: SsePayload
+	type: string
+}
 
 const CART_MANAGER_INACTIVITY_MS =
 	Number(process.env.CART_MANAGER_INACTIVITY_MS ?? 60_000) || 60_000
@@ -56,6 +64,7 @@ const TERMINAL_CART_STATUSES = new Set<CartStatus>([
 	CartStatus.CANCELLED,
 	CartStatus.EXPIRED
 ])
+const CART_SSE_REDIS_CHANNEL = 'cart:sse'
 
 const cartSelect = {
 	id: true,
@@ -66,6 +75,7 @@ const cartSelect = {
 	publicKey: true,
 	checkoutKey: true,
 	checkoutAt: true,
+	comment: true,
 	assignedManagerId: true,
 	managerSessionStartedAt: true,
 	managerLastSeenAt: true,
@@ -128,15 +138,20 @@ type CompletedOrderEntity = Prisma.OrderGetPayload<{
 export class CartService implements OnModuleInit, OnModuleDestroy {
 	private readonly logger = new Logger(CartService.name)
 	private readonly sseStreams = new Map<string, Set<Subject<MessageEvent>>>()
+	private readonly sseOriginId = randomBytes(8).toString('hex')
+	private redisSubscriber: Redis | null = null
 	private managerSweepTimer: NodeJS.Timeout | null = null
 	private draftSweepTimer: NodeJS.Timeout | null = null
 
 	constructor(
 		private readonly prisma: PrismaService,
-		private readonly mediaUrl: MediaUrlService
+		private readonly mediaUrl: MediaUrlService,
+		private readonly redis: RedisService
 	) {}
 
 	onModuleInit() {
+		this.setupRedisSseSubscriber()
+
 		if (CART_MANAGER_SWEEP_MS > 0) {
 			this.managerSweepTimer = setInterval(() => {
 				void this.expireInactiveManagerSessions().catch(error => {
@@ -161,6 +176,16 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	}
 
 	onModuleDestroy() {
+		if (this.redisSubscriber) {
+			this.redisSubscriber.removeAllListeners()
+			void this.redisSubscriber.quit().catch(error => {
+				this.logger.warn('Cart SSE Redis subscriber shutdown failed', {
+					error: error instanceof Error ? error.message : String(error)
+				})
+			})
+			this.redisSubscriber = null
+		}
+
 		if (this.managerSweepTimer) {
 			clearInterval(this.managerSweepTimer)
 			this.managerSweepTimer = null
@@ -219,11 +244,16 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		return { cart: this.mapCart(cart), token: normalizedToken }
 	}
 
-	async shareCurrentCart(catalogId: string, token?: string | null) {
+	async shareCurrentCart(
+		catalogId: string,
+		token?: string | null,
+		comment?: string | null
+	) {
 		const current = await this.getOrCreateCurrentCart(catalogId, token)
 		let publicKey = current.cart.publicKey
 		const now = new Date()
 		const data: Prisma.CartUpdateInput = {}
+		const normalizedComment = this.normalizeCartComment(comment)
 
 		if (!publicKey) {
 			publicKey = await this.generateUniquePublicKey()
@@ -233,6 +263,10 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		if (current.cart.status === CartStatus.DRAFT) {
 			data.status = CartStatus.SHARED
 			data.statusChangedAt = now
+		}
+
+		if (normalizedComment !== current.cart.comment) {
+			data.comment = normalizedComment
 		}
 
 		if (Object.keys(data).length > 0) {
@@ -529,11 +563,8 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	}
 
 	async connectCurrentSse(catalogId: string, token?: string | null) {
-		const current = await this.getOrCreateCurrentCart(catalogId, token)
-		return {
-			stream: this.createSseStream(current.cart.id),
-			token: current.token
-		}
+		const current = await this.getCurrentCartOrThrow(catalogId, token)
+		return this.createSseStream(current.cart.id)
 	}
 
 	async connectPublicSse(publicKey: string, checkoutKey?: string | null) {
@@ -625,6 +656,26 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	}
 
 	private broadcastCart(cartId: string, type: string, payload: SsePayload) {
+		this.broadcastCartLocal(cartId, type, payload)
+
+		const message: CartSsePubSubMessage = {
+			cartId,
+			originId: this.sseOriginId,
+			type,
+			payload
+		}
+		void this.redis.publish(CART_SSE_REDIS_CHANNEL, JSON.stringify(message)).catch(
+			error => {
+				this.logger.warn('Cart SSE Redis publish failed', {
+					cartId,
+					error: error instanceof Error ? error.message : String(error),
+					type
+				})
+			}
+		)
+	}
+
+	private broadcastCartLocal(cartId: string, type: string, payload: SsePayload) {
 		const streams = this.sseStreams.get(cartId)
 		if (!streams?.size) return
 
@@ -636,6 +687,66 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	private broadcastCartStatusChanged(cart: CartEntity) {
 		const payload = this.mapCart(cart)
 		this.broadcastCart(cart.id, 'cart.status_changed', payload)
+	}
+
+	private setupRedisSseSubscriber() {
+		const subscriber = this.redis.duplicate()
+		this.redisSubscriber = subscriber
+
+		subscriber.on('message', (channel, rawMessage) => {
+			if (channel !== CART_SSE_REDIS_CHANNEL) {
+				return
+			}
+
+			const message = this.parseCartSsePubSubMessage(rawMessage)
+			if (!message) {
+				return
+			}
+
+			if (message.originId === this.sseOriginId) {
+				return
+			}
+
+			this.broadcastCartLocal(message.cartId, message.type, message.payload)
+		})
+
+		subscriber.on('error', error => {
+			this.logger.error('Cart SSE Redis subscriber error', {
+				error: error instanceof Error ? error.message : String(error)
+			})
+		})
+
+		void subscriber.subscribe(CART_SSE_REDIS_CHANNEL).catch(error => {
+			this.logger.error('Cart SSE Redis subscribe failed', {
+				error: error instanceof Error ? error.message : String(error)
+			})
+		})
+	}
+
+	private parseCartSsePubSubMessage(
+		rawMessage: string
+	): CartSsePubSubMessage | null {
+		try {
+			const parsed = JSON.parse(rawMessage) as Partial<CartSsePubSubMessage>
+			if (
+				!parsed ||
+				typeof parsed.cartId !== 'string' ||
+				typeof parsed.originId !== 'string' ||
+				typeof parsed.type !== 'string' ||
+				!('payload' in parsed)
+			) {
+				return null
+			}
+
+			return {
+				cartId: parsed.cartId,
+				originId: parsed.originId,
+				type: parsed.type,
+				payload: parsed.payload as SsePayload
+			}
+		} catch {
+			return null
+		}
 	}
 
 	private mapCart(cart: CartEntity) {
@@ -664,6 +775,11 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		if (!key || !cart.checkoutKey || key !== cart.checkoutKey) {
 			throw new UnauthorizedException('Неверный ключ доступа к корзине')
 		}
+	}
+
+	private normalizeCartComment(comment?: string | null) {
+		const normalized = comment?.trim()
+		return normalized ? normalized : null
 	}
 
 	private ensureCartIsOpen(status: CartStatus) {

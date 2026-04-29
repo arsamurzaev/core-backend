@@ -22,6 +22,7 @@ type CartEntityLike = {
 	statusChangedAt: unknown
 	publicKey: string | null
 	checkoutAt: unknown
+	comment: string | null
 	assignedManagerId: string | null
 	managerSessionStartedAt: unknown
 	managerLastSeenAt: unknown
@@ -158,6 +159,7 @@ export function mapCartEntity(
 		statusChangedAt: cart.statusChangedAt,
 		publicKey: cart.publicKey,
 		checkoutAt: cart.checkoutAt,
+		comment: cart.comment,
 		assignedManagerId: cart.assignedManagerId,
 		managerSessionStartedAt: cart.managerSessionStartedAt,
 		managerLastSeenAt: cart.managerLastSeenAt,

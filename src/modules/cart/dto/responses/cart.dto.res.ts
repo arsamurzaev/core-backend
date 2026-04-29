@@ -90,6 +90,13 @@ export class CartDto {
 
 	@ApiProperty({
 		type: String,
+		nullable: true,
+		example: 'Позвоните перед доставкой'
+	})
+	comment: string | null
+
+	@ApiProperty({
+		type: String,
 		format: 'uuid',
 		nullable: true
 	})

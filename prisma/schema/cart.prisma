@@ -12,6 +12,7 @@ model Cart {
   publicKey   String?   @unique @map("public_key")
   checkoutKey String?   @map("checkout_key")
   checkoutAt  DateTime? @map("checkout_at")
+  comment     String?
 
   assignedManagerId       String?   @map("assigned_manager_id") @db.Uuid
   managerSessionStartedAt DateTime? @map("manager_session_started_at")

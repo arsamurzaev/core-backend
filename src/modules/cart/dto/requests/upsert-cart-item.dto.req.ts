@@ -1,6 +1,25 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Type } from 'class-transformer'
-import { IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator'
+import {
+	IsInt,
+	IsNotEmpty,
+	IsOptional,
+	IsString,
+	MaxLength,
+	Min
+} from 'class-validator'
+
+export class ShareCurrentCartDtoReq {
+	@ApiPropertyOptional({
+		type: String,
+		maxLength: 1000,
+		example: 'Позвоните перед доставкой'
+	})
+	@IsOptional()
+	@IsString()
+	@MaxLength(1000)
+	comment?: string
+}
 
 export class UpsertCartItemDtoReq {
 	@ApiProperty({

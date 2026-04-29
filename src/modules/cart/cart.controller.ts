@@ -43,6 +43,7 @@ import { AuthThrottle } from '@/shared/throttler/auth-throttle.decorator'
 import { CartService } from './cart.service'
 import {
 	PublicUpsertCartItemDtoReq,
+	ShareCurrentCartDtoReq,
 	UpsertCartItemDtoReq
 } from './dto/requests/upsert-cart-item.dto.req'
 import {
@@ -111,14 +112,20 @@ export class CartController {
 
 	@Post('current/share')
 	@ApiOperation({ summary: 'Issue a public key for the current cart' })
+	@ApiBody({ type: ShareCurrentCartDtoReq, required: false })
 	@ApiOkResponse({ type: ShareCartResponseDto })
 	async shareCurrent(
 		@Req() req: Request,
-		@Res({ passthrough: true }) res: Response
+		@Res({ passthrough: true }) res: Response,
+		@Body() dto: ShareCurrentCartDtoReq = {}
 	) {
 		const token = this.readTokenFromRequest(req)
 		const catalogId = mustCatalogId()
-		const result = await this.cartService.shareCurrentCart(catalogId, token)
+		const result = await this.cartService.shareCurrentCart(
+			catalogId,
+			token,
+			dto.comment
+		)
 		this.setTokenCookie(req, res, result.token)
 		return {
 			ok: true,
@@ -199,14 +206,11 @@ export class CartController {
 		}
 	})
 	async sseCurrent(
-		@Req() req: Request,
-		@Res({ passthrough: true }) res: Response
+		@Req() req: Request
 	): Promise<Observable<MessageEvent>> {
 		const token = this.readTokenFromRequest(req)
 		const catalogId = mustCatalogId()
-		const result = await this.cartService.connectCurrentSse(catalogId, token)
-		this.setTokenCookie(req, res, result.token)
-		return result.stream
+		return this.cartService.connectCurrentSse(catalogId, token)
 	}
 
 	@SkipCatalog()

@@ -2,6 +2,8 @@ import { CartStatus, OrderStatus, Role } from '@generated/client'
 import { Test, TestingModule } from '@nestjs/testing'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { RedisService } from '@/infrastructure/redis/redis.service'
+import { MediaUrlService } from '@/shared/media/media-url.service'
 
 import { CartService } from './cart.service'
 
@@ -15,6 +17,7 @@ function createCartEntity(overrides: Record<string, unknown> = {}) {
 		publicKey: 'public-1',
 		checkoutKey: 'checkout-1',
 		checkoutAt: null,
+		comment: null,
 		assignedManagerId: null,
 		managerSessionStartedAt: null,
 		managerLastSeenAt: null,
@@ -81,6 +84,10 @@ describe('CartService', () => {
 		}
 		$transaction: jest.Mock
 	}
+	let redis: {
+		duplicate: jest.Mock
+		publish: jest.Mock
+	}
 
 	beforeEach(async () => {
 		prisma = {
@@ -110,6 +117,15 @@ describe('CartService', () => {
 			},
 			$transaction: jest.fn(async callback => callback(prisma))
 		}
+		redis = {
+			duplicate: jest.fn(() => ({
+				on: jest.fn().mockReturnThis(),
+				quit: jest.fn().mockResolvedValue('OK'),
+				removeAllListeners: jest.fn().mockReturnThis(),
+				subscribe: jest.fn().mockResolvedValue(1)
+			})),
+			publish: jest.fn().mockResolvedValue(1)
+		}
 
 		const module: TestingModule = await Test.createTestingModule({
 			providers: [
@@ -117,6 +133,16 @@ describe('CartService', () => {
 				{
 					provide: PrismaService,
 					useValue: prisma
+				},
+				{
+					provide: MediaUrlService,
+					useValue: {
+						mapMedia: jest.fn(media => media)
+					}
+				},
+				{
+					provide: RedisService,
+					useValue: redis
 				}
 			]
 		}).compile()
@@ -275,7 +301,14 @@ describe('CartService', () => {
 			expect.objectContaining({
 				where: expect.objectContaining({
 					token: 'token-1',
-					status: { in: ['DRAFT', 'SHARED', 'IN_PROGRESS'] }
+					status: {
+						in: [
+							CartStatus.DRAFT,
+							CartStatus.SHARED,
+							CartStatus.IN_PROGRESS,
+							CartStatus.PAUSED
+						]
+					}
 				})
 			})
 		)
