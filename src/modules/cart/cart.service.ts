@@ -39,7 +39,14 @@ import {
 type SsePayload = string | Record<string, unknown>
 type CartSsePubSubMessage = {
 	cartId: string
+	eventId?: string
 	originId: string
+	payload: SsePayload
+	type: string
+}
+
+type CartSseStoredEvent = {
+	eventId: string
 	payload: SsePayload
 	type: string
 }
@@ -65,6 +72,11 @@ const TERMINAL_CART_STATUSES = new Set<CartStatus>([
 	CartStatus.EXPIRED
 ])
 const CART_SSE_REDIS_CHANNEL = 'cart:sse'
+const CART_SSE_STREAM_PREFIX = 'cart:sse:stream'
+const CART_SSE_STREAM_MAXLEN =
+	Number(process.env.CART_SSE_STREAM_MAXLEN ?? 100) || 100
+const CART_SSE_STREAM_TTL_SEC =
+	Number(process.env.CART_SSE_STREAM_TTL_SEC ?? 24 * 60 * 60) || 24 * 60 * 60
 
 const cartSelect = {
 	id: true,
@@ -562,15 +574,34 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		return { order: this.mapCompletedOrder(result.order) }
 	}
 
-	async connectCurrentSse(catalogId: string, token?: string | null) {
+	async connectCurrentSse(
+		catalogId: string,
+		token?: string | null,
+		lastEventId?: string | null
+	) {
 		const current = await this.getCurrentCartOrThrow(catalogId, token)
-		return this.createSseStream(current.cart.id)
+		return this.createSseStream(
+			current.cart.id,
+			async () => {
+				const fresh = await this.findByIdOrThrow(current.cart.id)
+				return this.mapCart(fresh)
+			},
+			lastEventId
+		)
 	}
 
-	async connectPublicSse(publicKey: string, checkoutKey?: string | null) {
+	async connectPublicSse(
+		publicKey: string,
+		checkoutKey?: string | null,
+		lastEventId?: string | null
+	) {
 		const cart = await this.findByPublicKeyOrThrow(publicKey)
 		this.ensureCheckoutAccess(cart, checkoutKey)
-		return this.createSseStream(cart.id)
+		return this.createSseStream(
+			cart.id,
+			() => this.getPublicCart(publicKey, checkoutKey),
+			lastEventId
+		)
 	}
 
 	private async upsertItem(
@@ -623,7 +654,11 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		})
 	}
 
-	private createSseStream(cartId: string): Observable<MessageEvent> {
+	private createSseStream(
+		cartId: string,
+		loadSnapshot: () => Promise<SsePayload>,
+		lastEventId?: string | null
+	): Observable<MessageEvent> {
 		return new Observable<MessageEvent>(subscriber => {
 			const stream = new Subject<MessageEvent>()
 			const set = this.sseStreams.get(cartId) ?? new Set<Subject<MessageEvent>>()
@@ -632,12 +667,38 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 
 			const sub = stream.subscribe(subscriber)
 			stream.next({
+				id: this.buildCartSseEventId(cartId, 'connected'),
 				type: 'connected',
 				data: { cartId, timestamp: new Date().toISOString() }
 			})
 
+			void this.replayCartSseEvents(cartId, lastEventId, stream)
+				.catch(error => {
+					this.logger.warn('Cart SSE replay failed', {
+						cartId,
+						error: error instanceof Error ? error.message : String(error)
+					})
+				})
+				.finally(() => {
+					void loadSnapshot()
+						.then(snapshot => {
+							stream.next({
+								id: this.buildCartSseEventId(cartId, 'cart.snapshot', snapshot),
+								type: 'cart.snapshot',
+								data: snapshot
+							})
+						})
+						.catch(error => {
+							this.logger.warn('Cart SSE snapshot failed', {
+								cartId,
+								error: error instanceof Error ? error.message : String(error)
+							})
+						})
+				})
+
 			const pingTimer = setInterval(() => {
 				stream.next({
+					id: this.buildCartSseEventId(cartId, 'ping'),
 					type: 'ping',
 					data: { timestamp: new Date().toISOString() }
 				})
@@ -656,37 +717,168 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	}
 
 	private broadcastCart(cartId: string, type: string, payload: SsePayload) {
-		this.broadcastCartLocal(cartId, type, payload)
-
-		const message: CartSsePubSubMessage = {
-			cartId,
-			originId: this.sseOriginId,
-			type,
-			payload
-		}
-		void this.redis.publish(CART_SSE_REDIS_CHANNEL, JSON.stringify(message)).catch(
-			error => {
-				this.logger.warn('Cart SSE Redis publish failed', {
-					cartId,
-					error: error instanceof Error ? error.message : String(error),
-					type
-				})
-			}
-		)
+		void this.persistAndBroadcastCartEvent(cartId, type, payload).catch(error => {
+			const eventId = this.buildCartSseEventId(cartId, type, payload)
+			this.logger.warn('Cart SSE Redis stream write failed', {
+				cartId,
+				error: error instanceof Error ? error.message : String(error),
+				type
+			})
+			this.broadcastCartLocal(cartId, type, payload, eventId)
+		})
 	}
 
-	private broadcastCartLocal(cartId: string, type: string, payload: SsePayload) {
+	private broadcastCartLocal(
+		cartId: string,
+		type: string,
+		payload: SsePayload,
+		eventId?: string
+	) {
 		const streams = this.sseStreams.get(cartId)
 		if (!streams?.size) return
 
 		for (const stream of streams) {
-			stream.next({ type, data: payload })
+			stream.next({
+				...(eventId ? { id: eventId } : {}),
+				type,
+				data: payload
+			})
 		}
 	}
 
 	private broadcastCartStatusChanged(cart: CartEntity) {
 		const payload = this.mapCart(cart)
 		this.broadcastCart(cart.id, 'cart.status_changed', payload)
+	}
+
+	private async persistAndBroadcastCartEvent(
+		cartId: string,
+		type: string,
+		payload: SsePayload
+	) {
+		const eventId = await this.appendCartSseStreamEvent(cartId, type, payload)
+		this.logger.debug('Cart SSE event persisted', {
+			cartId,
+			eventId,
+			type
+		})
+		this.broadcastCartLocal(cartId, type, payload, eventId)
+
+		const message: CartSsePubSubMessage = {
+			cartId,
+			eventId,
+			originId: this.sseOriginId,
+			type,
+			payload
+		}
+		await this.redis.publish(CART_SSE_REDIS_CHANNEL, JSON.stringify(message))
+	}
+
+	private async appendCartSseStreamEvent(
+		cartId: string,
+		type: string,
+		payload: SsePayload
+	) {
+		const streamKey = this.buildCartSseStreamKey(cartId)
+		const eventId = await this.redis.xadd(
+			streamKey,
+			'MAXLEN',
+			'~',
+			String(CART_SSE_STREAM_MAXLEN),
+			'*',
+			'type',
+			type,
+			'payload',
+			JSON.stringify(payload),
+			'originId',
+			this.sseOriginId
+		)
+
+		await this.redis.expire(streamKey, CART_SSE_STREAM_TTL_SEC)
+		return eventId ?? this.buildCartSseEventId(cartId, type, payload)
+	}
+
+	private async replayCartSseEvents(
+		cartId: string,
+		lastEventId: string | null | undefined,
+		stream: Subject<MessageEvent>
+	) {
+		const replayStartId = this.normalizeRedisStreamLastEventId(lastEventId)
+		if (!replayStartId) {
+			return
+		}
+
+		const entries = await this.redis.xrange(
+			this.buildCartSseStreamKey(cartId),
+			`(${replayStartId}`,
+			'+',
+			'COUNT',
+			String(CART_SSE_STREAM_MAXLEN)
+		)
+
+		if (entries.length > 0) {
+			this.logger.debug('Cart SSE replaying missed events', {
+				cartId,
+				count: entries.length,
+				lastEventId: replayStartId
+			})
+		}
+
+		for (const [eventId, rawFields] of entries) {
+			const event = this.parseCartSseStreamEntry(eventId, rawFields)
+			if (!event) {
+				continue
+			}
+
+			stream.next({
+				id: event.eventId,
+				type: event.type,
+				data: event.payload
+			})
+		}
+	}
+
+	private parseCartSseStreamEntry(
+		eventId: string,
+		rawFields: string[]
+	): CartSseStoredEvent | null {
+		const fields: Record<string, string> = {}
+		for (let index = 0; index < rawFields.length - 1; index += 2) {
+			fields[rawFields[index]] = rawFields[index + 1]
+		}
+
+		const type = fields.type
+		const rawPayload = fields.payload
+		if (!type || !rawPayload) {
+			return null
+		}
+
+		try {
+			return {
+				eventId,
+				type,
+				payload: JSON.parse(rawPayload) as SsePayload
+			}
+		} catch {
+			return {
+				eventId,
+				type,
+				payload: rawPayload
+			}
+		}
+	}
+
+	private normalizeRedisStreamLastEventId(value?: string | null): string | null {
+		const normalized = value?.trim()
+		if (!normalized) {
+			return null
+		}
+
+		return /^\d+-\d+$/.test(normalized) ? normalized : null
+	}
+
+	private buildCartSseStreamKey(cartId: string) {
+		return `${CART_SSE_STREAM_PREFIX}:${cartId}`
 	}
 
 	private setupRedisSseSubscriber() {
@@ -707,7 +899,12 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 				return
 			}
 
-			this.broadcastCartLocal(message.cartId, message.type, message.payload)
+			this.broadcastCartLocal(
+				message.cartId,
+				message.type,
+				message.payload,
+				message.eventId
+			)
 		})
 
 		subscriber.on('error', error => {
@@ -740,6 +937,8 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 
 			return {
 				cartId: parsed.cartId,
+				eventId:
+					typeof parsed.eventId === 'string' ? parsed.eventId : undefined,
 				originId: parsed.originId,
 				type: parsed.type,
 				payload: parsed.payload as SsePayload
@@ -751,6 +950,39 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 
 	private mapCart(cart: CartEntity) {
 		return mapCartEntity(cart, media => this.mediaUrl.mapMedia(media))
+	}
+
+	private buildCartSseEventId(
+		cartId: string,
+		type: string,
+		payload?: SsePayload
+	) {
+		const version =
+			typeof payload === 'object' && payload !== null
+				? this.resolveCartPayloadVersion(payload)
+				: new Date().toISOString()
+
+		return `${cartId}:${type}:${version}`
+	}
+
+	private resolveCartPayloadVersion(payload: Record<string, unknown>) {
+		const updatedAt = payload.updatedAt
+		const statusChangedAt = payload.statusChangedAt
+
+		if (typeof updatedAt === 'string' && updatedAt) {
+			return updatedAt
+		}
+		if (updatedAt instanceof Date) {
+			return updatedAt.toISOString()
+		}
+		if (typeof statusChangedAt === 'string' && statusChangedAt) {
+			return statusChangedAt
+		}
+		if (statusChangedAt instanceof Date) {
+			return statusChangedAt.toISOString()
+		}
+
+		return new Date().toISOString()
 	}
 
 	private mapCompletedOrder(order: CompletedOrderEntity) {

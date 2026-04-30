@@ -86,7 +86,10 @@ describe('CartService', () => {
 	}
 	let redis: {
 		duplicate: jest.Mock
+		expire: jest.Mock
 		publish: jest.Mock
+		xadd: jest.Mock
+		xrange: jest.Mock
 	}
 
 	beforeEach(async () => {
@@ -124,7 +127,10 @@ describe('CartService', () => {
 				removeAllListeners: jest.fn().mockReturnThis(),
 				subscribe: jest.fn().mockResolvedValue(1)
 			})),
-			publish: jest.fn().mockResolvedValue(1)
+			expire: jest.fn().mockResolvedValue(1),
+			publish: jest.fn().mockResolvedValue(1),
+			xadd: jest.fn().mockResolvedValue('1700000000000-0'),
+			xrange: jest.fn().mockResolvedValue([])
 		}
 
 		const module: TestingModule = await Test.createTestingModule({
@@ -381,5 +387,92 @@ describe('CartService', () => {
 		)
 		expect(result.order.id).toBe('order-1')
 		expect(result.order.status).toBe(OrderStatus.COMPLETED)
+	})
+
+	it('replays missed SSE events before sending a fresh snapshot', async () => {
+		const initialCart = createCartEntity()
+		const replayedCart = createCartEntity({
+			updatedAt: new Date('2026-03-25T09:01:00.000Z'),
+			items: [
+				{
+					id: 'cart-item-1',
+					productId: 'product-1',
+					variantId: null,
+					quantity: 1,
+					createdAt: new Date('2026-03-25T09:01:00.000Z'),
+					updatedAt: new Date('2026-03-25T09:01:00.000Z'),
+					product: {
+						id: 'product-1',
+						name: 'Product 1',
+						slug: 'product-1',
+						price: 1999
+					}
+				}
+			]
+		})
+		const freshSnapshot = createCartEntity({
+			updatedAt: new Date('2026-03-25T09:02:00.000Z'),
+			items: [
+				{
+					id: 'cart-item-1',
+					productId: 'product-1',
+					variantId: null,
+					quantity: 2,
+					createdAt: new Date('2026-03-25T09:01:00.000Z'),
+					updatedAt: new Date('2026-03-25T09:02:00.000Z'),
+					product: {
+						id: 'product-1',
+						name: 'Product 1',
+						slug: 'product-1',
+						price: 1999
+					}
+				}
+			]
+		})
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(initialCart)
+			.mockResolvedValueOnce(freshSnapshot)
+		redis.xrange.mockResolvedValueOnce([
+			[
+				'1700000000000-0',
+				['type', 'cart.updated', 'payload', JSON.stringify(service['mapCart'](replayedCart))]
+			]
+		])
+
+		const stream = await service.connectPublicSse(
+			'public-1',
+			'checkout-1',
+			'1699999999999-0'
+		)
+
+		const events = await new Promise<MessageEvent[]>(resolve => {
+			const received: MessageEvent[] = []
+			const subscription = stream.subscribe(event => {
+				received.push(event)
+				if (event.type === 'cart.snapshot') {
+					subscription.unsubscribe()
+					resolve(received)
+				}
+			})
+		})
+
+		expect(redis.xrange).toHaveBeenCalledWith(
+			'cart:sse:stream:cart-1',
+			'(1699999999999-0',
+			'+',
+			'COUNT',
+			expect.any(String)
+		)
+		expect(events.map(event => event.type)).toEqual([
+			'connected',
+			'cart.updated',
+			'cart.snapshot'
+		])
+		expect(events[1]).toMatchObject({
+			id: '1700000000000-0',
+			type: 'cart.updated'
+		})
+		expect((events[2].data as { items: Array<{ quantity: number }> }).items[0].quantity).toBe(2)
 	})
 })

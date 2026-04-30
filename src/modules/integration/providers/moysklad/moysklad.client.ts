@@ -134,6 +134,21 @@ export class MoySkladClient {
 		return item
 	}
 
+	async getAssortmentItemByExternalCode(
+		externalCode: string
+	): Promise<MoySkladProduct> {
+		const response = await this.request<MoySkladListResponse<MoySkladProduct>>(
+			`/entity/assortment?limit=1&filter=${encodeURIComponent(`externalCode=${externalCode}`)}&expand=${buildEntityExpand()}`
+		)
+		const item = response.rows?.[0]
+		if (!item) {
+			throw new Error(
+				`РџРѕР·РёС†РёСЏ Р°СЃСЃРѕСЂС‚РёРјРµРЅС‚Р° MoySklad СЃ РІРЅРµС€РЅРёРј РєРѕРґРѕРј ${externalCode} РЅРµ РЅР°Р№РґРµРЅР°`
+			)
+		}
+		return item
+	}
+
 	async getEntity(
 		entityType: Exclude<MoySkladEntityType, 'variant'>,
 		entityId: string

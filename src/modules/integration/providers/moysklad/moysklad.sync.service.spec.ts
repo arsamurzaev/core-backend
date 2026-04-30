@@ -18,6 +18,12 @@ describe('MoySkladSyncService', () => {
 	let s3: jest.Mocked<S3Service>
 	let mediaRepo: jest.Mocked<MediaRepository>
 	let metadataCrypto: jest.Mocked<MoySkladMetadataCryptoService>
+	const testProductFolder = {
+		id: 'folder-1',
+		meta: {
+			href: 'https://api.moysklad.ru/api/remap/1.2/entity/productfolder/folder-1'
+		}
+	}
 
 	beforeEach(async () => {
 		const module: TestingModule = await Test.createTestingModule({
@@ -99,6 +105,9 @@ describe('MoySkladSyncService', () => {
 			added: 0,
 			removed: 0
 		})
+		jest
+			.spyOn(MoySkladClient.prototype, 'getProductFolderChain')
+			.mockResolvedValue([])
 	})
 
 	afterEach(() => {
@@ -121,12 +130,14 @@ describe('MoySkladSyncService', () => {
 		}
 		const product = {
 			id: 'external-1',
+			externalCode: 'external-key-1',
 			meta: { type: 'product' },
 			name: 'Product 1',
 			code: 'MSK-1',
 			updated: '2026-03-23 14:00:00',
 			archived: false,
 			stock: 5,
+			productFolder: testProductFolder,
 			salePrices: [
 				{
 					value: 12500,
@@ -226,7 +237,7 @@ describe('MoySkladSyncService', () => {
 			expect.objectContaining({
 				integrationId: integration.id,
 				productId: 'local-1',
-				externalId: 'external-1'
+				externalId: 'external-key-1'
 			}),
 			undefined
 		)
@@ -247,38 +258,57 @@ describe('MoySkladSyncService', () => {
 		const assortment = [
 			{
 				id: 'external-product',
+				externalCode: 'external-key-product',
 				meta: { type: 'product' },
 				name: 'Product 1',
 				code: 'MSK-1',
 				updated: '2026-03-23 14:00:00',
 				archived: false,
 				stock: 5,
+				productFolder: testProductFolder,
 				salePrices: [{ value: 12500, priceType: { name: 'Retail' } }],
 				images: { rows: [] }
 			},
 			{
 				id: 'external-service',
+				externalCode: 'external-key-service',
 				meta: { type: 'service' },
 				name: 'Service 1',
 				code: 'MSK-2',
 				updated: '2026-03-23 14:01:00',
 				archived: false,
+				productFolder: testProductFolder,
 				salePrices: [{ value: 5000, priceType: { name: 'Retail' } }],
 				images: { rows: [] }
 			},
 			{
 				id: 'external-bundle',
+				externalCode: 'external-key-bundle',
 				meta: { type: 'bundle' },
 				name: 'Bundle 1',
 				code: 'MSK-3',
 				updated: '2026-03-23 14:02:00',
 				archived: false,
 				stock: 2,
+				productFolder: testProductFolder,
 				salePrices: [{ value: 25900, priceType: { name: 'Retail' } }],
 				images: { rows: [] }
 			},
 			{
+				id: 'external-no-folder',
+				externalCode: 'external-key-no-folder',
+				meta: { type: 'product' },
+				name: 'No Folder',
+				code: 'MSK-5',
+				updated: '2026-03-23 14:02:30',
+				archived: false,
+				stock: 1,
+				salePrices: [{ value: 1000, priceType: { name: 'Retail' } }],
+				images: { rows: [] }
+			},
+			{
 				id: 'external-variant',
+				externalCode: 'external-key-variant',
 				meta: { type: 'variant' },
 				name: 'Variant 1',
 				code: 'MSK-4',
@@ -397,6 +427,7 @@ describe('MoySkladSyncService', () => {
 		}
 		const product = {
 			id: 'external-1',
+			externalCode: 'external-key-1',
 			meta: { type: 'product' },
 			name: 'Product 1',
 			code: 'MSK-1',
@@ -558,12 +589,14 @@ describe('MoySkladSyncService', () => {
 		}
 		const product = {
 			id: 'external-1',
+			externalCode: 'external-key-1',
 			meta: { type: 'product' },
 			name: 'Product 1',
 			code: 'MSK-1',
 			updated: '2026-03-23 14:00:00',
 			archived: false,
 			stock: 5,
+			productFolder: testProductFolder,
 			salePrices: [
 				{
 					value: 12500,
@@ -582,7 +615,7 @@ describe('MoySkladSyncService', () => {
 		repo.findProductLinkByExternalId.mockResolvedValue({
 			id: 'link-1',
 			productId: 'local-1',
-			externalId: 'external-1',
+			externalId: 'external-key-1',
 			externalUpdatedAt: new Date('2026-03-22T10:00:00.000Z')
 		} as any)
 		repo.findProductById.mockResolvedValue({
@@ -608,7 +641,7 @@ describe('MoySkladSyncService', () => {
 		repo.findProductMediaIds.mockResolvedValue([])
 		repo.upsertProductLink.mockResolvedValue({ id: 'link-1' } as any)
 		repo.findProductLinksByIntegration.mockResolvedValue([
-			{ externalId: 'external-1', productId: 'local-1' }
+			{ externalId: 'external-key-1', productId: 'local-1' }
 		] as any)
 		repo.finishMoySkladSync.mockResolvedValue(integration as any)
 
@@ -709,12 +742,14 @@ describe('MoySkladSyncService', () => {
 		}
 		const externalProduct = {
 			id: 'external-1',
+			externalCode: 'external-key-1',
 			meta: { type: 'product' },
 			name: 'Product 1',
 			code: 'MSK-1',
 			updated: '2026-03-23 14:00:00',
 			archived: false,
 			stock: 5,
+			productFolder: testProductFolder,
 			salePrices: [
 				{
 					value: 12500,
@@ -739,14 +774,14 @@ describe('MoySkladSyncService', () => {
 		repo.findProductLinkByExternalId.mockResolvedValue({
 			id: 'link-1',
 			productId: 'local-1',
-			externalId: 'external-1',
+			externalId: 'external-key-1',
 			externalUpdatedAt: new Date('2026-03-22T10:00:00.000Z')
 		} as any)
 		repo.findProductById.mockResolvedValue(localProduct as any)
 		repo.upsertProductLink.mockResolvedValue({ id: 'link-1' } as any)
 		repo.findProductLinksByIntegration.mockResolvedValue([
 			{
-				externalId: 'external-1',
+				externalId: 'external-key-1',
 				productId: 'local-1'
 			}
 		] as any)
@@ -793,12 +828,14 @@ describe('MoySkladSyncService', () => {
 		}
 		const externalProduct = {
 			id: 'external-1',
+			externalCode: 'external-key-1',
 			meta: { type: 'product' },
 			name: 'Updated Product',
 			code: 'MSK-1',
 			updated: '2026-03-23 14:00:00',
 			archived: false,
 			stock: 5,
+			productFolder: testProductFolder,
 			salePrices: [
 				{
 					value: 13000,
@@ -824,13 +861,13 @@ describe('MoySkladSyncService', () => {
 		repo.findProductLinkByProductId.mockResolvedValue({
 			id: 'link-1',
 			productId,
-			externalId: 'external-1',
+			externalId: 'external-key-1',
 			externalUpdatedAt: new Date('2026-03-22T10:00:00.000Z')
 		} as any)
 		repo.findProductLinkByExternalId.mockResolvedValue({
 			id: 'link-1',
 			productId,
-			externalId: 'external-1',
+			externalId: 'external-key-1',
 			externalUpdatedAt: new Date('2026-03-22T10:00:00.000Z')
 		} as any)
 		repo.findProductMediaIds.mockResolvedValue([])
@@ -843,7 +880,7 @@ describe('MoySkladSyncService', () => {
 		} as any)
 
 		jest
-			.spyOn(MoySkladClient.prototype, 'getAssortmentItemById')
+			.spyOn(MoySkladClient.prototype, 'getAssortmentItemByExternalCode')
 			.mockResolvedValue(externalProduct as any)
 		const downloadImageSpy = jest
 			.spyOn(MoySkladClient.prototype, 'downloadImage')
@@ -855,6 +892,9 @@ describe('MoySkladSyncService', () => {
 		const result = await service.syncProduct(catalogId, productId)
 
 		expect(result.ok).toBe(true)
+		expect(
+			MoySkladClient.prototype.getAssortmentItemByExternalCode
+		).toHaveBeenCalledWith('external-key-1')
 		expect(result.updated).toBe(true)
 		expect(result.imagesImported).toBe(1)
 		expect(repo.updateProduct).not.toHaveBeenCalled()

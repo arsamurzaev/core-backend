@@ -4,6 +4,7 @@ import {
 	Controller,
 	Delete,
 	Get,
+	Headers,
 	MessageEvent,
 	NotFoundException,
 	Param,
@@ -18,6 +19,7 @@ import {
 import {
 	ApiBody,
 	ApiCreatedResponse,
+	ApiHeader,
 	ApiOkResponse,
 	ApiOperation,
 	ApiParam,
@@ -199,6 +201,11 @@ export class CartController {
 	@Sse('current/sse')
 	@ApiOperation({ summary: 'SSE stream for the current cart' })
 	@ApiProduces('text/event-stream')
+	@ApiHeader({
+		name: 'Last-Event-ID',
+		required: false,
+		description: 'Last received Redis Stream event id for SSE replay'
+	})
 	@ApiOkResponse({
 		description: 'SSE events: connected, ping, cart.updated, cart.status_changed',
 		content: {
@@ -208,11 +215,12 @@ export class CartController {
 		}
 	})
 	async sseCurrent(
-		@Req() req: Request
+		@Req() req: Request,
+		@Headers('last-event-id') lastEventId?: string
 	): Promise<Observable<MessageEvent>> {
 		const token = this.readTokenFromRequest(req)
 		const catalogId = mustCatalogId()
-		return this.cartService.connectCurrentSse(catalogId, token)
+		return this.cartService.connectCurrentSse(catalogId, token, lastEventId)
 	}
 
 	@SkipCatalog()
@@ -414,6 +422,11 @@ export class CartController {
 		description: 'Public cart key',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
+	@ApiHeader({
+		name: 'Last-Event-ID',
+		required: false,
+		description: 'Last received Redis Stream event id for SSE replay'
+	})
 	@ApiQuery({
 		name: 'checkoutKey',
 		required: true,
@@ -430,9 +443,10 @@ export class CartController {
 	})
 	async ssePublic(
 		@Param('publicKey') publicKey: string,
-		@Query('checkoutKey') checkoutKey?: string
+		@Query('checkoutKey') checkoutKey?: string,
+		@Headers('last-event-id') lastEventId?: string
 	): Promise<Observable<MessageEvent>> {
-		return this.cartService.connectPublicSse(publicKey, checkoutKey)
+		return this.cartService.connectPublicSse(publicKey, checkoutKey, lastEventId)
 	}
 
 	private readTokenFromRequest(req: Request) {

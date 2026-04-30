@@ -21,6 +21,7 @@ import { MediaRepository } from '@/shared/media/media.repository'
 
 import {
 	type CategorySyncRecord,
+	type IntegrationProductLinkRecord,
 	IntegrationRecord,
 	IntegrationRepository,
 	type ProductSyncRecord
@@ -167,6 +168,16 @@ function resolveExternalCode(product: MoySkladProduct): string {
 	)
 }
 
+function resolveExternalProductKey(product: MoySkladProduct): string {
+	return product.externalCode?.trim() || ''
+}
+
+function hasProductFolder(product: MoySkladProduct): boolean {
+	return Boolean(
+		product.productFolder?.id?.trim() || product.productFolder?.meta?.href?.trim()
+	)
+}
+
 function resolvePrice(product: MoySkladProduct, priceTypeName: string): number {
 	const selected =
 		product.salePrices?.find(
@@ -193,6 +204,14 @@ function resolveExternalEntityType(
 
 function isSupportedAssortmentItem(product: MoySkladProduct): boolean {
 	return SUPPORTED_ASSORTMENT_TYPES.has(resolveExternalEntityType(product))
+}
+
+function isSyncableAssortmentItem(product: MoySkladProduct): boolean {
+	return (
+		isSupportedAssortmentItem(product) &&
+		hasProductFolder(product) &&
+		Boolean(resolveExternalProductKey(product))
+	)
 }
 
 function resolveProductStatus(
@@ -270,24 +289,41 @@ export class MoySkladSyncService {
 				`Starting MoySklad catalog sync for catalog ${catalogId}: integration=${integration.id}, updatedFrom=${updatedFrom?.toISOString() ?? 'full-snapshot'}, importImages=${metadata.importImages}, syncStock=${metadata.syncStock}`
 			)
 			const assortment = await client.getAllAssortment(updatedFrom)
-			const products = assortment.filter(isSupportedAssortmentItem)
-			const skipped = assortment.length - products.length
+			const supportedProducts = assortment.filter(isSupportedAssortmentItem)
+			const products = supportedProducts.filter(isSyncableAssortmentItem)
+			const skippedUnsupported = assortment.length - supportedProducts.length
+			const skippedWithoutCategory = supportedProducts.filter(
+				product => !hasProductFolder(product)
+			).length
+			const skippedWithoutExternalCode = supportedProducts.filter(
+				product => hasProductFolder(product) && !resolveExternalProductKey(product)
+			).length
 			this.logger.log(
-				`Fetched ${assortment.length} assortment items from MoySklad for catalog ${catalogId}; syncing ${products.length} supported items`
+				`Fetched ${assortment.length} assortment items from MoySklad for catalog ${catalogId}; syncing ${products.length} supported categorized items`
 			)
-			if (skipped > 0) {
+			if (skippedUnsupported > 0) {
 				this.logger.log(
-					`Skipped ${skipped} unsupported assortment items from MoySklad for catalog ${catalogId}`
+					`Skipped ${skippedUnsupported} unsupported assortment items from MoySklad for catalog ${catalogId}`
+				)
+			}
+			if (skippedWithoutCategory > 0) {
+				this.logger.log(
+					`Skipped ${skippedWithoutCategory} supported MoySklad items without productFolder for catalog ${catalogId}`
+				)
+			}
+			if (skippedWithoutExternalCode > 0) {
+				this.logger.log(
+					`Skipped ${skippedWithoutExternalCode} supported MoySklad items without externalCode for catalog ${catalogId}`
 				)
 			}
 			if (products.length === 0) {
 				if (isIncrementalSync) {
 					this.logger.log(
-						`No supported MoySklad assortment changes found for catalog ${catalogId} since ${updatedFrom?.toISOString()}`
+						`No supported categorized MoySklad assortment changes found for catalog ${catalogId} since ${updatedFrom?.toISOString()}`
 					)
 				} else {
 					this.logger.warn(
-						`MoySklad returned 0 supported assortment items for catalog ${catalogId}. Check token permissions, filters, archived products, and whether the account really has product/service/bundle entries in the selected entity scope.`
+						`MoySklad returned 0 supported categorized assortment items for catalog ${catalogId}. Check token permissions, filters, archived products, product folders, external codes, and whether the account really has product/service/bundle entries in the selected entity scope.`
 					)
 				}
 			}
@@ -328,7 +364,7 @@ export class MoySkladSyncService {
 			// Handle deleted products
 			let deleted = 0
 			if (!isIncrementalSync) {
-				const currentExternalIds = new Set(products.map(p => p.id))
+				const currentExternalIds = new Set(products.map(resolveExternalProductKey))
 				const links = await this.repo.findProductLinksByIntegration(integration.id)
 				for (const link of links) {
 					if (!currentExternalIds.has(link.externalId)) {
@@ -416,7 +452,14 @@ export class MoySkladSyncService {
 				throw new NotFoundException('Товар не связан с MoySklad')
 			}
 
-			const externalProduct = await client.getAssortmentItemById(link.externalId)
+			let externalProduct: MoySkladProduct
+			try {
+				externalProduct = await client.getAssortmentItemByExternalCode(
+					link.externalId
+				)
+			} catch {
+				externalProduct = await client.getAssortmentItemById(link.externalId)
+			}
 			const result = await this.syncExternalProduct({
 				catalogId,
 				integration,
@@ -465,7 +508,18 @@ export class MoySkladSyncService {
 	private async syncExternalProduct(
 		params: SyncExternalProductParams
 	): Promise<SyncExternalProductOutcome> {
-		const externalId = params.product.id
+		const externalId = resolveExternalProductKey(params.product)
+		if (!externalId) {
+			throw new BadGatewayException(
+				'MoySklad product externalCode is required for product sync'
+			)
+		}
+		if (!hasProductFolder(params.product)) {
+			throw new BadGatewayException(
+				'MoySklad product productFolder is required for product sync'
+			)
+		}
+		const legacyExternalId = params.product.id?.trim() || null
 		const externalCode = resolveExternalCode(params.product)
 		const externalUpdatedAt = parseMoySkladDate(params.product.updated)
 		const stock =
@@ -475,17 +529,23 @@ export class MoySkladSyncService {
 				: undefined
 		const name = normalizeProductName(params.product.name || externalCode)
 
-		const link = params.existingLinkExternalId
-			? await this.repo.findProductLinkByExternalId(
-					params.integration.id,
-					params.existingLinkExternalId,
-					params.tx
-				)
-			: await this.repo.findProductLinkByExternalId(
-					params.integration.id,
-					externalId,
-					params.tx
-				)
+		const linkExternalIds = [
+			params.existingLinkExternalId,
+			externalId,
+			legacyExternalId
+		].filter(
+			(item, index, items): item is string =>
+				Boolean(item) && items.indexOf(item) === index
+		)
+		let link: IntegrationProductLinkRecord | null = null
+		for (const linkExternalId of linkExternalIds) {
+			link = await this.repo.findProductLinkByExternalId(
+				params.integration.id,
+				linkExternalId,
+				params.tx
+			)
+			if (link) break
+		}
 		let product = params.existingProduct ?? null
 
 		if (!product && link) {

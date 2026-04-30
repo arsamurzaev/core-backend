@@ -32,4 +32,39 @@ describe('MoySkladClient', () => {
 			})
 		)
 	})
+
+	it('loads assortment item by externalCode', async () => {
+		const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+			ok: true,
+			status: 200,
+			headers: new Headers(),
+			json: jest.fn().mockResolvedValue({
+				rows: [
+					{
+						id: 'internal-1',
+						externalCode: 'external-key-1',
+						name: 'Product 1'
+					}
+				],
+				meta: {}
+			})
+		} as any)
+
+		const client = new MoySkladClient({
+			token: 'token',
+			maxRetries: 0
+		})
+
+		const item = await client.getAssortmentItemByExternalCode('external-key-1')
+
+		expect(item.id).toBe('internal-1')
+		expect(fetchMock).toHaveBeenCalledWith(
+			'https://api.moysklad.ru/api/remap/1.2/entity/assortment?limit=1&filter=externalCode%3Dexternal-key-1&expand=images,salePrices,productFolder',
+			expect.objectContaining({
+				headers: expect.objectContaining({
+					Authorization: 'Bearer token'
+				})
+			})
+		)
+	})
 })

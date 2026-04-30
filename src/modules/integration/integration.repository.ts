@@ -533,7 +533,7 @@ export class IntegrationRepository {
 		})
 	}
 
-	upsertProductLink(
+	async upsertProductLink(
 		params: {
 			integrationId: string
 			productId: string
@@ -546,25 +546,56 @@ export class IntegrationRepository {
 	): Promise<IntegrationProductLinkRecord> {
 		const db = tx || this.prisma
 		const now = new Date()
+		const data = {
+			productId: params.productId,
+			externalCode: params.externalCode ?? null,
+			externalUpdatedAt: params.externalUpdatedAt ?? null,
+			lastSyncedAt: now,
+			rawMeta: params.rawMeta
+		}
 
-		return db.integrationProductLink.upsert({
+		const existingByExternalId = await db.integrationProductLink.findUnique({
 			where: {
 				integrationId_externalId: {
 					integrationId: params.integrationId,
 					externalId: params.externalId
 				}
 			},
-			create: {
+			select: productLinkSelect
+		})
+		if (existingByExternalId) {
+			return db.integrationProductLink.update({
+				where: { id: existingByExternalId.id },
+				data,
+				select: productLinkSelect
+			})
+		}
+
+		const existingByProductId = await db.integrationProductLink.findUnique({
+			where: {
+				integrationId_productId: {
+					integrationId: params.integrationId,
+					productId: params.productId
+				}
+			},
+			select: productLinkSelect
+		})
+		if (existingByProductId) {
+			return db.integrationProductLink.update({
+				where: { id: existingByProductId.id },
+				data: {
+					...data,
+					externalId: params.externalId
+				},
+				select: productLinkSelect
+			})
+		}
+
+		return db.integrationProductLink.create({
+			data: {
 				integrationId: params.integrationId,
 				productId: params.productId,
 				externalId: params.externalId,
-				externalCode: params.externalCode ?? null,
-				externalUpdatedAt: params.externalUpdatedAt ?? null,
-				lastSyncedAt: now,
-				rawMeta: params.rawMeta
-			},
-			update: {
-				productId: params.productId,
 				externalCode: params.externalCode ?? null,
 				externalUpdatedAt: params.externalUpdatedAt ?? null,
 				lastSyncedAt: now,
