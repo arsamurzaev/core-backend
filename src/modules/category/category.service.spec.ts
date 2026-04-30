@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common'
+import { BadRequestException, NotFoundException } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 
 import { CacheService } from '@/shared/cache/cache.service'
@@ -467,6 +467,60 @@ describe('CategoryService', () => {
 			{ id: 'cat-root', position: 1 },
 			{ id: 'cat-shirts', position: 2 }
 		])
+	})
+
+	it('saves final category order in one absolute position update', async () => {
+		repo.findAll
+			.mockResolvedValueOnce([
+				{ id: 'cat-a', parentId: null, position: 0, name: 'A' },
+				{ id: 'cat-b', parentId: null, position: 1, name: 'B' },
+				{ id: 'cat-c', parentId: null, position: 2, name: 'C' }
+			] as any)
+			.mockResolvedValueOnce([
+				{ id: 'cat-b', parentId: null, position: 0, name: 'B' },
+				{ id: 'cat-c', parentId: null, position: 1, name: 'C' },
+				{ id: 'cat-a', parentId: null, position: 2, name: 'A' }
+			] as any)
+
+		const result = await runWithCatalog(() =>
+			service.updatePositions({
+				categories: [
+					{ id: 'cat-b', position: 0 },
+					{ id: 'cat-c', position: 1 },
+					{ id: 'cat-a', position: 2 }
+				]
+			})
+		)
+
+		expect(repo.updatePositions).toHaveBeenCalledWith([
+			{ id: 'cat-b', position: 0 },
+			{ id: 'cat-c', position: 1 },
+			{ id: 'cat-a', position: 2 }
+		])
+		expect(result.map(category => [category.id, category.position])).toEqual([
+			['cat-b', 0],
+			['cat-c', 1],
+			['cat-a', 2]
+		])
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			CATEGORY_LIST_CACHE_VERSION,
+			'catalog-1'
+		)
+	})
+
+	it('rejects unknown category ids when saving final order', async () => {
+		repo.findAll.mockResolvedValue([
+			{ id: 'cat-a', parentId: null, position: 0, name: 'A' }
+		] as any)
+
+		await expect(
+			runWithCatalog(() =>
+				service.updatePositions({
+					categories: [{ id: 'cat-x', position: 0 }]
+				})
+			)
+		).rejects.toBeInstanceOf(BadRequestException)
+		expect(repo.updatePositions).not.toHaveBeenCalled()
 	})
 
 	it('rebuilds global positions after category removal', async () => {

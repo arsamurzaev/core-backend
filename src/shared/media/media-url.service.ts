@@ -86,6 +86,29 @@ function normalizeMediaVariantKind(kind: string): string {
 	return format ? `${normalizedName}-${format}` : normalizedName
 }
 
+function pickPrimaryMediaVariant(
+	variants: MediaVariantDto[]
+): MediaVariantDto | null {
+	return (
+		variants.find(
+			variant => variant.kind === `${MEDIA_VARIANT_NAMES.detail}-webp`
+		) ??
+		variants.find(
+			variant => variant.kind === `${MEDIA_VARIANT_NAMES.detail}-avif`
+		) ??
+		variants.find(variant => variant.kind === MEDIA_VARIANT_NAMES.detail) ??
+		variants.find(
+			variant => variant.kind === `${MEDIA_VARIANT_NAMES.card}-webp`
+		) ??
+		variants.find(
+			variant => variant.kind === `${MEDIA_VARIANT_NAMES.card}-avif`
+		) ??
+		variants.find(variant => variant.kind === MEDIA_VARIANT_NAMES.card) ??
+		variants[0] ??
+		null
+	)
+}
+
 @Injectable()
 export class MediaUrlService {
 	private readonly publicUrl: string | null
@@ -135,6 +158,8 @@ export class MediaUrlService {
 				return variantNames.has(extractNormalizedVariantName(variant.kind))
 			})
 			.map(variant => this.mapVariant(variant))
+		const primaryVariant = pickPrimaryMediaVariant(variants)
+
 		return {
 			id: media.id,
 			originalName: media.originalName,
@@ -144,7 +169,7 @@ export class MediaUrlService {
 			height: media.height ?? null,
 			status: media.status as MediaDto['status'],
 			key: media.key,
-			url: this.resolveUrl(media.storage, media.key),
+			url: primaryVariant?.url ?? this.resolveUrl(media.storage, media.key),
 			variants
 		}
 	}

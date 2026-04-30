@@ -39,6 +39,7 @@ import type { SessionUser } from '@/modules/auth/types/auth-request'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 import { AuthThrottle } from '@/shared/throttler/auth-throttle.decorator'
+import { setPrivateNoStoreHeaders } from '@/shared/http/cache-control'
 
 import { CartService } from './cart.service'
 import {
@@ -96,6 +97,7 @@ export class CartController {
 		@Req() req: Request,
 		@Res({ passthrough: true }) res: Response
 	) {
+		setPrivateNoStoreHeaders(res)
 		const token = this.readTokenFromRequest(req)
 		const catalogId = mustCatalogId()
 		try {
@@ -249,8 +251,10 @@ export class CartController {
 	@ApiOkResponse({ type: CartResponseDto })
 	async getPublicCart(
 		@Param('publicKey') publicKey: string,
-		@Query('checkoutKey') checkoutKey?: string
+		@Query('checkoutKey') checkoutKey: string | undefined,
+		@Res({ passthrough: true }) res: Response
 	) {
+		setPrivateNoStoreHeaders(res)
 		const cart = await this.cartService.getPublicCart(publicKey, checkoutKey)
 		return { ok: true, cart }
 	}

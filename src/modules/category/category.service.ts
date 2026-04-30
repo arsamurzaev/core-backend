@@ -44,6 +44,7 @@ import {
 import { CategoryRepository } from './category.repository'
 import { CreateCategoryDtoReq } from './dto/requests/create-category.dto.req'
 import { UpdateCategoryPositionDtoReq } from './dto/requests/update-category-position.dto.req'
+import { UpdateCategoryPositionsDtoReq } from './dto/requests/update-category-positions.dto.req'
 import { UpdateCategoryDtoReq } from './dto/requests/update-category.dto.req'
 
 type CategoryProductsPage = CategoryProductsPagePayload<unknown>
@@ -341,6 +342,42 @@ export class CategoryService {
 
 	async updatePosition(id: string, dto: UpdateCategoryPositionDtoReq) {
 		return this.update(id, { position: dto.position })
+	}
+
+	async updatePositions(dto: UpdateCategoryPositionsDtoReq) {
+		const catalogId = mustCatalogId()
+		const categories = await this.repo.findAll(catalogId)
+		const categoryById = new Map(categories.map(category => [category.id, category]))
+		const seenIds = new Set<string>()
+
+		for (const category of dto.categories) {
+			if (seenIds.has(category.id)) {
+				throw new BadRequestException('Список категорий содержит дубликаты')
+			}
+			if (!categoryById.has(category.id)) {
+				throw new BadRequestException('Категория не найдена в текущем каталоге')
+			}
+			seenIds.add(category.id)
+		}
+
+		const requestedOrder = [...dto.categories]
+			.sort((left, right) => left.position - right.position)
+			.map(category => category.id)
+		const requestedIds = new Set(requestedOrder)
+		const orderedCategories = this.getOrderedCategories(categories)
+		const missingIds = orderedCategories
+			.map(category => category.id)
+			.filter(id => !requestedIds.has(id))
+
+		const finalIds = [...requestedOrder, ...missingIds]
+		const updates = finalIds.map((id, position) => ({ id, position }))
+		const changed = await this.persistCategoryPositionUpdates(categories, updates)
+
+		if (changed.length) {
+			await this.invalidateCategoryListCache(catalogId)
+		}
+
+		return this.getAll()
 	}
 
 	async remove(id: string) {

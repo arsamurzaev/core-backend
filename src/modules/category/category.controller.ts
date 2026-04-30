@@ -30,6 +30,7 @@ import {
 	PUBLIC_CACHE_CONTROL_SHORT,
 	PUBLIC_CACHE_CONTROL_STANDARD,
 	setPublicCacheHeaders,
+	setPrivateNoStoreHeaders,
 	setUserAwarePublicCacheHeaders
 } from '@/shared/http/cache-control'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
@@ -45,6 +46,7 @@ import type { AuthRequest } from '../auth/types/auth-request'
 import { CategoryService } from './category.service'
 import { CreateCategoryDtoReq } from './dto/requests/create-category.dto.req'
 import { UpdateCategoryPositionDtoReq } from './dto/requests/update-category-position.dto.req'
+import { UpdateCategoryPositionsDtoReq } from './dto/requests/update-category-positions.dto.req'
 import { UpdateCategoryDtoReq } from './dto/requests/update-category.dto.req'
 import {
 	CategoryDto,
@@ -66,7 +68,7 @@ export class CategoryController {
 		isArray: true
 	})
 	async getAll(@Res({ passthrough: true }) res: Response) {
-		setPublicCacheHeaders(res, PUBLIC_CACHE_CONTROL_STANDARD)
+		setPrivateNoStoreHeaders(res)
 		return this.categoryService.getAll()
 	}
 
@@ -85,7 +87,7 @@ export class CategoryController {
 		@Param('id') id: string,
 		@Res({ passthrough: true }) res: Response
 	) {
-		setPublicCacheHeaders(res, PUBLIC_CACHE_CONTROL_STANDARD)
+		setPrivateNoStoreHeaders(res)
 		return this.categoryService.getById(id)
 	}
 
@@ -198,6 +200,26 @@ export class CategoryController {
 	@ApiForbiddenResponse({ description: 'Доступ запрещён' })
 	async create(@Body() dto: CreateCategoryDtoReq) {
 		return this.categoryService.create(dto)
+	}
+
+	@Patch('/positions')
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({
+		summary: 'Сохранить порядок категорий',
+		description:
+			'Принимает итоговый порядок категорий и атомарно пересобирает позиции без цепочки относительных перемещений.'
+	})
+	@ApiOkResponse({
+		description: 'Порядок категорий обновлён',
+		type: CategoryDto,
+		isArray: true
+	})
+	@ApiBadRequestResponse({ description: 'Ошибка валидации' })
+	@ApiForbiddenResponse({ description: 'Доступ запрещён' })
+	async updatePositions(@Body() dto: UpdateCategoryPositionsDtoReq) {
+		return this.categoryService.updatePositions(dto)
 	}
 
 	@Patch('/:id')

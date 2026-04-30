@@ -152,9 +152,7 @@ const CONTACT_FIELD_MAP = [
 const PASSWORD_ALPHABET =
 	'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*'
 const DEFAULT_PASSWORD_LENGTH = 20
-const LOGIN_LETTER_ALPHABET = 'abcdefghijklmnopqrstuvwxyz'
-const LOGIN_ALPHANUMERIC_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
-const DEFAULT_LOGIN_LENGTH = 10
+const USER_LOGIN_MAX_LENGTH = 191
 
 export async function applyCatalogBootstrap(
 	prisma: PrismaClient,
@@ -301,7 +299,7 @@ async function upsertCatalogBootstrapBusiness(
 	let createdUser = false
 
 	if (!userId) {
-		const resolvedLogin = await resolveUniqueUserLogin(tx)
+		const resolvedLogin = await resolveUniqueUserLogin(tx, business)
 		const password = generateStrongPassword()
 		const passwordHash = await hash(password)
 
@@ -947,13 +945,23 @@ async function buildOptionalDomainUpdate(
 }
 
 async function resolveUniqueUserLogin(
-	tx: Prisma.TransactionClient
+	tx: Prisma.TransactionClient,
+	business: LegacyBusinessRow
 ): Promise<string> {
+	const base =
+		normalizeLogin(resolveBusinessLoginSeed(business)) ||
+		`catalog-${business.id.slice(0, 8)}`
+	if (!(await isCatalogLoginTaken(tx, base))) {
+		return base
+	}
+
+	let suffix = 2
 	for (;;) {
-		const candidate = generateRandomLogin(DEFAULT_LOGIN_LENGTH)
+		const candidate = appendLoginSuffix(base, suffix)
 		if (!(await isCatalogLoginTaken(tx, candidate))) {
 			return candidate
 		}
+		suffix += 1
 	}
 }
 
@@ -1009,16 +1017,6 @@ async function isCatalogLoginTaken(
 		select: { id: true }
 	})
 	return Boolean(existing)
-}
-
-function generateRandomLogin(length = DEFAULT_LOGIN_LENGTH): string {
-	const normalizedLength = Math.max(2, length)
-	let result = LOGIN_LETTER_ALPHABET[randomInt(0, LOGIN_LETTER_ALPHABET.length)]
-	for (let index = 1; index < normalizedLength; index += 1) {
-		result +=
-			LOGIN_ALPHANUMERIC_ALPHABET[randomInt(0, LOGIN_ALPHANUMERIC_ALPHABET.length)]
-	}
-	return result
 }
 
 function buildCatalogHostValue(slug: string | null): string {
@@ -1314,9 +1312,22 @@ function normalizeSlug(value: string): string {
 }
 
 function normalizeLogin(value: string): string {
-	const normalized = value.trim().toLowerCase()
-	if (!normalized) return ''
-	return truncateValue(normalized.replace(/\s+/g, '-'), 191)
+	return truncateValue(normalizeSlug(value), USER_LOGIN_MAX_LENGTH)
+}
+
+function resolveBusinessLoginSeed(business: LegacyBusinessRow): string {
+	const domainSlug = normalizeText(business.domain)?.split('.')[0]
+	return (
+		normalizeText(business.host) ??
+		normalizeText(domainSlug) ??
+		normalizeText(business.login) ??
+		business.id
+	)
+}
+
+function appendLoginSuffix(base: string, suffix: number): string {
+	const suffixText = `-${suffix}`
+	return `${truncateValue(base, USER_LOGIN_MAX_LENGTH - suffixText.length)}${suffixText}`
 }
 
 function truncateValue(value: string, maxLength: number): string {
