@@ -976,7 +976,7 @@ describe('ProductService', () => {
 		)
 	})
 
-	it('duplicates product with hidden status and copied relations', async () => {
+	it('duplicates product with source status and copied relations', async () => {
 		repo.existsName.mockResolvedValue(false)
 		repo.existsSlug.mockResolvedValue(false)
 		repo.existsSku.mockResolvedValue(false)
@@ -1037,7 +1037,7 @@ describe('ProductService', () => {
 				id: 'product-2',
 				name: 'Source Product (копия)',
 				slug: 'source-product-copy',
-				status: 'HIDDEN',
+				status: 'ACTIVE',
 				media: [],
 				productAttributes: [],
 				variants: [],
@@ -1070,7 +1070,7 @@ describe('ProductService', () => {
 			ok: true,
 			id: 'product-2',
 			name: 'Source Product (копия)',
-			status: 'HIDDEN'
+			status: 'ACTIVE'
 		})
 
 		expect(variantBuilder.build).toHaveBeenCalledWith(
@@ -1093,7 +1093,7 @@ describe('ProductService', () => {
 		expect(repo.create).toHaveBeenCalledWith(
 			expect.objectContaining({
 				name: 'Source Product (копия)',
-				status: 'HIDDEN',
+				status: 'ACTIVE',
 				position: 7,
 				brand: { connect: { id: 'brand-1' } },
 				media: {

@@ -514,11 +514,7 @@ async function syncBusinessProducts(
 	const brandTargetIdByLegacyId = new Map<string, string>()
 	const categoryTargetIdByLegacyId = new Map<string, string>()
 	const productTargetIdByLegacyId = new Map<string, string>()
-	const productPositionByLegacyId = new Map<string, number>()
-
-	group.products.forEach((product, index) => {
-		productPositionByLegacyId.set(buildLegacyProductId(product), index)
-	})
+	const categoryProductPositionByLinkKey = buildCategoryProductPositionMap(group)
 
 	const allProductIds: string[] = []
 	let createdBrands = 0
@@ -630,7 +626,10 @@ async function syncBusinessProducts(
 		const result = await upsertCategoryProductLink(tx, {
 			categoryId,
 			productId,
-			position: productPositionByLegacyId.get(productLegacyId) ?? 0
+			position:
+				categoryProductPositionByLinkKey.get(
+					buildCategoryProductPositionKey(categoryLegacyId, productLegacyId)
+				) ?? 0
 		})
 
 		if (result.created) createdCategoryLinks += 1
@@ -1119,6 +1118,68 @@ async function upsertCategoryProductLink(
 		data: input
 	})
 	return { created: true }
+}
+
+function buildCategoryProductPositionMap(
+	group: BusinessProductsGroup
+): Map<string, number> {
+	const productOrderByLegacyId = new Map(
+		group.products.map((product, index) => [buildLegacyProductId(product), index])
+	)
+	const linksByCategory = new Map<
+		string,
+		Array<{ productLegacyId: string; productOrder: number }>
+	>()
+
+	for (const link of group.categoryProductLinks) {
+		const categoryLegacyId = buildLegacyCategoryReferenceId(link)
+		if (!categoryLegacyId) continue
+
+		const productLegacyId = buildLegacyProductId({
+			sourceTable: link.sourceTable,
+			legacyProductId: link.legacyProductId
+		})
+		const productOrder = productOrderByLegacyId.get(productLegacyId)
+		if (productOrder === undefined) continue
+
+		const categoryLinks = linksByCategory.get(categoryLegacyId) ?? []
+		categoryLinks.push({ productLegacyId, productOrder })
+		linksByCategory.set(categoryLegacyId, categoryLinks)
+	}
+
+	const positionByLinkKey = new Map<string, number>()
+	for (const [categoryLegacyId, links] of linksByCategory) {
+		const uniqueLinks = new Map<
+			string,
+			{ productLegacyId: string; productOrder: number }
+		>()
+		for (const link of links) {
+			uniqueLinks.set(link.productLegacyId, link)
+		}
+
+		Array.from(uniqueLinks.values())
+			.sort((left, right) => {
+				if (left.productOrder !== right.productOrder) {
+					return left.productOrder - right.productOrder
+				}
+				return left.productLegacyId.localeCompare(right.productLegacyId)
+			})
+			.forEach((link, index) => {
+				positionByLinkKey.set(
+					buildCategoryProductPositionKey(categoryLegacyId, link.productLegacyId),
+					index
+				)
+			})
+	}
+
+	return positionByLinkKey
+}
+
+function buildCategoryProductPositionKey(
+	categoryLegacyId: string,
+	productLegacyId: string
+): string {
+	return `${categoryLegacyId}\u0000${productLegacyId}`
 }
 
 async function loadCatalogContexts(

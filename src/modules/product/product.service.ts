@@ -1,4 +1,4 @@
-import { ProductStatus, SeoEntityType } from '@generated/enums'
+import { SeoEntityType } from '@generated/enums'
 import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
@@ -889,7 +889,7 @@ export class ProductService {
 			sku,
 			price,
 			isPopular: source.isPopular,
-			status: ProductStatus.HIDDEN,
+			status: source.status,
 			position: source.position,
 			catalog: { connect: { id: catalogId } },
 			...(brandId ? { brand: { connect: { id: brandId } } } : {}),

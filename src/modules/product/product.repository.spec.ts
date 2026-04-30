@@ -27,7 +27,7 @@ describe('ProductRepository', () => {
 		])
 
 		expect(prisma.$transaction).toHaveBeenCalledTimes(1)
-		expect(tx.$executeRaw).toHaveBeenCalledTimes(1)
+		expect(tx.$executeRaw).toHaveBeenCalledTimes(2)
 		expect(tx.categoryProduct.createMany).toHaveBeenCalledWith({
 			data: [
 				{ categoryId: 'category-1', productId: 'product-1', position: 0 },
@@ -59,7 +59,7 @@ describe('ProductRepository', () => {
 		])
 
 		expect(prisma.$transaction).toHaveBeenCalledTimes(1)
-		expect(tx.$executeRaw).toHaveBeenCalledTimes(2)
+		expect(tx.$executeRaw).toHaveBeenCalledTimes(3)
 		expect(tx.categoryProduct.deleteMany).toHaveBeenCalledWith({
 			where: {
 				productId: 'product-1',
@@ -68,6 +68,53 @@ describe('ProductRepository', () => {
 		})
 		expect(tx.categoryProduct.createMany).toHaveBeenCalledWith({
 			data: [{ categoryId: 'category-3', productId: 'product-1', position: 0 }]
+		})
+	})
+
+	it('normalizes category product positions before moving product inside category', async () => {
+		const tx = {
+			category: {
+				findFirst: jest.fn().mockResolvedValue({ id: 'category-1' })
+			},
+			product: {
+				findFirst: jest.fn().mockResolvedValue({ id: 'product-1' })
+			},
+			categoryProduct: {
+				findUnique: jest.fn().mockResolvedValue({ position: 2 }),
+				count: jest.fn().mockResolvedValue(3),
+				updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+				update: jest.fn().mockResolvedValue({ count: 1 })
+			},
+			$executeRaw: jest.fn().mockResolvedValue(2)
+		}
+		const prisma = {
+			$transaction: jest.fn(async callback => callback(tx))
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		await repository.upsertCategoryProductPosition(
+			'product-1',
+			'category-1',
+			'catalog-1',
+			1
+		)
+
+		expect(tx.$executeRaw).toHaveBeenCalledTimes(1)
+		expect(tx.categoryProduct.updateMany).toHaveBeenCalledWith({
+			where: {
+				categoryId: 'category-1',
+				position: { gte: 1, lt: 2 }
+			},
+			data: { position: { increment: 1 } }
+		})
+		expect(tx.categoryProduct.update).toHaveBeenCalledWith({
+			where: {
+				categoryId_productId: {
+					categoryId: 'category-1',
+					productId: 'product-1'
+				}
+			},
+			data: { position: 1 }
 		})
 	})
 

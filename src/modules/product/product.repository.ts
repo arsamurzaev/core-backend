@@ -1137,6 +1137,22 @@ export class ProductRepository {
 		categoryIds: string[]
 	) {
 		await this.prisma.$transaction(async tx => {
+			const currentExisting = await tx.categoryProduct.findMany({
+				where: {
+					productId,
+					category: { catalogId, deleteAt: null }
+				},
+				select: {
+					categoryId: true,
+					position: true
+				}
+			})
+			await this.normalizeCategoryProductPositions(tx, [
+				...new Set([
+					...categoryIds,
+					...currentExisting.map(item => item.categoryId)
+				])
+			])
 			const existing = await tx.categoryProduct.findMany({
 				where: {
 					productId,
@@ -1219,6 +1235,7 @@ export class ProductRepository {
 				)
 			}
 
+			await this.normalizeCategoryProductPositions(tx, categoryIds)
 			await this.shiftCategoryProductPositionsRight(tx, categoryIds, 0)
 			await tx.categoryProduct.createMany({
 				data: categoryIds.map(categoryId => ({
@@ -1258,6 +1275,7 @@ export class ProductRepository {
 				throw new BadRequestException('Товар не найден')
 			}
 
+			await this.normalizeCategoryProductPositions(tx, [categoryId])
 			const current = await tx.categoryProduct.findUnique({
 				where: {
 					categoryId_productId: {
@@ -1317,6 +1335,41 @@ export class ProductRepository {
 				data: { position: targetPosition }
 			})
 		})
+	}
+
+	private async normalizeCategoryProductPositions(
+		tx: Prisma.TransactionClient,
+		categoryIds: string[]
+	) {
+		const uniqueCategoryIds = [...new Set(categoryIds)].filter(Boolean)
+		if (!uniqueCategoryIds.length) return
+
+		const values = uniqueCategoryIds.map(
+			categoryId => PrismaSql.sql`(CAST(${categoryId} AS uuid))`
+		)
+
+		await tx.$executeRaw(PrismaSql.sql`
+			UPDATE "category_products" AS category_product
+			SET "position" = ranked."normalized_position"::integer
+			FROM (
+				SELECT
+					category_product."category_id",
+					category_product."product_id",
+					ROW_NUMBER() OVER (
+						PARTITION BY category_product."category_id"
+						ORDER BY category_product."position" ASC, category_product."product_id" ASC
+					) - 1 AS "normalized_position"
+				FROM "category_products" AS category_product
+				INNER JOIN (
+					VALUES ${PrismaSql.join(values)}
+				) AS input("category_id")
+					ON category_product."category_id" = input."category_id"
+			) AS ranked
+			WHERE
+				category_product."category_id" = ranked."category_id"
+				AND category_product."product_id" = ranked."product_id"
+				AND category_product."position" <> ranked."normalized_position"::integer
+		`)
 	}
 
 	private async shiftCategoryProductPositionsRight(
