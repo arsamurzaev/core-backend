@@ -413,7 +413,7 @@ export async function applyLegacyProducts(
 	let skippedProducts = 0
 	let skippedCategoryLinks = 0
 
-	const limit = pLimit(10)
+	const limit = pLimit(8)
 
 	await Promise.all(
 		businesses.map(business =>

@@ -364,7 +364,7 @@ export async function applyLegacyMedia(
 		sourceDriftAllowed: allowSourceDrift
 	})
 
-	const limit = pLimit(15)
+	const limit = pLimit(6)
 	await Promise.all(
 		assets.map((asset, assetIndex) =>
 			limit(async () => {
