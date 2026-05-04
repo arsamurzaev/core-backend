@@ -347,7 +347,9 @@ export class CategoryService {
 	async updatePositions(dto: UpdateCategoryPositionsDtoReq) {
 		const catalogId = mustCatalogId()
 		const categories = await this.repo.findAll(catalogId)
-		const categoryById = new Map(categories.map(category => [category.id, category]))
+		const categoryById = new Map(
+			categories.map(category => [category.id, category])
+		)
 		const seenIds = new Set<string>()
 
 		for (const category of dto.categories) {
@@ -394,11 +396,17 @@ export class CategoryService {
 		return { ok: true }
 	}
 
-	private mapCategory<T extends { imageMedia?: MediaRecord | null }>(
-		category: T
-	) {
+	private mapCategory<
+		T extends {
+			_count?: { categoryProducts?: number }
+			imageMedia?: MediaRecord | null
+		}
+	>(category: T) {
+		const { _count, ...rest } = category
+
 		return {
-			...category,
+			...rest,
+			...(_count ? { productCount: _count.categoryProducts ?? 0 } : {}),
 			imageMedia: category.imageMedia
 				? this.mediaUrl.mapMedia(category.imageMedia)
 				: null

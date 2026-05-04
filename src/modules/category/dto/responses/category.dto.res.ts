@@ -16,6 +16,9 @@ export class CategoryDto {
 	@ApiProperty({ type: Number })
 	position: number
 
+	@ApiProperty({ type: Number })
+	productCount: number
+
 	@ApiProperty({ type: String })
 	name: string
 

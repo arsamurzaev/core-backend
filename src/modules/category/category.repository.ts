@@ -21,6 +21,18 @@ const categorySelect = {
 	catalogId: true,
 	parentId: true,
 	position: true,
+	_count: {
+		select: {
+			categoryProducts: {
+				where: {
+					product: {
+						deleteAt: null,
+						status: ProductStatus.ACTIVE
+					}
+				}
+			}
+		}
+	},
 	name: true,
 	imageMedia: {
 		select: buildMediaSelect()

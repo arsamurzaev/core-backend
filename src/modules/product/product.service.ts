@@ -11,6 +11,7 @@ import slugify from 'slugify'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_TYPE_CACHE_VERSION,
+	CATEGORY_LIST_CACHE_VERSION,
 	CATEGORY_PRODUCTS_CACHE_VERSION,
 	PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
@@ -1063,5 +1064,6 @@ export class ProductService {
 		catalogId: string
 	): Promise<void> {
 		await this.cache.bumpVersion(CATEGORY_PRODUCTS_CACHE_VERSION, catalogId)
+		await this.cache.bumpVersion(CATEGORY_LIST_CACHE_VERSION, catalogId)
 	}
 }
