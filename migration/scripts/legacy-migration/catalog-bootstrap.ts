@@ -86,6 +86,7 @@ type PrewarmReferenceDataResult = {
 type CatalogBootstrapSummary = {
 	processedBusinesses: number
 	skippedAlreadyMigrated: number
+	previouslyMigratedBusinesses: number
 	createdUsers: number
 	reusedUsers: number
 	createdCatalogs: number
@@ -149,9 +150,12 @@ const CONTACT_FIELD_MAP = [
 	{ field: 'map', type: ContactType.MAP }
 ] as const
 
-const PASSWORD_ALPHABET =
-	'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*'
-const DEFAULT_PASSWORD_LENGTH = 20
+const TEMPORARY_CATALOG_PASSWORD_PREFIX = 'catalog'
+const TEMPORARY_CATALOG_PASSWORD_MIN = 10000
+const TEMPORARY_CATALOG_PASSWORD_MAX = 100000
+const TEMPORARY_CATALOG_LOGIN_MIN = 10000
+const TEMPORARY_CATALOG_LOGIN_MAX = 100000
+const TEMPORARY_CATALOG_LOGIN_RANDOM_ATTEMPTS = 20
 const USER_LOGIN_MAX_LENGTH = 191
 
 export async function applyCatalogBootstrap(
@@ -163,17 +167,14 @@ export async function applyCatalogBootstrap(
 	const sortedBusinesses = sortBusinessesForBootstrap(businesses)
 	const credentials: CatalogBootstrapCredential[] = []
 
-	// Resume: skip businesses already fully migrated in a previous run
 	const alreadyMigrated = await loadAlreadyMigratedIds(
 		prisma,
 		options.source,
 		MigrationEntityKind.BUSINESS
 	)
-	const pendingBusinesses = sortedBusinesses.filter(
-		b => !alreadyMigrated.has(b.id)
-	)
+	const businessesToProcess = sortedBusinesses
 
-	const prewarm = await prewarmTypesAndRegions(prisma, pendingBusinesses)
+	const prewarm = await prewarmTypesAndRegions(prisma, businessesToProcess)
 
 	let createdUsers = 0
 	let reusedUsers = 0
@@ -187,7 +188,7 @@ export async function applyCatalogBootstrap(
 	const limit = pLimit(8)
 
 	// First pass: root businesses (no parentId) — must run before children
-	const rootBusinesses = pendingBusinesses.filter(b => !b.parentId)
+	const rootBusinesses = businessesToProcess.filter(b => !b.parentId)
 	await Promise.all(
 		rootBusinesses.map(business =>
 			limit(async () => {
@@ -209,7 +210,7 @@ export async function applyCatalogBootstrap(
 	)
 
 	// Second pass: child businesses — after parents are committed
-	const childBusinesses = pendingBusinesses.filter(b => !!b.parentId)
+	const childBusinesses = businessesToProcess.filter(b => !!b.parentId)
 	await Promise.all(
 		childBusinesses.map(business =>
 			limit(async () => {
@@ -255,12 +256,13 @@ export async function applyCatalogBootstrap(
 
 	return {
 		summary: {
-			processedBusinesses: pendingBusinesses.length,
-			skippedAlreadyMigrated: alreadyMigrated.size,
+			processedBusinesses: businessesToProcess.length,
+			skippedAlreadyMigrated: 0,
+			previouslyMigratedBusinesses: alreadyMigrated.size,
 			createdUsers,
 			reusedUsers,
 			createdCatalogs,
-			reusedCatalogs: pendingBusinesses.length - createdCatalogs,
+			reusedCatalogs: businessesToProcess.length - createdCatalogs,
 			createdTypes,
 			createdActivities,
 			createdRegions,
@@ -297,12 +299,11 @@ async function upsertCatalogBootstrapBusiness(
 	let credential: CatalogBootstrapCredential | null = null
 	let userId = existingUser?.id ?? null
 	let createdUser = false
+	const resolvedLogin = await resolveUniqueUserLogin(tx, business, userId)
+	const password = generateTemporaryCatalogPassword()
+	const passwordHash = await hash(password)
 
 	if (!userId) {
-		const resolvedLogin = await resolveUniqueUserLogin(tx, business)
-		const password = generateStrongPassword()
-		const passwordHash = await hash(password)
-
 		const user = await tx.user.create({
 			data: {
 				name: resolveBusinessDisplayName(business),
@@ -318,16 +319,13 @@ async function upsertCatalogBootstrapBusiness(
 
 		userId = user.id
 		createdUser = true
-		credential = {
-			businessName: resolveBusinessDisplayName(business),
-			host: '',
-			login: resolvedLogin,
-			password
-		}
+	} else {
 		await tx.user.update({
 			where: { id: userId },
 			data: {
 				name: resolveBusinessDisplayName(business),
+				login: resolvedLogin,
+				password: passwordHash,
 				isEmailConfirmed: true,
 				deleteAt: null,
 				regions: {
@@ -335,6 +333,12 @@ async function upsertCatalogBootstrapBusiness(
 				}
 			}
 		})
+	}
+	credential = {
+		businessName: resolveBusinessDisplayName(business),
+		host: '',
+		login: resolvedLogin,
+		password
 	}
 
 	await upsertEntityMap(tx, {
@@ -345,9 +349,7 @@ async function upsertCatalogBootstrapBusiness(
 		targetId: userId,
 		legacyParentId: business.parentId,
 		payload: {
-			login: createdUser
-				? (credential?.login ?? null)
-				: (existingUser?.login ?? null)
+			login: credential.login
 		}
 	})
 
@@ -946,19 +948,31 @@ async function buildOptionalDomainUpdate(
 
 async function resolveUniqueUserLogin(
 	tx: Prisma.TransactionClient,
-	business: LegacyBusinessRow
+	business: LegacyBusinessRow,
+	excludeUserId: string | null = null
 ): Promise<string> {
 	const base =
 		normalizeLogin(resolveBusinessLoginSeed(business)) ||
 		`catalog-${business.id.slice(0, 8)}`
-	if (!(await isCatalogLoginTaken(tx, base))) {
-		return base
+
+	for (
+		let attempt = 0;
+		attempt < TEMPORARY_CATALOG_LOGIN_RANDOM_ATTEMPTS;
+		attempt += 1
+	) {
+		const candidate = appendLoginSuffix(
+			base,
+			randomInt(TEMPORARY_CATALOG_LOGIN_MIN, TEMPORARY_CATALOG_LOGIN_MAX)
+		)
+		if (!(await isCatalogLoginTaken(tx, candidate, excludeUserId))) {
+			return candidate
+		}
 	}
 
-	let suffix = 2
+	let suffix = TEMPORARY_CATALOG_LOGIN_MAX
 	for (;;) {
 		const candidate = appendLoginSuffix(base, suffix)
-		if (!(await isCatalogLoginTaken(tx, candidate))) {
+		if (!(await isCatalogLoginTaken(tx, candidate, excludeUserId))) {
 			return candidate
 		}
 		suffix += 1
@@ -1007,12 +1021,14 @@ async function resolveCatalogDomain(
 
 async function isCatalogLoginTaken(
 	tx: Prisma.TransactionClient,
-	login: string
+	login: string,
+	excludeUserId: string | null = null
 ): Promise<boolean> {
 	const existing = await tx.user.findFirst({
 		where: {
 			login,
-			role: Role.CATALOG
+			role: Role.CATALOG,
+			...(excludeUserId ? { id: { not: excludeUserId } } : {})
 		},
 		select: { id: true }
 	})
@@ -1342,12 +1358,11 @@ function humanizeCode(code: string): string {
 		.join(' ')
 }
 
-function generateStrongPassword(length = DEFAULT_PASSWORD_LENGTH): string {
-	let result = ''
-	for (let index = 0; index < length; index += 1) {
-		result += PASSWORD_ALPHABET[randomInt(0, PASSWORD_ALPHABET.length)]
-	}
-	return result
+function generateTemporaryCatalogPassword(): string {
+	return `${TEMPORARY_CATALOG_PASSWORD_PREFIX}${randomInt(
+		TEMPORARY_CATALOG_PASSWORD_MIN,
+		TEMPORARY_CATALOG_PASSWORD_MAX
+	)}`
 }
 
 function csvEscape(value: string): string {
