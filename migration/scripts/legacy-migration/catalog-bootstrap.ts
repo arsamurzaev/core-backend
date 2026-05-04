@@ -1,6 +1,6 @@
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { hash } from 'argon2'
-import { randomInt, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import pLimit from 'p-limit'
@@ -150,12 +150,7 @@ const CONTACT_FIELD_MAP = [
 	{ field: 'map', type: ContactType.MAP }
 ] as const
 
-const TEMPORARY_CATALOG_PASSWORD_PREFIX = 'catalog'
-const TEMPORARY_CATALOG_PASSWORD_MIN = 10000
-const TEMPORARY_CATALOG_PASSWORD_MAX = 100000
-const TEMPORARY_CATALOG_LOGIN_MIN = 10000
-const TEMPORARY_CATALOG_LOGIN_MAX = 100000
-const TEMPORARY_CATALOG_LOGIN_RANDOM_ATTEMPTS = 20
+const TEMPORARY_CATALOG_PASSWORD = '00000000'
 const USER_LOGIN_MAX_LENGTH = 191
 
 export async function applyCatalogBootstrap(
@@ -954,29 +949,11 @@ async function resolveUniqueUserLogin(
 	const base =
 		normalizeLogin(resolveBusinessLoginSeed(business)) ||
 		`catalog-${business.id.slice(0, 8)}`
-
-	for (
-		let attempt = 0;
-		attempt < TEMPORARY_CATALOG_LOGIN_RANDOM_ATTEMPTS;
-		attempt += 1
-	) {
-		const candidate = appendLoginSuffix(
-			base,
-			randomInt(TEMPORARY_CATALOG_LOGIN_MIN, TEMPORARY_CATALOG_LOGIN_MAX)
-		)
-		if (!(await isCatalogLoginTaken(tx, candidate, excludeUserId))) {
-			return candidate
-		}
+	if (await isCatalogLoginTaken(tx, base, excludeUserId)) {
+		throw new Error(`Catalog login is already taken: ${base}`)
 	}
 
-	let suffix = TEMPORARY_CATALOG_LOGIN_MAX
-	for (;;) {
-		const candidate = appendLoginSuffix(base, suffix)
-		if (!(await isCatalogLoginTaken(tx, candidate, excludeUserId))) {
-			return candidate
-		}
-		suffix += 1
-	}
+	return base
 }
 
 async function resolveUniqueCatalogSlug(
@@ -1341,11 +1318,6 @@ function resolveBusinessLoginSeed(business: LegacyBusinessRow): string {
 	)
 }
 
-function appendLoginSuffix(base: string, suffix: number): string {
-	const suffixText = `-${suffix}`
-	return `${truncateValue(base, USER_LOGIN_MAX_LENGTH - suffixText.length)}${suffixText}`
-}
-
 function truncateValue(value: string, maxLength: number): string {
 	return value.length <= maxLength ? value : value.slice(0, maxLength)
 }
@@ -1359,10 +1331,7 @@ function humanizeCode(code: string): string {
 }
 
 function generateTemporaryCatalogPassword(): string {
-	return `${TEMPORARY_CATALOG_PASSWORD_PREFIX}${randomInt(
-		TEMPORARY_CATALOG_PASSWORD_MIN,
-		TEMPORARY_CATALOG_PASSWORD_MAX
-	)}`
+	return TEMPORARY_CATALOG_PASSWORD
 }
 
 function csvEscape(value: string): string {

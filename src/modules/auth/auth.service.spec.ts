@@ -1,37 +1,50 @@
 import { Role } from '@generated/enums'
 import { UnauthorizedException } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
-import { verify } from 'argon2'
+import { hash, verify } from 'argon2'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { RedisService } from '@/infrastructure/redis/redis.service'
 import { ObservabilityService } from '@/modules/observability/observability.service'
 
 import { AuthService } from './auth.service'
 import { SessionService } from './session/session.service'
 
 jest.mock('argon2', () => ({
+	hash: jest.fn(),
 	verify: jest.fn()
 }))
 
 describe('AuthService', () => {
 	let service: AuthService
 	let prisma: {
-		user: { findFirst: jest.Mock }
+		user: { findFirst: jest.Mock; update: jest.Mock }
 		catalog: { findUnique: jest.Mock }
 	}
 	let sessions: {
 		get: jest.Mock
 		touch: jest.Mock
 		createForUser: jest.Mock
+		destroyAllForUser: jest.Mock
+		destroyAllForUserExcept: jest.Mock
 	}
 	let observability: {
 		recordAuthEvent: jest.Mock
+	}
+	let redis: {
+		exists: jest.Mock
+		ttl: jest.Mock
+		incr: jest.Mock
+		expire: jest.Mock
+		set: jest.Mock
+		del: jest.Mock
 	}
 
 	beforeEach(async () => {
 		prisma = {
 			user: {
-				findFirst: jest.fn()
+				findFirst: jest.fn(),
+				update: jest.fn()
 			},
 			catalog: {
 				findUnique: jest.fn()
@@ -41,11 +54,22 @@ describe('AuthService', () => {
 		sessions = {
 			get: jest.fn(),
 			touch: jest.fn(),
-			createForUser: jest.fn()
+			createForUser: jest.fn(),
+			destroyAllForUser: jest.fn(),
+			destroyAllForUserExcept: jest.fn()
 		}
 
 		observability = {
 			recordAuthEvent: jest.fn()
+		}
+
+		redis = {
+			exists: jest.fn().mockResolvedValue(0),
+			ttl: jest.fn(),
+			incr: jest.fn().mockResolvedValue(1),
+			expire: jest.fn(),
+			set: jest.fn(),
+			del: jest.fn()
 		}
 
 		const module: TestingModule = await Test.createTestingModule({
@@ -62,11 +86,16 @@ describe('AuthService', () => {
 				{
 					provide: ObservabilityService,
 					useValue: observability
+				},
+				{
+					provide: RedisService,
+					useValue: redis
 				}
 			]
 		}).compile()
 
 		service = module.get(AuthService)
+		;(hash as jest.Mock).mockReset()
 		;(verify as jest.Mock).mockReset()
 	})
 
@@ -145,5 +174,51 @@ describe('AuthService', () => {
 			'failure',
 			'access'
 		)
+	})
+
+	it('changes password when current password is valid', async () => {
+		prisma.user.findFirst.mockResolvedValue({
+			id: 'user-1',
+			password: 'current-hash'
+		})
+		;(verify as jest.Mock).mockResolvedValue(true)
+		;(hash as jest.Mock).mockResolvedValue('new-hash')
+
+		await service.changePassword(
+			'user-1',
+			{
+				currentPassword: 'oldPassword',
+				newPassword: 'newPassword'
+			},
+			'sid-1'
+		)
+
+		expect(hash).toHaveBeenCalledWith('newPassword')
+		expect(prisma.user.update).toHaveBeenCalledWith({
+			where: { id: 'user-1' },
+			data: { password: 'new-hash' }
+		})
+		expect(sessions.destroyAllForUserExcept).toHaveBeenCalledWith(
+			'user-1',
+			'sid-1'
+		)
+		expect(sessions.destroyAllForUser).not.toHaveBeenCalled()
+	})
+
+	it('rejects password change when current password is invalid', async () => {
+		prisma.user.findFirst.mockResolvedValue({
+			id: 'user-1',
+			password: 'current-hash'
+		})
+		;(verify as jest.Mock).mockResolvedValue(false)
+
+		await expect(
+			service.changePassword('user-1', {
+				currentPassword: 'wrongPassword',
+				newPassword: 'newPassword'
+			})
+		).rejects.toBeInstanceOf(UnauthorizedException)
+
+		expect(prisma.user.update).not.toHaveBeenCalled()
 	})
 })

@@ -30,6 +30,11 @@ type CreateSessionOptions = {
 	loginsTtlSeconds?: number
 }
 
+export type ActiveSessionEntry = SessionLoginEntry & {
+	expiresAt: number | null
+	ttlSeconds: number | null
+}
+
 @Injectable()
 export class SessionService {
 	private readonly logger = new Logger(SessionService.name)
@@ -195,6 +200,75 @@ export class SessionService {
 		}
 	}
 
+	async listActiveForUser(userId: string): Promise<ActiveSessionEntry[]> {
+		const entries = await this.listForUser(userId)
+		if (entries.length === 0) return []
+
+		try {
+			const primarySid = await this.redis.get(this.primaryKey(userId))
+			const pipeline = this.redis.pipeline()
+
+			for (const entry of entries) {
+				pipeline.get(this.key(entry.sid))
+				pipeline.ttl(this.key(entry.sid))
+			}
+
+			const results = await pipeline.exec()
+			if (!results) return []
+
+			const seen = new Set<string>()
+			const now = Date.now()
+			const activeEntries: ActiveSessionEntry[] = []
+
+			for (let index = 0; index < entries.length; index += 1) {
+				const entry = entries[index]
+				if (!entry?.sid || seen.has(entry.sid)) continue
+
+				const rawResult = results[index * 2]
+				const ttlResult = results[index * 2 + 1]
+				const raw = rawResult?.[1]
+				const ttl = ttlResult?.[1]
+				const data = parseStoredSessionData(
+					typeof raw === 'string' ? raw : null
+				)
+
+				if (!data || data.userId !== userId) continue
+
+				const ttlSeconds =
+					typeof ttl === 'number' && ttl >= 0 ? ttl : null
+
+				seen.add(entry.sid)
+				activeEntries.push({
+					...entry,
+					createdAt: data.createdAt || entry.createdAt,
+					isPrimary: entry.sid === primarySid,
+					client: data.client ?? entry.client,
+					context: data.context ?? entry.context,
+					expiresAt: ttlSeconds === null ? null : now + ttlSeconds * 1000,
+					ttlSeconds
+				})
+			}
+
+			return activeEntries
+		} catch (error) {
+			this.logger.warn('Session listActiveForUser failed', {
+				userId,
+				error: error instanceof Error ? error.message : String(error)
+			})
+			return []
+		}
+	}
+
+	async destroyForUser(userId: string, sid: string): Promise<boolean> {
+		if (!userId || !sid) return false
+
+		const data = await this.get(sid)
+		if (!data || data.userId !== userId) return false
+
+		await this.destroy(sid)
+		return true
+	}
+
 	async destroyAllForUser(userId: string): Promise<void> {
 		const entries = await this.listForUser(userId)
 		const sids = entries.map(e => e.sid)
@@ -211,6 +285,53 @@ export class SessionService {
 			.multi()
 			.del(this.primaryKey(userId))
 			.del(this.loginsKey(userId))
+			.exec()
+	}
+
+	async destroyAllForUserExcept(userId: string, keepSid: string): Promise<void> {
+		const sid = keepSid.trim()
+		if (!sid) {
+			await this.destroyAllForUser(userId)
+			return
+		}
+
+		const keptSession = await this.get(sid)
+		if (!keptSession || keptSession.userId !== userId) {
+			await this.destroyAllForUser(userId)
+			return
+		}
+
+		const entries = await this.listForUser(userId)
+		const keptEntry =
+			entries.find(entry => entry.sid === sid) ??
+			({
+				sid,
+				createdAt: keptSession.createdAt,
+				isPrimary: true,
+				client: keptSession.client,
+				context: keptSession.context
+			} satisfies SessionLoginEntry)
+		keptEntry.isPrimary = true
+
+		const staleSids = entries
+			.map(entry => entry.sid)
+			.filter(entrySid => entrySid && entrySid !== sid)
+
+		if (staleSids.length > 0) {
+			const pipeline = this.redis.pipeline()
+			for (const staleSid of staleSids) {
+				pipeline.del(this.key(staleSid))
+			}
+			await pipeline.exec()
+		}
+
+		await this.redis
+			.multi()
+			.expire(this.key(sid), this.ttlSeconds)
+			.set(this.primaryKey(userId), sid, 'EX', this.ttlSeconds)
+			.del(this.loginsKey(userId))
+			.lpush(this.loginsKey(userId), JSON.stringify(keptEntry))
+			.expire(this.loginsKey(userId), this.loginsTtlSeconds)
 			.exec()
 	}
 }

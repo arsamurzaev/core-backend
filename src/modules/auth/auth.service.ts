@@ -7,12 +7,13 @@ import {
 	Logger,
 	UnauthorizedException
 } from '@nestjs/common'
-import { verify } from 'argon2'
+import { hash, verify } from 'argon2'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { RedisService } from '@/infrastructure/redis/redis.service'
 import { ObservabilityService } from '@/modules/observability/observability.service'
 
+import { ChangePasswordDtoReq } from './dto/requests/change-password.dto.req'
 import { LoginDtoReq } from './dto/requests/login.dto.req'
 import { SessionService } from './session/session.service'
 
@@ -249,6 +250,38 @@ export class AuthService {
 		)
 		if (!ownerId || ownerId !== userId) {
 			throw new ForbiddenException('Нет прав для этого каталога')
+		}
+	}
+
+	async changePassword(
+		userId: string,
+		dto: ChangePasswordDtoReq,
+		currentSessionId?: string | null
+	): Promise<void> {
+		const user = await this.prisma.user.findFirst({
+			where: { id: userId, deleteAt: null },
+			select: { id: true, password: true }
+		})
+
+		if (!user?.password) {
+			throw new UnauthorizedException('Пользователь не найден')
+		}
+
+		const currentPasswordOk = await verify(user.password, dto.currentPassword)
+		if (!currentPasswordOk) {
+			throw new UnauthorizedException('Неверный текущий пароль')
+		}
+
+		const password = await hash(dto.newPassword)
+		await this.prisma.user.update({
+			where: { id: user.id },
+			data: { password }
+		})
+
+		if (currentSessionId) {
+			await this.sessions.destroyAllForUserExcept(user.id, currentSessionId)
+		} else {
+			await this.sessions.destroyAllForUser(user.id)
 		}
 	}
 

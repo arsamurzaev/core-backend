@@ -33,6 +33,7 @@ import {
 	setSessionCookies
 } from './auth-cookie.utils'
 import { AuthService } from './auth.service'
+import { ChangePasswordDtoReq } from './dto/requests/change-password.dto.req'
 import { LoginDtoReq } from './dto/requests/login.dto.req'
 import { AuthLoginResponseDto } from './dto/responses/auth-login.dto.res'
 import { SessionGuard } from './guards/session.guard'
@@ -94,6 +95,23 @@ export class AuthController {
 	@ApiUnauthorizedResponse({ description: 'Не авторизован' })
 	me(@Req() req: Request) {
 		return { ok: true, user: (req as AuthRequest).user }
+	}
+
+	@UseGuards(SessionGuard)
+	@SkipThrottle()
+	@Post('/change-password')
+	@ApiOperation({ summary: 'Change current user password' })
+	@ApiSecurity('csrf')
+	@ApiOkResponse({ description: 'Пароль изменён', type: OkResponseDto })
+	@ApiUnauthorizedResponse({ description: 'Не авторизован или неверный пароль' })
+	async changePassword(@Body() dto: ChangePasswordDtoReq, @Req() req: Request) {
+		const authReq = req as AuthRequest
+		await this.auth.changePassword(
+			authReq.user!.id,
+			dto,
+			authReq.sessionId ?? null
+		)
+		return { ok: true }
 	}
 
 	@UseGuards(SessionGuard)
