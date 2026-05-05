@@ -1,0 +1,190 @@
+# Production Caddyfile для myctlg.ru.
+#
+# Схема:
+#   Internet :80/:443 -> Caddy
+#   Caddy /api/*      -> backend 127.0.0.1:4000
+#   Caddy /*          -> public frontend 127.0.0.1:3000
+#   Caddy shtab.*     -> admin frontend 127.0.0.1:3001
+#
+# Для myctlg.ru и *.myctlg.ru нужен сертификат, который покрывает оба имени:
+# myctlg.ru и *.myctlg.ru. Если сертификат разделен на cert + chain, сначала
+# собери fullchain:
+#
+#   sudo sh -c 'cat /etc/ssl/certs/myctlg.ru.crt /etc/ssl/certs/myctlg.ru.chain.pem > /etc/ssl/certs/myctlg.ru.fullchain.pem'
+#   sudo chmod 0644 /etc/ssl/certs/myctlg.ru.fullchain.pem
+
+{
+	email admin@myctlg.ru
+
+	on_demand_tls {
+		ask http://127.0.0.1:4000/internal/tls/ask
+	}
+}
+
+(access_log) {
+	log {
+		output file /var/log/caddy/catalog-access.log {
+			roll_size 100MiB
+			roll_keep 10
+			roll_keep_for 720h
+		}
+		format json
+	}
+}
+
+(platform_headers) {
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+	}
+}
+
+(custom_domain_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+	}
+}
+
+(strip_upstream_security_headers) {
+	header_down -Strict-Transport-Security
+	header_down -X-Content-Type-Options
+	header_down -X-Frame-Options
+	header_down -Referrer-Policy
+	header_down -Permissions-Policy
+}
+
+(backend_proxy) {
+	reverse_proxy 127.0.0.1:4000 {
+		header_up Host {host}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP {remote_host}
+
+		import strip_upstream_security_headers
+
+		flush_interval -1
+		stream_close_delay 5m
+
+		transport http {
+			dial_timeout 10s
+			response_header_timeout 120s
+		}
+	}
+}
+
+(public_frontend_proxy) {
+	reverse_proxy 127.0.0.1:3000 {
+		header_up Host {host}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP {remote_host}
+
+		import strip_upstream_security_headers
+
+		transport http {
+			dial_timeout 10s
+			response_header_timeout 180s
+		}
+	}
+}
+
+(admin_frontend_proxy) {
+	reverse_proxy 127.0.0.1:3001 {
+		header_up Host {host}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP {remote_host}
+
+		import strip_upstream_security_headers
+
+		transport http {
+			dial_timeout 10s
+			response_header_timeout 180s
+		}
+	}
+}
+
+(common_site) {
+	encode zstd gzip
+	import access_log
+
+	request_body {
+		max_size 25MB
+	}
+
+	handle /internal/* {
+		respond 404
+	}
+
+	handle /api/internal/* {
+		respond 404
+	}
+}
+
+(api_to_backend) {
+	@api path /api /api/*
+	handle @api {
+		uri strip_prefix /api
+		import backend_proxy
+	}
+}
+
+shtab.myctlg.ru {
+	tls /etc/ssl/certs/myctlg.ru.fullchain.pem /etc/ssl/private/myctlg.ru.key
+	import common_site
+	import platform_headers
+	import api_to_backend
+
+	handle {
+		import admin_frontend_proxy
+	}
+}
+
+api.myctlg.ru {
+	tls /etc/ssl/certs/myctlg.ru.fullchain.pem /etc/ssl/private/myctlg.ru.key
+	import common_site
+	import platform_headers
+
+	handle {
+		import backend_proxy
+	}
+}
+
+myctlg.ru, *.myctlg.ru {
+	tls /etc/ssl/certs/myctlg.ru.fullchain.pem /etc/ssl/private/myctlg.ru.key
+	import common_site
+	import platform_headers
+	import api_to_backend
+
+	handle {
+		import public_frontend_proxy
+	}
+}
+
+# Кастомные домены клиентов.
+# Caddy выпускает сертификат только если backend разрешил домен:
+#   GET http://127.0.0.1:4000/internal/tls/ask?domain=kingsname.ru
+https:// {
+	tls {
+		on_demand
+	}
+
+	import common_site
+	import custom_domain_headers
+	import api_to_backend
+
+	handle {
+		import public_frontend_proxy
+	}
+}
+
+http:// {
+	redir https://{host}{uri} permanent
+}

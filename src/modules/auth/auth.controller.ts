@@ -78,7 +78,7 @@ export class AuthController {
 			res,
 			{ sid, csrf },
 			resolveCookieDomain(resolveServerHost(req)),
-			catalogId ? { catalogId } : null
+			user.role === Role.ADMIN ? { global: true } : null
 		)
 
 		return { ok: true, user, catalogId }
@@ -147,9 +147,7 @@ export class AuthController {
 		clearSessionCookies(
 			res,
 			resolveCookieDomain(resolveServerHost(req)),
-			authReq.session?.context?.catalogId
-				? { catalogId: authReq.session.context.catalogId }
-				: null
+			authReq.user?.role === Role.ADMIN ? { global: true } : null
 		)
 
 		return { ok: true }

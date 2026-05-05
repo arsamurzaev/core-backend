@@ -2,18 +2,36 @@ import type { Request, Response } from 'express'
 
 const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
 const CSRF_COOKIE = process.env.CSRF_COOKIE_NAME ?? 'csrf'
-const CATALOG_SID_COOKIE_PREFIX =
-	process.env.CATALOG_SESSION_COOKIE_PREFIX ?? 'catalog_sid'
-const CATALOG_CSRF_COOKIE_PREFIX =
-	process.env.CATALOG_CSRF_COOKIE_PREFIX ?? 'catalog_csrf'
+const ADMIN_SID_COOKIE = process.env.ADMIN_SESSION_COOKIE_NAME ?? 'admin_sid'
+const ADMIN_CSRF_COOKIE = process.env.ADMIN_CSRF_COOKIE_NAME ?? 'admin_csrf'
+const LEGACY_CATALOG_SID_COOKIE_PREFIX = 'catalog_sid'
+const LEGACY_CATALOG_CSRF_COOKIE_PREFIX = 'catalog_csrf'
 const SAME_SITE = (process.env.COOKIE_SAMESITE ?? 'lax') as 'strict' | 'lax'
 const isProd = process.env.NODE_ENV === 'production'
 const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7
 
-const BASE_DOMAINS = (process.env.CATALOG_BASE_DOMAINS ?? 'myctlg.ru')
+function parseCsv(value: string | undefined, fallback: string[]): string[] {
+	return (value ?? fallback.join(','))
+		.split(',')
+		.map(s => s.trim().toLowerCase())
+		.filter(Boolean)
+}
+
+const BASE_DOMAINS = (
+	process.env.CATALOG_BASE_DOMAINS ?? 'myctlg.ru,myctlg-update.ru'
+)
 	.split(',')
 	.map(s => s.trim().toLowerCase())
 	.filter(Boolean)
+const PLATFORM_COOKIE_SUBDOMAINS = new Set(
+	parseCsv(process.env.PLATFORM_COOKIE_SUBDOMAINS, [
+		'www',
+		'api',
+		'admin',
+		'app',
+		'shtab'
+	])
+)
 
 export function resolveServerHost(req: { headers: { host?: string } }): string {
 	return (req.headers.host ?? '').split(':')[0] ?? ''
@@ -24,12 +42,18 @@ export function resolveCookieDomain(host: string): string | undefined {
 	const h = host.toLowerCase().split(':')[0] ?? ''
 	if (isLocalCookieHost(h)) return undefined
 	for (const base of BASE_DOMAINS) {
-		if (h === base || h.endsWith('.' + base)) return '.' + base
+		if (h === base) return '.' + base
+		if (isPlatformCookieSubdomain(h, base)) return '.' + base
 	}
-	// кастомный домен — берём eTLD+1
-	const parts = h.split('.')
-	if (parts.length >= 2) return '.' + parts.slice(-2).join('.')
+	// Каталожные поддомены и кастомные домены должны получать host-only cookies.
 	return undefined
+}
+
+function isPlatformCookieSubdomain(host: string, base: string): boolean {
+	if (!host.endsWith('.' + base)) return false
+	const left = host.slice(0, -(base.length + 1))
+	if (!left || left.includes('.')) return false
+	return PLATFORM_COOKIE_SUBDOMAINS.has(left)
 }
 
 function isLocalCookieHost(host: string): boolean {
@@ -42,6 +66,7 @@ function isLocalCookieHost(host: string): boolean {
 
 export type SessionCookieScope = {
 	catalogId?: string | null
+	global?: boolean
 }
 
 export type SessionCookieNames = {
@@ -59,15 +84,10 @@ export type ResolvedSessionCookies = {
 export function getSessionCookieNames(
 	scope?: SessionCookieScope | null
 ): SessionCookieNames {
-	const catalogId = normalizeCookieSegment(scope?.catalogId)
-	if (!catalogId) {
-		return { sid: SID_COOKIE, csrf: CSRF_COOKIE }
+	if (scope?.global) {
+		return { sid: ADMIN_SID_COOKIE, csrf: ADMIN_CSRF_COOKIE }
 	}
-
-	return {
-		sid: `${CATALOG_SID_COOKIE_PREFIX}_${catalogId}`,
-		csrf: `${CATALOG_CSRF_COOKIE_PREFIX}_${catalogId}`
-	}
+	return { sid: SID_COOKIE, csrf: CSRF_COOKIE }
 }
 
 export function getSessionCookie(
@@ -81,26 +101,24 @@ export function readSessionCookies(
 	req: Request,
 	scope?: SessionCookieScope | null
 ): ResolvedSessionCookies {
-	const scopedNames = scope?.catalogId ? getSessionCookieNames(scope) : null
-
-	if (scopedNames) {
-		const sid = getCookie(req, scopedNames.sid)
-		if (sid) {
-			return {
-				sid,
-				csrf: getCookie(req, scopedNames.csrf) ?? null,
-				names: scopedNames,
-				scope
-			}
+	const primaryNames = getSessionCookieNames(scope)
+	const primarySid = getCookie(req, primaryNames.sid)
+	if (primarySid) {
+		return {
+			sid: primarySid,
+			csrf: getCookie(req, primaryNames.csrf) ?? null,
+			names: primaryNames,
+			scope: scope?.global ? { global: true } : null
 		}
 	}
 
-	const names = getSessionCookieNames()
+	const fallbackScope = scope?.global ? null : { global: true }
+	const fallbackNames = getSessionCookieNames(fallbackScope)
 	return {
-		sid: getCookie(req, names.sid) ?? null,
-		csrf: getCookie(req, names.csrf) ?? null,
-		names,
-		scope: null
+		sid: getCookie(req, fallbackNames.sid) ?? null,
+		csrf: getCookie(req, fallbackNames.csrf) ?? null,
+		names: fallbackNames,
+		scope: fallbackScope
 	}
 }
 
@@ -111,6 +129,7 @@ export function setSessionCookies(
 	scope?: SessionCookieScope | null
 ): void {
 	const names = getSessionCookieNames(scope)
+	const effectiveDomain = scope?.global ? cookieDomain : undefined
 
 	res.cookie(names.sid, session.sid, {
 		httpOnly: true,
@@ -118,7 +137,7 @@ export function setSessionCookies(
 		secure: isProd,
 		path: '/',
 		maxAge: SESSION_MAX_AGE_MS,
-		...(cookieDomain ? { domain: cookieDomain } : {})
+		...(effectiveDomain ? { domain: effectiveDomain } : {})
 	})
 	res.cookie(names.csrf, session.csrf, {
 		httpOnly: false,
@@ -126,7 +145,7 @@ export function setSessionCookies(
 		secure: isProd,
 		path: '/',
 		maxAge: SESSION_MAX_AGE_MS,
-		...(cookieDomain ? { domain: cookieDomain } : {})
+		...(effectiveDomain ? { domain: effectiveDomain } : {})
 	})
 }
 
@@ -135,20 +154,37 @@ export function clearSessionCookies(
 	cookieDomain?: string,
 	scope?: SessionCookieScope | null
 ): void {
-	const names = getSessionCookieNames(scope)
+	const names = getSessionCookieNames()
+	const scopedNames = scope?.global ? getSessionCookieNames(scope) : names
+	const effectiveDomain = scope?.global ? cookieDomain : undefined
 
-	res.clearCookie(names.sid, {
+	res.clearCookie(scopedNames.sid, {
 		path: '/',
 		sameSite: SAME_SITE,
 		secure: isProd,
-		...(cookieDomain ? { domain: cookieDomain } : {})
+		...(effectiveDomain ? { domain: effectiveDomain } : {})
 	})
-	res.clearCookie(names.csrf, {
+	res.clearCookie(scopedNames.csrf, {
 		path: '/',
 		sameSite: SAME_SITE,
 		secure: isProd,
-		...(cookieDomain ? { domain: cookieDomain } : {})
+		...(effectiveDomain ? { domain: effectiveDomain } : {})
 	})
+
+	const legacyCatalogId = normalizeCookieSegment(scope?.catalogId)
+	if (!legacyCatalogId) return
+
+	for (const legacyName of [
+		`${LEGACY_CATALOG_SID_COOKIE_PREFIX}_${legacyCatalogId}`,
+		`${LEGACY_CATALOG_CSRF_COOKIE_PREFIX}_${legacyCatalogId}`
+	]) {
+		res.clearCookie(legacyName, {
+			path: '/',
+			sameSite: SAME_SITE,
+			secure: isProd,
+			...(cookieDomain ? { domain: cookieDomain } : {})
+		})
+	}
 }
 
 function getCookie(req: Request, name: string): string | undefined {

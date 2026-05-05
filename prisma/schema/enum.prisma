@@ -54,6 +54,14 @@ enum CatalogStatus {
   PROMOTION
 }
 
+enum CatalogDomainStatus {
+  PENDING_DNS
+  DNS_VERIFIED
+  ACTIVE
+  FAILED
+  DISABLED
+}
+
 enum PaymentMethod {
   CASH
   TRANSFER

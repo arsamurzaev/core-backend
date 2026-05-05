@@ -56,7 +56,7 @@ function parseCsvEnv(name: string, fallback: string[]): string[] {
 		.filter(Boolean)
 }
 
-const DEFAULT_BASE_DOMAINS = ['myctlg.ru']
+const DEFAULT_BASE_DOMAINS = ['myctlg.ru', 'myctlg-update.ru']
 const DEFAULT_RESERVED_SUBDOMAINS = [
 	'www',
 	'api',

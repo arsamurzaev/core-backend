@@ -47,8 +47,7 @@ import {
 } from './config/env'
 
 const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
-const CATALOG_SID_COOKIE_PREFIX =
-	process.env.CATALOG_SESSION_COOKIE_PREFIX ?? 'catalog_sid'
+const ADMIN_SID_COOKIE = process.env.ADMIN_SESSION_COOKIE_NAME ?? 'admin_sid'
 type TrackerRequest = Record<string, unknown>
 
 function readTrackerHeader(
@@ -74,19 +73,11 @@ function stringifyTrackerHeader(req: TrackerRequest, name: string): string {
 }
 
 function readAnySessionCookie(cookieHeader: string | string[] | undefined) {
-	const sid = readCookieValue(cookieHeader, SID_COOKIE)
-	if (sid) return sid
-
-	const header = Array.isArray(cookieHeader)
-		? cookieHeader.join(';')
-		: (cookieHeader ?? '')
-	for (const part of header.split(';')) {
-		const [key, ...rest] = part.trim().split('=')
-		if (!key.startsWith(`${CATALOG_SID_COOKIE_PREFIX}_`)) continue
-		return decodeURIComponent(rest.join('='))
-	}
-
-	return null
+	return (
+		readCookieValue(cookieHeader, SID_COOKIE) ??
+		readCookieValue(cookieHeader, ADMIN_SID_COOKIE) ??
+		null
+	)
 }
 
 function readTrackerIp(req: TrackerRequest): string {

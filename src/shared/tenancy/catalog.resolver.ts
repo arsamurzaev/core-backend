@@ -1,4 +1,5 @@
-﻿import { Injectable } from '@nestjs/common'
+import { CatalogDomainStatus } from '@generated/enums'
+import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
@@ -12,6 +13,15 @@ export type ResolvedCatalog = {
 }
 
 type CacheEntry = { value: ResolvedCatalog | null; expiresAt: number }
+
+function normalizeDomainHost(raw: string): string {
+	let host = raw.split(',')[0]?.trim().toLowerCase() ?? ''
+	host = host.replace(/^https?:\/\//, '')
+	host = host.split('/')[0] ?? host
+	host = host.split(':')[0] ?? host
+	if (host.startsWith('www.')) host = host.slice(4)
+	return host
+}
 
 @Injectable()
 export class CatalogResolver {
@@ -64,15 +74,44 @@ export class CatalogResolver {
 	}
 
 	async resolveByDomain(domain: string): Promise<ResolvedCatalog | null> {
-		const key = `domain:${domain}`
+		const normalizedDomain = normalizeDomainHost(domain)
+		if (!normalizedDomain) return null
+
+		const key = `domain:${normalizedDomain}`
 		const cached = this.getCached(key)
 		if (cached !== undefined) return cached
 
-		// Лучше если domain в Prisma: domain String? @unique
-		const catalog = await this.prisma.catalog.findFirst({
-			where: { domain, deleteAt: null },
-			select: { id: true, slug: true, typeId: true, userId: true, parentId: true }
+		const catalogDomain = await this.prisma.catalogDomain.findFirst({
+			where: {
+				hostname: normalizedDomain,
+				status: CatalogDomainStatus.ACTIVE,
+				catalog: { deleteAt: null }
+			},
+			select: {
+				catalog: {
+					select: {
+						id: true,
+						slug: true,
+						typeId: true,
+						userId: true,
+						parentId: true
+					}
+				}
+			}
 		})
+
+		const catalog =
+			catalogDomain?.catalog ??
+			(await this.prisma.catalog.findFirst({
+				where: { domain: normalizedDomain, deleteAt: null },
+				select: {
+					id: true,
+					slug: true,
+					typeId: true,
+					userId: true,
+					parentId: true
+				}
+			}))
 
 		const value = catalog
 			? {

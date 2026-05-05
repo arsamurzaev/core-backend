@@ -84,9 +84,7 @@ export class OptionalSessionGuard implements CanActivate {
 			const cookieDomain = resolveCookieDomain(resolveServerHost(req))
 			if (res?.cookie) {
 				const responseCookieScope =
-					user.role === Role.CATALOG && session.context?.catalogId
-						? { catalogId: session.context.catalogId }
-						: sessionCookies.scope
+					user.role === Role.ADMIN ? { global: true } : null
 				setSessionCookies(
 					res,
 					{ sid, csrf: session.csrf },

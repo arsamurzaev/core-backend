@@ -124,7 +124,7 @@ export class HandoffController {
 			res,
 			{ sid, csrf },
 			resolveCookieDomain(RequestContext.get()?.host ?? ''),
-			payload.role === Role.ADMIN ? null : { catalogId: store.catalogId }
+			payload.role === Role.ADMIN ? { global: true } : null
 		)
 
 		return res.redirect(302, resolveHandoffNext(next ?? payload.next))

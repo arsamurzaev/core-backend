@@ -115,12 +115,10 @@ export class SessionGuard implements CanActivate {
 				// no-op: do not block request if refresh fails
 			}
 
+			const responseCookieScope =
+				user.role === Role.ADMIN ? { global: true } : null
 			const cookieDomain = resolveCookieDomain(resolveServerHost(req))
 			if (res?.cookie) {
-				const responseCookieScope =
-					user.role === Role.CATALOG && session.context?.catalogId
-						? { catalogId: session.context.catalogId }
-						: sessionCookies.scope
 				setSessionCookies(
 					res,
 					{ sid, csrf: session.csrf },

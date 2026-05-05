@@ -12,20 +12,15 @@ import { readCookieValue } from '@/shared/http/cookie.utils'
 import { buildRateLimitMessage } from '@/shared/http/error-message.utils'
 
 const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
-const CATALOG_SID_COOKIE_PREFIX =
-	process.env.CATALOG_SESSION_COOKIE_PREFIX ?? 'catalog_sid'
+const ADMIN_SID_COOKIE = process.env.ADMIN_SESSION_COOKIE_NAME ?? 'admin_sid'
 
 function hasAnySessionCookie(
 	cookieHeader: Request['headers']['cookie']
 ): boolean {
-	if (readCookieValue(cookieHeader, SID_COOKIE)) return true
-
-	const header = Array.isArray(cookieHeader)
-		? cookieHeader.join(';')
-		: (cookieHeader ?? '')
-	return header
-		.split(';')
-		.some(part => part.trim().startsWith(`${CATALOG_SID_COOKIE_PREFIX}_`))
+	return Boolean(
+		readCookieValue(cookieHeader, SID_COOKIE) ||
+			readCookieValue(cookieHeader, ADMIN_SID_COOKIE)
+	)
 }
 
 @Injectable()

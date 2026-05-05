@@ -66,6 +66,7 @@ model Catalog {
   order        Order[]
   cart         Cart[]
   media        Media[]
+  domains      CatalogDomain[]
 
   subscriptionEndsAt DateTime? @map("subscription_ends_at") // Дата окончания подписки
 
@@ -79,6 +80,31 @@ model Catalog {
 }
 
 // Здесь основные ключи отображения
+model CatalogDomain {
+  id String @id @default(uuid()) @db.Uuid
+
+  catalog   Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  catalogId String  @map("catalog_id") @db.Uuid
+
+  hostname String              @unique @db.VarChar(253)
+  status   CatalogDomainStatus @default(PENDING_DNS)
+
+  isPrimary         Boolean @default(false) @map("is_primary")
+  redirectToPrimary Boolean @default(true) @map("redirect_to_primary")
+  includeWww        Boolean @default(false) @map("include_www")
+
+  verificationToken String    @map("verification_token") @db.VarChar(128)
+  lastCheckedAt     DateTime? @map("last_checked_at")
+  lastError         String?   @map("last_error")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([catalogId])
+  @@index([status])
+  @@map("catalog_domains")
+}
+
 model CatalogConfig {
   id String @id @default(uuid()) @db.Uuid
 

@@ -90,7 +90,7 @@ export class CatalogAuthController {
 			res,
 			{ sid, csrf },
 			resolveCookieDomain(resolveServerHost(req)),
-			user.role === Role.ADMIN ? null : { catalogId }
+			user.role === Role.ADMIN ? { global: true } : null
 		)
 
 		return { ok: true, user, catalogId }
