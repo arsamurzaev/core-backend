@@ -1,5 +1,5 @@
 import { Prisma } from '@generated/client'
-import { SeoEntityType } from '@generated/enums'
+import { Metric, SeoEntityType } from '@generated/enums'
 import { CatalogCreateInput, CatalogUpdateInput } from '@generated/models'
 import { Injectable } from '@nestjs/common'
 
@@ -144,6 +144,18 @@ const catalogSelect: Prisma.CatalogSelect = {
 			googleVerification: true,
 			yandexVerification: true
 		}
+	},
+	metrics: {
+		where: {
+			provider: Metric.YANDEX,
+			deleteAt: null
+		},
+		select: {
+			provider: true,
+			scope: true,
+			counterId: true
+		},
+		orderBy: [{ scope: 'asc' as const }, { createdAt: 'asc' as const }]
 	}
 }
 

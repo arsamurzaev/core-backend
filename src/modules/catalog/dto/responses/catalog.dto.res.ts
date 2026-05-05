@@ -1,4 +1,10 @@
-import { CatalogExperienceMode, CatalogStatus, ContactType } from '@generated/enums'
+import {
+	CatalogExperienceMode,
+	CatalogStatus,
+	ContactType,
+	Metric,
+	MetricScope
+} from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
 import { AttributeDto } from '@/modules/attribute/dto/responses/attribute.dto.res'
@@ -44,6 +50,17 @@ export class CatalogSettingsDto {
 
 	@ApiProperty({ type: String, nullable: true })
 	yandexVerification: string | null
+}
+
+export class CatalogMetricDto {
+	@ApiProperty({ enum: Metric })
+	provider: Metric
+
+	@ApiProperty({ enum: MetricScope })
+	scope: MetricScope
+
+	@ApiProperty({ type: String })
+	counterId: string
 }
 
 export class CatalogTypeDto {
@@ -113,6 +130,9 @@ export class CatalogDto {
 
 	@ApiProperty({ type: CatalogSettingsDto, nullable: true })
 	settings: CatalogSettingsDto | null
+
+	@ApiProperty({ type: [CatalogMetricDto] })
+	metrics: CatalogMetricDto[]
 }
 
 export class CatalogCurrentDto extends CatalogDto {
