@@ -31,6 +31,16 @@ Nginx в production вперед не ставим. Он нужен только
 sudo cp deploy/caddy/Caddyfile /etc/caddy/Caddyfile
 ```
 
+Создать директорию для access-log. Без этого Caddy может упасть на старте с
+ошибкой `opening log writer`:
+
+```bash
+sudo install -d -o caddy -g caddy -m 0755 /var/log/caddy
+sudo touch /var/log/caddy/catalog-access.log
+sudo chown caddy:caddy /var/log/caddy/catalog-access.log
+sudo chmod 0644 /var/log/caddy/catalog-access.log
+```
+
 Создать env для Caddy. Для тестового домена:
 
 ```bash

@@ -63,8 +63,6 @@
 (backend_proxy) {
 	reverse_proxy 127.0.0.1:4000 {
 		header_up Host {host}
-		header_up X-Forwarded-Host {host}
-		header_up X-Forwarded-Proto {scheme}
 		header_up X-Real-IP {remote_host}
 
 		import strip_upstream_security_headers
@@ -82,8 +80,6 @@
 (public_frontend_proxy) {
 	reverse_proxy 127.0.0.1:3000 {
 		header_up Host {host}
-		header_up X-Forwarded-Host {host}
-		header_up X-Forwarded-Proto {scheme}
 		header_up X-Real-IP {remote_host}
 
 		import strip_upstream_security_headers
@@ -98,8 +94,6 @@
 (admin_frontend_proxy) {
 	reverse_proxy 127.0.0.1:3001 {
 		header_up Host {host}
-		header_up X-Forwarded-Host {host}
-		header_up X-Forwarded-Proto {scheme}
 		header_up X-Real-IP {remote_host}
 
 		import strip_upstream_security_headers
