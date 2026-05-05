@@ -18,7 +18,7 @@ Internet
   -> Caddy :80/:443
       -> /api/*  -> backend 127.0.0.1:4000
       -> остальное -> public frontend 127.0.0.1:3000
-      -> shtab.myctlg.ru -> admin frontend 127.0.0.1:3001
+      -> shtab.<platform-domain> -> admin frontend 127.0.0.1:3001
 ```
 
 Nginx в production вперед не ставим. Он нужен только как rollback.
@@ -31,12 +31,50 @@ Nginx в production вперед не ставим. Он нужен только
 sudo cp deploy/caddy/Caddyfile /etc/caddy/Caddyfile
 ```
 
-Сертификат платформы должен покрывать оба имени: `myctlg.ru` и `*.myctlg.ru`.
+Создать env для Caddy. Для тестового домена:
+
+```bash
+sudo install -d -m 0755 /etc/caddy
+sudo cp deploy/caddy/catalog.env.example /etc/caddy/catalog.env
+sudo nano /etc/caddy/catalog.env
+sudo chmod 0644 /etc/caddy/catalog.env
+```
+
+Минимальное содержимое `/etc/caddy/catalog.env`:
+
+```env
+CATALOG_PLATFORM_DOMAIN=myctlg-update.ru
+CADDY_ACME_EMAIL=admin@myctlg-update.ru
+CADDY_PLATFORM_CERT_FULLCHAIN=/etc/ssl/certs/myctlg-update.ru.fullchain.pem
+CADDY_PLATFORM_CERT_KEY=/etc/ssl/private/myctlg-update.ru.key
+```
+
+Подключить env к systemd-сервису Caddy:
+
+```bash
+sudo systemctl edit caddy
+```
+
+Вставить:
+
+```ini
+[Service]
+EnvironmentFile=/etc/caddy/catalog.env
+```
+
+Применить:
+
+```bash
+sudo systemctl daemon-reload
+```
+
+Сертификат платформы должен покрывать оба имени: `myctlg-update.ru` и
+`*.myctlg-update.ru`.
 Если он разделен на `crt` и `chain.pem`, собрать `fullchain`:
 
 ```bash
-sudo sh -c 'cat /etc/ssl/certs/myctlg.ru.crt /etc/ssl/certs/myctlg.ru.chain.pem > /etc/ssl/certs/myctlg.ru.fullchain.pem'
-sudo chmod 0644 /etc/ssl/certs/myctlg.ru.fullchain.pem
+sudo sh -c 'cat /etc/ssl/certs/myctlg-update.ru.crt /etc/ssl/certs/myctlg-update.ru.chain.pem > /etc/ssl/certs/myctlg-update.ru.fullchain.pem'
+sudo chmod 0644 /etc/ssl/certs/myctlg-update.ru.fullchain.pem
 ```
 
 Включить Caddy как публичный вход:
@@ -80,14 +118,14 @@ www.kingsname.ru  CNAME  kingsname.ru
 Если DNS-провайдер поддерживает `ALIAS`, `ANAME` или CNAME flattening:
 
 ```text
-kingsname.ru      ALIAS  customers.myctlg.ru
-www.kingsname.ru  CNAME  customers.myctlg.ru
+kingsname.ru      ALIAS  customers.myctlg-update.ru
+www.kingsname.ru  CNAME  customers.myctlg-update.ru
 ```
 
 Для поддомена клиента:
 
 ```text
-shop.kingsname.ru CNAME  customers.myctlg.ru
+shop.kingsname.ru CNAME  customers.myctlg-update.ru
 ```
 
 ## Важные Env
@@ -95,9 +133,9 @@ shop.kingsname.ru CNAME  customers.myctlg.ru
 Backend:
 
 ```env
-CATALOG_BASE_DOMAINS=myctlg.ru
+CATALOG_BASE_DOMAINS=myctlg-update.ru
 CATALOG_CUSTOM_DOMAIN_IPS=SERVER_IP
-CATALOG_CUSTOM_DOMAIN_TARGETS=customers.myctlg.ru
+CATALOG_CUSTOM_DOMAIN_TARGETS=customers.myctlg-update.ru
 CATALOG_DOMAIN_REQUIRE_TXT=true
 CATALOG_DOMAIN_RECHECK_AFTER_SECONDS=300
 CATALOG_TLS_ASK_ALLOWED_HOSTS=127.0.0.1,localhost,::1,[::1]
@@ -122,14 +160,15 @@ API_BASE_URL=http://127.0.0.1:4000
 Для production оставляем такую модель:
 
 ```text
-global admin на myctlg.ru/shtab.myctlg.ru -> admin_sid/admin_csrf, Domain=.myctlg.ru
-catalog owner на domain.myctlg.ru         -> sid/csrf, host-only без Domain
-custom domains                            -> sid/csrf, host-only без Domain
+global admin на myctlg-update.ru/shtab.myctlg-update.ru -> admin_sid/admin_csrf, Domain=.myctlg-update.ru
+catalog owner на domain.myctlg-update.ru                -> sid/csrf, host-only без Domain
+custom domains                                           -> sid/csrf, host-only без Domain
 ```
 
-Так мы избегаем конфликта двух cookie с одинаковым именем на `domain.myctlg.ru`.
-Глобальная админка может работать через `.myctlg.ru`, а владелец каталога и
-кастомный домен остаются изолированы текущим host.
+Так мы избегаем конфликта двух cookie с одинаковым именем на
+`domain.myctlg-update.ru`. Глобальная админка может работать через
+`.myctlg-update.ru`, а владелец каталога и кастомный домен остаются
+изолированы текущим host.
 
 ## Проверки
 
@@ -154,8 +193,8 @@ HTTP/1.1 204 No Content
 Публичный API:
 
 ```bash
-curl -I https://myctlg.ru/api/catalog/current
-curl -I https://shtab.myctlg.ru/api/catalog/current
+curl -I https://myctlg-update.ru/api/catalog/current
+curl -I https://shtab.myctlg-update.ru/api/catalog/current
 ```
 
 Кастомный домен с принудительным DNS на IP сервера:
@@ -183,11 +222,39 @@ sudo systemctl restart nginx
 В rollback-режиме автоматических кастомных доменов нет. Работает платформа:
 
 ```text
-myctlg.ru
-*.myctlg.ru
-api.myctlg.ru
-shtab.myctlg.ru
+myctlg-update.ru
+*.myctlg-update.ru
+api.myctlg-update.ru
+shtab.myctlg-update.ru
 ```
 
 Для каждого кастомного домена в Nginx придется вручную выпускать сертификат и
 добавлять отдельный `server` block. Поэтому основной путь для нас — Caddy.
+
+## Переключение На Боевой Домен
+
+Когда переходишь с `myctlg-update.ru` на `myctlg.ru`, меняются только env и DNS:
+
+```env
+CATALOG_PLATFORM_DOMAIN=myctlg.ru
+CADDY_ACME_EMAIL=admin@myctlg.ru
+CADDY_PLATFORM_CERT_FULLCHAIN=/etc/ssl/certs/myctlg.ru.fullchain.pem
+CADDY_PLATFORM_CERT_KEY=/etc/ssl/private/myctlg.ru.key
+```
+
+В backend env:
+
+```env
+CATALOG_BASE_DOMAINS=myctlg.ru
+CATALOG_CUSTOM_DOMAIN_TARGETS=customers.myctlg.ru
+HTTP_CORS=https://myctlg.ru,https://*.myctlg.ru,https://shtab.myctlg.ru,https://api.myctlg.ru
+```
+
+После изменения:
+
+```bash
+sudo systemctl daemon-reload
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl restart caddy
+sudo systemctl restart catalog-backend
+```

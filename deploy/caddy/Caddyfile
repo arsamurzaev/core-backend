@@ -1,4 +1,4 @@
-# Production Caddyfile для myctlg.ru.
+# Production Caddyfile для платформенного домена.
 #
 # Схема:
 #   Internet :80/:443 -> Caddy
@@ -6,15 +6,15 @@
 #   Caddy /*          -> public frontend 127.0.0.1:3000
 #   Caddy shtab.*     -> admin frontend 127.0.0.1:3001
 #
-# Для myctlg.ru и *.myctlg.ru нужен сертификат, который покрывает оба имени:
-# myctlg.ru и *.myctlg.ru. Если сертификат разделен на cert + chain, сначала
-# собери fullchain:
+# Домен и пути к сертификату задаются через systemd EnvironmentFile:
 #
-#   sudo sh -c 'cat /etc/ssl/certs/myctlg.ru.crt /etc/ssl/certs/myctlg.ru.chain.pem > /etc/ssl/certs/myctlg.ru.fullchain.pem'
-#   sudo chmod 0644 /etc/ssl/certs/myctlg.ru.fullchain.pem
+#   CATALOG_PLATFORM_DOMAIN=myctlg-update.ru
+#   CADDY_ACME_EMAIL=admin@myctlg-update.ru
+#   CADDY_PLATFORM_CERT_FULLCHAIN=/etc/ssl/certs/myctlg-update.ru.fullchain.pem
+#   CADDY_PLATFORM_CERT_KEY=/etc/ssl/private/myctlg-update.ru.key
 
 {
-	email admin@myctlg.ru
+	email {$CADDY_ACME_EMAIL:admin@myctlg-update.ru}
 
 	on_demand_tls {
 		ask http://127.0.0.1:4000/internal/tls/ask
@@ -136,8 +136,8 @@
 	}
 }
 
-shtab.myctlg.ru {
-	tls /etc/ssl/certs/myctlg.ru.fullchain.pem /etc/ssl/private/myctlg.ru.key
+shtab.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
+	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/ssl/certs/myctlg-update.ru.fullchain.pem} {$CADDY_PLATFORM_CERT_KEY:/etc/ssl/private/myctlg-update.ru.key}
 	import common_site
 	import platform_headers
 	import api_to_backend
@@ -147,8 +147,8 @@ shtab.myctlg.ru {
 	}
 }
 
-api.myctlg.ru {
-	tls /etc/ssl/certs/myctlg.ru.fullchain.pem /etc/ssl/private/myctlg.ru.key
+api.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
+	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/ssl/certs/myctlg-update.ru.fullchain.pem} {$CADDY_PLATFORM_CERT_KEY:/etc/ssl/private/myctlg-update.ru.key}
 	import common_site
 	import platform_headers
 
@@ -157,8 +157,8 @@ api.myctlg.ru {
 	}
 }
 
-myctlg.ru, *.myctlg.ru {
-	tls /etc/ssl/certs/myctlg.ru.fullchain.pem /etc/ssl/private/myctlg.ru.key
+{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru}, *.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
+	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/ssl/certs/myctlg-update.ru.fullchain.pem} {$CADDY_PLATFORM_CERT_KEY:/etc/ssl/private/myctlg-update.ru.key}
 	import common_site
 	import platform_headers
 	import api_to_backend

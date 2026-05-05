@@ -40,7 +40,7 @@ Nginx в этой схеме не является публичным TLS-вхо
 
 ```bash
 export SERVER_IP="203.0.113.10"
-export PLATFORM_DOMAIN="myctlg.ru"
+export PLATFORM_DOMAIN="myctlg-update.ru"
 export BACKEND_PORT="4000"
 export PUBLIC_FRONTEND_PORT="3000"
 export ADMIN_FRONTEND_PORT="3001"
@@ -280,14 +280,14 @@ sudo nano /etc/catalog/backend.env
 NODE_ENV=production
 
 HTTP_PORT=4000
-HTTP_HOST=https://api.myctlg.ru
-HTTP_CORS=https://myctlg.ru,https://*.myctlg.ru,https://shtab.myctlg.ru,https://api.myctlg.ru
+HTTP_HOST=https://api.myctlg-update.ru
+HTTP_CORS=https://myctlg-update.ru,https://*.myctlg-update.ru,https://shtab.myctlg-update.ru,https://api.myctlg-update.ru
 
-CATALOG_BASE_DOMAINS=myctlg.ru
-CATALOG_RESERVED_SUBDOMAINS=www,api,admin,app,static,cdn,assets,shtab
+CATALOG_BASE_DOMAINS=myctlg-update.ru
+CATALOG_RESERVED_SUBDOMAINS=www,api,admin,app,static,cdn,assets,shtab,customers
 
 CATALOG_CUSTOM_DOMAIN_IPS=203.0.113.10
-CATALOG_CUSTOM_DOMAIN_TARGETS=customers.myctlg.ru
+CATALOG_CUSTOM_DOMAIN_TARGETS=customers.myctlg-update.ru
 
 CATALOG_DOMAIN_REQUIRE_TXT=true
 CATALOG_DOMAIN_CHECK_ENABLED=true
@@ -513,11 +513,39 @@ sudo systemctl disable nginx
 sudo nano /etc/caddy/Caddyfile
 ```
 
+Перед этим создать env для Caddy:
+
+```bash
+sudo nano /etc/caddy/catalog.env
+```
+
+```env
+CATALOG_PLATFORM_DOMAIN=myctlg-update.ru
+CADDY_ACME_EMAIL=admin@myctlg-update.ru
+CADDY_PLATFORM_CERT_FULLCHAIN=/etc/ssl/certs/myctlg-update.ru.fullchain.pem
+CADDY_PLATFORM_CERT_KEY=/etc/ssl/private/myctlg-update.ru.key
+```
+
+И подключить его к systemd:
+
+```bash
+sudo systemctl edit caddy
+```
+
+```ini
+[Service]
+EnvironmentFile=/etc/caddy/catalog.env
+```
+
+```bash
+sudo systemctl daemon-reload
+```
+
 Пример:
 
 ```caddyfile
 {
-	email admin@myctlg.ru
+	email {$CADDY_ACME_EMAIL:admin@myctlg-update.ru}
 
 	on_demand_tls {
 		ask http://127.0.0.1:4000/internal/tls/ask
@@ -573,14 +601,14 @@ sudo nano /etc/caddy/Caddyfile
 	}
 }
 
-api.myctlg.ru {
+api.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
 	encode gzip
 	import access_log
 
 	import backend_proxy
 }
 
-shtab.myctlg.ru {
+shtab.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
 	encode gzip
 	import access_log
 
@@ -593,7 +621,7 @@ shtab.myctlg.ru {
 	}
 }
 
-myctlg.ru, *.myctlg.ru {
+{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru}, *.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
 	encode gzip
 	import access_log
 
