@@ -8,13 +8,13 @@
 #
 # Домен и пути к сертификату задаются через systemd EnvironmentFile:
 #
-#   CATALOG_PLATFORM_DOMAIN=myctlg-update.ru
-#   CADDY_ACME_EMAIL=admin@myctlg-update.ru
-#   CADDY_PLATFORM_CERT_FULLCHAIN=/etc/caddy/certs/myctlg-update.ru.crt
-#   CADDY_PLATFORM_CERT_KEY=/etc/caddy/certs/myctlg-update.ru.key
+#   CATALOG_PLATFORM_DOMAIN=myctlg.ru
+#   CADDY_ACME_EMAIL=admin@myctlg.ru
+#   CADDY_PLATFORM_CERT_FULLCHAIN=/etc/caddy/certs/myctlg.ru.crt
+#   CADDY_PLATFORM_CERT_KEY=/etc/caddy/certs/myctlg.ru.key
 
 {
-	email {$CADDY_ACME_EMAIL:admin@myctlg-update.ru}
+	email {$CADDY_ACME_EMAIL:admin@myctlg.ru}
 
 	on_demand_tls {
 		ask http://127.0.0.1:4000/internal/tls/ask
@@ -137,8 +137,8 @@
 	}
 }
 
-shtab.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
-	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/caddy/certs/myctlg-update.ru.crt} {$CADDY_PLATFORM_CERT_KEY:/etc/caddy/certs/myctlg-update.ru.key}
+shtab.{$CATALOG_PLATFORM_DOMAIN:myctlg.ru} {
+	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/caddy/certs/myctlg.ru.crt} {$CADDY_PLATFORM_CERT_KEY:/etc/caddy/certs/myctlg.ru.key}
 	import svc_api_to_backend
 	import common_site
 	import platform_headers
@@ -148,8 +148,8 @@ shtab.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
 	}
 }
 
-api.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
-	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/caddy/certs/myctlg-update.ru.crt} {$CADDY_PLATFORM_CERT_KEY:/etc/caddy/certs/myctlg-update.ru.key}
+api.{$CATALOG_PLATFORM_DOMAIN:myctlg.ru} {
+	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/caddy/certs/myctlg.ru.crt} {$CADDY_PLATFORM_CERT_KEY:/etc/caddy/certs/myctlg.ru.key}
 	import svc_api_to_backend
 	import common_site
 	import platform_headers
@@ -159,8 +159,8 @@ api.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
 	}
 }
 
-{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru}, *.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
-	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/caddy/certs/myctlg-update.ru.crt} {$CADDY_PLATFORM_CERT_KEY:/etc/caddy/certs/myctlg-update.ru.key}
+{$CATALOG_PLATFORM_DOMAIN:myctlg.ru}, *.{$CATALOG_PLATFORM_DOMAIN:myctlg.ru} {
+	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/caddy/certs/myctlg.ru.crt} {$CADDY_PLATFORM_CERT_KEY:/etc/caddy/certs/myctlg.ru.key}
 	import svc_api_to_backend
 	import common_site
 	import platform_headers
