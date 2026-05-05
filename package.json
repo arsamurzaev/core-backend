@@ -24,7 +24,8 @@
 		"db:add-clothes-size": "node --loader ts-node/esm prisma/add-clothes-size-attribute.ts",
 		"admin:create": "bun run scripts/create-admin.ts",
 		"legacy:migrate": "tsc -p migration/tsconfig.json && node migration/dist/migration/scripts/migrate-legacy.js",
-		"legacy:migrate:all": "tsc -p migration/tsconfig.json && node migration/dist/migration/scripts/migrate-legacy.js --phase=all --apply"
+		"legacy:migrate:all": "tsc -p migration/tsconfig.json && node migration/dist/migration/scripts/migrate-legacy.js --phase=all --apply",
+		"legacy:backfill-media-maps": "tsc -p migration/tsconfig.json && node migration/dist/migration/scripts/backfill-media-maps.js"
 	},
 	"prisma": {
 		"seed": "node --loader ts-node/esm prisma/seed.ts"
