@@ -127,7 +127,10 @@
 }
 
 (svc_api_to_backend) {
-	@svc_api path /_svc_api /_svc_api/*
+	@svc_api {
+		path /_svc_api /_svc_api/*
+		not path /_svc_api/internal /_svc_api/internal/*
+	}
 	handle @svc_api {
 		uri strip_prefix /_svc_api
 		import backend_proxy
@@ -136,9 +139,9 @@
 
 shtab.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
 	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/caddy/certs/myctlg-update.ru.crt} {$CADDY_PLATFORM_CERT_KEY:/etc/caddy/certs/myctlg-update.ru.key}
+	import svc_api_to_backend
 	import common_site
 	import platform_headers
-	import svc_api_to_backend
 
 	handle {
 		import admin_frontend_proxy
@@ -147,6 +150,7 @@ shtab.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
 
 api.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
 	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/caddy/certs/myctlg-update.ru.crt} {$CADDY_PLATFORM_CERT_KEY:/etc/caddy/certs/myctlg-update.ru.key}
+	import svc_api_to_backend
 	import common_site
 	import platform_headers
 
@@ -157,9 +161,9 @@ api.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
 
 {$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru}, *.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
 	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/caddy/certs/myctlg-update.ru.crt} {$CADDY_PLATFORM_CERT_KEY:/etc/caddy/certs/myctlg-update.ru.key}
+	import svc_api_to_backend
 	import common_site
 	import platform_headers
-	import svc_api_to_backend
 
 	handle {
 		import public_frontend_proxy
@@ -174,9 +178,9 @@ https:// {
 		on_demand
 	}
 
+	import svc_api_to_backend
 	import common_site
 	import custom_domain_headers
-	import svc_api_to_backend
 
 	handle {
 		import public_frontend_proxy

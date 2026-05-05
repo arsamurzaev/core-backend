@@ -178,6 +178,14 @@ API_BASE_URL=http://127.0.0.1:4000
 `POST /api/revalidate-storefront` обрабатывается frontend-ом и не конфликтует с
 Nest backend.
 
+В `Caddyfile` блок `svc_api_to_backend` импортируется в site-блоках раньше
+frontend fallback. Поэтому `/_svc_api/*` должен отрабатывать в Caddy до того,
+как запрос попадет в Next.js.
+
+Во frontend также есть fallback rewrite в `next.config.ts`: если `/_svc_api/*`
+по ошибке дошел до Next.js, он проксируется на `API_BASE_URL` без префикса.
+Основной production-путь всё равно должен отрабатывать в Caddy.
+
 ## Cookies
 
 Для production оставляем такую модель:
