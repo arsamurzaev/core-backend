@@ -5,7 +5,7 @@
 ```text
 deploy/caddy/Caddyfile
   Основной production-конфиг. Caddy слушает 80/443, выпускает сертификаты для
-  кастомных доменов и проксирует /api в backend.
+  кастомных доменов и проксирует /_svc_api в backend.
 
 deploy/nginx/catalog-rollback-public.conf
   Запасной публичный Nginx-конфиг на случай, если Caddy нужно временно выключить.
@@ -16,7 +16,7 @@ deploy/nginx/catalog-rollback-public.conf
 ```text
 Internet
   -> Caddy :80/:443
-      -> /api/*  -> backend 127.0.0.1:4000
+      -> /_svc_api/* -> backend 127.0.0.1:4000
       -> остальное -> public frontend 127.0.0.1:3000
       -> shtab.<platform-domain> -> admin frontend 127.0.0.1:3001
 ```
@@ -45,6 +45,12 @@ sudo chmod 0644 /var/log/caddy/catalog-access.log
 
 ```bash
 sudo install -d -m 0755 /etc/caddy
+sudo install -d -o root -g caddy -m 0750 /etc/caddy/certs
+sudo cp /etc/ssl/certs/myctlg-update.ru.crt /etc/caddy/certs/myctlg-update.ru.crt
+sudo cp /etc/ssl/private/myctlg-update.ru.key /etc/caddy/certs/myctlg-update.ru.key
+sudo chown root:caddy /etc/caddy/certs/myctlg-update.ru.crt /etc/caddy/certs/myctlg-update.ru.key
+sudo chmod 0644 /etc/caddy/certs/myctlg-update.ru.crt
+sudo chmod 0640 /etc/caddy/certs/myctlg-update.ru.key
 sudo cp deploy/caddy/catalog.env.example /etc/caddy/catalog.env
 sudo nano /etc/caddy/catalog.env
 sudo chmod 0644 /etc/caddy/catalog.env
@@ -55,36 +61,38 @@ sudo chmod 0644 /etc/caddy/catalog.env
 ```env
 CATALOG_PLATFORM_DOMAIN=myctlg-update.ru
 CADDY_ACME_EMAIL=admin@myctlg-update.ru
-CADDY_PLATFORM_CERT_FULLCHAIN=/etc/ssl/certs/myctlg-update.ru.fullchain.pem
-CADDY_PLATFORM_CERT_KEY=/etc/ssl/private/myctlg-update.ru.key
+CADDY_PLATFORM_CERT_FULLCHAIN=/etc/caddy/certs/myctlg-update.ru.crt
+CADDY_PLATFORM_CERT_KEY=/etc/caddy/certs/myctlg-update.ru.key
 ```
 
-Подключить env к systemd-сервису Caddy:
+Подключить env к systemd-сервису Caddy. Надежнее создать override-файл
+напрямую, без интерактивного `systemctl edit`:
 
 ```bash
-sudo systemctl edit caddy
-```
-
-Вставить:
-
-```ini
+sudo mkdir -p /etc/systemd/system/caddy.service.d
+sudo tee /etc/systemd/system/caddy.service.d/override.conf > /dev/null <<'EOF'
 [Service]
 EnvironmentFile=/etc/caddy/catalog.env
+EOF
 ```
 
 Применить:
 
 ```bash
 sudo systemctl daemon-reload
+sudo systemctl cat caddy
+sudo systemctl show caddy -p EnvironmentFiles
 ```
 
 Сертификат платформы должен покрывать оба имени: `myctlg-update.ru` и
-`*.myctlg-update.ru`.
-Если он разделен на `crt` и `chain.pem`, собрать `fullchain`:
+`*.myctlg-update.ru`. Если твой `.crt` не содержит chain, собери fullchain и
+скопируй именно его в `/etc/caddy/certs/myctlg-update.ru.crt`:
 
 ```bash
 sudo sh -c 'cat /etc/ssl/certs/myctlg-update.ru.crt /etc/ssl/certs/myctlg-update.ru.chain.pem > /etc/ssl/certs/myctlg-update.ru.fullchain.pem'
 sudo chmod 0644 /etc/ssl/certs/myctlg-update.ru.fullchain.pem
+sudo cp /etc/ssl/certs/myctlg-update.ru.fullchain.pem /etc/caddy/certs/myctlg-update.ru.crt
+sudo chown root:caddy /etc/caddy/certs/myctlg-update.ru.crt
 ```
 
 Включить Caddy как публичный вход:
@@ -158,12 +166,17 @@ ADMIN_CSRF_COOKIE_NAME=admin_csrf
 Frontend:
 
 ```env
-NEXT_PUBLIC_API_BASE_URL=/api
+NEXT_PUBLIC_API_BASE_URL=/_svc_api
 API_BASE_URL=http://127.0.0.1:4000
 ```
 
-Смысл: на кастомном домене browser ходит в `https://kingsname.ru/api/*`, Caddy
-проксирует запрос в backend, а backend видит `Host: kingsname.ru`.
+Смысл: на кастомном домене browser ходит в
+`https://kingsname.ru/_svc_api/*`, Caddy проксирует запрос в backend, а backend
+видит `Host: kingsname.ru`.
+
+`/api/*` теперь остается за Next.js. Например,
+`POST /api/revalidate-storefront` обрабатывается frontend-ом и не конфликтует с
+Nest backend.
 
 ## Cookies
 
@@ -203,14 +216,14 @@ HTTP/1.1 204 No Content
 Публичный API:
 
 ```bash
-curl -I https://myctlg-update.ru/api/catalog/current
-curl -I https://shtab.myctlg-update.ru/api/catalog/current
+curl -I https://myctlg-update.ru/_svc_api/catalog/current
+curl -I https://shtab.myctlg-update.ru/_svc_api/catalog/current
 ```
 
 Кастомный домен с принудительным DNS на IP сервера:
 
 ```bash
-curl -vk --resolve kingsname.ru:443:SERVER_IP https://kingsname.ru/api/catalog/current
+curl -vk --resolve kingsname.ru:443:SERVER_IP https://kingsname.ru/_svc_api/catalog/current
 ```
 
 ## Rollback На Nginx
@@ -248,8 +261,8 @@ shtab.myctlg-update.ru
 ```env
 CATALOG_PLATFORM_DOMAIN=myctlg.ru
 CADDY_ACME_EMAIL=admin@myctlg.ru
-CADDY_PLATFORM_CERT_FULLCHAIN=/etc/ssl/certs/myctlg.ru.fullchain.pem
-CADDY_PLATFORM_CERT_KEY=/etc/ssl/private/myctlg.ru.key
+CADDY_PLATFORM_CERT_FULLCHAIN=/etc/caddy/certs/myctlg.ru.crt
+CADDY_PLATFORM_CERT_KEY=/etc/caddy/certs/myctlg.ru.key
 ```
 
 В backend env:

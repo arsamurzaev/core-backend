@@ -1,4 +1,4 @@
-﻿# Custom Domains, Caddy, Nginx, Ubuntu Runbook
+# Custom Domains, Caddy, Nginx, Ubuntu Runbook
 
 Документ описывает продовую настройку сервера Ubuntu для платформы каталогов с кастомными доменами клиентов.
 
@@ -26,7 +26,7 @@ Caddy
   |-- myctlg.ru            -> public/platform frontend
   |-- *.myctlg.ru          -> public catalog frontend
   |-- kingsname.ru                -> public catalog frontend
-  |-- kingsname.ru/api/*          -> backend, tenant берется из Host
+  |-- kingsname.ru/_svc_api/*          -> backend, tenant берется из Host
 ```
 
 Nginx в этой схеме не является публичным TLS-входом. Для нашего кейса его лучше:
@@ -74,7 +74,7 @@ NEXT_PUBLIC_API_BASE_URL=https://api.myctlg.ru
 
 ```env
 # Browser-запросы frontend: same-origin через Caddy
-NEXT_PUBLIC_API_BASE_URL=/api
+NEXT_PUBLIC_API_BASE_URL=/_svc_api
 
 # Server-side запросы Next.js: напрямую в backend внутри сервера
 API_BASE_URL=http://127.0.0.1:4000
@@ -83,8 +83,8 @@ API_BASE_URL=http://127.0.0.1:4000
 Тогда:
 
 ```text
-https://kingsname.ru/api/catalog/current     -> Caddy -> backend /catalog/current
-https://shtab.myctlg.ru/api/...       -> Caddy -> backend /...
+https://kingsname.ru/_svc_api/catalog/current     -> Caddy -> backend /catalog/current
+https://shtab.myctlg.ru/_svc_api/...       -> Caddy -> backend /...
 https://api.myctlg.ru/...             -> прямой платформенный API для внешних интеграций/Swagger/legacy
 ```
 
@@ -99,7 +99,7 @@ NEXT_PUBLIC_API_BASE_URL=https://api.myctlg.ru
 Но для public storefront build всё равно нужен:
 
 ```env
-NEXT_PUBLIC_API_BASE_URL=/api
+NEXT_PUBLIC_API_BASE_URL=/_svc_api
 ```
 
 ## 2. DNS
@@ -612,7 +612,7 @@ shtab.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
 	encode gzip
 	import access_log
 
-	handle_path /api/* {
+	handle_path /_svc_api/* {
 		import backend_proxy
 	}
 
@@ -625,7 +625,7 @@ shtab.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
 	encode gzip
 	import access_log
 
-	handle_path /api/* {
+	handle_path /_svc_api/* {
 		import backend_proxy
 	}
 
@@ -642,7 +642,7 @@ https:// {
 	encode gzip
 	import access_log
 
-	handle_path /api/* {
+	handle_path /_svc_api/* {
 		import backend_proxy
 	}
 
@@ -656,10 +656,10 @@ https:// {
 
 - `api.myctlg.ru` проксирует напрямую в backend.
 - `shtab.myctlg.ru` проксирует в админку.
-- `myctlg.ru` и `*.myctlg.ru` проксируют публичный frontend, а `/api/*` отправляют в backend без префикса `/api`.
+- `myctlg.ru` и `*.myctlg.ru` проксируют публичный frontend, а `/_svc_api/*` отправляют в backend без префикса `/_svc_api`.
 - `https://` ловит кастомные домены клиентов.
 - `tls on_demand` выпускает сертификат только после разрешения от backend endpoint `/internal/tls/ask`.
-- `handle_path /api/*` автоматически убирает `/api`, поэтому запрос `https://kingsname.ru/api/catalog/current` попадет в backend как `/catalog/current`.
+- `handle_path /_svc_api/*` автоматически убирает `/_svc_api`, поэтому запрос `https://kingsname.ru/_svc_api/catalog/current` попадет в backend как `/catalog/current`.
 
 Проверить и применить:
 
@@ -683,7 +683,7 @@ sudo tail -f /var/log/caddy/catalog-access.log
 
 ```bash
 curl -vk --resolve kingsname.ru:443:203.0.113.10 https://kingsname.ru/
-curl -vk --resolve kingsname.ru:443:203.0.113.10 https://kingsname.ru/api/catalog/current
+curl -vk --resolve kingsname.ru:443:203.0.113.10 https://kingsname.ru/_svc_api/catalog/current
 ```
 
 Если домен еще не `ACTIVE` в БД, TLS handshake должен не пройти или Caddy должен отказать в выпуске сертификата.
@@ -698,7 +698,7 @@ curl -i https://api.myctlg.ru/observability/health
 
 ```bash
 curl -i https://testslug.myctlg.ru/catalog/current
-curl -i https://testslug.myctlg.ru/api/catalog/current
+curl -i https://testslug.myctlg.ru/_svc_api/catalog/current
 ```
 
 ## 12. Как Добавляется Кастомный Домен
@@ -1021,8 +1021,8 @@ HTTP:
 
 ```bash
 curl -I https://kingsname.ru
-curl -I https://kingsname.ru/api/catalog/current
-curl -vk --resolve kingsname.ru:443:203.0.113.10 https://kingsname.ru/api/catalog/current
+curl -I https://kingsname.ru/_svc_api/catalog/current
+curl -vk --resolve kingsname.ru:443:203.0.113.10 https://kingsname.ru/_svc_api/catalog/current
 ```
 
 ## 19. Частые Проблемы
@@ -1074,7 +1074,7 @@ where hostname in ('kingsname.ru', 'www.kingsname.ru');
 Проверить headers:
 
 ```bash
-curl -vk https://kingsname.ru/api/catalog/current
+curl -vk https://kingsname.ru/_svc_api/catalog/current
 ```
 
 Caddy должен передавать:
@@ -1090,7 +1090,7 @@ X-Forwarded-Proto: https
 Для storefront лучше использовать same-origin:
 
 ```text
-https://kingsname.ru/api/*
+https://kingsname.ru/_svc_api/*
 ```
 
 Если frontend ходит на `https://api.myctlg.ru`, то запрос становится cross-origin и зависит от CORS/cookies. Для публичных каталогов это менее удобно.
@@ -1100,10 +1100,10 @@ https://kingsname.ru/api/*
 Проверить:
 
 ```bash
-curl -I https://kingsname.ru/api/catalog/current
+curl -I https://kingsname.ru/_svc_api/catalog/current
 ```
 
-Для кастомного домена лучше same-origin API через `/api`. Тогда cookies будут привязаны к `kingsname.ru`, а не к `api.myctlg.ru`.
+Для кастомного домена лучше same-origin API через `/_svc_api`. Тогда cookies будут привязаны к `kingsname.ru`, а не к `api.myctlg.ru`.
 
 ### SSE Не Работает
 
@@ -1113,7 +1113,7 @@ curl -I https://kingsname.ru/api/catalog/current
 flush_interval -1
 ```
 
-И что запрос идет через `/api/.../sse`, чтобы Caddy отправил его в backend.
+И что запрос идет через `/_svc_api/.../sse`, чтобы Caddy отправил его в backend.
 
 ## 20. Backup
 
@@ -1213,7 +1213,7 @@ sudo ss -ltnp | grep -E ':80|:443'
 [ ] Nginx не занимает 80/443
 [ ] /internal/tls/ask отвечает 204 только для ACTIVE доменов
 [ ] тестовый кастомный домен открывается по HTTPS
-[ ] /api на кастомном домене работает same-origin
+[ ] /_svc_api на кастомном домене работает same-origin
 [ ] Caddy и backend logs проверены
 ```
 
@@ -1257,7 +1257,7 @@ dig +short TXT _myctlg-verify.kingsname.ru
 curl -i 'http://127.0.0.1:4000/internal/tls/ask?domain=kingsname.ru' -H 'Host: 127.0.0.1'
 
 # Test via forced DNS
-curl -vk --resolve kingsname.ru:443:203.0.113.10 https://kingsname.ru/api/catalog/current
+curl -vk --resolve kingsname.ru:443:203.0.113.10 https://kingsname.ru/_svc_api/catalog/current
 ```
 
 ## 24. Источники

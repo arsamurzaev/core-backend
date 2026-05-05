@@ -2,7 +2,7 @@
 #
 # Схема:
 #   Internet :80/:443 -> Caddy
-#   Caddy /api/*      -> backend 127.0.0.1:4000
+#   Caddy /_svc_api/* -> backend 127.0.0.1:4000
 #   Caddy /*          -> public frontend 127.0.0.1:3000
 #   Caddy shtab.*     -> admin frontend 127.0.0.1:3001
 #
@@ -10,8 +10,8 @@
 #
 #   CATALOG_PLATFORM_DOMAIN=myctlg-update.ru
 #   CADDY_ACME_EMAIL=admin@myctlg-update.ru
-#   CADDY_PLATFORM_CERT_FULLCHAIN=/etc/ssl/certs/myctlg-update.ru.fullchain.pem
-#   CADDY_PLATFORM_CERT_KEY=/etc/ssl/private/myctlg-update.ru.key
+#   CADDY_PLATFORM_CERT_FULLCHAIN=/etc/caddy/certs/myctlg-update.ru.crt
+#   CADDY_PLATFORM_CERT_KEY=/etc/caddy/certs/myctlg-update.ru.key
 
 {
 	email {$CADDY_ACME_EMAIL:admin@myctlg-update.ru}
@@ -117,24 +117,28 @@
 		respond 404
 	}
 
+	handle /_svc_api/internal/* {
+		respond 404
+	}
+
 	handle /api/internal/* {
 		respond 404
 	}
 }
 
-(api_to_backend) {
-	@api path /api /api/*
-	handle @api {
-		uri strip_prefix /api
+(svc_api_to_backend) {
+	@svc_api path /_svc_api /_svc_api/*
+	handle @svc_api {
+		uri strip_prefix /_svc_api
 		import backend_proxy
 	}
 }
 
 shtab.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
-	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/ssl/certs/myctlg-update.ru.fullchain.pem} {$CADDY_PLATFORM_CERT_KEY:/etc/ssl/private/myctlg-update.ru.key}
+	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/caddy/certs/myctlg-update.ru.crt} {$CADDY_PLATFORM_CERT_KEY:/etc/caddy/certs/myctlg-update.ru.key}
 	import common_site
 	import platform_headers
-	import api_to_backend
+	import svc_api_to_backend
 
 	handle {
 		import admin_frontend_proxy
@@ -142,7 +146,7 @@ shtab.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
 }
 
 api.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
-	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/ssl/certs/myctlg-update.ru.fullchain.pem} {$CADDY_PLATFORM_CERT_KEY:/etc/ssl/private/myctlg-update.ru.key}
+	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/caddy/certs/myctlg-update.ru.crt} {$CADDY_PLATFORM_CERT_KEY:/etc/caddy/certs/myctlg-update.ru.key}
 	import common_site
 	import platform_headers
 
@@ -152,10 +156,10 @@ api.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
 }
 
 {$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru}, *.{$CATALOG_PLATFORM_DOMAIN:myctlg-update.ru} {
-	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/ssl/certs/myctlg-update.ru.fullchain.pem} {$CADDY_PLATFORM_CERT_KEY:/etc/ssl/private/myctlg-update.ru.key}
+	tls {$CADDY_PLATFORM_CERT_FULLCHAIN:/etc/caddy/certs/myctlg-update.ru.crt} {$CADDY_PLATFORM_CERT_KEY:/etc/caddy/certs/myctlg-update.ru.key}
 	import common_site
 	import platform_headers
-	import api_to_backend
+	import svc_api_to_backend
 
 	handle {
 		import public_frontend_proxy
@@ -172,7 +176,7 @@ https:// {
 
 	import common_site
 	import custom_domain_headers
-	import api_to_backend
+	import svc_api_to_backend
 
 	handle {
 		import public_frontend_proxy
