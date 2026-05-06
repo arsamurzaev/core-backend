@@ -205,16 +205,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 			path,
 			requestId,
 			timestamp: new Date().toISOString(),
-			...(clearPublicCartKeys
-				? { clearCartKeys: ['publicKey', 'checkoutKey'] }
-				: {})
+			...(clearPublicCartKeys ? { clearCartKeys: ['publicKey'] } : {})
 		}
 
 		// корреляция в ответе
 		if (requestId) res.setHeader('x-request-id', requestId)
 		if (clearPublicCartKeys) {
 			res.setHeader('x-cart-clear-public-key', 'true')
-			res.setHeader('x-cart-clear-checkout-key', 'true')
 		}
 
 		res.status(status).json(body)

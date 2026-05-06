@@ -1076,7 +1076,7 @@ export class S3Service implements OnModuleDestroy {
 		}
 
 		// Raw file has been processed — delete it to free space
-		await this.client!
+		await this.client
 			.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: cleanedKey }))
 			.catch(err =>
 				this.logger.warn('Не удалось удалить raw-файл после обработки', {

@@ -26,15 +26,11 @@ describe('GlobalExceptionFilter', () => {
 
 		filter.catch(
 			new NotFoundException('Корзина не найдена'),
-			createHost('/cart/public/public-1?checkoutKey=key-1', response)
+			createHost('/cart/public/public-1', response)
 		)
 
 		expect(response.setHeader).toHaveBeenCalledWith(
 			'x-cart-clear-public-key',
-			'true'
-		)
-		expect(response.setHeader).toHaveBeenCalledWith(
-			'x-cart-clear-checkout-key',
 			'true'
 		)
 		expect(response.status).toHaveBeenCalledWith(404)
@@ -42,7 +38,7 @@ describe('GlobalExceptionFilter', () => {
 			expect.objectContaining({
 				statusCode: 404,
 				message: 'Корзина не найдена',
-				clearCartKeys: ['publicKey', 'checkoutKey']
+				clearCartKeys: ['publicKey']
 			})
 		)
 	})
@@ -62,10 +58,6 @@ describe('GlobalExceptionFilter', () => {
 
 		expect(response.setHeader).not.toHaveBeenCalledWith(
 			'x-cart-clear-public-key',
-			'true'
-		)
-		expect(response.setHeader).not.toHaveBeenCalledWith(
-			'x-cart-clear-checkout-key',
 			'true'
 		)
 		expect(response.json).toHaveBeenCalledWith(

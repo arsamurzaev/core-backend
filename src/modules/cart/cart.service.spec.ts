@@ -436,15 +436,16 @@ describe('CartService', () => {
 		redis.xrange.mockResolvedValueOnce([
 			[
 				'1700000000000-0',
-				['type', 'cart.updated', 'payload', JSON.stringify(service['mapCart'](replayedCart))]
+				[
+					'type',
+					'cart.updated',
+					'payload',
+					JSON.stringify(service['mapCart'](replayedCart))
+				]
 			]
 		])
 
-		const stream = await service.connectPublicSse(
-			'public-1',
-			'checkout-1',
-			'1699999999999-0'
-		)
+		const stream = await service.connectPublicSse('public-1', '1699999999999-0')
 
 		const events = await new Promise<MessageEvent[]>(resolve => {
 			const received: MessageEvent[] = []
@@ -473,6 +474,8 @@ describe('CartService', () => {
 			id: '1700000000000-0',
 			type: 'cart.updated'
 		})
-		expect((events[2].data as { items: Array<{ quantity: number }> }).items[0].quantity).toBe(2)
+		expect(
+			(events[2].data as { items: Array<{ quantity: number }> }).items[0].quantity
+		).toBe(2)
 	})
 })

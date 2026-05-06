@@ -50,7 +50,11 @@ export class CartTotalsDto {
 	@ApiProperty({ type: Number, example: 4997 })
 	subtotal: number
 
-	@ApiProperty({ type: Number, example: 4997, description: 'Итого к оплате (subtotal с учётом скидок)' })
+	@ApiProperty({
+		type: Number,
+		example: 4997,
+		description: 'Итого к оплате (subtotal с учётом скидок)'
+	})
 	total: number
 }
 
@@ -147,20 +151,6 @@ export class ShareCartResponseDto extends CartResponseDto {
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	publicKey: string
-}
-
-export class CheckoutCartResponseDto extends CartResponseDto {
-	@ApiProperty({
-		type: String,
-		example: '5f7ec4ac9cc6c392419eec11850d45f1'
-	})
-	publicKey: string
-
-	@ApiProperty({
-		type: String,
-		example: '7b5f8d06f87d14d4a4f1f3f9826459fd9f9a'
-	})
-	checkoutKey: string
 }
 
 export class CompletedOrderItemDto {

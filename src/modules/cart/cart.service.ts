@@ -7,25 +7,26 @@ import {
 	MessageEvent,
 	NotFoundException,
 	OnModuleDestroy,
-	OnModuleInit,
-	UnauthorizedException
+	OnModuleInit
 } from '@nestjs/common'
+import type Redis from 'ioredis'
 import { randomBytes } from 'node:crypto'
 import { Observable, Subject } from 'rxjs'
-import type Redis from 'ioredis'
 
-import { RedisService } from '@/infrastructure/redis/redis.service'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { RedisService } from '@/infrastructure/redis/redis.service'
 import type { SessionUser } from '@/modules/auth/types/auth-request'
 import { buildMediaSelect } from '@/shared/media/media-select'
-import { MEDIA_VARIANT_NAMES, MediaUrlService } from '@/shared/media/media-url.service'
+import {
+	MEDIA_VARIANT_NAMES,
+	MediaUrlService
+} from '@/shared/media/media-url.service'
 import { normalizeOrderProducts } from '@/shared/order/order-products.utils'
 
 import {
 	CART_COOKIE_NAME,
 	CART_SSE_HEARTBEAT_MS,
 	CART_TOKEN_BYTES,
-	CHECKOUT_KEY_BYTES,
 	mapCartEntity,
 	MAX_CART_ITEMS,
 	MAX_ITEM_QUANTITY,
@@ -292,40 +293,8 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		return { cart: this.mapCart(fresh), token: current.token }
 	}
 
-	async issueCheckoutKey(publicKey: string) {
-		const key = publicKey.trim()
-		if (!key) {
-			throw new BadRequestException('Параметр publicKey обязателен')
-		}
-
-		const cart = await this.findByPublicKeyOrThrow(key)
-		const checkoutKey = await this.generateUniqueCheckoutKey()
-		const now = new Date()
-		const data: Prisma.CartUpdateInput = {
-			checkoutKey,
-			checkoutAt: now
-		}
-
-		if (cart.status === CartStatus.DRAFT) {
-			data.status = CartStatus.SHARED
-			data.statusChangedAt = now
-		}
-
-		await this.prisma.cart.update({
-			where: { id: cart.id },
-			data
-		})
-
-		const fresh = await this.findByIdOrThrow(cart.id)
-		return {
-			cart: this.mapCart(fresh),
-			checkoutKey
-		}
-	}
-
-	async getPublicCart(publicKey: string, checkoutKey?: string | null) {
+	async getPublicCart(publicKey: string) {
 		const cart = await this.findByPublicKeyOrThrow(publicKey)
-		this.ensureCheckoutAccess(cart, checkoutKey)
 		return this.mapCart(cart)
 	}
 
@@ -363,13 +332,8 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		return { cart: this.mapCart(updated.cart), token: current.token }
 	}
 
-	async upsertPublicItem(
-		publicKey: string,
-		checkoutKey: string | null | undefined,
-		input: UpsertCartItemInput
-	) {
+	async upsertPublicItem(publicKey: string, input: UpsertCartItemInput) {
 		const cart = await this.findByPublicKeyOrThrow(publicKey)
-		this.ensureCheckoutAccess(cart, checkoutKey)
 		const updated = await this.upsertItem(cart.id, input)
 		if (updated.changed) {
 			this.broadcastCart(
@@ -381,13 +345,8 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		return this.mapCart(updated.cart)
 	}
 
-	async removePublicItem(
-		publicKey: string,
-		checkoutKey: string | null | undefined,
-		itemId: string
-	) {
+	async removePublicItem(publicKey: string, itemId: string) {
 		const cart = await this.findByPublicKeyOrThrow(publicKey)
-		this.ensureCheckoutAccess(cart, checkoutKey)
 		const updated = await this.removeItem(cart.id, itemId)
 		if (updated.changed) {
 			this.broadcastCart(
@@ -590,16 +549,11 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		)
 	}
 
-	async connectPublicSse(
-		publicKey: string,
-		checkoutKey?: string | null,
-		lastEventId?: string | null
-	) {
+	async connectPublicSse(publicKey: string, lastEventId?: string | null) {
 		const cart = await this.findByPublicKeyOrThrow(publicKey)
-		this.ensureCheckoutAccess(cart, checkoutKey)
 		return this.createSseStream(
 			cart.id,
-			() => this.getPublicCart(publicKey, checkoutKey),
+			() => this.getPublicCart(publicKey),
 			lastEventId
 		)
 	}
@@ -937,11 +891,10 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 
 			return {
 				cartId: parsed.cartId,
-				eventId:
-					typeof parsed.eventId === 'string' ? parsed.eventId : undefined,
+				eventId: typeof parsed.eventId === 'string' ? parsed.eventId : undefined,
 				originId: parsed.originId,
 				type: parsed.type,
-				payload: parsed.payload as SsePayload
+				payload: parsed.payload
 			}
 		} catch {
 			return null
@@ -999,13 +952,6 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 				unitPrice: item.unitPrice
 			})),
 			createdAt: order.createdAt
-		}
-	}
-
-	private ensureCheckoutAccess(cart: CartEntity, checkoutKey?: string | null) {
-		const key = checkoutKey?.trim()
-		if (!key || !cart.checkoutKey || key !== cart.checkoutKey) {
-			throw new UnauthorizedException('Неверный ключ доступа к корзине')
 		}
 	}
 
@@ -1395,20 +1341,9 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 
 	private async generateUniquePublicKey() {
 		for (;;) {
-			const candidate = randomBytes(PUBLIC_KEY_BYTES).toString('hex')
+			const candidate = randomBytes(PUBLIC_KEY_BYTES).toString('base64url')
 			const exists = await this.prisma.cart.findFirst({
 				where: { publicKey: candidate },
-				select: { id: true }
-			})
-			if (!exists) return candidate
-		}
-	}
-
-	private async generateUniqueCheckoutKey() {
-		for (;;) {
-			const candidate = randomBytes(CHECKOUT_KEY_BYTES).toString('hex')
-			const exists = await this.prisma.cart.findFirst({
-				where: { checkoutKey: candidate },
 				select: { id: true }
 			})
 			if (!exists) return candidate

@@ -55,8 +55,7 @@ type CartItemLike = {
 }
 
 export const CART_TOKEN_BYTES = 24
-export const PUBLIC_KEY_BYTES = 16
-export const CHECKOUT_KEY_BYTES = 18
+export const PUBLIC_KEY_BYTES = 18
 export const CART_COOKIE_NAME = 'cart_token'
 export const CART_SSE_HEARTBEAT_MS = 20_000
 export const MAX_ITEM_QUANTITY = 999

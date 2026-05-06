@@ -52,12 +52,4 @@ export class UpsertCartItemDtoReq {
 	quantity: number
 }
 
-export class PublicUpsertCartItemDtoReq extends UpsertCartItemDtoReq {
-	@ApiProperty({
-		type: String,
-		example: '7b5f8d06f87d14d4a4f1f3f9826459fd9f9a'
-	})
-	@IsString()
-	@IsNotEmpty()
-	checkoutKey: string
-}
+export class PublicUpsertCartItemDtoReq extends UpsertCartItemDtoReq {}

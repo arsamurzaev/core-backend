@@ -10,7 +10,6 @@ import {
 	Param,
 	Post,
 	Put,
-	Query,
 	Req,
 	Res,
 	Sse,
@@ -24,7 +23,6 @@ import {
 	ApiOperation,
 	ApiParam,
 	ApiProduces,
-	ApiQuery,
 	ApiTags
 } from '@nestjs/swagger'
 import type { Request, Response } from 'express'
@@ -38,10 +36,9 @@ import { Roles } from '@/modules/auth/decorators/roles.decorator'
 import { User } from '@/modules/auth/decorators/user.decorator'
 import { SessionGuard } from '@/modules/auth/guards/session.guard'
 import type { SessionUser } from '@/modules/auth/types/auth-request'
+import { setPrivateNoStoreHeaders } from '@/shared/http/cache-control'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
-import { AuthThrottle } from '@/shared/throttler/auth-throttle.decorator'
-import { setPrivateNoStoreHeaders } from '@/shared/http/cache-control'
 
 import { CartService } from './cart.service'
 import {
@@ -51,7 +48,6 @@ import {
 } from './dto/requests/upsert-cart-item.dto.req'
 import {
 	CartResponseDto,
-	CheckoutCartResponseDto,
 	CompleteCartOrderResponseDto,
 	ShareCartResponseDto
 } from './dto/responses/cart.dto.res'
@@ -224,46 +220,20 @@ export class CartController {
 	}
 
 	@SkipCatalog()
-	@Post('public/:publicKey/checkout')
-	@AuthThrottle()
-	@ApiOperation({ summary: 'Issue a checkoutKey for a public cart' })
-	@ApiParam({
-		name: 'publicKey',
-		description: 'Public cart key',
-		example: '5f7ec4ac9cc6c392419eec11850d45f1'
-	})
-	@ApiOkResponse({ type: CheckoutCartResponseDto })
-	async createCheckoutKey(@Param('publicKey') publicKey: string) {
-		const result = await this.cartService.issueCheckoutKey(publicKey)
-		return {
-			ok: true,
-			publicKey: result.cart.publicKey,
-			checkoutKey: result.checkoutKey,
-			cart: result.cart
-		}
-	}
-
-	@SkipCatalog()
 	@Get('public/:publicKey')
-	@ApiOperation({ summary: 'Get a public cart by checkoutKey' })
+	@ApiOperation({ summary: 'Get a public cart by public key' })
 	@ApiParam({
 		name: 'publicKey',
 		description: 'Public cart key',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
-	})
-	@ApiQuery({
-		name: 'checkoutKey',
-		required: true,
-		description: 'Read/write key for the public cart'
 	})
 	@ApiOkResponse({ type: CartResponseDto })
 	async getPublicCart(
 		@Param('publicKey') publicKey: string,
-		@Query('checkoutKey') checkoutKey: string | undefined,
 		@Res({ passthrough: true }) res: Response
 	) {
 		setPrivateNoStoreHeaders(res)
-		const cart = await this.cartService.getPublicCart(publicKey, checkoutKey)
+		const cart = await this.cartService.getPublicCart(publicKey)
 		return { ok: true, cart }
 	}
 
@@ -361,7 +331,6 @@ export class CartController {
 			base: {
 				summary: 'Add a product to the public cart',
 				value: {
-					checkoutKey: '7b5f8d06f87d14d4a4f1f3f9826459fd9f9a',
 					productId: 'd084ec3f-55cb-4ba4-9f50-c18fd01ea124',
 					variantId: '9f3f4ec2-9f74-4e03-b8cf-95ce5449cb8e',
 					quantity: 2
@@ -374,11 +343,7 @@ export class CartController {
 		@Param('publicKey') publicKey: string,
 		@Body() dto: PublicUpsertCartItemDtoReq
 	) {
-		const cart = await this.cartService.upsertPublicItem(
-			publicKey,
-			dto.checkoutKey,
-			dto
-		)
+		const cart = await this.cartService.upsertPublicItem(publicKey, dto)
 		return { ok: true, cart }
 	}
 
@@ -395,22 +360,12 @@ export class CartController {
 		description: 'Cart item id',
 		example: 'fc31fd15-6f7e-4fb1-a594-34fa14f6ef0c'
 	})
-	@ApiQuery({
-		name: 'checkoutKey',
-		required: true,
-		description: 'Write key for the public cart'
-	})
 	@ApiOkResponse({ type: CartResponseDto })
 	async removePublicItem(
 		@Param('publicKey') publicKey: string,
-		@Param('itemId') itemId: string,
-		@Query('checkoutKey') checkoutKey?: string
+		@Param('itemId') itemId: string
 	) {
-		const cart = await this.cartService.removePublicItem(
-			publicKey,
-			checkoutKey,
-			itemId
-		)
+		const cart = await this.cartService.removePublicItem(publicKey, itemId)
 		return { ok: true, cart }
 	}
 
@@ -427,11 +382,6 @@ export class CartController {
 		required: false,
 		description: 'Last received Redis Stream event id for SSE replay'
 	})
-	@ApiQuery({
-		name: 'checkoutKey',
-		required: true,
-		description: 'SSE access key for the public cart'
-	})
 	@ApiProduces('text/event-stream')
 	@ApiOkResponse({
 		description: 'SSE events: connected, ping, cart.updated, cart.status_changed',
@@ -443,10 +393,9 @@ export class CartController {
 	})
 	async ssePublic(
 		@Param('publicKey') publicKey: string,
-		@Query('checkoutKey') checkoutKey?: string,
 		@Headers('last-event-id') lastEventId?: string
 	): Promise<Observable<MessageEvent>> {
-		return this.cartService.connectPublicSse(publicKey, checkoutKey, lastEventId)
+		return this.cartService.connectPublicSse(publicKey, lastEventId)
 	}
 
 	private readTokenFromRequest(req: Request) {
