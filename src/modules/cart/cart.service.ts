@@ -337,6 +337,51 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		return { cart: this.mapCart(updated.cart), token: current.token }
 	}
 
+	async deleteCurrentCart(catalogId: string, token: string | null | undefined) {
+		const current = await this.getCurrentCartOrThrow(catalogId, token)
+		const cart = current.cart
+
+		if (cart.status === CartStatus.IN_PROGRESS || cart.assignedManagerId) {
+			await this.prisma.cart.update({
+				where: { id: cart.id },
+				data: {
+					token: null,
+					userId: null
+				}
+			})
+
+			return { mode: 'detached' as const, token: current.token }
+		}
+
+		const now = new Date()
+		await this.prisma.$transaction(async tx => {
+			await tx.cartItem.updateMany({
+				where: {
+					cartId: cart.id,
+					deleteAt: null
+				},
+				data: { deleteAt: now }
+			})
+			await tx.cart.update({
+				where: { id: cart.id },
+				data: {
+					deleteAt: now,
+					token: null,
+					userId: null,
+					publicKey: null,
+					checkoutKey: null
+				}
+			})
+		})
+
+		this.broadcastCart(cart.id, 'cart.detached', {
+			cartId: cart.id,
+			deletedAt: now.toISOString()
+		})
+
+		return { mode: 'deleted' as const, token: current.token }
+	}
+
 	async upsertPublicItem(publicKey: string, input: UpsertCartItemInput) {
 		const cart = await this.findByPublicKeyOrThrow(publicKey)
 		const updated = await this.upsertItem(cart.id, input)

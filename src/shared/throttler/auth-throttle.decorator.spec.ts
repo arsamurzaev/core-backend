@@ -21,7 +21,7 @@ function createContext(methodName: keyof TestController): ExecutionContext {
 		getClass: () => TestController,
 		getHandler: () =>
 			TestController.prototype[methodName] as (...args: any[]) => any
-	} as ExecutionContext
+	} as unknown as ExecutionContext
 }
 
 describe('AuthThrottle', () => {

@@ -159,8 +159,8 @@ CATALOG_DOMAIN_RECHECK_AFTER_SECONDS=300
 CATALOG_TLS_ASK_ALLOWED_HOSTS=127.0.0.1,localhost,::1,[::1]
 SESSION_COOKIE_NAME=sid
 CSRF_COOKIE_NAME=csrf
-ADMIN_SESSION_COOKIE_NAME=admin_sid
-ADMIN_CSRF_COOKIE_NAME=admin_csrf
+ADMIN_SESSION_COOKIE_NAME=asid
+ADMIN_CSRF_COOKIE_NAME=acrsf
 ```
 
 Frontend:
@@ -191,7 +191,7 @@ frontend fallback. Поэтому `/_svc_api/*` должен отрабатыв�
 Для production оставляем такую модель:
 
 ```text
-global admin на myctlg-update.ru/shtab.myctlg-update.ru -> admin_sid/admin_csrf, Domain=.myctlg-update.ru
+global admin на myctlg-update.ru/shtab.myctlg-update.ru -> asid/acrsf, Domain=.myctlg-update.ru
 catalog owner на domain.myctlg-update.ru                -> sid/csrf, host-only без Domain
 custom domains                                           -> sid/csrf, host-only без Domain
 ```

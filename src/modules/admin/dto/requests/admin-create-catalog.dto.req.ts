@@ -16,7 +16,6 @@ import {
 } from 'class-validator'
 
 const SLUG_PATTERN = /^[a-z0-9-]+$/
-const DOMAIN_PATTERN = /^[a-z0-9.-]+$/
 const METRIC_ID_PATTERN = /^\d+$/
 
 export class AdminCreateCatalogDtoReq {
@@ -78,25 +77,6 @@ export class AdminCreateCatalogDtoReq {
 	@IsString()
 	@IsNotEmpty()
 	slug: string
-
-	@ApiPropertyOptional({
-		type: String,
-		example: 'example.com',
-		nullable: true,
-		description: 'Custom domain.'
-	})
-	@Transform(({ value }: { value: unknown }) => {
-		if (value === undefined) return undefined
-		if (value === null) return null
-		if (typeof value !== 'string') return value
-		const normalized = value.trim().toLowerCase()
-		return normalized.length ? normalized : null
-	})
-	@IsOptional()
-	@IsString()
-	@MaxLength(253)
-	@Matches(DOMAIN_PATTERN)
-	domain?: string | null
 
 	@ApiPropertyOptional({ type: String, example: 'parent catalog uuid' })
 	@Transform(({ value }: { value: unknown }) => {

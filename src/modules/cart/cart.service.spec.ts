@@ -1,4 +1,5 @@
 import { CartStatus, OrderStatus, Role } from '@generated/client'
+import type { MessageEvent } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
@@ -70,6 +71,7 @@ describe('CartService', () => {
 			findFirst: jest.Mock
 			count: jest.Mock
 			update: jest.Mock
+			updateMany: jest.Mock
 			create: jest.Mock
 		}
 		order: {
@@ -107,6 +109,7 @@ describe('CartService', () => {
 				findFirst: jest.fn(),
 				count: jest.fn(),
 				update: jest.fn(),
+				updateMany: jest.fn(),
 				create: jest.fn()
 			},
 			order: {
@@ -323,6 +326,79 @@ describe('CartService', () => {
 		)
 		expect(prisma.cart.create).toHaveBeenCalled()
 		expect(result.cart.id).toBe('cart-2')
+	})
+
+	it('soft deletes a current shared cart and removes its public key', async () => {
+		const currentCart = createCartEntity({
+			status: CartStatus.SHARED,
+			publicKey: 'public-1',
+			items: [
+				{
+					id: 'cart-item-1',
+					productId: 'product-1',
+					variantId: null,
+					quantity: 1,
+					createdAt: new Date('2026-03-25T09:00:00.000Z'),
+					updatedAt: new Date('2026-03-25T09:00:00.000Z'),
+					product: {
+						id: 'product-1',
+						name: 'Product 1',
+						slug: 'product-1',
+						price: 1999
+					}
+				}
+			]
+		})
+
+		prisma.cart.findFirst.mockResolvedValueOnce(currentCart)
+
+		const result = await service.deleteCurrentCart('catalog-1', 'token-1')
+
+		expect(prisma.cartItem.updateMany).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: expect.objectContaining({
+					cartId: 'cart-1',
+					deleteAt: null
+				}),
+				data: expect.objectContaining({
+					deleteAt: expect.any(Date)
+				})
+			})
+		)
+		expect(prisma.cart.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: 'cart-1' },
+				data: expect.objectContaining({
+					deleteAt: expect.any(Date),
+					token: null,
+					userId: null,
+					publicKey: null,
+					checkoutKey: null
+				})
+			})
+		)
+		expect(result.mode).toBe('deleted')
+	})
+
+	it('detaches a current cart that is already assigned to a manager', async () => {
+		const currentCart = createCartEntity({
+			status: CartStatus.IN_PROGRESS,
+			assignedManagerId: 'manager-1'
+		})
+
+		prisma.cart.findFirst.mockResolvedValueOnce(currentCart)
+
+		const result = await service.deleteCurrentCart('catalog-1', 'token-1')
+
+		expect(prisma.cart.update).toHaveBeenCalledWith({
+			where: { id: 'cart-1' },
+			data: {
+				token: null,
+				userId: null
+			}
+		})
+		expect(prisma.cartItem.updateMany).not.toHaveBeenCalled()
+		expect(result.mode).toBe('detached')
 	})
 
 	it('allows adding parent catalog products to a child catalog cart', async () => {

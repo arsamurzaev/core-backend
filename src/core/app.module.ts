@@ -47,7 +47,7 @@ import {
 } from './config/env'
 
 const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
-const ADMIN_SID_COOKIE = process.env.ADMIN_SESSION_COOKIE_NAME ?? 'admin_sid'
+const ADMIN_SID_COOKIE = process.env.ADMIN_SESSION_COOKIE_NAME ?? 'asid'
 type TrackerRequest = Record<string, unknown>
 
 function readTrackerHeader(

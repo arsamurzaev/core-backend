@@ -5,6 +5,7 @@ import {
 	Delete,
 	Get,
 	Headers,
+	HttpCode,
 	MessageEvent,
 	NotFoundException,
 	Param,
@@ -19,6 +20,7 @@ import {
 	ApiBody,
 	ApiCreatedResponse,
 	ApiHeader,
+	ApiNoContentResponse,
 	ApiOkResponse,
 	ApiOperation,
 	ApiParam,
@@ -101,6 +103,33 @@ export class CartController {
 		try {
 			const result = await this.cartService.getCurrentCartOrThrow(catalogId, token)
 			return { ok: true, cart: result.cart }
+		} catch (error) {
+			if (this.isCartNotFoundError(error)) {
+				this.clearTokenCookie(req, res)
+			}
+
+			throw error
+		}
+	}
+
+	@Delete('current')
+	@HttpCode(204)
+	@ApiOperation({
+		summary: 'Delete or detach the current cart by cookie token'
+	})
+	@ApiNoContentResponse({
+		description:
+			'Current cart was deleted, or detached when it is already assigned to a manager'
+	})
+	async deleteCurrent(
+		@Req() req: Request,
+		@Res({ passthrough: true }) res: Response
+	) {
+		const token = this.readTokenFromRequest(req)
+		const catalogId = mustCatalogId()
+		try {
+			await this.cartService.deleteCurrentCart(catalogId, token)
+			this.clearTokenCookie(req, res)
 		} catch (error) {
 			if (this.isCartNotFoundError(error)) {
 				this.clearTokenCookie(req, res)

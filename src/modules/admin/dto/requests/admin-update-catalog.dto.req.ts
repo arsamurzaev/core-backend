@@ -15,7 +15,6 @@ import {
 } from 'class-validator'
 
 const SLUG_PATTERN = /^[a-z0-9-]+$/
-const DOMAIN_PATTERN = /^[a-z0-9.-]+$/
 const METRIC_ID_PATTERN = /^\d+$/
 
 function trimOptionalString(value: unknown) {
@@ -87,22 +86,6 @@ export class AdminUpdateCatalogDtoReq {
 	@MaxLength(63)
 	@IsString()
 	slug?: string
-
-	@ApiPropertyOptional({
-		type: String,
-		example: 'example.com',
-		nullable: true,
-		description: 'Custom domain. Pass null to clear.'
-	})
-	@Transform(({ value }: { value: unknown }) => {
-		const normalized = trimOptionalNullableString(value)
-		return typeof normalized === 'string' ? normalized.toLowerCase() : normalized
-	})
-	@IsOptional()
-	@IsString()
-	@MaxLength(253)
-	@Matches(DOMAIN_PATTERN)
-	domain?: string | null
 
 	@ApiPropertyOptional({
 		type: String,

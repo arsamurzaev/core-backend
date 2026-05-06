@@ -26,8 +26,8 @@ describe('auth cookie utils', () => {
 	it('uses separate cookie names for global admin sessions', () => {
 		expect(getSessionCookieNames()).toEqual({ sid: 'sid', csrf: 'csrf' })
 		expect(getSessionCookieNames({ global: true })).toEqual({
-			sid: 'admin_sid',
-			csrf: 'admin_csrf'
+			sid: 'asid',
+			csrf: 'acrsf'
 		})
 	})
 })

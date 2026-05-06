@@ -12,7 +12,7 @@ import { readCookieValue } from '@/shared/http/cookie.utils'
 import { buildRateLimitMessage } from '@/shared/http/error-message.utils'
 
 const SID_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid'
-const ADMIN_SID_COOKIE = process.env.ADMIN_SESSION_COOKIE_NAME ?? 'admin_sid'
+const ADMIN_SID_COOKIE = process.env.ADMIN_SESSION_COOKIE_NAME ?? 'asid'
 
 function hasAnySessionCookie(
 	cookieHeader: Request['headers']['cookie']

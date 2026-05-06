@@ -150,6 +150,23 @@ export class AdminCatalogConfigListItemDto {
 	status: CatalogStatus
 }
 
+export class AdminCatalogChildListItemDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	slug: string
+
+	@ApiProperty({ type: String, nullable: true })
+	domain: string | null
+
+	@ApiProperty({ type: String })
+	name: string
+
+	@ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+	deleteAt?: Date | null
+}
+
 export class AdminCatalogListItemDto {
 	@ApiProperty({ type: String })
 	id: string
@@ -214,6 +231,9 @@ export class AdminCatalogListItemDto {
 
 	@ApiProperty({ type: AdminPromoCodeListItemDto, nullable: true })
 	promoCode: AdminPromoCodeListItemDto | null
+
+	@ApiProperty({ type: AdminCatalogChildListItemDto, isArray: true })
+	children: AdminCatalogChildListItemDto[]
 }
 
 export class AdminCreatedCatalogOwnerDto {

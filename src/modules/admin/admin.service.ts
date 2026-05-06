@@ -30,7 +30,6 @@ import {
 	applyCatalogSlugSuffix,
 	CATALOG_SLUG_FALLBACK,
 	ensureCatalogSlugAllowed,
-	normalizeCatalogDomain,
 	normalizeCatalogSlug,
 	slugifyCatalogValue
 } from '../catalog/catalog.utils'
@@ -124,6 +123,16 @@ const adminCatalogSelect = {
 			createdAt: true,
 			updatedAt: true
 		}
+	},
+	children: {
+		select: {
+			id: true,
+			slug: true,
+			domain: true,
+			name: true,
+			deleteAt: true
+		},
+		orderBy: { createdAt: 'desc' }
 	}
 } as const satisfies Prisma.CatalogSelect
 const paymentSelect = {
@@ -160,9 +169,6 @@ export class AdminService {
 	) {}
 
 	async createCatalog(dto: AdminCreateCatalogDtoReq) {
-		const normalizedDomain = normalizeCatalogDomain(dto.domain ?? null)
-		if (normalizedDomain) await this.ensureDomainAvailable(normalizedDomain)
-
 		const normalizedSlug = dto.slug ? normalizeCatalogSlug(dto.slug) : null
 		if (normalizedSlug) {
 			ensureCatalogSlugAllowed(normalizedSlug)
@@ -225,7 +231,6 @@ export class AdminService {
 				data: {
 					name: dto.name,
 					slug,
-					domain: normalizedDomain,
 					type: { connect: { id: dto.typeId } },
 					...(dto.activityIds?.length
 						? {
@@ -444,11 +449,6 @@ export class AdminService {
 
 		if (!source) throw new NotFoundException('Catalog not found')
 
-		// Custom domain is unique and must not be inherited from the source catalog.
-		const normalizedDomain =
-			dto.domain === undefined ? null : normalizeCatalogDomain(dto.domain)
-		if (normalizedDomain) await this.ensureDomainAvailable(normalizedDomain)
-
 		const slug = normalizeCatalogSlug(dto.slug)
 		ensureCatalogSlugAllowed(slug)
 		await this.ensureSlugAvailable(slug)
@@ -480,7 +480,6 @@ export class AdminService {
 				data: {
 					name: dto.name,
 					slug,
-					domain: normalizedDomain,
 					type: { connect: { id: dto.typeId } },
 					user: { connect: { id: owner.id } },
 					...(source.parentId
@@ -805,7 +804,6 @@ export class AdminService {
 			select: {
 				id: true,
 				slug: true,
-				domain: true,
 				typeId: true,
 				metrics: {
 					where: {
@@ -824,20 +822,9 @@ export class AdminService {
 			await this.ensureSlugAvailable(dto.slug, id)
 		}
 
-		const normalizedDomain =
-			dto.domain !== undefined ? normalizeCatalogDomain(dto.domain) : undefined
-		if (
-			normalizedDomain !== undefined &&
-			normalizedDomain !== current.domain &&
-			normalizedDomain
-		) {
-			await this.ensureDomainAvailable(normalizedDomain, id)
-		}
-
 		const data: Prisma.CatalogUpdateInput = {
 			...(dto.name !== undefined ? { name: dto.name } : {}),
 			...(dto.slug !== undefined ? { slug: dto.slug } : {}),
-			...(dto.domain !== undefined ? { domain: normalizedDomain } : {}),
 			...(dto.typeId ? { type: { connect: { id: dto.typeId } } } : {}),
 			...(dto.activityIds !== undefined
 				? {
@@ -1444,20 +1431,6 @@ export class AdminService {
 			purgeAt,
 			purgeInDays
 		}
-	}
-
-	private async ensureDomainAvailable(
-		domain: string,
-		excludeCatalogId?: string
-	) {
-		const existing = await this.prisma.catalog.findFirst({
-			where: {
-				domain,
-				...(excludeCatalogId ? { id: { not: excludeCatalogId } } : {})
-			},
-			select: { id: true }
-		})
-		if (existing) throw new BadRequestException('Catalog domain already exists')
 	}
 
 	private async ensureSlugAvailable(slug: string, excludeCatalogId?: string) {
