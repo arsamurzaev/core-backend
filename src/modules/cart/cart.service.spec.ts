@@ -18,6 +18,7 @@ function createCartEntity(overrides: Record<string, unknown> = {}) {
 		checkoutKey: 'checkout-1',
 		checkoutAt: null,
 		comment: null,
+		catalog: { parentId: null },
 		assignedManagerId: null,
 		managerSessionStartedAt: null,
 		managerLastSeenAt: null,
@@ -67,6 +68,7 @@ describe('CartService', () => {
 		}
 		cartItem: {
 			findFirst: jest.Mock
+			count: jest.Mock
 			update: jest.Mock
 			create: jest.Mock
 		}
@@ -103,6 +105,7 @@ describe('CartService', () => {
 			},
 			cartItem: {
 				findFirst: jest.fn(),
+				count: jest.fn(),
 				update: jest.fn(),
 				create: jest.fn()
 			},
@@ -320,6 +323,62 @@ describe('CartService', () => {
 		)
 		expect(prisma.cart.create).toHaveBeenCalled()
 		expect(result.cart.id).toBe('cart-2')
+	})
+
+	it('allows adding parent catalog products to a child catalog cart', async () => {
+		const currentCart = createCartEntity({
+			catalogId: 'child-catalog',
+			status: CartStatus.DRAFT,
+			catalog: { parentId: 'parent-catalog' }
+		})
+		const updatedCart = createCartEntity({
+			catalogId: 'child-catalog',
+			status: CartStatus.DRAFT,
+			catalog: { parentId: 'parent-catalog' },
+			items: [
+				{
+					id: 'cart-item-1',
+					productId: 'product-1',
+					variantId: null,
+					quantity: 1,
+					createdAt: new Date('2026-03-25T09:00:00.000Z'),
+					updatedAt: new Date('2026-03-25T09:00:00.000Z'),
+					product: {
+						id: 'product-1',
+						name: 'Product 1',
+						slug: 'product-1',
+						price: 1999,
+						media: []
+					}
+				}
+			]
+		})
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(updatedCart)
+		prisma.product.findFirst.mockResolvedValueOnce({ id: 'product-1' })
+		prisma.cartItem.findFirst.mockResolvedValueOnce(null)
+		prisma.cartItem.count.mockResolvedValueOnce(0)
+		prisma.cartItem.create.mockResolvedValueOnce({ id: 'cart-item-1' })
+		prisma.cart.update.mockResolvedValueOnce(undefined)
+
+		const result = await service.upsertCurrentItem('child-catalog', 'token-1', {
+			productId: 'product-1',
+			quantity: 1
+		})
+
+		expect(prisma.product.findFirst).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: expect.objectContaining({
+					catalogId: { in: ['child-catalog', 'parent-catalog'] },
+					id: 'product-1'
+				})
+			})
+		)
+		expect(prisma.cartItem.create).toHaveBeenCalled()
+		expect(result.cart.items).toHaveLength(1)
 	})
 
 	it('converts a shared cart into a completed order', async () => {

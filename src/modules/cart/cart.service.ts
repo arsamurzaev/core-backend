@@ -126,7 +126,12 @@ const cartSelect = {
 }
 
 type CartEntity = Prisma.CartGetPayload<{ select: typeof cartSelect }>
-type CartContext = { id: string; catalogId: string; status: CartStatus }
+type CartContext = {
+	id: string
+	catalogId: string
+	parentCatalogId: string | null
+	status: CartStatus
+}
 type ExistingCartItem = {
 	id: string
 	deleteAt: Date | null
@@ -1073,7 +1078,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	): Promise<CartMutationResult> {
 		const cart = await this.findCartContextOrThrow(cartId, tx)
 		this.ensureCartIsOpen(cart.status)
-		await this.ensureProductInCatalog(tx, cart.catalogId, input.productId)
+		await this.ensureProductInCatalog(tx, cart, input.productId)
 		await this.ensureVariantMatchesProduct(tx, input.productId, input.variantId)
 
 		if (input.quantity > 0) {
@@ -1143,23 +1148,36 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	): Promise<CartContext> {
 		const cart = await tx.cart.findFirst({
 			where: { id: cartId, deleteAt: null },
-			select: { id: true, catalogId: true, status: true }
+			select: {
+				id: true,
+				catalogId: true,
+				status: true,
+				catalog: { select: { parentId: true } }
+			}
 		})
 
 		if (!cart) throw new NotFoundException('Корзина не найдена')
 
-		return cart
+		return {
+			id: cart.id,
+			catalogId: cart.catalogId,
+			parentCatalogId: cart.catalog.parentId ?? null,
+			status: cart.status
+		}
 	}
 
 	private async ensureProductInCatalog(
 		tx: Prisma.TransactionClient,
-		catalogId: string,
+		cart: CartContext,
 		productId: string
 	): Promise<void> {
+		const allowedCatalogIds = [cart.catalogId, cart.parentCatalogId].filter(
+			(id): id is string => Boolean(id)
+		)
 		const product = await tx.product.findFirst({
 			where: {
 				id: productId,
-				catalogId,
+				catalogId: { in: allowedCatalogIds },
 				deleteAt: null
 			},
 			select: { id: true }
