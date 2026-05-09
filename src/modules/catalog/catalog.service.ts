@@ -20,6 +20,7 @@ import { ensureMediaInCatalog } from '@/shared/media/media.validation'
 import { RequestContext } from '@/shared/tenancy/request-context'
 import { assertHasUpdateFields, normalizeRequiredString } from '@/shared/utils'
 
+import { resolveCatalogCheckoutConfig } from './catalog-checkout'
 import { CatalogSeoSyncService } from './catalog-seo-sync.service'
 import { mapCatalogRecord } from './catalog.mapper'
 import { CatalogRepository } from './catalog.repository'
@@ -125,20 +126,27 @@ export class CatalogService {
 			? await this.loadCatalogTypeSchema(shell.typeId)
 			: null
 
-		return {
-			...shell,
+		return this.withResolvedCheckout(
+			{
+				...shell,
+				type
+			},
 			type
-		}
+		)
 	}
 
 	async getCurrentShell() {
 		const store = RequestContext.get()
 		if (!store?.catalogId) throw new NotFoundException('Каталог не найден')
 
-		return this.loadCurrentCatalogShell(
+		const shell = await this.loadCurrentCatalogShell(
 			store.catalogId,
 			Boolean(this.cacheTtlSec)
 		)
+		const type = shell.settings && shell.typeId
+			? await this.loadCatalogTypeSchema(shell.typeId)
+			: null
+		return this.withResolvedCheckout(shell, type)
 	}
 
 	async getCurrentTypeSchema() {
@@ -205,7 +213,10 @@ export class CatalogService {
 		}
 		await this.catalogSeoSync.syncCatalog(catalog as any)
 		await this.invalidateCatalogCache(store.catalogId)
-		return this.mapCatalog(catalog)
+		const type = catalog.typeId
+			? await this.loadCatalogTypeSchema(catalog.typeId, false)
+			: null
+		return this.withResolvedCheckout(this.mapCatalog(catalog), type)
 	}
 
 	private async buildUpdateData(
@@ -248,6 +259,8 @@ export class CatalogService {
 			dto.isActive !== undefined ||
 			dto.defaultMode !== undefined ||
 			dto.allowedModes !== undefined ||
+			dto.address !== undefined ||
+			dto.checkout !== undefined ||
 			dto.googleVerification !== undefined ||
 			dto.yandexVerification !== undefined
 		)
@@ -258,7 +271,14 @@ export class CatalogService {
 			settings: {
 				select: {
 					defaultMode: true,
-					allowedModes: true
+					allowedModes: true,
+					address: true,
+					checkout: true
+				}
+			},
+			type: {
+				select: {
+					code: true
 				}
 			}
 		})
@@ -268,6 +288,11 @@ export class CatalogService {
 		}
 
 		return catalog.settings
+			? {
+					...catalog.settings,
+					typeCode: catalog.type?.code ?? null
+				}
+			: null
 	}
 
 	private async applyCatalogIdentityUpdates(
@@ -317,14 +342,36 @@ export class CatalogService {
 			? await this.loadCatalogTypeSchema(shell.typeId, false)
 			: null
 
-		return {
-			...shell,
+		return this.withResolvedCheckout(
+			{
+				...shell,
+				type
+			},
 			type
-		}
+		)
 	}
 
 	private mapCatalog<T>(catalog: T) {
 		return mapCatalogRecord(catalog, media => this.mediaUrl.mapMedia(media))
+	}
+
+	private withResolvedCheckout<T extends Record<string, any>>(
+		catalog: T,
+		type?: { code?: string | null } | null
+	): T {
+		const settings = (catalog as { settings?: any } | null)?.settings
+		if (!settings) return catalog
+
+		return {
+			...catalog,
+			settings: {
+				...settings,
+				checkout: resolveCatalogCheckoutConfig({
+					checkout: settings.checkout,
+					typeCode: type?.code ?? null
+				})
+			}
+		}
 	}
 
 	private mapCatalogType<T>(type: T) {

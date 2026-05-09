@@ -1,4 +1,11 @@
-import { CartStatus, OrderStatus, type Prisma, Role } from '@generated/client'
+import {
+	CartCheckoutMethod,
+	CartStatus,
+	ContactType,
+	OrderStatus,
+	Prisma,
+	Role
+} from '@generated/client'
 import {
 	BadRequestException,
 	ForbiddenException,
@@ -16,6 +23,12 @@ import { Observable, Subject } from 'rxjs'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { RedisService } from '@/infrastructure/redis/redis.service'
 import type { SessionUser } from '@/modules/auth/types/auth-request'
+import {
+	normalizeCartCheckoutData,
+	resolveCatalogCheckoutConfig,
+	resolveCheckoutContactsSnapshot,
+	type CatalogCheckoutData
+} from '@/modules/catalog/catalog-checkout'
 import { buildMediaSelect } from '@/shared/media/media-select'
 import {
 	MEDIA_VARIANT_NAMES,
@@ -88,6 +101,9 @@ const cartSelect = {
 	publicKey: true,
 	checkoutKey: true,
 	checkoutAt: true,
+	checkoutMethod: true,
+	checkoutData: true,
+	checkoutContacts: true,
 	comment: true,
 	assignedManagerId: true,
 	managerSessionStartedAt: true,
@@ -145,12 +161,20 @@ const completedOrderSelect = {
 	catalogId: true,
 	totalAmount: true,
 	createdAt: true,
-	products: true
+	products: true,
+	checkoutMethod: true,
+	checkoutData: true,
+	checkoutContacts: true
 }
 
 type CompletedOrderEntity = Prisma.OrderGetPayload<{
 	select: typeof completedOrderSelect
 }>
+type ShareCartInput = {
+	checkoutData?: unknown
+	checkoutMethod?: CartCheckoutMethod
+	comment?: string | null
+}
 
 @Injectable()
 export class CartService implements OnModuleInit, OnModuleDestroy {
@@ -265,13 +289,16 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	async shareCurrentCart(
 		catalogId: string,
 		token?: string | null,
-		comment?: string | null
+		input: ShareCartInput | string | null = {}
 	) {
+		const shareInput: ShareCartInput =
+			typeof input === 'string' ? { comment: input } : (input ?? {})
 		const current = await this.getOrCreateCurrentCart(catalogId, token)
 		let publicKey = current.cart.publicKey
 		const now = new Date()
 		const data: Prisma.CartUpdateInput = {}
-		const normalizedComment = this.normalizeCartComment(comment)
+		const normalizedComment = this.normalizeCartComment(shareInput.comment)
+		const checkout = await this.resolveCheckoutForShare(catalogId, shareInput)
 
 		if (!publicKey) {
 			publicKey = await this.generateUniquePublicKey()
@@ -286,6 +313,10 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		if (normalizedComment !== current.cart.comment) {
 			data.comment = normalizedComment
 		}
+
+		data.checkoutMethod = checkout.checkoutMethod
+		data.checkoutData = checkout.checkoutData as Prisma.InputJsonValue
+		data.checkoutContacts = checkout.checkoutContacts as Prisma.InputJsonValue
 
 		if (Object.keys(data).length > 0) {
 			await this.prisma.cart.update({
@@ -369,7 +400,10 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 					token: null,
 					userId: null,
 					publicKey: null,
-					checkoutKey: null
+					checkoutKey: null,
+					checkoutMethod: null,
+					checkoutData: Prisma.DbNull,
+					checkoutContacts: Prisma.DbNull
 				}
 			})
 		})
@@ -548,11 +582,22 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 				0
 			)
 			const totalAmount = Math.round(totalAmountCents / 100)
+			const deliveryAddress = this.resolveDeliveryAddress(freshCart)
 
 			const order = await tx.order.create({
 				data: {
 					status: OrderStatus.COMPLETED,
 					catalogId: freshCart.catalogId,
+					comment: freshCart.comment,
+					isDelivery: freshCart.checkoutMethod === CartCheckoutMethod.DELIVERY,
+					address: deliveryAddress,
+					checkoutMethod: freshCart.checkoutMethod,
+					checkoutData: (freshCart.checkoutData ?? undefined) as
+						| Prisma.InputJsonValue
+						| undefined,
+					checkoutContacts: (freshCart.checkoutContacts ?? undefined) as
+						| Prisma.InputJsonValue
+						| undefined,
 					paymentProof: [],
 					products: snapshotItems,
 					totalAmount
@@ -955,6 +1000,75 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		return mapCartEntity(cart, media => this.mediaUrl.mapMedia(media))
 	}
 
+	private async resolveCheckoutForShare(
+		catalogId: string,
+		input: ShareCartInput
+	): Promise<{
+		checkoutContacts: Record<string, string>
+		checkoutData: CatalogCheckoutData
+		checkoutMethod: CartCheckoutMethod
+	}> {
+		const catalog = await this.prisma.catalog.findFirst({
+			where: { id: catalogId, deleteAt: null },
+			select: {
+				type: { select: { code: true } },
+				settings: { select: { address: true, checkout: true } },
+				contacts: {
+					where: { deleteAt: null },
+					select: { type: true, value: true },
+					orderBy: [{ position: 'asc' as const }, { createdAt: 'asc' as const }]
+				}
+			}
+		})
+
+		if (!catalog) {
+			throw new NotFoundException('РљР°С‚Р°Р»РѕРі РЅРµ РЅР°Р№РґРµРЅ')
+		}
+
+		const config = resolveCatalogCheckoutConfig({
+			checkout: catalog.settings?.checkout,
+			typeCode: catalog.type?.code
+		})
+		const mapUrl = this.resolveCatalogMapUrl(catalog.contacts)
+		const checkout = normalizeCartCheckoutData({
+			catalogAddress: catalog.settings?.address,
+			config,
+			data: input.checkoutData,
+			mapUrl,
+			method: input.checkoutMethod
+		})
+		const checkoutContacts = resolveCheckoutContactsSnapshot({
+			catalogContacts: catalog.contacts,
+			config,
+			method: checkout.checkoutMethod
+		})
+
+		return {
+			checkoutContacts: checkoutContacts as Record<string, string>,
+			checkoutData: checkout.checkoutData,
+			checkoutMethod: checkout.checkoutMethod
+		}
+	}
+
+	private resolveCatalogMapUrl(
+		contacts: Array<{ type: ContactType; value: string }>
+	): string | null {
+		const contact = contacts.find(item => item.type === ContactType.MAP)
+		const value = contact?.value?.trim()
+		return value || null
+	}
+
+	private resolveDeliveryAddress(cart: CartEntity): string | null {
+		if (cart.checkoutMethod !== CartCheckoutMethod.DELIVERY) return null
+		const data = cart.checkoutData
+		if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+			return null
+		}
+
+		const address = (data as Record<string, unknown>).address
+		return typeof address === 'string' && address.trim() ? address.trim() : null
+	}
+
 	private buildCartSseEventId(
 		cartId: string,
 		type: string,
@@ -994,6 +1108,9 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 			status: order.status,
 			catalogId: order.catalogId,
 			totalAmount: Number(order.totalAmount),
+			checkoutMethod: order.checkoutMethod,
+			checkoutData: order.checkoutData,
+			checkoutContacts: order.checkoutContacts,
 			items: normalizeOrderProducts(order.products).map(item => ({
 				id: item.id,
 				productId: item.productId ?? '',

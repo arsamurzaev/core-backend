@@ -1,4 +1,4 @@
-import { CartStatus, OrderStatus } from '@generated/client'
+import { CartCheckoutMethod, CartStatus, OrderStatus } from '@generated/client'
 import { ApiProperty } from '@nestjs/swagger'
 
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
@@ -99,6 +99,15 @@ export class CartDto {
 	})
 	comment: string | null
 
+	@ApiProperty({ enum: CartCheckoutMethod, nullable: true })
+	checkoutMethod: CartCheckoutMethod | null
+
+	@ApiProperty({ type: Object, nullable: true })
+	checkoutData: Record<string, unknown> | null
+
+	@ApiProperty({ type: Object, nullable: true })
+	checkoutContacts: Record<string, string> | null
+
 	@ApiProperty({
 		type: String,
 		format: 'uuid',
@@ -182,6 +191,15 @@ export class CompletedOrderDto {
 
 	@ApiProperty({ type: Number, example: 3998 })
 	totalAmount: number
+
+	@ApiProperty({ enum: CartCheckoutMethod, nullable: true })
+	checkoutMethod: CartCheckoutMethod | null
+
+	@ApiProperty({ type: Object, nullable: true })
+	checkoutData: Record<string, unknown> | null
+
+	@ApiProperty({ type: Object, nullable: true })
+	checkoutContacts: Record<string, string> | null
 
 	@ApiProperty({ type: [CompletedOrderItemDto] })
 	items: CompletedOrderItemDto[]

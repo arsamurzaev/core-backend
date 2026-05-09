@@ -7,6 +7,7 @@ import type {
 	UpdateCatalogContactDtoReq,
 	UpdateCatalogDtoReq
 } from './dto/requests/update-catalog.dto.req'
+import { normalizeCatalogCheckoutSettings } from './catalog-checkout'
 
 const RESERVED_SUBDOMAINS = new Set(
 	(
@@ -31,6 +32,9 @@ export type CatalogUpdateAccess = {
 type CatalogSettingsSnapshot = {
 	defaultMode: CatalogExperienceMode
 	allowedModes: CatalogExperienceMode[]
+	address?: string | null
+	checkout?: unknown
+	typeCode?: string | null
 } | null
 
 export function normalizeCatalogSlug(value: string): string {
@@ -206,6 +210,20 @@ export function buildCatalogSettingsUpsert(
 	if (dto.yandexVerification !== undefined) {
 		update.yandexVerification = dto.yandexVerification
 		create.yandexVerification = dto.yandexVerification
+	}
+
+	if (dto.address !== undefined) {
+		update.address = dto.address
+		create.address = dto.address
+	}
+
+	if (dto.checkout !== undefined) {
+		const checkout = normalizeCatalogCheckoutSettings(
+			dto.checkout,
+			currentSettings?.typeCode
+		)
+		update.checkout = checkout ?? null
+		create.checkout = checkout ?? null
 	}
 
 	const nextAllowedModes =

@@ -7,6 +7,7 @@ import {
 	IsArray,
 	IsBoolean,
 	IsEnum,
+	IsObject,
 	IsOptional,
 	IsString,
 	Matches,
@@ -160,6 +161,23 @@ export class UpdateCatalogDtoReq {
 	isActive?: boolean
 
 	@ApiPropertyOptional({
+		type: String,
+		example: 'г. Грозный, ул. Назарбаева 5',
+		nullable: true
+	})
+	@IsOptional()
+	@IsString()
+	@MaxLength(500)
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		if (typeof value !== 'string') return value
+		const normalized = value.trim()
+		return normalized.length ? normalized : null
+	})
+	address?: string | null
+
+	@ApiPropertyOptional({
 		enum: CatalogExperienceMode,
 		example: CatalogExperienceMode.DELIVERY
 	})
@@ -177,6 +195,15 @@ export class UpdateCatalogDtoReq {
 	@ArrayNotEmpty()
 	@IsEnum(CatalogExperienceMode, { each: true })
 	allowedModes?: CatalogExperienceMode[]
+
+	@ApiPropertyOptional({
+		type: Object,
+		nullable: true,
+		description: 'Checkout methods settings for cart flow.'
+	})
+	@IsOptional()
+	@IsObject()
+	checkout?: Record<string, unknown> | null
 
 	@ApiPropertyOptional({
 		type: String,

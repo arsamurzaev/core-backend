@@ -22,6 +22,6 @@ import { MoySkladSyncService } from './providers/moysklad/moysklad.sync.service'
 		MoySkladSyncService,
 		MediaRepository
 	],
-	exports: [MoySkladQueueService]
+	exports: [IntegrationService, MoySkladQueueService]
 })
 export class IntegrationModule {}

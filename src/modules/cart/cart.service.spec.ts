@@ -1,4 +1,10 @@
-import { CartStatus, OrderStatus, Role } from '@generated/client'
+import {
+	CartCheckoutMethod,
+	CartStatus,
+	ContactType,
+	OrderStatus,
+	Role
+} from '@generated/client'
 import type { MessageEvent } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 
@@ -18,6 +24,9 @@ function createCartEntity(overrides: Record<string, unknown> = {}) {
 		publicKey: 'public-1',
 		checkoutKey: 'checkout-1',
 		checkoutAt: null,
+		checkoutMethod: null,
+		checkoutData: null,
+		checkoutContacts: null,
 		comment: null,
 		catalog: { parentId: null },
 		assignedManagerId: null,
@@ -38,6 +47,9 @@ function createCompletedOrderEntity(overrides: Record<string, unknown> = {}) {
 		catalogId: 'catalog-1',
 		totalAmount: 3998,
 		createdAt: new Date('2026-03-25T09:10:00.000Z'),
+		checkoutMethod: null,
+		checkoutData: null,
+		checkoutContacts: null,
 		products: [
 			{
 				id: 'cart-item-1',
@@ -199,6 +211,103 @@ describe('CartService', () => {
 		)
 		expect(result.status).toBe(CartStatus.IN_PROGRESS)
 		expect(result.assignedManagerId).toBe('manager-1')
+	})
+
+	it('shares delivery checkout with client address snapshot', async () => {
+		const draftCart = createCartEntity({
+			status: CartStatus.DRAFT,
+			publicKey: null,
+			checkoutKey: null
+		})
+		const sharedCart = createCartEntity({
+			status: CartStatus.SHARED,
+			publicKey: 'public-1',
+			checkoutMethod: CartCheckoutMethod.DELIVERY,
+			checkoutData: { address: 'Client street, 2' },
+			checkoutContacts: { PHONE: '+79990000000' }
+		})
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(draftCart)
+			.mockResolvedValueOnce(null)
+			.mockResolvedValueOnce(sharedCart)
+		prisma.catalog.findFirst.mockResolvedValue({
+			id: 'catalog-1',
+			type: { code: 'wholesale' },
+			settings: {
+				address: 'Catalog street, 1',
+				checkout: { enabledMethods: [CartCheckoutMethod.DELIVERY] }
+			},
+			contacts: [
+				{ type: ContactType.PHONE, value: '+79990000000' },
+				{ type: ContactType.MAP, value: 'https://yandex.ru/maps/-/test' }
+			]
+		})
+		prisma.cart.update.mockResolvedValue(undefined)
+
+		const result = await service.shareCurrentCart('catalog-1', 'token-1', {
+			checkoutData: { address: 'Client street, 2' },
+			checkoutMethod: CartCheckoutMethod.DELIVERY
+		})
+
+		expect(prisma.cart.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: 'cart-1' },
+				data: expect.objectContaining({
+					checkoutMethod: CartCheckoutMethod.DELIVERY,
+					checkoutData: { address: 'Client street, 2' },
+					checkoutContacts: { PHONE: '+79990000000' }
+				})
+			})
+		)
+		expect(result.cart.checkoutData).toEqual({ address: 'Client street, 2' })
+	})
+
+	it('shares pickup checkout with catalog address and map snapshot', async () => {
+		const draftCart = createCartEntity({
+			status: CartStatus.DRAFT,
+			publicKey: null,
+			checkoutKey: null
+		})
+		const sharedCart = createCartEntity({
+			status: CartStatus.SHARED,
+			publicKey: 'public-1',
+			checkoutMethod: CartCheckoutMethod.PICKUP,
+			checkoutData: {
+				address: 'Catalog street, 1',
+				mapUrl: 'https://yandex.ru/maps/-/test'
+			}
+		})
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(draftCart)
+			.mockResolvedValueOnce(null)
+			.mockResolvedValueOnce(sharedCart)
+		prisma.catalog.findFirst.mockResolvedValue({
+			id: 'catalog-1',
+			type: { code: 'clothes' },
+			settings: {
+				address: 'Catalog street, 1',
+				checkout: { enabledMethods: [CartCheckoutMethod.PICKUP] }
+			},
+			contacts: [{ type: ContactType.MAP, value: 'https://yandex.ru/maps/-/test' }]
+		})
+		prisma.cart.update.mockResolvedValue(undefined)
+
+		await service.shareCurrentCart('catalog-1', 'token-1', {
+			checkoutMethod: CartCheckoutMethod.PICKUP
+		})
+
+		expect(prisma.cart.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				data: expect.objectContaining({
+					checkoutData: {
+						address: 'Catalog street, 1',
+						mapUrl: 'https://yandex.ru/maps/-/test'
+					}
+				})
+			})
+		)
 	})
 
 	it('emits only cart.status_changed when manager status changes', async () => {
@@ -461,6 +570,9 @@ describe('CartService', () => {
 		const cartWithItems = createCartEntity({
 			status: CartStatus.IN_PROGRESS,
 			assignedManagerId: 'manager-1',
+			checkoutMethod: CartCheckoutMethod.DELIVERY,
+			checkoutData: { address: 'Main street, 1' },
+			checkoutContacts: { TELEGRAM: '@delivery' },
 			items: [
 				{
 					id: 'cart-item-1',
@@ -505,9 +617,14 @@ describe('CartService', () => {
 
 		expect(prisma.order.create).toHaveBeenCalledWith(
 			expect.objectContaining({
-				data: expect.objectContaining({
+			data: expect.objectContaining({
 					status: OrderStatus.COMPLETED,
-					catalogId: 'catalog-1'
+					catalogId: 'catalog-1',
+					isDelivery: true,
+					address: 'Main street, 1',
+					checkoutMethod: CartCheckoutMethod.DELIVERY,
+					checkoutData: { address: 'Main street, 1' },
+					checkoutContacts: { TELEGRAM: '@delivery' }
 				})
 			})
 		)

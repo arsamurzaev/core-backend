@@ -164,6 +164,9 @@ model CatalogSettings {
   defaultMode  CatalogExperienceMode   @default(DELIVERY) @map("default_mode")
   allowedModes CatalogExperienceMode[] @default([DELIVERY]) @map("allowed_modes")
 
+  address  String? @map("address")
+  checkout Json?
+
   googleVerification String? @map("google_verification")
   yandexVerification String? @map("yandex_verification")
 

@@ -1,8 +1,11 @@
+import { CartCheckoutMethod } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Type } from 'class-transformer'
 import {
 	IsInt,
 	IsNotEmpty,
+	IsObject,
+	IsEnum,
 	IsOptional,
 	IsString,
 	MaxLength,
@@ -19,6 +22,22 @@ export class ShareCurrentCartDtoReq {
 	@IsString()
 	@MaxLength(1000)
 	comment?: string
+
+	@ApiPropertyOptional({
+		enum: CartCheckoutMethod,
+		example: CartCheckoutMethod.DELIVERY
+	})
+	@IsOptional()
+	@IsEnum(CartCheckoutMethod)
+	checkoutMethod?: CartCheckoutMethod
+
+	@ApiPropertyOptional({
+		type: Object,
+		example: { personsCount: 4, visitTime: '19:30' }
+	})
+	@IsOptional()
+	@IsObject()
+	checkoutData?: Record<string, unknown>
 }
 
 export class UpsertCartItemDtoReq {

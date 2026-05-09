@@ -1,4 +1,4 @@
-import { CartStatus } from '@generated/client'
+import { CartCheckoutMethod, CartStatus } from '@generated/client'
 import { BadRequestException } from '@nestjs/common'
 
 import type { MediaRecord } from '@/shared/media/media-url.service'
@@ -22,6 +22,9 @@ type CartEntityLike = {
 	statusChangedAt: unknown
 	publicKey: string | null
 	checkoutAt: unknown
+	checkoutMethod: CartCheckoutMethod | null
+	checkoutData: unknown
+	checkoutContacts: unknown
 	comment: string | null
 	assignedManagerId: string | null
 	managerSessionStartedAt: unknown
@@ -158,6 +161,9 @@ export function mapCartEntity(
 		statusChangedAt: cart.statusChangedAt,
 		publicKey: cart.publicKey,
 		checkoutAt: cart.checkoutAt,
+		checkoutMethod: cart.checkoutMethod,
+		checkoutData: cart.checkoutData,
+		checkoutContacts: cart.checkoutContacts,
 		comment: cart.comment,
 		assignedManagerId: cart.assignedManagerId,
 		managerSessionStartedAt: cart.managerSessionStartedAt,

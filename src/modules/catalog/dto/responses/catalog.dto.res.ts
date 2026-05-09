@@ -1,4 +1,5 @@
 import {
+	CartCheckoutMethod,
 	CatalogExperienceMode,
 	CatalogStatus,
 	ContactType,
@@ -35,6 +36,34 @@ export class CatalogConfigDto {
 	note: string | null
 }
 
+export class CatalogCheckoutFieldDto {
+	@ApiProperty({ type: String })
+	key: string
+
+	@ApiProperty({ type: String })
+	label: string
+
+	@ApiProperty({ type: String, enum: ['text', 'number', 'time'] })
+	type: 'text' | 'number' | 'time'
+
+	@ApiProperty({ type: Boolean })
+	required: boolean
+}
+
+export class CatalogCheckoutConfigDto {
+	@ApiProperty({ enum: CartCheckoutMethod, isArray: true })
+	availableMethods: CartCheckoutMethod[]
+
+	@ApiProperty({ enum: CartCheckoutMethod, isArray: true })
+	enabledMethods: CartCheckoutMethod[]
+
+	@ApiProperty({ type: Object })
+	methodContacts: Record<string, Record<string, string>>
+
+	@ApiProperty({ type: Object })
+	methodFields: Record<string, CatalogCheckoutFieldDto[]>
+}
+
 export class CatalogSettingsDto {
 	@ApiProperty({ type: Boolean })
 	isActive: boolean
@@ -44,6 +73,12 @@ export class CatalogSettingsDto {
 
 	@ApiProperty({ enum: CatalogExperienceMode, isArray: true })
 	allowedModes: CatalogExperienceMode[]
+
+	@ApiProperty({ type: String, nullable: true })
+	address: string | null
+
+	@ApiProperty({ type: CatalogCheckoutConfigDto })
+	checkout: CatalogCheckoutConfigDto
 
 	@ApiProperty({ type: String, nullable: true })
 	googleVerification: string | null

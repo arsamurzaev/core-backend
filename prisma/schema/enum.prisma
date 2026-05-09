@@ -88,6 +88,12 @@ enum CartStatus {
   EXPIRED
 }
 
+enum CartCheckoutMethod {
+  DELIVERY
+  PICKUP
+  PREORDER
+}
+
 enum Metric {
   YANDEX
 }

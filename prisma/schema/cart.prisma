@@ -14,6 +14,10 @@ model Cart {
   checkoutAt  DateTime? @map("checkout_at")
   comment     String?
 
+  checkoutMethod   CartCheckoutMethod? @map("checkout_method")
+  checkoutData     Json?               @map("checkout_data")
+  checkoutContacts Json?               @map("checkout_contacts")
+
   assignedManagerId       String?   @map("assigned_manager_id") @db.Uuid
   managerSessionStartedAt DateTime? @map("manager_session_started_at")
   managerLastSeenAt       DateTime? @map("manager_last_seen_at")
