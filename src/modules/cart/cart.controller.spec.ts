@@ -51,8 +51,21 @@ describe('CartController', () => {
 		)
 	})
 
-	it('sets cart token cookie with base domain for catalog hosts', () => {
+	it('sets cart token cookie without domain for catalog subdomains', () => {
 		const req = createRequest('shop.myctlg.ru')
+		const res = createResponse()
+
+		;(controller as any).setTokenCookie(req, res, 'token-1')
+
+		expect(res.cookie).toHaveBeenCalledWith(
+			'cart_token',
+			'token-1',
+			expect.not.objectContaining({ domain: expect.any(String) })
+		)
+	})
+
+	it('sets cart token cookie with base domain for platform hosts', () => {
+		const req = createRequest('shtab.myctlg.ru')
 		const res = createResponse()
 
 		;(controller as any).setTokenCookie(req, res, 'token-1')

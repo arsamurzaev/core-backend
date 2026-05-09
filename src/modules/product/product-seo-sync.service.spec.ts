@@ -112,8 +112,8 @@ describe('ProductSeoSyncService', () => {
 			expect.objectContaining({
 				entityType: 'PRODUCT',
 				entityId: 'product-1',
-				urlPath: '/products/dzhinsy-slim-fit',
-				canonicalUrl: 'https://store.test/products/dzhinsy-slim-fit',
+				urlPath: '/product/dzhinsy-slim-fit',
+				canonicalUrl: 'https://store.test/product/dzhinsy-slim-fit',
 				ogMedia: { connect: { id: 'media-1' } },
 				twitterMedia: { connect: { id: 'media-1' } },
 				structuredData: expect.stringContaining('"@type":"Product"')

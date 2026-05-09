@@ -8,7 +8,7 @@ describe('resolveObservabilitySettings', () => {
 		expect(settings.serviceName).toBe('catalog_backend')
 		expect(settings.metricsPath).toBe('/metrics')
 		expect(settings.metricsEnabled).toBe(true)
-		expect(settings.jsonLogsEnabled).toBe(true)
+		expect(settings.jsonLogsEnabled).toBe(false)
 		expect(settings.tracesEnabled).toBe(false)
 		expect(settings.logFilePath).toBe('runtime/logs/backend.jsonl')
 	})

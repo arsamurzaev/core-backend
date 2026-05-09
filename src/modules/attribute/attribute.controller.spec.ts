@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing'
 
+import { OptionalSessionGuard } from '@/modules/auth/guards/optional-session.guard'
+import { SessionGuard } from '@/modules/auth/guards/session.guard'
+
 import { AttributeController } from './attribute.controller'
 import { AttributeService } from './attribute.service'
 
@@ -7,7 +10,7 @@ describe('AttributeController', () => {
 	let controller: AttributeController
 
 	beforeEach(async () => {
-		const module: TestingModule = await Test.createTestingModule({
+		const moduleBuilder = Test.createTestingModule({
 			controllers: [AttributeController],
 			providers: [
 				{
@@ -25,7 +28,16 @@ describe('AttributeController', () => {
 					}
 				}
 			]
-		}).compile()
+		})
+
+		moduleBuilder.overrideGuard(OptionalSessionGuard).useValue({
+			canActivate: jest.fn().mockReturnValue(true)
+		})
+		moduleBuilder.overrideGuard(SessionGuard).useValue({
+			canActivate: jest.fn().mockReturnValue(true)
+		})
+
+		const module: TestingModule = await moduleBuilder.compile()
 
 		controller = module.get<AttributeController>(AttributeController)
 	})
