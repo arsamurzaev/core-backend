@@ -182,7 +182,7 @@ export class AdminService {
 				: this.generateCatalogSlug(dto.name),
 			this.generateOwnerLogin(dto.slug)
 		])
-		const password = generatePassword()
+		const password = '00000000'
 		const passwordHash = await hash(password)
 		const ownerName = dto.ownerName ?? dto.name
 		const status = dto.status
