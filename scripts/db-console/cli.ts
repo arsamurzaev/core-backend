@@ -32,13 +32,13 @@ Command mode examples:
 		)
 
 	program.parse(argv)
-	const options = program.opts<{
+	const options = program.opts() as {
 		model?: string
 		readonly?: boolean
 		danger?: boolean
 		limit?: number
 		json?: boolean
-	}>()
+	}
 
 	return {
 		model: options.model,
