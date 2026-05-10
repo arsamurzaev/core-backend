@@ -1,8 +1,8 @@
 import { PrismaPg } from '@prisma/adapter-pg'
 import { hash } from 'argon2'
 import 'dotenv/config'
-import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
+import { createInterface } from 'node:readline/promises'
 
 import { PrismaClient, Role } from '../prisma/generated/client.js'
 
@@ -79,7 +79,10 @@ async function main() {
 	console.log(`Admin created: ${admin.login} (${admin.id})`)
 }
 
-async function askRequired(label: string, defaultValue?: string): Promise<string> {
+async function askRequired(
+	label: string,
+	defaultValue?: string
+): Promise<string> {
 	const suffix = defaultValue ? ` (${defaultValue})` : ''
 	const value = (await rl.question(`${label}${suffix}: `)).trim()
 	const resolved = value || defaultValue

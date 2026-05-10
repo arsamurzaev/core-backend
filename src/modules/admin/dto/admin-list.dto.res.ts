@@ -17,6 +17,55 @@ export class AdminDeleteInfoDto {
 	purgeInDays: number
 }
 
+export class AdminDeleteCatalogContentCountsDto {
+	@ApiProperty({ type: Number })
+	products: number
+
+	@ApiProperty({ type: Number })
+	productVariants: number
+
+	@ApiProperty({ type: Number })
+	productAttributes: number
+
+	@ApiProperty({ type: Number })
+	variantAttributes: number
+
+	@ApiProperty({ type: Number })
+	categories: number
+
+	@ApiProperty({ type: Number })
+	brands: number
+
+	@ApiProperty({ type: Number })
+	seoSettings: number
+
+	@ApiProperty({ type: Number })
+	productMediaLinks: number
+
+	@ApiProperty({ type: Number })
+	categoryProductLinks: number
+
+	@ApiProperty({ type: Number })
+	integrationProductLinks: number
+
+	@ApiProperty({ type: Number })
+	integrationCategoryLinks: number
+}
+
+export class AdminDeleteCatalogContentResultDto {
+	@ApiProperty({ type: Boolean })
+	ok: boolean
+
+	@ApiProperty({ type: String })
+	catalogId: string
+
+	@ApiProperty({ type: String, format: 'date-time' })
+	deletedAt: Date
+
+	@ApiProperty({ type: AdminDeleteCatalogContentCountsDto })
+	counts: AdminDeleteCatalogContentCountsDto
+}
+
 export class AdminTypeListItemDto {
 	@ApiProperty({ type: String })
 	id: string

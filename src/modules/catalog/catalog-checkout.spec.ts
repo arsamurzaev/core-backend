@@ -2,6 +2,7 @@ import { CartCheckoutMethod, ContactType } from '@generated/enums'
 import { BadRequestException } from '@nestjs/common'
 
 import {
+	normalizeCatalogCheckoutSettings,
 	normalizeCartCheckoutData,
 	resolveCatalogCheckoutConfig,
 	resolveCheckoutAvailableMethods,
@@ -21,11 +22,42 @@ describe('catalog checkout helpers', () => {
 			CartCheckoutMethod.PREORDER
 		])
 		expect(resolveCheckoutAvailableMethods('clothes')).toEqual([
+			CartCheckoutMethod.DELIVERY,
 			CartCheckoutMethod.PICKUP
 		])
 		expect(resolveCheckoutAvailableMethods('wholesale')).toEqual([
-			CartCheckoutMethod.DELIVERY
+			CartCheckoutMethod.DELIVERY,
+			CartCheckoutMethod.PICKUP
 		])
+	})
+
+	it('resolves default enabled methods by catalog type', () => {
+		expect(
+			resolveCatalogCheckoutConfig({ typeCode: 'restaurant' }).enabledMethods
+		).toEqual([CartCheckoutMethod.DELIVERY, CartCheckoutMethod.PICKUP])
+		expect(resolveCatalogCheckoutConfig({ typeCode: 'cafe' }).enabledMethods).toEqual(
+			[CartCheckoutMethod.DELIVERY, CartCheckoutMethod.PICKUP]
+		)
+		expect(
+			resolveCatalogCheckoutConfig({ typeCode: 'wholesale' }).enabledMethods
+		).toEqual([])
+		expect(resolveCatalogCheckoutConfig({ typeCode: 'clothes' }).enabledMethods).toEqual(
+			[]
+		)
+	})
+
+	it('keeps explicit empty enabled methods', () => {
+		expect(
+			normalizeCatalogCheckoutSettings({ enabledMethods: [] }, 'restaurant')
+		).toEqual({
+			enabledMethods: []
+		})
+		expect(
+			resolveCatalogCheckoutConfig({
+				typeCode: 'restaurant',
+				checkout: { enabledMethods: [] }
+			}).enabledMethods
+		).toEqual([])
 	})
 
 	it('uses catalog contacts unless a method has custom checkout contacts', () => {
@@ -69,7 +101,10 @@ describe('catalog checkout helpers', () => {
 	})
 
 	it('requires client address for delivery checkout', () => {
-		const config = resolveCatalogCheckoutConfig({ typeCode: 'wholesale' })
+		const config = resolveCatalogCheckoutConfig({
+			typeCode: 'wholesale',
+			checkout: { enabledMethods: [CartCheckoutMethod.DELIVERY] }
+		})
 
 		expect(() =>
 			normalizeCartCheckoutData({
@@ -93,7 +128,10 @@ describe('catalog checkout helpers', () => {
 	})
 
 	it('keeps catalog address and map url snapshot for pickup', () => {
-		const config = resolveCatalogCheckoutConfig({ typeCode: 'clothes' })
+		const config = resolveCatalogCheckoutConfig({
+			typeCode: 'clothes',
+			checkout: { enabledMethods: [CartCheckoutMethod.PICKUP] }
+		})
 
 		expect(
 			normalizeCartCheckoutData({
@@ -112,7 +150,10 @@ describe('catalog checkout helpers', () => {
 	})
 
 	it('requires persons count and keeps optional visit time for preorder', () => {
-		const config = resolveCatalogCheckoutConfig({ typeCode: 'restaurant' })
+		const config = resolveCatalogCheckoutConfig({
+			typeCode: 'restaurant',
+			checkout: { enabledMethods: [CartCheckoutMethod.PREORDER] }
+		})
 
 		expect(() =>
 			normalizeCartCheckoutData({
@@ -132,5 +173,29 @@ describe('catalog checkout helpers', () => {
 			checkoutMethod: CartCheckoutMethod.PREORDER,
 			checkoutData: { personsCount: 4, visitTime: '19:30' }
 		})
+	})
+
+	it('rejects checkout when all methods are disabled', () => {
+		const config = resolveCatalogCheckoutConfig({ typeCode: 'wholesale' })
+
+		expect(() =>
+			normalizeCartCheckoutData({
+				config,
+				method: CartCheckoutMethod.DELIVERY,
+				data: { address: 'Client street, 2' }
+			})
+		).toThrow('checkout is disabled for catalog')
+	})
+
+	it('keeps preorder disabled by default for restaurants', () => {
+		const config = resolveCatalogCheckoutConfig({ typeCode: 'restaurant' })
+
+		expect(() =>
+			normalizeCartCheckoutData({
+				config,
+				method: CartCheckoutMethod.PREORDER,
+				data: { personsCount: 4 }
+			})
+		).toThrow('checkoutMethod is not enabled')
 	})
 })

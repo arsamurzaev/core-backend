@@ -20,6 +20,7 @@ import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_CACHE_VERSION,
 	CATALOG_TYPE_CACHE_VERSION,
+	CATEGORY_LIST_CACHE_VERSION,
 	CATEGORY_PRODUCTS_CACHE_VERSION,
 	PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
@@ -975,6 +976,119 @@ export class AdminService {
 		return this.mapAdminCatalog(catalog)
 	}
 
+	async deleteCatalogContent(catalogId: string) {
+		const catalog = await this.prisma.catalog.findUnique({
+			where: { id: catalogId },
+			select: { id: true }
+		})
+
+		if (!catalog) throw new NotFoundException('Catalog not found')
+
+		const deletedAt = new Date()
+		const counts = await this.prisma.$transaction(async tx => {
+			const [
+				productMediaLinks,
+				categoryProductLinks,
+				integrationProductLinks,
+				integrationCategoryLinks,
+				variantAttributes,
+				productVariants,
+				productAttributes,
+				products,
+				categories,
+				brands,
+				seoSettings
+			] = await Promise.all([
+				tx.productMedia.deleteMany({
+					where: {
+						product: { catalogId }
+					}
+				}),
+				tx.categoryProduct.deleteMany({
+					where: {
+						OR: [{ category: { catalogId } }, { product: { catalogId } }]
+					}
+				}),
+				tx.integrationProductLink.deleteMany({
+					where: {
+						OR: [{ integration: { catalogId } }, { product: { catalogId } }]
+					}
+				}),
+				tx.integrationCategoryLink.deleteMany({
+					where: {
+						OR: [{ integration: { catalogId } }, { category: { catalogId } }]
+					}
+				}),
+				tx.variantAttribute.updateMany({
+					where: {
+						deleteAt: null,
+						variant: {
+							product: { catalogId }
+						}
+					},
+					data: { deleteAt: deletedAt }
+				}),
+				tx.productVariant.updateMany({
+					where: {
+						deleteAt: null,
+						product: { catalogId }
+					},
+					data: { deleteAt: deletedAt }
+				}),
+				tx.productAttribute.updateMany({
+					where: {
+						deleteAt: null,
+						product: { catalogId }
+					},
+					data: { deleteAt: deletedAt }
+				}),
+				tx.product.updateMany({
+					where: { catalogId, deleteAt: null },
+					data: { deleteAt: deletedAt, brandId: null }
+				}),
+				tx.category.updateMany({
+					where: { catalogId, deleteAt: null },
+					data: { deleteAt: deletedAt }
+				}),
+				tx.brand.updateMany({
+					where: { catalogId, deleteAt: null },
+					data: { deleteAt: deletedAt }
+				}),
+				tx.seoSetting.updateMany({
+					where: {
+						catalogId,
+						deleteAt: null,
+						entityType: { not: SeoEntityType.CATALOG }
+					},
+					data: { deleteAt: deletedAt }
+				})
+			])
+
+			return {
+				products: products.count,
+				productVariants: productVariants.count,
+				productAttributes: productAttributes.count,
+				variantAttributes: variantAttributes.count,
+				categories: categories.count,
+				brands: brands.count,
+				seoSettings: seoSettings.count,
+				productMediaLinks: productMediaLinks.count,
+				categoryProductLinks: categoryProductLinks.count,
+				integrationProductLinks: integrationProductLinks.count,
+				integrationCategoryLinks: integrationCategoryLinks.count
+			}
+		})
+
+		await this.invalidateCatalogContentCaches(catalogId)
+
+		return {
+			ok: true,
+			catalogId,
+			deletedAt,
+			counts
+		}
+	}
+
 	async getTypes() {
 		const types = await this.prisma.type.findMany({
 			select: {
@@ -1369,6 +1483,15 @@ export class AdminService {
 			this.cache.bumpVersion(CATALOG_CACHE_VERSION, catalogId),
 			this.cache.bumpVersion(PRODUCTS_CACHE_VERSION, catalogId),
 			this.cache.bumpVersion(CATEGORY_PRODUCTS_CACHE_VERSION, catalogId)
+		])
+	}
+
+	private async invalidateCatalogContentCaches(catalogId: string) {
+		await Promise.all([
+			this.cache.bumpVersion(CATALOG_CACHE_VERSION, catalogId),
+			this.cache.bumpVersion(PRODUCTS_CACHE_VERSION, catalogId),
+			this.cache.bumpVersion(CATEGORY_PRODUCTS_CACHE_VERSION, catalogId),
+			this.cache.bumpVersion(CATEGORY_LIST_CACHE_VERSION, catalogId)
 		])
 	}
 

@@ -69,14 +69,21 @@ const METHOD_FIELDS: Record<CartCheckoutMethod, CatalogCheckoutField[]> = {
 	]
 }
 
-const DEFAULT_AVAILABLE_METHODS = [CartCheckoutMethod.DELIVERY]
+const DEFAULT_AVAILABLE_METHODS = [
+	CartCheckoutMethod.DELIVERY,
+	CartCheckoutMethod.PICKUP
+]
+const RESTAURANT_TYPE_CODES = new Set(['restaurant', 'cafe'])
+
+function isRestaurantCheckoutType(typeCode?: string | null): boolean {
+	const code = typeCode?.trim().toLowerCase()
+	return Boolean(code && RESTAURANT_TYPE_CODES.has(code))
+}
 
 export function resolveCheckoutAvailableMethods(
 	typeCode?: string | null
 ): CartCheckoutMethod[] {
-	const code = typeCode?.trim().toLowerCase()
-
-	if (code === 'restaurant' || code === 'cafe') {
+	if (isRestaurantCheckoutType(typeCode)) {
 		return [
 			CartCheckoutMethod.DELIVERY,
 			CartCheckoutMethod.PICKUP,
@@ -84,11 +91,20 @@ export function resolveCheckoutAvailableMethods(
 		]
 	}
 
-	if (code === 'clothing' || code === 'clothes') {
-		return [CartCheckoutMethod.PICKUP]
+	return DEFAULT_AVAILABLE_METHODS
+}
+
+export function resolveCheckoutDefaultEnabledMethods(
+	typeCode?: string | null,
+	availableMethods = resolveCheckoutAvailableMethods(typeCode)
+): CartCheckoutMethod[] {
+	if (isRestaurantCheckoutType(typeCode)) {
+		return [CartCheckoutMethod.DELIVERY, CartCheckoutMethod.PICKUP].filter(
+			method => availableMethods.includes(method)
+		)
 	}
 
-	return DEFAULT_AVAILABLE_METHODS
+	return []
 }
 
 export function normalizeCatalogCheckoutSettings(
@@ -128,8 +144,18 @@ export function resolveCatalogCheckoutConfig(params: {
 }): CatalogCheckoutConfig {
 	const availableMethods = resolveCheckoutAvailableMethods(params.typeCode)
 	const raw = isRecord(params.checkout) ? params.checkout : {}
+	const fallbackMethods = resolveCheckoutDefaultEnabledMethods(
+		params.typeCode,
+		availableMethods
+	)
+	const normalizedEnabledMethods = normalizeMethodArray(
+		raw.enabledMethods,
+		availableMethods
+	)
 	const enabledMethods =
-		normalizeMethodArray(raw.enabledMethods, availableMethods) ?? availableMethods
+		normalizedEnabledMethods === null
+			? fallbackMethods
+			: normalizedEnabledMethods
 
 	return {
 		availableMethods,
@@ -162,6 +188,10 @@ export function normalizeCartCheckoutData(params: {
 	checkoutData: CatalogCheckoutData
 	checkoutMethod: CartCheckoutMethod
 } {
+	if (params.config.enabledMethods.length === 0) {
+		throw new BadRequestException('checkout is disabled for catalog')
+	}
+
 	const method = resolveCartCheckoutMethod(params.method, params.config)
 	if (!params.config.enabledMethods.includes(method)) {
 		throw new BadRequestException('checkoutMethod is not enabled')
@@ -257,7 +287,7 @@ function normalizeMethodArray(
 		throw new BadRequestException('enabledMethods must include available methods')
 	}
 
-	return filtered.length > 0 ? filtered : null
+	return filtered
 }
 
 function normalizeMethodContacts(

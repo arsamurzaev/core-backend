@@ -34,6 +34,7 @@ import {
 	AdminActivityListItemDto,
 	AdminCatalogListItemDto,
 	AdminCreateCatalogResponseDto,
+	AdminDeleteCatalogContentResultDto,
 	AdminPaymentDto,
 	AdminPromoCodeListItemDto,
 	AdminTypeListItemDto
@@ -115,6 +116,17 @@ export class AdminController {
 		@Param('id', ParseUUIDPipe) id: string
 	): Promise<AdminCatalogListItemDto> {
 		return this.adminService.deleteCatalog(id) as Promise<AdminCatalogListItemDto>
+	}
+
+	@Delete('/catalogs/:id/content')
+	@ApiOperation({ summary: 'Soft-delete контент каталога, не удаляя каталог' })
+	@ApiOkResponse({ type: AdminDeleteCatalogContentResultDto })
+	async deleteCatalogContent(
+		@Param('id', ParseUUIDPipe) id: string
+	): Promise<AdminDeleteCatalogContentResultDto> {
+		return this.adminService.deleteCatalogContent(
+			id
+		) as Promise<AdminDeleteCatalogContentResultDto>
 	}
 
 	@Post('/catalogs/:id/restore')
