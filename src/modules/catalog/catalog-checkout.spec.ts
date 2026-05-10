@@ -175,16 +175,19 @@ describe('catalog checkout helpers', () => {
 		})
 	})
 
-	it('rejects checkout when all methods are disabled', () => {
+	it('allows checkout without method when all methods are disabled', () => {
 		const config = resolveCatalogCheckoutConfig({ typeCode: 'wholesale' })
 
-		expect(() =>
+		expect(
 			normalizeCartCheckoutData({
 				config,
 				method: CartCheckoutMethod.DELIVERY,
 				data: { address: 'Client street, 2' }
 			})
-		).toThrow('checkout is disabled for catalog')
+		).toEqual({
+			checkoutMethod: null,
+			checkoutData: {}
+		})
 	})
 
 	it('keeps preorder disabled by default for restaurants', () => {

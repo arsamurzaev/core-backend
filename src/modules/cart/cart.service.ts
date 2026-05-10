@@ -1006,7 +1006,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	): Promise<{
 		checkoutContacts: Record<string, string>
 		checkoutData: CatalogCheckoutData
-		checkoutMethod: CartCheckoutMethod
+		checkoutMethod: CartCheckoutMethod | null
 	}> {
 		const catalog = await this.prisma.catalog.findFirst({
 			where: { id: catalogId, deleteAt: null },

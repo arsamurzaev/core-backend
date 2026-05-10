@@ -186,10 +186,10 @@ export function normalizeCartCheckoutData(params: {
 	method?: unknown
 }): {
 	checkoutData: CatalogCheckoutData
-	checkoutMethod: CartCheckoutMethod
+	checkoutMethod: CartCheckoutMethod | null
 } {
 	if (params.config.enabledMethods.length === 0) {
-		throw new BadRequestException('checkout is disabled for catalog')
+		return { checkoutMethod: null, checkoutData: {} }
 	}
 
 	const method = resolveCartCheckoutMethod(params.method, params.config)
@@ -239,11 +239,13 @@ export function normalizeCartCheckoutData(params: {
 export function resolveCheckoutContactsSnapshot(params: {
 	catalogContacts: CatalogContactSnapshot[]
 	config: CatalogCheckoutConfig
-	method: CartCheckoutMethod
+	method: CartCheckoutMethod | null
 }): CatalogCheckoutContactValues {
-	const customContacts = params.config.methodContacts[params.method] ?? {}
-	if (hasCheckoutContacts(customContacts)) {
-		return customContacts
+	if (params.method) {
+		const customContacts = params.config.methodContacts[params.method] ?? {}
+		if (hasCheckoutContacts(customContacts)) {
+			return customContacts
+		}
 	}
 
 	return params.catalogContacts.reduce<CatalogCheckoutContactValues>(

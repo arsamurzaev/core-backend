@@ -310,6 +310,49 @@ describe('CartService', () => {
 		)
 	})
 
+	it('shares checkout without method when catalog methods are disabled', async () => {
+		const draftCart = createCartEntity({
+			status: CartStatus.DRAFT,
+			publicKey: null,
+			checkoutKey: null
+		})
+		const sharedCart = createCartEntity({
+			status: CartStatus.SHARED,
+			publicKey: 'public-1',
+			checkoutMethod: null,
+			checkoutData: {},
+			checkoutContacts: { PHONE: '+79990000000' }
+		})
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(draftCart)
+			.mockResolvedValueOnce(null)
+			.mockResolvedValueOnce(sharedCart)
+		prisma.catalog.findFirst.mockResolvedValue({
+			id: 'catalog-1',
+			type: { code: 'wholesale' },
+			settings: {
+				address: 'Catalog street, 1',
+				checkout: { enabledMethods: [] }
+			},
+			contacts: [{ type: ContactType.PHONE, value: '+79990000000' }]
+		})
+		prisma.cart.update.mockResolvedValue(undefined)
+
+		await service.shareCurrentCart('catalog-1', 'token-1', {})
+
+		expect(prisma.cart.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: 'cart-1' },
+				data: expect.objectContaining({
+					checkoutMethod: null,
+					checkoutData: {},
+					checkoutContacts: { PHONE: '+79990000000' }
+				})
+			})
+		)
+	})
+
 	it('emits only cart.status_changed when manager status changes', async () => {
 		const activeCart = createCartEntity({
 			status: CartStatus.IN_PROGRESS,
