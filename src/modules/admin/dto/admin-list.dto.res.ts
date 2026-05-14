@@ -2,6 +2,10 @@ import { CatalogStatus, PaymentKind } from '@generated/enums'
 import type { CatalogInventoryMode } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
+import {
+	CATALOG_CAPABILITIES,
+	type CatalogCapability
+} from '@/modules/capability/capability.constants'
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
 
 const CATALOG_INVENTORY_MODE_VALUES = ['NONE', 'EXTERNAL', 'INTERNAL'] as const
@@ -234,6 +238,51 @@ export class AdminCatalogConfigListItemDto {
 		description: 'Whether the catalog can use MoySklad integration.'
 	})
 	canUseMoySkladIntegration: boolean
+}
+
+export class AdminCatalogFeatureEntitlementItemDto {
+	@ApiProperty({ enum: CATALOG_CAPABILITIES })
+	feature: CatalogCapability
+
+	@ApiProperty({ type: Boolean })
+	enabled: boolean
+
+	@ApiProperty({ type: String, format: 'date-time', nullable: true })
+	expiresAt: Date | null
+
+	@ApiProperty({ type: Object, nullable: true })
+	metadata: unknown | null
+}
+
+export class AdminCatalogFeatureEntitlementsDto {
+	@ApiProperty({ type: String })
+	catalogId: string
+
+	@ApiProperty({ type: [Object] })
+	definitions: Record<string, unknown>[]
+
+	@ApiProperty({
+		type: Object,
+		additionalProperties: { type: 'boolean' },
+		description: 'Raw admin entitlements before dependency resolution.'
+	})
+	raw: Record<string, boolean>
+
+	@ApiProperty({
+		type: Object,
+		additionalProperties: { type: 'boolean' },
+		description: 'Effective capabilities after dependency resolution.'
+	})
+	effective: Record<string, boolean>
+
+	@ApiProperty({
+		type: [Object],
+		description: 'Per-capability state with disabled reasons.'
+	})
+	items: Record<string, unknown>[]
+
+	@ApiProperty({ type: [AdminCatalogFeatureEntitlementItemDto] })
+	features: AdminCatalogFeatureEntitlementItemDto[]
 }
 
 export class AdminCatalogChildListItemDto {

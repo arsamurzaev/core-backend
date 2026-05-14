@@ -1170,7 +1170,38 @@ describe('ProductService', () => {
 			id: 'product-1',
 			media: [],
 			productType: { id: 'product-type-1', code: 'clothes', name: 'Clothes' },
-			productAttributes: [{ id: 'attribute-value-1' }],
+			productAttributes: [
+				{
+					id: 'attribute-value-public',
+					attribute: {
+						id: 'subtitle-attribute',
+						key: 'subtitle',
+						displayName: 'Subtitle',
+						isHidden: false,
+						isVariantAttribute: false
+					}
+				},
+				{
+					id: 'attribute-value-hidden',
+					attribute: {
+						id: 'hidden-attribute',
+						key: 'internal',
+						displayName: 'Internal',
+						isHidden: true,
+						isVariantAttribute: false
+					}
+				},
+				{
+					id: 'attribute-value-variant',
+					attribute: {
+						id: 'size-attribute',
+						key: 'size',
+						displayName: 'Size',
+						isHidden: false,
+						isVariantAttribute: true
+					}
+				}
+			],
 			variants: [
 				{
 					id: 'variant-1',
@@ -1202,7 +1233,11 @@ describe('ProductService', () => {
 		expect(result).toMatchObject({
 			id: 'product-1',
 			productType: null,
-			productAttributes: [],
+			productAttributes: [
+				{
+					id: 'attribute-value-public'
+				}
+			],
 			variantSummary: {
 				minPrice: null,
 				maxPrice: null,

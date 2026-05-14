@@ -328,6 +328,30 @@ function sanitizeVariantForReadFeatures<T extends Record<string, unknown>>(
 	return sanitized as T
 }
 
+function sanitizeProductAttributesForReadFeatures(
+	value: unknown,
+	features: ProductReadFeatures
+): unknown[] {
+	if (!Array.isArray(value)) return []
+	const attributes = value as unknown[]
+	if (features.canUseProductTypes) return attributes
+
+	return attributes.filter(attributeValue => {
+		if (!attributeValue || typeof attributeValue !== 'object') return false
+
+		const meta = (
+			attributeValue as {
+				attribute?: {
+					isHidden?: boolean | null
+					isVariantAttribute?: boolean | null
+				} | null
+			}
+		).attribute
+
+		return meta?.isHidden !== true && meta?.isVariantAttribute !== true
+	})
+}
+
 function sanitizeProductForReadFeatures<T extends Record<string, unknown>>(
 	product: T,
 	features: ProductReadFeatures,
@@ -337,7 +361,12 @@ function sanitizeProductForReadFeatures<T extends Record<string, unknown>>(
 
 	if (!features.canUseProductTypes) {
 		if ('productType' in sanitized) sanitized.productType = null
-		if ('productAttributes' in sanitized) sanitized.productAttributes = []
+		if ('productAttributes' in sanitized) {
+			sanitized.productAttributes = sanitizeProductAttributesForReadFeatures(
+				sanitized.productAttributes,
+				features
+			)
+		}
 	}
 
 	if (!features.canUseMoySkladIntegration && 'integration' in sanitized) {
@@ -353,18 +382,20 @@ function sanitizeProductForReadFeatures<T extends Record<string, unknown>>(
 	}
 
 	if ('variants' in sanitized) {
-		sanitized.variants = shouldExposeVariants
-			? Array.isArray(sanitized.variants)
-				? sanitized.variants.map(variant =>
-						typeof variant === 'object' && variant !== null
-							? sanitizeVariantForReadFeatures(
-									variant as Record<string, unknown>,
-									features
-								)
-							: variant
-					)
-				: []
-			: []
+		if (!shouldExposeVariants || !Array.isArray(sanitized.variants)) {
+			sanitized.variants = []
+		} else {
+			const variants = sanitized.variants as unknown[]
+
+			sanitized.variants = variants.map((variant): unknown =>
+				typeof variant === 'object' && variant !== null
+					? sanitizeVariantForReadFeatures(
+							variant as Record<string, unknown>,
+							features
+						)
+					: variant
+			)
+		}
 	}
 
 	return sanitized as T

@@ -32,6 +32,7 @@ import { SessionGuard } from '../auth/guards/session.guard'
 import { AdminService, type UploadedPaymentProofFile } from './admin.service'
 import {
 	AdminActivityListItemDto,
+	AdminCatalogFeatureEntitlementsDto,
 	AdminCatalogListItemDto,
 	AdminCreateCatalogResponseDto,
 	AdminDeleteCatalogContentResultDto,
@@ -112,16 +113,20 @@ export class AdminController {
 
 	@Get('/catalogs/:id/features')
 	@ApiOperation({ summary: 'Get catalog feature entitlements' })
-	async getCatalogFeatureEntitlements(@Param('id', ParseUUIDPipe) id: string) {
+	@ApiOkResponse({ type: AdminCatalogFeatureEntitlementsDto })
+	async getCatalogFeatureEntitlements(
+		@Param('id', ParseUUIDPipe) id: string
+	): Promise<AdminCatalogFeatureEntitlementsDto> {
 		return this.adminService.getCatalogFeatureEntitlements(id)
 	}
 
 	@Patch('/catalogs/:id/features')
 	@ApiOperation({ summary: 'Enable or disable a catalog feature entitlement' })
+	@ApiOkResponse({ type: AdminCatalogFeatureEntitlementsDto })
 	async updateCatalogFeatureEntitlement(
 		@Param('id', ParseUUIDPipe) id: string,
 		@Body() dto: AdminUpdateCatalogFeatureEntitlementDtoReq
-	) {
+	): Promise<AdminCatalogFeatureEntitlementsDto> {
 		return this.adminService.updateCatalogFeatureEntitlement(id, dto)
 	}
 
