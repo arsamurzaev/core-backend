@@ -113,6 +113,29 @@ export class IntegrationProviderCapabilitiesDto {
 	webhook: boolean
 }
 
+export class MoySkladStockWebhookDto {
+	@ApiProperty({ type: Boolean })
+	enabled: boolean
+
+	@ApiProperty({ type: Boolean })
+	registered: boolean
+
+	@ApiProperty({ type: String })
+	reportType: string
+
+	@ApiProperty({ type: String })
+	stockType: string
+
+	@ApiProperty({ type: String, format: 'date-time', nullable: true })
+	lastReceivedAt: string | null
+
+	@ApiProperty({ type: String, format: 'date-time', nullable: true })
+	lastProcessedAt: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	lastError: string | null
+}
+
 export class MoySkladIntegrationDto {
 	@ApiProperty({ enum: IntegrationProvider })
 	provider: IntegrationProvider
@@ -137,6 +160,9 @@ export class MoySkladIntegrationDto {
 
 	@ApiProperty({ type: Boolean })
 	syncStock: boolean
+
+	@ApiProperty({ type: MoySkladStockWebhookDto })
+	stockWebhook: MoySkladStockWebhookDto
 
 	@ApiProperty({ type: Boolean })
 	exportOrders: boolean

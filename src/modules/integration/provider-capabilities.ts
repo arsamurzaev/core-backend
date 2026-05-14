@@ -39,7 +39,7 @@ export const INTEGRATION_PROVIDER_CAPABILITIES: Record<
 		imageImport: true,
 		orderExport: true,
 		reservation: false,
-		webhook: false
+		webhook: true
 	}
 }
 

@@ -7,6 +7,8 @@ import {
 	IntegrationSyncStatus
 } from '@generated/enums'
 import { BadRequestException, NotFoundException } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { createHash } from 'crypto'
 import { Test, TestingModule } from '@nestjs/testing'
 
 import { AuditService } from '@/modules/audit/audit.service'
@@ -37,6 +39,8 @@ function buildEncryptedMetadata(input: {
 	schedulePattern?: string | null
 	scheduleTimezone?: string
 	lastStockSyncedAt?: string | null
+	stockWebhookEnabled?: boolean
+	stockWebhook?: any
 }) {
 	const normalized = buildMoySkladMetadata(input)
 
@@ -52,6 +56,8 @@ function buildEncryptedMetadata(input: {
 		schedulePattern: normalized.schedulePattern,
 		scheduleTimezone: normalized.scheduleTimezone,
 		lastStockSyncedAt: normalized.lastStockSyncedAt,
+		stockWebhookEnabled: normalized.stockWebhookEnabled,
+		stockWebhook: normalized.stockWebhook,
 		tokenEncrypted: {
 			format: 'enc-v1' as const,
 			alg: 'aes-256-gcm' as const,
@@ -61,6 +67,10 @@ function buildEncryptedMetadata(input: {
 			ciphertext: 'cipher'
 		}
 	}
+}
+
+function hashWebhookSecret(secret: string): string {
+	return createHash('sha256').update(secret).digest('hex')
 }
 
 describe('IntegrationService', () => {
@@ -189,6 +199,10 @@ describe('IntegrationService', () => {
 						upsertMoySkladAttributeMappings: jest.fn(),
 						upsertMoySklad: jest.fn(),
 						updateMoySklad: jest.fn(),
+						findMoySkladById: jest.fn(),
+						updateMoySkladMetadataById: jest.fn(),
+						patchMoySkladStockWebhookMetadata: jest.fn(),
+						createWebhookEventIfNew: jest.fn(),
 						softDeleteMoySklad: jest.fn(),
 						failMoySkladSync: jest.fn()
 					}
@@ -207,7 +221,8 @@ describe('IntegrationService', () => {
 						removeScheduler: jest.fn(),
 						enqueueCatalogSync: jest.fn(),
 						enqueueProductSync: jest.fn(),
-						enqueueStockSync: jest.fn()
+						enqueueStockSync: jest.fn(),
+						enqueueStockWebhookDrain: jest.fn()
 					}
 				},
 				{
@@ -273,9 +288,30 @@ describe('IntegrationService', () => {
 									typeof metadata?.lastStockSyncedAt === 'string' ||
 									metadata?.lastStockSyncedAt === null
 										? metadata.lastStockSyncedAt
-										: decryptedMetadata.lastStockSyncedAt
+										: decryptedMetadata.lastStockSyncedAt,
+								stockWebhookEnabled:
+									typeof metadata?.stockWebhookEnabled === 'boolean'
+										? metadata.stockWebhookEnabled
+										: decryptedMetadata.stockWebhookEnabled,
+								stockWebhook:
+									metadata?.stockWebhook && typeof metadata.stockWebhook === 'object'
+										? metadata.stockWebhook
+										: decryptedMetadata.stockWebhook
 							})
 						)
+					}
+				},
+				{
+					provide: ConfigService,
+					useValue: {
+						get: jest.fn((key: string) => {
+							if (key === 'integration') {
+								return {
+									moySkladWebhookBaseUrl: 'https://api.example.test'
+								}
+							}
+							return undefined
+						})
 					}
 				},
 				{
@@ -289,7 +325,8 @@ describe('IntegrationService', () => {
 					useValue: {
 						assertCanUseMoySkladIntegration: jest.fn().mockResolvedValue(undefined),
 						assertCanUseProductTypes: jest.fn().mockResolvedValue(undefined),
-						assertCanUseProductVariants: jest.fn().mockResolvedValue(undefined)
+						assertCanUseProductVariants: jest.fn().mockResolvedValue(undefined),
+						canUseMoySkladIntegration: jest.fn().mockResolvedValue(true)
 					}
 				}
 			]
@@ -506,7 +543,7 @@ describe('IntegrationService', () => {
 			imageImport: true,
 			orderExport: true,
 			reservation: false,
-			webhook: false
+			webhook: true
 		})
 		expect(result.integration?.lastSyncError).toContain('[redacted]')
 		expect(result.activeRun?.error).toContain('[redacted]')
@@ -1215,6 +1252,108 @@ describe('IntegrationService', () => {
 
 		expect(queue.enqueueStockSync).toHaveBeenCalledWith('catalog-1')
 		expect(result.mode).toBe(IntegrationSyncRunMode.STOCK)
+	})
+
+	it('stores MoySklad stock webhook event and queues drain job', async () => {
+		const secret = 'webhook-secret'
+		repo.findMoySkladById.mockResolvedValue({
+			...integrationRecord,
+			metadata: buildEncryptedMetadata({
+				token: 'token-12345678',
+				stockWebhookEnabled: true,
+				stockWebhook: {
+					externalId: 'webhook-1',
+					accountId: 'account-1',
+					secretHash: hashWebhookSecret(secret),
+					reportType: 'all',
+					stockType: 'stock',
+					lastReceivedAt: null,
+					lastProcessedAt: null,
+					lastError: null
+				}
+			})
+		} as any)
+		repo.createWebhookEventIfNew.mockResolvedValue({
+			created: true,
+			event: { id: 'event-1' }
+		} as any)
+		repo.patchMoySkladStockWebhookMetadata.mockResolvedValue(
+			integrationRecord as any
+		)
+		queue.enqueueStockWebhookDrain.mockResolvedValue({
+			ok: true,
+			queued: true,
+			jobId: 'webhook-job-1'
+		})
+
+		await service.receiveMoySkladStockWebhook({
+			integrationId: 'integration-1',
+			secret,
+			requestId: 'request-1',
+			payload: {
+				events: [
+					{
+						accountId: 'account-1',
+						reportUrl:
+							'https://api.moysklad.ru/api/remap/1.2/report/stock/all/current?filter=assortmentId%3Dassortment-1'
+					}
+				]
+			}
+		})
+
+		expect(repo.createWebhookEventIfNew).toHaveBeenCalledWith(
+			expect.objectContaining({
+				integrationId: 'integration-1',
+				requestId: 'request-1',
+				reportUrl:
+					'https://api.moysklad.ru/api/remap/1.2/report/stock/all/current?filter=assortmentId%3Dassortment-1'
+			})
+		)
+		expect(queue.enqueueStockWebhookDrain).toHaveBeenCalledWith(
+			'catalog-1',
+			'integration-1'
+		)
+	})
+
+	it('does not queue webhook drain for duplicate MoySklad requestId', async () => {
+		const secret = 'webhook-secret'
+		repo.findMoySkladById.mockResolvedValue({
+			...integrationRecord,
+			metadata: buildEncryptedMetadata({
+				token: 'token-12345678',
+				stockWebhookEnabled: true,
+				stockWebhook: {
+					externalId: 'webhook-1',
+					accountId: 'account-1',
+					secretHash: hashWebhookSecret(secret),
+					reportType: 'all',
+					stockType: 'stock',
+					lastReceivedAt: null,
+					lastProcessedAt: null,
+					lastError: null
+				}
+			})
+		} as any)
+		repo.createWebhookEventIfNew.mockResolvedValue({
+			created: false,
+			event: { id: 'event-1' }
+		} as any)
+		repo.patchMoySkladStockWebhookMetadata.mockResolvedValue(
+			integrationRecord as any
+		)
+
+		await service.receiveMoySkladStockWebhook({
+			integrationId: 'integration-1',
+			secret,
+			requestId: 'request-1',
+			payload: {
+				accountId: 'account-1',
+				reportUrl:
+					'https://api.moysklad.ru/api/remap/1.2/report/stock/all/current'
+			}
+		})
+
+		expect(queue.enqueueStockWebhookDrain).not.toHaveBeenCalled()
 	})
 
 	it('marks active MoySklad sync as cancelled', async () => {

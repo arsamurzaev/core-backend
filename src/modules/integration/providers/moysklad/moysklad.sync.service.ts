@@ -941,6 +941,139 @@ export class MoySkladSyncService {
 		}
 	}
 
+	async syncWebhookStock(
+		catalogId: string,
+		options: SyncProgressOptions & { reportUrls: string[] }
+	): Promise<SyncStockResult> {
+		const startedAt = Date.now()
+		const progress = this.createProgressReporter(options.runId)
+		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.beginSyncOrThrow(catalogId)
+		this.logger.log(
+			`Starting MoySklad webhook stock sync for catalog ${catalogId}: reportUrls=${options.reportUrls.length}`
+		)
+
+		try {
+			const integration = await this.getActiveIntegration(catalogId)
+			const metadata = this.metadataCrypto.parseStoredMetadata(
+				integration.metadata
+			)
+			if (!metadata.syncStock) {
+				throw new ConflictException(
+					'MoySklad stock sync is disabled in integration settings'
+				)
+			}
+
+			const inventoryMode = await this.repo.findCatalogInventoryMode(catalogId)
+			if (inventoryMode === CATALOG_INVENTORY_MODE_INTERNAL) {
+				const syncedAt = new Date()
+				await this.repo.finishMoySkladSync(catalogId, {
+					totalProducts: 0,
+					createdProducts: 0,
+					updatedProducts: 0,
+					deletedProducts: 0,
+					syncedAt,
+					lastStockSyncedAt: syncedAt
+				})
+				const durationMs = Date.now() - startedAt
+				await progress.report({
+					phase: 'COMPLETED',
+					message:
+						'MoySklad webhook stock sync skipped for INTERNAL inventory catalog',
+					processed: 0,
+					total: 0,
+					force: true
+				})
+
+				return {
+					ok: true,
+					total: 0,
+					updated: 0,
+					updatedProducts: 0,
+					updatedVariants: 0,
+					skipped: 0,
+					durationMs,
+					syncedAt
+				}
+			}
+
+			await progress.report({
+				phase: 'SYNCING_STOCK',
+				message: 'Fetching MoySklad webhook stock reports',
+				processed: 0,
+				total: options.reportUrls.length,
+				force: true
+			})
+
+			const client = new MoySkladClient({ token: metadata.token })
+			const stockMap = new Map<string, number>()
+			for (const reportUrl of options.reportUrls) {
+				const reportStockMap = await client.getStockFromReportUrl(reportUrl)
+				for (const [externalId, stock] of reportStockMap) {
+					stockMap.set(externalId, stock)
+				}
+			}
+
+			const features = await this.featureEntitlements.getCurrentFeatures(catalogId)
+			const canSyncVariants =
+				features.canUseProductTypes && features.canUseProductVariants
+			const stockResult = await this.stockSync.applyExternalStockMap({
+				catalogId,
+				integrationId: integration.id,
+				stockMap,
+				canSyncVariants,
+				progress
+			})
+
+			const syncedAt = new Date()
+			await this.repo.finishMoySkladSync(catalogId, {
+				totalProducts: stockResult.total,
+				createdProducts: 0,
+				updatedProducts: stockResult.updated,
+				deletedProducts: 0,
+				syncedAt,
+				lastStockSyncedAt: syncedAt
+			})
+			if (stockResult.updated > 0) {
+				await this.invalidateProductCaches(catalogId)
+			}
+
+			const durationMs = Date.now() - startedAt
+			await progress.report({
+				phase: 'COMPLETED',
+				message: 'MoySklad webhook stock sync completed',
+				processed: stockResult.total,
+				total: stockResult.total,
+				force: true
+			})
+			this.logger.log(
+				`Completed MoySklad webhook stock sync for catalog ${catalogId}: stockRows=${stockResult.total}, updatedProducts=${stockResult.updatedProducts}, updatedVariants=${stockResult.updatedVariants}, skipped=${stockResult.skipped}, durationMs=${durationMs}`
+			)
+
+			return {
+				ok: true,
+				total: stockResult.total,
+				updated: stockResult.updated,
+				updatedProducts: stockResult.updatedProducts,
+				updatedVariants: stockResult.updatedVariants,
+				skipped: stockResult.skipped,
+				durationMs,
+				syncedAt
+			}
+		} catch (error) {
+			await progress.report({
+				phase: 'FAILED',
+				message: this.renderErrorMessage(error),
+				force: true
+			})
+			this.logger.error(
+				`MoySklad webhook stock sync failed for catalog ${catalogId}: ${this.renderErrorMessage(error)}`
+			)
+			await this.repo.failMoySkladSync(catalogId, this.renderErrorMessage(error))
+			throw this.wrapSyncError(error)
+		}
+	}
+
 	private createProgressReporter(runId?: string | null): SyncProgressReporter {
 		let lastReportedAt = 0
 		let lastProcessed = -1

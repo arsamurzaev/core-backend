@@ -4,6 +4,7 @@ import {
 	Controller,
 	Delete,
 	Get,
+	HttpCode,
 	Param,
 	Patch,
 	Post,
@@ -22,6 +23,8 @@ import {
 } from '@nestjs/swagger'
 
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
+import { Public } from '@/shared/http/decorators/public.decorator'
+import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { CatalogAccessGuard } from '../auth/guards/catalog-access.guard'
@@ -222,6 +225,28 @@ export class IntegrationController {
 	@ApiOkResponse({ type: MoySkladQueuedSyncDto })
 	async syncMoySkladStock() {
 		return this.integrationService.syncMoySkladStock()
+	}
+
+	@Post('/webhooks/moysklad/stock/:integrationId/:secret')
+	@Public()
+	@SkipCatalog()
+	@HttpCode(204)
+	@ApiOperation({ summary: 'Receive MoySklad stock webhook' })
+	@ApiParam({ name: 'integrationId' })
+	@ApiParam({ name: 'secret' })
+	@ApiQuery({ name: 'requestId', required: false, type: String })
+	async receiveMoySkladStockWebhook(
+		@Param('integrationId') integrationId: string,
+		@Param('secret') secret: string,
+		@Query('requestId') requestId: string | string[] | undefined,
+		@Body() payload: unknown
+	): Promise<void> {
+		await this.integrationService.receiveMoySkladStockWebhook({
+			integrationId,
+			secret,
+			requestId,
+			payload
+		})
 	}
 
 	@Post('/moysklad/order-exports/:id/retry')

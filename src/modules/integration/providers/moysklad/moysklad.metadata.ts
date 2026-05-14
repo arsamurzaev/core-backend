@@ -9,11 +9,14 @@ import { normalizeRequiredString } from '@/shared/utils'
 import {
 	type EncryptedMoySkladToken,
 	type MoySkladMetadata,
+	type MoySkladStockWebhookMetadata,
 	type StoredMoySkladMetadata
 } from './moysklad.types'
 
 export const MOYSKLAD_DEFAULT_PRICE_TYPE_NAME = 'Цена продажи'
 export const MOYSKLAD_DEFAULT_SCHEDULE_TIMEZONE = 'Europe/Moscow'
+export const MOYSKLAD_STOCK_WEBHOOK_REPORT_TYPE = 'all'
+export const MOYSKLAD_STOCK_WEBHOOK_STOCK_TYPE = 'stock'
 
 const MOYSKLAD_TOKEN_ENCRYPTION_FORMAT = 'enc-v1'
 const MOYSKLAD_TOKEN_ENCRYPTION_ALGORITHM = 'aes-256-gcm'
@@ -43,7 +46,20 @@ const storedMoySkladMetadataSchema = z
 		scheduleEnabled: z.boolean().optional(),
 		schedulePattern: z.string().nullable().optional(),
 		scheduleTimezone: z.string().optional(),
-		lastStockSyncedAt: z.string().nullable().optional()
+		lastStockSyncedAt: z.string().nullable().optional(),
+		stockWebhookEnabled: z.boolean().optional(),
+		stockWebhook: z
+			.object({
+				externalId: z.string().nullable().optional(),
+				accountId: z.string().nullable().optional(),
+				secretHash: z.string().nullable().optional(),
+				reportType: z.literal(MOYSKLAD_STOCK_WEBHOOK_REPORT_TYPE).optional(),
+				stockType: z.literal(MOYSKLAD_STOCK_WEBHOOK_STOCK_TYPE).optional(),
+				lastReceivedAt: z.string().nullable().optional(),
+				lastProcessedAt: z.string().nullable().optional(),
+				lastError: z.string().nullable().optional()
+			})
+			.optional()
 	})
 	.refine(data => data.token || data.tokenEncrypted, {
 		message: 'Токен MoySklad обязателен'
@@ -62,6 +78,8 @@ type PartialMoySkladMetadata = {
 	schedulePattern?: string | null
 	scheduleTimezone?: string | null
 	lastStockSyncedAt?: string | null
+	stockWebhookEnabled?: boolean
+	stockWebhook?: Partial<MoySkladStockWebhookMetadata> | null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -106,6 +124,8 @@ export function buildMoySkladMetadata(
 	)
 	const orderExportStoreId = normalizeOptionalString(input.orderExportStoreId)
 	const lastStockSyncedAt = normalizeOptionalString(input.lastStockSyncedAt)
+	const stockWebhookEnabled = input.stockWebhookEnabled ?? false
+	const stockWebhook = normalizeStockWebhookMetadata(input.stockWebhook)
 
 	if (scheduleEnabled && !schedulePattern) {
 		throw new BadRequestException(
@@ -136,7 +156,40 @@ export function buildMoySkladMetadata(
 		scheduleEnabled,
 		schedulePattern,
 		scheduleTimezone,
-		lastStockSyncedAt
+		lastStockSyncedAt,
+		stockWebhookEnabled,
+		stockWebhook
+	}
+}
+
+export function buildDefaultMoySkladStockWebhookMetadata(): MoySkladStockWebhookMetadata {
+	return {
+		externalId: null,
+		accountId: null,
+		secretHash: null,
+		reportType: MOYSKLAD_STOCK_WEBHOOK_REPORT_TYPE,
+		stockType: MOYSKLAD_STOCK_WEBHOOK_STOCK_TYPE,
+		lastReceivedAt: null,
+		lastProcessedAt: null,
+		lastError: null
+	}
+}
+
+function normalizeStockWebhookMetadata(
+	input?: Partial<MoySkladStockWebhookMetadata> | null
+): MoySkladStockWebhookMetadata {
+	const defaults = buildDefaultMoySkladStockWebhookMetadata()
+	if (!input) return defaults
+
+	return {
+		externalId: normalizeOptionalString(input.externalId),
+		accountId: normalizeOptionalString(input.accountId),
+		secretHash: normalizeOptionalString(input.secretHash),
+		reportType: defaults.reportType,
+		stockType: defaults.stockType,
+		lastReceivedAt: normalizeOptionalString(input.lastReceivedAt),
+		lastProcessedAt: normalizeOptionalString(input.lastProcessedAt),
+		lastError: normalizeOptionalString(input.lastError)
 	}
 }
 
@@ -194,6 +247,8 @@ export class MoySkladMetadataCryptoService {
 			schedulePattern: metadata.schedulePattern,
 			scheduleTimezone: metadata.scheduleTimezone,
 			lastStockSyncedAt: metadata.lastStockSyncedAt,
+			stockWebhookEnabled: metadata.stockWebhookEnabled,
+			stockWebhook: metadata.stockWebhook,
 			tokenEncrypted: this.encryptToken(metadata.token)
 		}
 	}
@@ -215,7 +270,9 @@ export class MoySkladMetadataCryptoService {
 			scheduleEnabled: parsed.scheduleEnabled,
 			schedulePattern: parsed.schedulePattern,
 			scheduleTimezone: parsed.scheduleTimezone,
-			lastStockSyncedAt: parsed.lastStockSyncedAt
+			lastStockSyncedAt: parsed.lastStockSyncedAt,
+			stockWebhookEnabled: parsed.stockWebhookEnabled,
+			stockWebhook: parsed.stockWebhook
 		})
 	}
 

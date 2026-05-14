@@ -54,6 +54,22 @@ export class MoySkladStockSyncService {
 		})
 
 		const stockMap = await params.client.getStockAll()
+		return this.applyExternalStockMap({
+			catalogId: params.catalogId,
+			integrationId: params.integrationId,
+			stockMap,
+			canSyncVariants: params.canSyncVariants,
+			progress: params.progress
+		})
+	}
+
+	async applyExternalStockMap(params: {
+		catalogId: string
+		integrationId: string
+		stockMap: Map<string, number>
+		canSyncVariants: boolean
+		progress: StockSyncProgressReporter
+	}): Promise<MoySkladExternalStockSyncResult> {
 		const [productLinks, rawVariantLinks, rawProductIdsWithVariantLinks] =
 			await Promise.all([
 				this.loadProductLinks(params.integrationId),
@@ -85,7 +101,7 @@ export class MoySkladStockSyncService {
 
 		for (const link of variantLinks) {
 			try {
-				const stock = resolveStockForExternalLink(stockMap, link)
+				const stock = resolveStockForExternalLink(params.stockMap, link)
 				if (stock === null) {
 					skipped += 1
 					continue
@@ -128,7 +144,7 @@ export class MoySkladStockSyncService {
 					continue
 				}
 
-				const stock = resolveStockForExternalLink(stockMap, link)
+				const stock = resolveStockForExternalLink(params.stockMap, link)
 				if (stock === null) {
 					skipped += 1
 					continue
@@ -154,7 +170,7 @@ export class MoySkladStockSyncService {
 
 		const updated = updatedProducts + updatedVariants
 		return {
-			total: stockMap.size,
+			total: params.stockMap.size,
 			updated,
 			updatedProducts,
 			updatedVariants,

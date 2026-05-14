@@ -159,6 +159,33 @@ export class MoySkladSyncOrchestratorService {
 		}
 	}
 
+	async syncWebhookStock(input: {
+		catalogId: string
+		runId: string
+		reportUrls: string[]
+	}): Promise<{
+		result: SyncStockResult
+		completion: MoySkladSyncRunCompletionInput
+	}> {
+		const result = await this.sync.syncWebhookStock(input.catalogId, {
+			runId: input.runId,
+			reportUrls: input.reportUrls
+		})
+
+		return {
+			result,
+			completion: {
+				totalProducts: result.total,
+				createdProducts: 0,
+				updatedProducts: result.updated,
+				deletedProducts: 0,
+				imagesImported: 0,
+				durationMs: result.durationMs,
+				metadata: this.buildStockSyncMetadata(result)
+			}
+		}
+	}
+
 	private buildCatalogSyncMetadata(result: SyncCatalogResult) {
 		const total = result.totalProducts + result.totalVariants
 

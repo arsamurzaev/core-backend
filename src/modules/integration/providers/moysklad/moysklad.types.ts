@@ -155,6 +155,45 @@ export type MoySkladStockReportFilters = {
 	warehouseId?: string | string[]
 }
 
+export type MoySkladStockWebhookReportType = 'all'
+
+export type MoySkladStockWebhookStockType = 'stock'
+
+export type MoySkladStockWebhookMetadata = {
+	externalId: string | null
+	accountId: string | null
+	secretHash: string | null
+	reportType: MoySkladStockWebhookReportType
+	stockType: MoySkladStockWebhookStockType
+	lastReceivedAt: string | null
+	lastProcessedAt: string | null
+	lastError: string | null
+}
+
+export type MoySkladWebhookStock = {
+	meta?: MoySkladMeta
+	id: string
+	accountId?: string
+	enabled: boolean
+	stockType: MoySkladStockWebhookStockType
+	reportType: MoySkladStockWebhookReportType
+	url: string
+}
+
+export type MoySkladWebhookStockPayload = {
+	url?: string
+	enabled?: boolean
+	stockType?: MoySkladStockWebhookStockType
+	reportType?: MoySkladStockWebhookReportType
+}
+
+export type MoySkladStockWebhookNotification = {
+	accountId: string
+	stockType: MoySkladStockWebhookStockType
+	reportType: MoySkladStockWebhookReportType
+	reportUrl: string
+}
+
 export type MoySkladCustomerOrderPosition = {
 	quantity: number
 	price: number
@@ -196,6 +235,8 @@ export type MoySkladMetadata = {
 	schedulePattern: string | null
 	scheduleTimezone: string
 	lastStockSyncedAt: string | null
+	stockWebhookEnabled: boolean
+	stockWebhook: MoySkladStockWebhookMetadata
 }
 
 export type EncryptedMoySkladToken = {

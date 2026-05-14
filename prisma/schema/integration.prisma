@@ -25,6 +25,7 @@ model Integration {
   categoryLinks      IntegrationCategoryLink[]
   syncRuns           IntegrationSyncRun[]
   orderExports       IntegrationOrderExport[]
+  webhookEvents      IntegrationWebhookEvent[]
   inventoryMovements InventoryMovement[]
 
   deleteAt  DateTime? @map("delete_at") // Дата удаления
@@ -176,4 +177,31 @@ model IntegrationOrderExport {
   @@index([status, requestedAt])
   @@index([integrationId, status, requestedAt])
   @@map("integration_order_exports")
+}
+
+model IntegrationWebhookEvent {
+  id String @id @default(uuid()) @db.Uuid
+
+  integrationId String              @map("integration_id") @db.Uuid
+  provider      IntegrationProvider
+
+  requestId String @map("request_id") @db.VarChar(191)
+  reportUrl String @map("report_url") @db.VarChar(1000)
+
+  payload Json?
+  status  IntegrationWebhookEventStatus @default(PENDING)
+  jobId   String?                       @map("job_id") @db.VarChar(191)
+  error   String?                       @db.Text
+
+  receivedAt  DateTime  @default(now()) @map("received_at")
+  processedAt DateTime? @map("processed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@unique([integrationId, requestId])
+  @@index([integrationId, status, receivedAt])
+  @@index([provider, status, receivedAt])
+  @@map("integration_webhook_events")
 }

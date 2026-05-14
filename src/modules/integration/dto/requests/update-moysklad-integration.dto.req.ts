@@ -32,6 +32,11 @@ export class UpdateMoySkladIntegrationDtoReq {
 	@ApiPropertyOptional({ type: Boolean, example: false })
 	@IsOptional()
 	@IsBoolean()
+	stockWebhookEnabled?: boolean
+
+	@ApiPropertyOptional({ type: Boolean, example: false })
+	@IsOptional()
+	@IsBoolean()
 	exportOrders?: boolean
 
 	@ApiPropertyOptional({

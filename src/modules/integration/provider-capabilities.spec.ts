@@ -29,7 +29,7 @@ describe('integration provider capabilities', () => {
 			imageImport: true,
 			orderExport: true,
 			reservation: false,
-			webhook: false
+			webhook: true
 		})
 	})
 

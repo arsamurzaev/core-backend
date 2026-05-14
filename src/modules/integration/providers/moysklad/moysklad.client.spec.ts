@@ -557,4 +557,115 @@ describe('MoySkladClient', () => {
 			})
 		)
 	})
+
+	it('loads stock from a MoySklad webhook reportUrl', async () => {
+		const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+			ok: true,
+			status: 200,
+			headers: new Headers(),
+			json: jest.fn().mockResolvedValue([
+				{
+					assortmentId: 'assortment-1',
+					stock: 4
+				}
+			])
+		} as any)
+
+		const client = new MoySkladClient({
+			token: 'token',
+			maxRetries: 0
+		})
+
+		const stock = await client.getStockFromReportUrl(
+			'https://api.moysklad.ru/api/remap/1.2/report/stock/all/current?filter=assortmentId%3Dassortment-1'
+		)
+
+		expect(stock.get('assortment-1')).toBe(4)
+		expect(fetchMock).toHaveBeenCalledWith(
+			'https://api.moysklad.ru/api/remap/1.2/report/stock/all/current?filter=assortmentId%3Dassortment-1',
+			expect.objectContaining({
+				headers: expect.objectContaining({
+					Authorization: 'Bearer token'
+				})
+			})
+		)
+	})
+
+	it('rejects non-MoySklad webhook reportUrl values', async () => {
+		const client = new MoySkladClient({
+			token: 'token',
+			maxRetries: 0
+		})
+
+		await expect(
+			client.getStockFromReportUrl(
+				'https://evil.example.test/api/remap/1.2/report/stock/all/current'
+			)
+		).rejects.toThrow('MoySklad stock reportUrl host or path is not allowed')
+	})
+
+	it('creates and disables webhookstock entries', async () => {
+		const fetchMock = jest
+			.spyOn(global, 'fetch')
+			.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				headers: new Headers(),
+				json: jest.fn().mockResolvedValue({
+					id: 'webhook-1',
+					accountId: 'account-1',
+					enabled: true,
+					reportType: 'all',
+					stockType: 'stock',
+					url: 'https://api.example.test/webhook'
+				})
+			} as any)
+			.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				headers: new Headers(),
+				json: jest.fn().mockResolvedValue({
+					id: 'webhook-1',
+					enabled: false,
+					reportType: 'all',
+					stockType: 'stock',
+					url: 'https://api.example.test/webhook'
+				})
+			} as any)
+
+		const client = new MoySkladClient({
+			token: 'token',
+			maxRetries: 0
+		})
+
+		await client.createWebhookStock({
+			url: 'https://api.example.test/webhook',
+			enabled: true,
+			reportType: 'all',
+			stockType: 'stock'
+		})
+		await client.disableWebhookStock('webhook-1')
+
+		expect(fetchMock).toHaveBeenNthCalledWith(
+			1,
+			'https://api.moysklad.ru/api/remap/1.2/entity/webhookstock',
+			expect.objectContaining({
+				method: 'POST',
+				body: JSON.stringify({
+					url: 'https://api.example.test/webhook',
+					enabled: true,
+					reportType: 'all',
+					stockType: 'stock'
+				})
+			})
+		)
+		expect(fetchMock).toHaveBeenNthCalledWith(
+			2,
+			'https://api.moysklad.ru/api/remap/1.2/entity/webhookstock/webhook-1',
+			expect.objectContaining({
+				method: 'PUT',
+				body: JSON.stringify({ enabled: false })
+			})
+		)
+	})
 })

@@ -7,6 +7,7 @@ import {
 	IntegrationSyncRunStatus,
 	IntegrationSyncRunTrigger,
 	IntegrationSyncStatus,
+	IntegrationWebhookEventStatus,
 	ProductStatus,
 	ProductVariantStatus
 } from '@generated/enums'
@@ -23,6 +24,12 @@ const ORDER_EXPORT_STATUS_RUNNING: IntegrationOrderExportStatus = 'RUNNING'
 const ORDER_EXPORT_STATUS_SUCCESS: IntegrationOrderExportStatus = 'SUCCESS'
 const ORDER_EXPORT_STATUS_ERROR: IntegrationOrderExportStatus = 'ERROR'
 const ORDER_EXPORT_STATUS_SKIPPED: IntegrationOrderExportStatus = 'SKIPPED'
+const WEBHOOK_EVENT_STATUS_PENDING: IntegrationWebhookEventStatus = 'PENDING'
+const WEBHOOK_EVENT_STATUS_PROCESSING: IntegrationWebhookEventStatus =
+	'PROCESSING'
+const WEBHOOK_EVENT_STATUS_PROCESSED: IntegrationWebhookEventStatus = 'PROCESSED'
+const WEBHOOK_EVENT_STATUS_FAILED: IntegrationWebhookEventStatus = 'FAILED'
+const WEBHOOK_EVENT_STATUS_SKIPPED: IntegrationWebhookEventStatus = 'SKIPPED'
 const DEFAULT_VARIANT_KEY = 'default'
 const DEFAULT_VARIANT_SKU_SUFFIX = 'DEFAULT'
 const VARIANT_SKU_MAX_LENGTH = 100
@@ -215,6 +222,22 @@ const orderExportSelect = {
 	updatedAt: true
 }
 
+const webhookEventSelect = {
+	id: true,
+	integrationId: true,
+	provider: true,
+	requestId: true,
+	reportUrl: true,
+	payload: true,
+	status: true,
+	jobId: true,
+	error: true,
+	receivedAt: true,
+	processedAt: true,
+	createdAt: true,
+	updatedAt: true
+}
+
 const orderExportWithIntegrationSelect = {
 	...orderExportSelect,
 	integration: {
@@ -256,6 +279,15 @@ function mergeJsonObject(
 		...base,
 		...patch
 	} as Prisma.InputJsonValue
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		'code' in error &&
+		(error as { code?: unknown }).code === 'P2002'
+	)
 }
 
 function cloneJsonRecord(
@@ -353,6 +385,11 @@ export type IntegrationOrderExportRecord =
 		select: typeof orderExportSelect
 	}>
 
+export type IntegrationWebhookEventRecord =
+	Prisma.IntegrationWebhookEventGetPayload<{
+		select: typeof webhookEventSelect
+	}>
+
 export type IntegrationOrderExportWithIntegrationRecord =
 	Prisma.IntegrationOrderExportGetPayload<{
 		select: typeof orderExportWithIntegrationSelect
@@ -370,6 +407,17 @@ export class IntegrationRepository {
 		return this.prisma.integration.findFirst({
 			where: {
 				catalogId,
+				provider: IntegrationProvider.MOYSKLAD,
+				deleteAt: null
+			},
+			select: integrationSelect
+		})
+	}
+
+	findMoySkladById(integrationId: string): Promise<IntegrationRecord | null> {
+		return this.prisma.integration.findFirst({
+			where: {
+				id: integrationId,
 				provider: IntegrationProvider.MOYSKLAD,
 				deleteAt: null
 			},
@@ -445,6 +493,52 @@ export class IntegrationRepository {
 		})
 
 		return this.findMoySklad(catalogId)
+	}
+
+	async updateMoySkladMetadataById(
+		integrationId: string,
+		metadata: Prisma.InputJsonValue
+	): Promise<IntegrationRecord | null> {
+		const updated = await this.prisma.integration.updateMany({
+			where: {
+				id: integrationId,
+				provider: IntegrationProvider.MOYSKLAD,
+				deleteAt: null
+			},
+			data: { metadata }
+		})
+
+		if (!updated.count) return null
+		return this.findMoySkladById(integrationId)
+	}
+
+	async patchMoySkladStockWebhookMetadata(
+		integrationId: string,
+		patch: Record<string, Prisma.InputJsonValue | null>
+	): Promise<IntegrationRecord | null> {
+		const existing = await this.prisma.integration.findFirst({
+			where: {
+				id: integrationId,
+				provider: IntegrationProvider.MOYSKLAD,
+				deleteAt: null
+			},
+			select: { id: true, metadata: true }
+		})
+		if (!existing) return null
+
+		const metadata = cloneJsonRecord(existing.metadata)
+		const currentWebhook = cloneJsonRecord(metadata.stockWebhook)
+		metadata.stockWebhook = {
+			...currentWebhook,
+			...patch
+		}
+
+		await this.prisma.integration.update({
+			where: { id: existing.id },
+			data: { metadata: metadata as Prisma.InputJsonValue }
+		})
+
+		return this.findMoySkladById(integrationId)
 	}
 
 	async softDeleteMoySklad(
@@ -770,6 +864,156 @@ export class IntegrationRepository {
 
 		if (!updated.count) return null
 		return this.findSyncRunById(runId)
+	}
+
+	async createWebhookEventIfNew(params: {
+		integrationId: string
+		requestId: string
+		reportUrl: string
+		payload: Prisma.InputJsonValue
+	}): Promise<{ event: IntegrationWebhookEventRecord; created: boolean }> {
+		const existing = await this.findWebhookEventByRequestId(
+			params.integrationId,
+			params.requestId
+		)
+		if (existing) return { event: existing, created: false }
+
+		try {
+			const event = await this.prisma.integrationWebhookEvent.create({
+				data: {
+					integrationId: params.integrationId,
+					provider: IntegrationProvider.MOYSKLAD,
+					requestId: params.requestId,
+					reportUrl: params.reportUrl,
+					payload: params.payload,
+					status: WEBHOOK_EVENT_STATUS_PENDING
+				},
+				select: webhookEventSelect
+			})
+			return { event, created: true }
+		} catch (error) {
+			if (isUniqueConstraintError(error)) {
+				const event = await this.findWebhookEventByRequestId(
+					params.integrationId,
+					params.requestId
+				)
+				if (event) return { event, created: false }
+			}
+			throw error
+		}
+	}
+
+	findWebhookEventByRequestId(
+		integrationId: string,
+		requestId: string
+	): Promise<IntegrationWebhookEventRecord | null> {
+		return this.prisma.integrationWebhookEvent.findUnique({
+			where: {
+				integrationId_requestId: {
+					integrationId,
+					requestId
+				}
+			},
+			select: webhookEventSelect
+		})
+	}
+
+	async findPendingWebhookEvents(
+		integrationId: string,
+		limit = 50
+	): Promise<IntegrationWebhookEventRecord[]> {
+		return this.prisma.integrationWebhookEvent.findMany({
+			where: {
+				integrationId,
+				provider: IntegrationProvider.MOYSKLAD,
+				status: WEBHOOK_EVENT_STATUS_PENDING
+			},
+			orderBy: [{ receivedAt: 'asc' }, { createdAt: 'asc' }],
+			take: limit,
+			select: webhookEventSelect
+		})
+	}
+
+	async markWebhookEventsProcessing(
+		eventIds: string[],
+		jobId: string
+	): Promise<void> {
+		if (!eventIds.length) return
+		await this.prisma.integrationWebhookEvent.updateMany({
+			where: {
+				id: { in: eventIds },
+				status: WEBHOOK_EVENT_STATUS_PENDING
+			},
+			data: {
+				status: WEBHOOK_EVENT_STATUS_PROCESSING,
+				jobId,
+				error: null
+			}
+		})
+	}
+
+	async markWebhookEventProcessed(eventId: string): Promise<void> {
+		await this.prisma.integrationWebhookEvent.updateMany({
+			where: {
+				id: eventId,
+				status: {
+					in: [
+						WEBHOOK_EVENT_STATUS_PENDING,
+						WEBHOOK_EVENT_STATUS_PROCESSING
+					]
+				}
+			},
+			data: {
+				status: WEBHOOK_EVENT_STATUS_PROCESSED,
+				error: null,
+				processedAt: new Date()
+			}
+		})
+	}
+
+	async markWebhookEventFailed(
+		eventId: string,
+		error: string
+	): Promise<void> {
+		await this.prisma.integrationWebhookEvent.updateMany({
+			where: {
+				id: eventId,
+				status: {
+					in: [
+						WEBHOOK_EVENT_STATUS_PENDING,
+						WEBHOOK_EVENT_STATUS_PROCESSING
+					]
+				}
+			},
+			data: {
+				status: WEBHOOK_EVENT_STATUS_FAILED,
+				error: renderSafeProviderErrorMessage(error),
+				processedAt: new Date()
+			}
+		})
+	}
+
+	async markWebhookEventsSkipped(
+		eventIds: string[],
+		reason: string
+	): Promise<void> {
+		if (!eventIds.length) return
+		await this.prisma.integrationWebhookEvent.updateMany({
+			where: {
+				id: { in: eventIds },
+				status: {
+					in: [
+						WEBHOOK_EVENT_STATUS_PENDING,
+						WEBHOOK_EVENT_STATUS_PROCESSING
+					]
+				}
+			},
+			data: {
+				status: WEBHOOK_EVENT_STATUS_SKIPPED,
+				error: reason,
+				processedAt: new Date()
+			}
+		})
 	}
 
 	findOrderExportById(

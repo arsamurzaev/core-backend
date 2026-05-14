@@ -4,15 +4,20 @@ import {
 	IntegrationProvider,
 	IntegrationSyncRunStatus
 } from '@generated/enums'
+import type { Prisma } from '@generated/client'
 import {
 	BadRequestException,
 	ConflictException,
+	ForbiddenException,
 	Injectable,
 	Logger,
 	NotFoundException
 } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
+import { createHash, randomBytes, timingSafeEqual } from 'crypto'
 import slugify from 'slugify'
 
+import { AllInterfaces } from '@/core/config'
 import { AuditService } from '@/modules/audit/audit.service'
 import { CapabilityService } from '@/modules/capability/capability.service'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
@@ -53,7 +58,10 @@ import {
 } from './integration.repository'
 import { getIntegrationProviderCapabilities } from './provider-capabilities'
 import { renderSafeProviderErrorMessage } from './provider-error-redaction'
-import { MoySkladClient } from './providers/moysklad/moysklad.client'
+import {
+	MoySkladClient,
+	normalizeMoySkladStockReportUrl
+} from './providers/moysklad/moysklad.client'
 import {
 	maskToken,
 	MoySkladMetadataCryptoService
@@ -62,8 +70,10 @@ import { MoySkladOrderExportQueueService } from './providers/moysklad/moysklad.o
 import { MoySkladQueueService } from './providers/moysklad/moysklad.queue.service'
 import { MoySkladSyncService } from './providers/moysklad/moysklad.sync.service'
 import type {
+	MoySkladMetadata,
 	MoySkladNamedEntity,
 	MoySkladProduct,
+	MoySkladStockWebhookNotification,
 	MoySkladVariantCharacteristic
 } from './providers/moysklad/moysklad.types'
 
@@ -172,7 +182,8 @@ export class IntegrationService {
 		private readonly moySkladOrderExportQueue: MoySkladOrderExportQueueService,
 		private readonly metadataCrypto: MoySkladMetadataCryptoService,
 		private readonly audit: AuditService,
-		private readonly featureEntitlements: CapabilityService
+		private readonly featureEntitlements: CapabilityService,
+		private readonly configService: ConfigService<AllInterfaces>
 	) {}
 
 	async getMoySklad(): Promise<MoySkladIntegrationDto> {
@@ -396,11 +407,17 @@ export class IntegrationService {
 		const catalogId = mustCatalogId()
 		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
 		const existing = await this.repo.findMoySklad(catalogId)
+		const currentMetadata = existing
+			? this.metadataCrypto.parseStoredMetadata(existing.metadata)
+			: null
 		const metadata = this.metadataCrypto.buildStoredMetadata({
 			token: dto.token,
 			priceTypeName: dto.priceTypeName,
 			importImages: dto.importImages,
 			syncStock: dto.syncStock,
+			stockWebhookEnabled:
+				dto.stockWebhookEnabled ?? currentMetadata?.stockWebhookEnabled ?? false,
+			stockWebhook: currentMetadata?.stockWebhook ?? null,
 			exportOrders: dto.exportOrders,
 			orderExportOrganizationId: dto.orderExportOrganizationId,
 			orderExportCounterpartyId: dto.orderExportCounterpartyId,
@@ -408,15 +425,13 @@ export class IntegrationService {
 			scheduleEnabled: dto.scheduleEnabled,
 			schedulePattern: dto.schedulePattern,
 			scheduleTimezone: dto.scheduleTimezone,
-			lastStockSyncedAt: existing
-				? this.metadataCrypto.parseStoredMetadata(existing.metadata)
-						.lastStockSyncedAt
-				: null
+			lastStockSyncedAt: currentMetadata?.lastStockSyncedAt ?? null
 		})
-		const integration = await this.repo.upsertMoySklad(catalogId, {
+		let integration = await this.repo.upsertMoySklad(catalogId, {
 			metadata,
 			isActive: dto.isActive ?? true
 		})
+		integration = await this.reconcileMoySkladStockWebhook(integration)
 		await this.moySkladQueue.syncSchedulerForIntegration(integration)
 
 		await this.tryQueueInitialSync({
@@ -449,6 +464,9 @@ export class IntegrationService {
 			priceTypeName: dto.priceTypeName ?? currentMetadata.priceTypeName,
 			importImages: dto.importImages ?? currentMetadata.importImages,
 			syncStock: dto.syncStock ?? currentMetadata.syncStock,
+			stockWebhookEnabled:
+				dto.stockWebhookEnabled ?? currentMetadata.stockWebhookEnabled,
+			stockWebhook: currentMetadata.stockWebhook,
 			exportOrders: dto.exportOrders ?? currentMetadata.exportOrders,
 			orderExportOrganizationId:
 				dto.orderExportOrganizationId !== undefined
@@ -470,7 +488,7 @@ export class IntegrationService {
 			scheduleTimezone: dto.scheduleTimezone ?? currentMetadata.scheduleTimezone,
 			lastStockSyncedAt: currentMetadata.lastStockSyncedAt
 		})
-		const integration = await this.repo.updateMoySklad(catalogId, {
+		let integration = await this.repo.updateMoySklad(catalogId, {
 			metadata,
 			isActive: dto.isActive
 		})
@@ -478,6 +496,7 @@ export class IntegrationService {
 		if (!integration) {
 			throw new NotFoundException('Интеграция MoySklad не настроена')
 		}
+		integration = await this.reconcileMoySkladStockWebhook(integration)
 		await this.moySkladQueue.syncSchedulerForIntegration(integration)
 		await this.tryQueueInitialSync({
 			catalogId,
@@ -497,6 +516,7 @@ export class IntegrationService {
 			throw new NotFoundException('Интеграция MoySklad не настроена')
 		}
 
+		await this.deleteMoySkladStockWebhook(existing)
 		const integration = await this.repo.softDeleteMoySklad(catalogId)
 		if (!integration) {
 			throw new NotFoundException('Интеграция MoySklad не настроена')
@@ -532,6 +552,77 @@ export class IntegrationService {
 		const catalogId = mustCatalogId()
 		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
 		return this.moySkladQueue.enqueueStockSync(catalogId)
+	}
+
+	async receiveMoySkladStockWebhook(params: {
+		integrationId: string
+		secret: string
+		requestId?: string | string[]
+		payload: unknown
+	}): Promise<void> {
+		const integration = await this.repo.findMoySkladById(params.integrationId)
+		if (!integration) {
+			throw new NotFoundException('MoySklad integration not found')
+		}
+
+		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
+		this.assertMoySkladWebhookSecret(metadata, params.secret)
+
+		if (
+			!integration.isActive ||
+			!metadata.syncStock ||
+			!metadata.stockWebhookEnabled
+		) {
+			this.logger.warn(
+				`Ignoring MoySklad stock webhook for disabled integration ${integration.id}`
+			)
+			return
+		}
+
+		if (
+			!(await this.featureEntitlements.canUseMoySkladIntegration(
+				integration.catalogId
+			))
+		) {
+			this.logger.warn(
+				`Ignoring MoySklad stock webhook for catalog ${integration.catalogId}: capability disabled`
+			)
+			return
+		}
+
+		const events = this.extractMoySkladStockWebhookEvents(params.payload)
+		const baseRequestId = this.normalizeWebhookRequestId(
+			params.requestId,
+			params.payload
+		)
+		let created = 0
+
+		for (const [index, event] of events.entries()) {
+			this.assertMoySkladWebhookAccount(metadata, event.accountId)
+			const requestId =
+				events.length === 1 ? baseRequestId : `${baseRequestId}:${index}`
+			const result = await this.repo.createWebhookEventIfNew({
+				integrationId: integration.id,
+				requestId,
+				reportUrl: event.reportUrl,
+				payload: this.toPrismaJson(params.payload)
+			})
+			if (result.created) {
+				created += 1
+			}
+		}
+
+		await this.repo.patchMoySkladStockWebhookMetadata(integration.id, {
+			lastReceivedAt: new Date().toISOString(),
+			lastError: null
+		})
+
+		if (created > 0) {
+			await this.moySkladQueue.enqueueStockWebhookDrain(
+				integration.catalogId,
+				integration.id
+			)
+		}
 	}
 
 	async cancelMoySkladSync(): Promise<void> {
@@ -1249,6 +1340,257 @@ export class IntegrationService {
 		return previous[right.length] ?? 0
 	}
 
+	private async reconcileMoySkladStockWebhook(
+		integration: IntegrationRecord
+	): Promise<IntegrationRecord> {
+		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
+		const shouldEnable =
+			integration.isActive && metadata.syncStock && metadata.stockWebhookEnabled
+
+		if (!shouldEnable) {
+			return this.disableMoySkladStockWebhook(integration, metadata)
+		}
+
+		const baseUrl = this.getMoySkladWebhookBaseUrl()
+		if (!baseUrl) {
+			throw new BadRequestException(
+				'MOYSKLAD_WEBHOOK_BASE_URL is required to enable MoySklad stock webhook'
+			)
+		}
+
+		const client = new MoySkladClient({ token: metadata.token })
+		const currentWebhook = metadata.stockWebhook
+		const needsNewSecret =
+			!currentWebhook.externalId || !currentWebhook.secretHash
+		const secret = needsNewSecret ? this.generateWebhookSecret() : null
+		const secretHash = secret
+			? this.hashWebhookSecret(secret)
+			: currentWebhook.secretHash
+		const url = secret
+			? this.buildMoySkladStockWebhookUrl(integration.id, secret, baseUrl)
+			: undefined
+
+		let remoteWebhook
+		if (currentWebhook.externalId) {
+			try {
+				remoteWebhook = await client.updateWebhookStock(
+					currentWebhook.externalId,
+					{
+						...(url ? { url } : {}),
+						enabled: true,
+						reportType: 'all',
+						stockType: 'stock'
+					}
+				)
+			} catch (error) {
+				if (!this.isProviderNotFound(error)) throw error
+			}
+		}
+
+		if (!remoteWebhook) {
+			const newSecret = secret ?? this.generateWebhookSecret()
+			remoteWebhook = await client.createWebhookStock({
+				url: this.buildMoySkladStockWebhookUrl(
+					integration.id,
+					newSecret,
+					baseUrl
+				),
+				enabled: true,
+				reportType: 'all',
+				stockType: 'stock'
+			})
+			return this.persistMoySkladMetadata(integration, {
+				...metadata,
+				stockWebhookEnabled: true,
+				stockWebhook: {
+					...metadata.stockWebhook,
+					externalId: remoteWebhook.id,
+					accountId: remoteWebhook.accountId ?? null,
+					secretHash: this.hashWebhookSecret(newSecret),
+					reportType: 'all',
+					stockType: 'stock',
+					lastError: null
+				}
+			})
+		}
+
+		return this.persistMoySkladMetadata(integration, {
+			...metadata,
+			stockWebhookEnabled: true,
+			stockWebhook: {
+				...metadata.stockWebhook,
+				externalId: remoteWebhook.id,
+				accountId: remoteWebhook.accountId ?? currentWebhook.accountId,
+				secretHash,
+				reportType: 'all',
+				stockType: 'stock',
+				lastError: null
+			}
+		})
+	}
+
+	private async disableMoySkladStockWebhook(
+		integration: IntegrationRecord,
+		metadata: MoySkladMetadata
+	): Promise<IntegrationRecord> {
+		if (!metadata.stockWebhook.externalId) {
+			return integration
+		}
+
+		try {
+			await new MoySkladClient({ token: metadata.token }).disableWebhookStock(
+				metadata.stockWebhook.externalId
+			)
+		} catch (error) {
+			if (!this.isProviderNotFound(error)) throw error
+		}
+
+		return this.persistMoySkladMetadata(integration, {
+			...metadata,
+			stockWebhookEnabled: false
+		})
+	}
+
+	private async deleteMoySkladStockWebhook(
+		integration: IntegrationRecord
+	): Promise<void> {
+		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
+		if (!metadata.stockWebhook.externalId) return
+
+		try {
+			await new MoySkladClient({ token: metadata.token }).deleteWebhookStock(
+				metadata.stockWebhook.externalId
+			)
+		} catch (error) {
+			if (!this.isProviderNotFound(error)) throw error
+		}
+	}
+
+	private async persistMoySkladMetadata(
+		integration: IntegrationRecord,
+		metadata: MoySkladMetadata
+	): Promise<IntegrationRecord> {
+		const stored = this.metadataCrypto.buildStoredMetadata(metadata)
+		const updated = await this.repo.updateMoySkladMetadataById(
+			integration.id,
+			stored
+		)
+		return updated ?? integration
+	}
+
+	private getMoySkladWebhookBaseUrl(): string | null {
+		const raw = this.configService
+			.get('integration', { infer: true })
+			?.moySkladWebhookBaseUrl?.trim()
+		if (!raw) return null
+
+		try {
+			const url = new URL(raw)
+			if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+				return null
+			}
+			url.pathname = url.pathname.replace(/\/+$/, '')
+			url.search = ''
+			url.hash = ''
+			return url.toString().replace(/\/+$/, '')
+		} catch {
+			return null
+		}
+	}
+
+	private buildMoySkladStockWebhookUrl(
+		integrationId: string,
+		secret: string,
+		baseUrl: string
+	): string {
+		return `${baseUrl}/integration/webhooks/moysklad/stock/${encodeURIComponent(integrationId)}/${encodeURIComponent(secret)}`
+	}
+
+	private generateWebhookSecret(): string {
+		return randomBytes(32).toString('hex')
+	}
+
+	private hashWebhookSecret(secret: string): string {
+		return createHash('sha256').update(secret).digest('hex')
+	}
+
+	private assertMoySkladWebhookSecret(
+		metadata: MoySkladMetadata,
+		secret: string
+	): void {
+		const expectedHash = metadata.stockWebhook.secretHash
+		if (!expectedHash) {
+			throw new ForbiddenException('MoySklad stock webhook is not registered')
+		}
+
+		const actual = Buffer.from(this.hashWebhookSecret(secret), 'hex')
+		const expected = Buffer.from(expectedHash, 'hex')
+		if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+			throw new ForbiddenException('Invalid MoySklad stock webhook secret')
+		}
+	}
+
+	private assertMoySkladWebhookAccount(
+		metadata: MoySkladMetadata,
+		accountId: string
+	): void {
+		const expectedAccountId = metadata.stockWebhook.accountId
+		if (expectedAccountId && expectedAccountId !== accountId) {
+			throw new ForbiddenException('Invalid MoySklad stock webhook account')
+		}
+	}
+
+	private extractMoySkladStockWebhookEvents(
+		payload: unknown
+	): MoySkladStockWebhookNotification[] {
+		const eventsSource =
+			isRecord(payload) && Array.isArray(payload.events)
+				? payload.events
+				: [payload]
+		const events = eventsSource
+			.map(item => {
+				if (!isRecord(item)) return null
+				const accountId = readNonEmptyString(item.accountId)
+				const reportUrl = readNonEmptyString(item.reportUrl)
+				if (!accountId || !reportUrl) return null
+
+				return {
+					accountId,
+					reportUrl: normalizeMoySkladStockReportUrl(reportUrl),
+					reportType: 'all',
+					stockType: 'stock'
+				} satisfies MoySkladStockWebhookNotification
+			})
+			.filter(isPresent)
+
+		if (!events.length) {
+			throw new BadRequestException('MoySklad stock webhook payload is empty')
+		}
+
+		return events
+	}
+
+	private normalizeWebhookRequestId(
+		value: string | string[] | undefined,
+		payload: unknown
+	): string {
+		const raw = Array.isArray(value) ? value[0] : value
+		const normalized = typeof raw === 'string' ? raw.trim() : ''
+		if (normalized) return normalized.slice(0, 180)
+
+		return createHash('sha256')
+			.update(JSON.stringify(payload ?? null))
+			.digest('hex')
+	}
+
+	private toPrismaJson(value: unknown): Prisma.InputJsonValue {
+		return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue
+	}
+
+	private isProviderNotFound(error: unknown): boolean {
+		return error instanceof Error && /MoySklad API error 404:/i.test(error.message)
+	}
+
 	private mapMoySkladIntegration(
 		integration: IntegrationRecord
 	): MoySkladIntegrationDto {
@@ -1263,6 +1605,17 @@ export class IntegrationService {
 			priceTypeName: metadata.priceTypeName,
 			importImages: metadata.importImages,
 			syncStock: metadata.syncStock,
+			stockWebhook: {
+				enabled: metadata.stockWebhookEnabled,
+				registered: Boolean(metadata.stockWebhook.externalId),
+				reportType: metadata.stockWebhook.reportType,
+				stockType: metadata.stockWebhook.stockType,
+				lastReceivedAt: metadata.stockWebhook.lastReceivedAt,
+				lastProcessedAt: metadata.stockWebhook.lastProcessedAt,
+				lastError: metadata.stockWebhook.lastError
+					? renderSafeProviderErrorMessage(metadata.stockWebhook.lastError)
+					: null
+			},
 			exportOrders: metadata.exportOrders,
 			orderExportOrganizationId: metadata.orderExportOrganizationId,
 			orderExportCounterpartyId: metadata.orderExportCounterpartyId,
@@ -1552,6 +1905,7 @@ export class IntegrationService {
 			dto.priceTypeName === undefined &&
 			dto.importImages === undefined &&
 			dto.syncStock === undefined &&
+			dto.stockWebhookEnabled === undefined &&
 			dto.exportOrders === undefined &&
 			dto.orderExportOrganizationId === undefined &&
 			dto.orderExportCounterpartyId === undefined &&
@@ -1645,6 +1999,10 @@ function readNonEmptyString(value: unknown): string | null {
 	if (typeof value !== 'string') return null
 	const normalized = value.trim()
 	return normalized || null
+}
+
+function isPresent<T>(value: T | null | undefined): value is T {
+	return value !== null && value !== undefined
 }
 
 function readNonNegativeInteger(value: unknown): number | null {

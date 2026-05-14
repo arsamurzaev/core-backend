@@ -45,6 +45,7 @@ import { PrismaModule } from '../infrastructure/prisma/prisma.module'
 import {
 	databaseEnv,
 	httpEnv,
+	integrationEnv,
 	integrationCryptoEnv,
 	redisEnv,
 	s3Env
@@ -104,7 +105,14 @@ function shouldSkipAuthThrottler(context: ExecutionContext): boolean {
 	imports: [
 		ConfigModule.forRoot({
 			isGlobal: true,
-			load: [databaseEnv, redisEnv, httpEnv, s3Env, integrationCryptoEnv]
+			load: [
+				databaseEnv,
+				redisEnv,
+				httpEnv,
+				s3Env,
+				integrationCryptoEnv,
+				integrationEnv
+			]
 		}),
 		ThrottlerModule.forRootAsync({
 			imports: [RedisModule],

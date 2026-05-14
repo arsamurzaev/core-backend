@@ -21,10 +21,14 @@ import {
 	type MoySkladStockReportFilters,
 	type MoySkladStockResponse,
 	type MoySkladStore,
-	type MoySkladVariant
+	type MoySkladVariant,
+	type MoySkladWebhookStock,
+	type MoySkladWebhookStockPayload
 } from './moysklad.types'
 
 const API_BASE = 'https://api.moysklad.ru/api/remap/1.2'
+const API_HOST = 'api.moysklad.ru'
+const STOCK_REPORT_PATH_PREFIX = '/api/remap/1.2/report/stock/'
 const DEFAULT_TIMEOUT_MS = 30000
 const LIST_LIMIT_WITH_EXPAND = 100
 const DEFAULT_MAX_REQUESTS_PER_WINDOW = 22
@@ -125,6 +129,30 @@ function buildCurrentStockEndpoint(
 
 function readMoySkladString(value: unknown): string {
 	return typeof value === 'string' ? value.trim() : ''
+}
+
+export function normalizeMoySkladStockReportUrl(value: string): string {
+	const normalized = readMoySkladString(value)
+	if (!normalized) {
+		throw new Error('MoySklad stock reportUrl is required')
+	}
+
+	let url: URL
+	try {
+		url = new URL(normalized)
+	} catch {
+		throw new Error('Invalid MoySklad stock reportUrl')
+	}
+
+	if (
+		url.protocol !== 'https:' ||
+		url.hostname !== API_HOST ||
+		!url.pathname.startsWith(STOCK_REPORT_PATH_PREFIX)
+	) {
+		throw new Error('MoySklad stock reportUrl host or path is not allowed')
+	}
+
+	return url.toString()
 }
 
 function extractMoySkladEntityIdFromHref(
@@ -519,6 +547,49 @@ export class MoySkladClient {
 		})
 	}
 
+	async getWebhookStocks(): Promise<MoySkladWebhookStock[]> {
+		const response =
+			await this.request<MoySkladListResponse<MoySkladWebhookStock>>(
+				'/entity/webhookstock'
+			)
+		return this.readListRows(response, '/entity/webhookstock')
+	}
+
+	async createWebhookStock(
+		payload: Required<MoySkladWebhookStockPayload>
+	): Promise<MoySkladWebhookStock> {
+		return this.request<MoySkladWebhookStock>('/entity/webhookstock', {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		})
+	}
+
+	async updateWebhookStock(
+		webhookId: string,
+		payload: MoySkladWebhookStockPayload
+	): Promise<MoySkladWebhookStock> {
+		return this.request<MoySkladWebhookStock>(
+			`/entity/webhookstock/${encodeURIComponent(webhookId)}`,
+			{
+				method: 'PUT',
+				body: JSON.stringify(payload)
+			}
+		)
+	}
+
+	async disableWebhookStock(webhookId: string): Promise<MoySkladWebhookStock> {
+		return this.updateWebhookStock(webhookId, { enabled: false })
+	}
+
+	async deleteWebhookStock(webhookId: string): Promise<void> {
+		await this.request<void>(
+			`/entity/webhookstock/${encodeURIComponent(webhookId)}`,
+			{
+				method: 'DELETE'
+			}
+		)
+	}
+
 	async downloadImage(
 		downloadHref: string
 	): Promise<{ buffer: Buffer; contentType: string } | null> {
@@ -588,12 +659,25 @@ export class MoySkladClient {
 		return stockMap
 	}
 
+	async getStockFromReportUrl(reportUrl: string): Promise<Map<string, number>> {
+		const response = await this.request<MoySkladCurrentStockRow[]>(
+			normalizeMoySkladStockReportUrl(reportUrl)
+		)
+		return this.mapCurrentStockRows(response)
+	}
+
 	private async getCurrentStockAll(
 		filters: MoySkladStockReportFilters
 	): Promise<Map<string, number>> {
 		const response = await this.request<MoySkladCurrentStockRow[]>(
 			buildCurrentStockEndpoint(filters)
 		)
+		return this.mapCurrentStockRows(response)
+	}
+
+	private mapCurrentStockRows(
+		response: MoySkladCurrentStockRow[] | null | undefined
+	): Map<string, number> {
 		const stockMap = new Map<string, number>()
 
 		for (const item of response ?? []) {
@@ -676,7 +760,16 @@ export class MoySkladClient {
 					)
 				}
 
-				return (await response.json()) as T
+				if (typeof response.text === 'function') {
+					const text = await response.text()
+					return (text ? JSON.parse(text) : undefined) as T
+				}
+
+				if (typeof response.json === 'function') {
+					return (await response.json()) as T
+				}
+
+				return undefined as T
 			} catch (error) {
 				if (
 					error instanceof MoySkladHttpError &&

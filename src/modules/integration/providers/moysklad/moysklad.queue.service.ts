@@ -37,9 +37,12 @@ const MOYSKLAD_SYNC_QUEUE_NAME = 'moysklad-sync'
 const MOYSKLAD_SYNC_QUEUE_CONCURRENCY = 1
 const MOYSKLAD_SYNC_SCHEDULER_PREFIX = 'moysklad:catalog'
 const MANUAL_JOB_ID_PREFIX = 'moysklad-manual'
+const WEBHOOK_JOB_ID_PREFIX = 'moysklad-webhook-stock'
 const FULL_SYNC_JOB_NAME = 'catalog-sync'
 const PRODUCT_SYNC_JOB_NAME = 'product-sync'
 const STOCK_SYNC_JOB_NAME = 'stock-sync'
+const WEBHOOK_STOCK_SYNC_JOB_NAME = 'stock-webhook'
+const WEBHOOK_STOCK_SYNC_DELAY_MS = 5000
 
 type MoySkladSyncJob = {
 	runId?: string
@@ -47,6 +50,7 @@ type MoySkladSyncJob = {
 	mode: IntegrationSyncRunMode
 	trigger: IntegrationSyncRunTrigger
 	productId?: string
+	webhookIntegrationId?: string
 }
 
 type QueuedSyncResult = {
@@ -56,6 +60,12 @@ type QueuedSyncResult = {
 	jobId: string
 	mode: IntegrationSyncRunMode
 	trigger: IntegrationSyncRunTrigger
+}
+
+type QueuedWebhookStockResult = {
+	ok: true
+	queued: true
+	jobId: string
 }
 
 @Injectable()
@@ -285,6 +295,42 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		}
 	}
 
+	async enqueueStockWebhookDrain(
+		catalogId: string,
+		integrationId: string
+	): Promise<QueuedWebhookStockResult> {
+		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		const jobId = buildBullMqSafeJobId(WEBHOOK_JOB_ID_PREFIX, integrationId)
+		const job = await this.queue.add(
+			WEBHOOK_STOCK_SYNC_JOB_NAME,
+			{
+				catalogId,
+				webhookIntegrationId: integrationId,
+				mode: IntegrationSyncRunMode.STOCK,
+				trigger: IntegrationSyncRunTrigger.WEBHOOK
+			},
+			{
+				jobId,
+				delay: WEBHOOK_STOCK_SYNC_DELAY_MS,
+				removeOnComplete: true
+			}
+		)
+		const resolvedJobId = String(job.id ?? jobId)
+		this.observability.recordQueueJobEnqueued(
+			MOYSKLAD_SYNC_QUEUE_NAME,
+			WEBHOOK_STOCK_SYNC_JOB_NAME
+		)
+		this.logger.log(
+			`Queued MoySklad stock webhook drain for catalog ${catalogId}: integration=${integrationId}, jobId=${resolvedJobId}`
+		)
+
+		return {
+			ok: true,
+			queued: true,
+			jobId: resolvedJobId
+		}
+	}
+
 	async syncSchedulerForIntegration(
 		integration: IntegrationRecord
 	): Promise<void> {
@@ -443,6 +489,32 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 					}
 
 					if (!runId) {
+						if (
+							job.data.mode === IntegrationSyncRunMode.STOCK &&
+							job.data.trigger === IntegrationSyncRunTrigger.WEBHOOK
+						) {
+							const result = await this.processWebhookStockJob(
+								job,
+								jobId
+							)
+							const drainSkipped =
+								typeof result === 'object' &&
+								result !== null &&
+								'drainSkipped' in result &&
+								(result as { drainSkipped?: boolean }).drainSkipped === true
+							this.syncRuns.recordOutcome(
+								job.data,
+								drainSkipped ? 'skipped' : 'success',
+								this.elapsedMs(startedAt)
+							)
+							this.recordQueueOutcome(
+								jobName,
+								drainSkipped ? 'skipped' : 'success',
+								startedAt
+							)
+							return result
+						}
+
 						runId = await this.prepareScheduledRun(job.data, jobId)
 						if (!runId) {
 							this.logger.warn(
@@ -631,6 +703,122 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		return run.id
 	}
 
+	private async processWebhookStockJob(
+		job: Job<MoySkladSyncJob>,
+		jobId: string
+	): Promise<unknown> {
+		const integrationId = job.data.webhookIntegrationId
+		if (!integrationId) {
+			throw new InternalServerErrorException(
+				'Для webhook-синхронизации остатков MoySklad не указан integrationId'
+			)
+		}
+
+		const integration = await this.repo.findMoySkladById(integrationId)
+		if (!integration || !integration.isActive) {
+			const events = await this.repo.findPendingWebhookEvents(integrationId)
+			await this.repo.markWebhookEventsSkipped(
+				events.map(event => event.id),
+				'integration_inactive'
+			)
+			this.logger.warn(
+				`Skipping MoySklad stock webhook drain ${jobId || '<unknown>'}: integration ${integrationId} not found or inactive`
+			)
+			return {
+				ok: true,
+				drainSkipped: true,
+				reason: 'integration_inactive'
+			}
+		}
+
+		if (integration.catalogId !== job.data.catalogId) {
+			throw new InternalServerErrorException(
+				`MoySklad stock webhook job catalog mismatch: job=${job.data.catalogId}, integration=${integration.catalogId}`
+			)
+		}
+
+		const events = await this.repo.findPendingWebhookEvents(integrationId)
+		if (!events.length) {
+			this.logger.log(
+				`Skipping MoySklad stock webhook drain ${jobId || '<unknown>'}: no pending events for integration ${integrationId}`
+			)
+			return {
+				ok: true,
+				drainSkipped: true,
+				reason: 'no_pending_events'
+			}
+		}
+
+		const eventIds = events.map(event => event.id)
+		await this.repo.markWebhookEventsProcessing(eventIds, jobId)
+
+		const run = await this.repo.createSyncRun({
+			integrationId,
+			catalogId: integration.catalogId,
+			mode: IntegrationSyncRunMode.STOCK,
+			trigger: IntegrationSyncRunTrigger.WEBHOOK,
+			metadata: {
+				webhook: {
+					queueJobId: jobId,
+					eventIds,
+					reportUrlCount: events.length
+				}
+			}
+		})
+		const runJobId = buildBullMqSafeJobId(WEBHOOK_JOB_ID_PREFIX, run.id)
+		const runningRun = await this.syncRuns.markRunning(run.id, runJobId)
+		if (!runningRun) {
+			throw new InternalServerErrorException(
+				`Не найден запуск webhook-синхронизации MoySklad ${run.id}`
+			)
+		}
+
+		try {
+			const reportUrls = Array.from(
+				new Set(events.map(event => event.reportUrl).filter(Boolean))
+			)
+			const execution = await this.moySkladSync.syncWebhookStock({
+				catalogId: integration.catalogId,
+				runId: run.id,
+				reportUrls
+			})
+			const result = execution.result
+			await this.syncRuns.completeStockSync(
+				run.id,
+				job.data,
+				execution.completion,
+				result
+			)
+			await Promise.all(
+				eventIds.map(eventId => this.repo.markWebhookEventProcessed(eventId))
+			)
+			await this.repo.patchMoySkladStockWebhookMetadata(integrationId, {
+				lastProcessedAt: new Date().toISOString(),
+				lastError: null
+			})
+			this.logger.log(
+				`Finished MoySklad stock webhook drain ${jobId || '<unknown>'}: catalog=${integration.catalogId}, events=${events.length}, total=${result.total}, updated=${result.updated}, updatedProducts=${result.updatedProducts}, updatedVariants=${result.updatedVariants}, skipped=${result.skipped}, durationMs=${result.durationMs}`
+			)
+
+			return result
+		} catch (error) {
+			const message = this.renderErrorMessage(error)
+			await Promise.all(
+				eventIds.map(eventId =>
+					this.repo.markWebhookEventFailed(eventId, message)
+				)
+			)
+			await this.repo.patchMoySkladStockWebhookMetadata(integrationId, {
+				lastError: message
+			})
+			await this.syncRuns.failRun(run.id, message)
+			this.logger.error(
+				`MoySklad stock webhook drain ${jobId || '<unknown>'} failed for catalog ${integration.catalogId}: ${message}`
+			)
+			throw this.toError(error)
+		}
+	}
+
 	private async assertNoActiveRun(catalogId: string): Promise<void> {
 		const activeRun = await this.repo.findLatestActiveSyncRun(catalogId)
 		if (!activeRun) return
@@ -664,6 +852,12 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 	private resolveJobName(job: Job<MoySkladSyncJob>): string {
 		if (job.name) {
 			return job.name
+		}
+		if (
+			job.data.mode === IntegrationSyncRunMode.STOCK &&
+			job.data.trigger === IntegrationSyncRunTrigger.WEBHOOK
+		) {
+			return WEBHOOK_STOCK_SYNC_JOB_NAME
 		}
 
 		switch (job.data.mode) {

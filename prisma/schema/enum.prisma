@@ -24,6 +24,7 @@ enum IntegrationSyncRunMode {
 enum IntegrationSyncRunTrigger {
   MANUAL
   SCHEDULED
+  WEBHOOK
 }
 
 enum IntegrationSyncRunStatus {
@@ -31,6 +32,14 @@ enum IntegrationSyncRunStatus {
   RUNNING
   SUCCESS
   ERROR
+  SKIPPED
+}
+
+enum IntegrationWebhookEventStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
   SKIPPED
 }
 

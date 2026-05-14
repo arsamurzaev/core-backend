@@ -35,6 +35,7 @@ describe('IntegrationController', () => {
 							syncMoySkladCatalog: jest.fn(),
 							syncMoySkladProduct: jest.fn(),
 							syncMoySkladStock: jest.fn(),
+							receiveMoySkladStockWebhook: jest.fn(),
 							retryMoySkladOrderExport: jest.fn(),
 							cancelMoySkladSync: jest.fn()
 						}
@@ -81,6 +82,33 @@ describe('IntegrationController', () => {
 
 		expect(service.syncMoySkladStock).toHaveBeenCalledWith()
 		expect(result.mode).toBe(IntegrationSyncRunMode.STOCK)
+	})
+
+	it('delegates MoySklad stock webhook to service', async () => {
+		service.receiveMoySkladStockWebhook.mockResolvedValue(undefined)
+		const payload = {
+			events: [
+				{
+					accountId: 'account-1',
+					reportUrl:
+						'https://api.moysklad.ru/api/remap/1.2/report/stock/all/current'
+				}
+			]
+		}
+
+		await controller.receiveMoySkladStockWebhook(
+			'integration-1',
+			'secret-1',
+			'request-1',
+			payload
+		)
+
+		expect(service.receiveMoySkladStockWebhook).toHaveBeenCalledWith({
+			integrationId: 'integration-1',
+			secret: 'secret-1',
+			requestId: 'request-1',
+			payload
+		})
 	})
 
 	it('delegates order export history to service', async () => {
