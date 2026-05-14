@@ -417,6 +417,17 @@ export class ProductCursorCardPageDto {
 	nextCursor: string | null
 }
 
+export class ProductDefaultVariantRepairResponseDto {
+	@ApiProperty({ type: Number })
+	checkedProducts: number
+
+	@ApiProperty({ type: Number })
+	repairedProducts: number
+
+	@ApiProperty({ type: Number })
+	affectedCatalogs: number
+}
+
 export class ProductTypeCompatibilityIssueDto {
 	@ApiProperty({ type: String })
 	attributeId: string

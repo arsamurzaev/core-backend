@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common'
 
+import { mustCatalogId } from '@/shared/tenancy/ctx'
+
 import { ApplyProductTypeChangeDtoReq } from './dto/requests/apply-product-type-change.dto.req'
 import { CreateProductDtoReq } from './dto/requests/create-product.dto.req'
 import { ProductTypeCompatibilityPreviewDtoReq } from './dto/requests/product-type-compatibility-preview.dto.req'
@@ -143,6 +145,16 @@ export class ProductService {
 
 	async expireScheduledDiscounts(now = new Date()) {
 		return this.maintenance.expireScheduledDiscounts(now)
+	}
+
+	async repairMissingDefaultVariantsForCurrentCatalog() {
+		return this.maintenance.repairMissingDefaultVariantsForCatalog(
+			mustCatalogId()
+		)
+	}
+
+	async repairMissingDefaultVariantsForCatalog(catalogId: string) {
+		return this.maintenance.repairMissingDefaultVariantsForCatalog(catalogId)
 	}
 
 	async rebuildSeoForCatalog(catalogId: string) {

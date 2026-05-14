@@ -521,6 +521,13 @@ export type ExpiredDiscountProductRef = {
 	catalogId: string
 }
 
+export type ProductDefaultVariantRepairCandidate = {
+	id: string
+	sku: string
+	price: unknown
+	status: ProductStatus
+}
+
 type ProductReadExecutor =
 	| Pick<PrismaService, 'product'>
 	| Pick<Prisma.TransactionClient, 'product'>
@@ -823,6 +830,55 @@ export class ProductRepository {
 		return this.prisma.product.findMany({
 			where: { catalogId, deleteAt: null },
 			select: { id: true },
+			orderBy: { id: 'asc' },
+			take,
+			...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {})
+		})
+	}
+
+	findDefaultVariantRepairCandidates(
+		catalogId: string,
+		take: number,
+		cursorId?: string
+	): Promise<ProductDefaultVariantRepairCandidate[]> {
+		return this.prisma.product.findMany({
+			where: {
+				catalogId,
+				deleteAt: null,
+				AND: [
+					{
+						variants: {
+							none: {
+								deleteAt: null,
+								OR: [
+									{
+										status: ProductVariantStatus.ACTIVE,
+										isAvailable: true
+									},
+									{
+										variantKey: DEFAULT_VARIANT_KEY,
+										status: { not: ProductVariantStatus.DISABLED }
+									}
+								]
+							}
+						}
+					},
+					{
+						variants: {
+							none: {
+								deleteAt: null,
+								variantKey: { not: DEFAULT_VARIANT_KEY }
+							}
+						}
+					}
+				]
+			},
+			select: {
+				id: true,
+				sku: true,
+				price: true,
+				status: true
+			},
 			orderBy: { id: 'asc' },
 			take,
 			...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {})
@@ -1154,6 +1210,26 @@ export class ProductRepository {
 			await this.assertActiveProductHasValidVariant(tx, id)
 
 			return this.findProductWithDetails(tx, id, catalogId)
+		})
+	}
+
+	async ensureDefaultVariant(
+		id: string,
+		catalogId: string,
+		variant: ProductVariantData
+	): Promise<boolean | null> {
+		return this.prisma.$transaction(async tx => {
+			const existing = await this.findActiveProductRef(tx, id, catalogId)
+			if (!existing) return null
+
+			const validVariant = await this.findActiveOrDefaultProductVariant(tx, id)
+			if (validVariant) return false
+
+			const customVariant = await this.findCustomProductVariant(tx, id)
+			if (customVariant) return false
+
+			await this.restoreOrCreateDefaultVariant(tx, catalogId, id, variant)
+			return true
 		})
 	}
 
@@ -1510,7 +1586,20 @@ export class ProductRepository {
 
 		if (status !== ProductStatus.ACTIVE) return
 
-		const variant = await db.productVariant.findFirst({
+		const variant = await this.findActiveOrDefaultProductVariant(db, productId)
+
+		if (!variant) {
+			throw new BadRequestException(
+				'Активный товар должен иметь активный или default variant'
+			)
+		}
+	}
+
+	private findActiveOrDefaultProductVariant(
+		db: ProductVariantInvariantExecutor,
+		productId: string
+	): Promise<{ id: string } | null> {
+		return db.productVariant.findFirst({
 			where: {
 				productId,
 				deleteAt: null,
@@ -1527,12 +1616,60 @@ export class ProductRepository {
 			},
 			select: { id: true }
 		})
+	}
 
-		if (!variant) {
-			throw new BadRequestException(
-				'Активный товар должен иметь активный или default variant'
-			)
+	private findCustomProductVariant(
+		db: ProductVariantInvariantExecutor,
+		productId: string
+	): Promise<{ id: string } | null> {
+		return db.productVariant.findFirst({
+			where: {
+				productId,
+				deleteAt: null,
+				variantKey: { not: DEFAULT_VARIANT_KEY }
+			},
+			select: { id: true }
+		})
+	}
+
+	private async restoreOrCreateDefaultVariant(
+		tx: Prisma.TransactionClient,
+		catalogId: string,
+		productId: string,
+		variant: ProductVariantData
+	): Promise<void> {
+		const existingDefault = await tx.productVariant.findFirst({
+			where: { productId, variantKey: DEFAULT_VARIANT_KEY },
+			orderBy: { createdAt: 'asc' },
+			select: { id: true }
+		})
+
+		if (!existingDefault) {
+			await this.createVariant(tx, catalogId, productId, variant, [])
+			return
 		}
+
+		const now = new Date()
+		await tx.productVariant.update({
+			where: { id: existingDefault.id },
+			data: {
+				stock: variant.stock,
+				price: variant.price,
+				status: variant.status,
+				isAvailable: variant.status === ProductVariantStatus.ACTIVE,
+				deleteAt: null
+			}
+		})
+		await tx.variantAttribute.updateMany({
+			where: { variantId: existingDefault.id, deleteAt: null },
+			data: { deleteAt: now }
+		})
+		await this.syncVariantSaleUnits(
+			tx,
+			catalogId,
+			existingDefault.id,
+			variant.saleUnits
+		)
 	}
 
 	private async syncSingleDefaultVariantPrice(

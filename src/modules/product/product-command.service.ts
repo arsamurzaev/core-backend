@@ -166,6 +166,7 @@ export class ProductCommandService {
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
 		const payload = await this.prepareUpdatePayload(id, dto, catalogId, typeId)
+		await this.ensureDefaultVariantForLegacyUpdate(id, dto, catalogId)
 
 		const updateArgs: [
 			string,
@@ -244,6 +245,7 @@ export class ProductCommandService {
 
 	async toggleStatus(id: string) {
 		const catalogId = mustCatalogId()
+		await this.ensureDefaultVariantForLegacyUpdate(id, {}, catalogId)
 		const product = await this.repo.toggleStatus(id, catalogId)
 		if (!product)
 			throw new NotFoundException(
@@ -367,6 +369,26 @@ export class ProductCommandService {
 		await this.finalizer.invalidateCatalogProductsCache(catalogId)
 		await this.finalizer.invalidateCategoryProductsCache(catalogId)
 		return { ok: true }
+	}
+
+	private async ensureDefaultVariantForLegacyUpdate(
+		id: string,
+		dto: Pick<UpdateProductDtoReq, 'price' | 'status' | 'variants'>,
+		catalogId: string
+	): Promise<void> {
+		if (dto.variants !== undefined) return
+		if (await this.featureEntitlements.canUseProductVariants(catalogId)) return
+
+		const product = await this.repo.findSkuById(id, catalogId)
+		if (!product) return
+
+		const price = Object.hasOwn(dto, 'price') ? dto.price : product.price
+		const defaultVariant = await this.variants.buildDefaultVariantData(
+			product.sku,
+			price,
+			{ productStatus: dto.status }
+		)
+		await this.repo.ensureDefaultVariant(id, catalogId, defaultVariant)
 	}
 
 	private async finalizeVariantReplacement(

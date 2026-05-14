@@ -51,6 +51,7 @@ import {
 	ProductCreateResponseDto,
 	ProductCursorCardPageDto,
 	ProductCursorPageDto,
+	ProductDefaultVariantRepairResponseDto,
 	ProductInfinitePageDto,
 	ProductTypeCompatibilityPreviewDto,
 	ProductUpdateResponseDto,
@@ -591,6 +592,20 @@ export class ProductController {
 	@ApiCreatedResponse({ type: ProductCreateResponseDto })
 	async duplicate(@Param('id') id: string) {
 		return this.productService.duplicate(id)
+	}
+
+	@Post('/maintenance/default-variants/repair')
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({
+		summary: 'Repair missing technical default variants for current catalog',
+		description:
+			'Creates or restores a technical default variant only for legacy simple products that do not have real custom variants.'
+	})
+	@ApiOkResponse({ type: ProductDefaultVariantRepairResponseDto })
+	async repairMissingDefaultVariants(): Promise<ProductDefaultVariantRepairResponseDto> {
+		return this.productService.repairMissingDefaultVariantsForCurrentCatalog()
 	}
 
 	@Post('/:id/product-type/compatibility-preview')

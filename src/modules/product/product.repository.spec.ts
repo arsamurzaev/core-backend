@@ -249,6 +249,57 @@ describe('ProductRepository', () => {
 		expect(sql.values).toContain('product-type-from-catalog-2')
 	})
 
+	it('finds only simple products that need a technical default variant repair', async () => {
+		const prisma = {
+			product: {
+				findMany: jest.fn().mockResolvedValue([])
+			}
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		await repository.findDefaultVariantRepairCandidates(
+			'catalog-1',
+			25,
+			'cursor-product'
+		)
+
+		expect(prisma.product.findMany).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: expect.objectContaining({
+					catalogId: 'catalog-1',
+					deleteAt: null,
+					AND: expect.arrayContaining([
+						expect.objectContaining({
+							variants: expect.objectContaining({
+								none: expect.objectContaining({
+									OR: expect.any(Array)
+								})
+							})
+						}),
+						expect.objectContaining({
+							variants: {
+								none: {
+									deleteAt: null,
+									variantKey: { not: 'default' }
+								}
+							}
+						})
+					])
+				}),
+				select: {
+					id: true,
+					sku: true,
+					price: true,
+					status: true
+				},
+				orderBy: { id: 'asc' },
+				take: 25,
+				cursor: { id: 'cursor-product' },
+				skip: 1
+			})
+		)
+	})
+
 	it('loads product type compatibility preview refs inside current catalog', async () => {
 		const prisma = {
 			product: {
@@ -492,6 +543,80 @@ describe('ProductRepository', () => {
 		await repository.update('product-1', { price: 140 }, 'catalog-1')
 
 		expect(prisma.productVariant.update).not.toHaveBeenCalled()
+	})
+
+	it('creates a default variant while repairing a legacy product without variants', async () => {
+		const tx = {
+			product: {
+				findFirst: jest.fn().mockResolvedValue({ id: 'product-1' })
+			},
+			productVariant: {
+				findFirst: jest
+					.fn()
+					.mockResolvedValueOnce(null)
+					.mockResolvedValueOnce(null),
+				create: jest.fn().mockResolvedValue({ id: 'variant-default' })
+			}
+		}
+		const prisma = {
+			$transaction: jest.fn(async callback => callback(tx))
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		await expect(
+			repository.ensureDefaultVariant('product-1', 'catalog-1', {
+				sku: 'LEGACY-PRODUCT',
+				variantKey: 'default',
+				price: 120,
+				stock: 0,
+				status: 'OUT_OF_STOCK',
+				attributes: []
+			} as any)
+		).resolves.toBe(true)
+
+		expect(tx.productVariant.create).toHaveBeenCalledWith({
+			data: {
+				productId: 'product-1',
+				sku: 'LEGACY-PRODUCT',
+				variantKey: 'default',
+				stock: 0,
+				price: 120,
+				status: 'OUT_OF_STOCK',
+				isAvailable: false
+			}
+		})
+	})
+
+	it('does not repair default variant when product has custom variants', async () => {
+		const tx = {
+			product: {
+				findFirst: jest.fn().mockResolvedValue({ id: 'product-1' })
+			},
+			productVariant: {
+				findFirst: jest
+					.fn()
+					.mockResolvedValueOnce(null)
+					.mockResolvedValueOnce({ id: 'variant-custom' }),
+				create: jest.fn()
+			}
+		}
+		const prisma = {
+			$transaction: jest.fn(async callback => callback(tx))
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		await expect(
+			repository.ensureDefaultVariant('product-1', 'catalog-1', {
+				sku: 'CUSTOM-PRODUCT',
+				variantKey: 'default',
+				price: 120,
+				stock: 0,
+				status: 'OUT_OF_STOCK',
+				attributes: []
+			} as any)
+		).resolves.toBe(false)
+
+		expect(tx.productVariant.create).not.toHaveBeenCalled()
 	})
 
 	it('rejects toggling a product to active without a valid variant', async () => {

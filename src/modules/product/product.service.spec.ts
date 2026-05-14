@@ -119,6 +119,7 @@ describe('ProductService', () => {
 						findFilteredProductIdsPageSeeded: jest.fn(),
 						findRecommendedProductIdsPageDefault: jest.fn(),
 						findRecommendedProductIdsPageSeeded: jest.fn(),
+						findDefaultVariantRepairCandidates: jest.fn(),
 						findAttributesByTypeAndKeys: jest.fn(),
 						findBrandById: jest.fn(),
 						findProductTypeById: jest.fn(),
@@ -132,6 +133,7 @@ describe('ProductService', () => {
 						existsName: jest.fn(),
 						existsSku: jest.fn(),
 						existsVariantSku: jest.fn(),
+						ensureDefaultVariant: jest.fn(),
 						create: jest.fn(),
 						update: jest.fn(),
 						applyProductTypeChange: jest.fn(),
@@ -335,6 +337,61 @@ describe('ProductService', () => {
 			3,
 			{ id: 'product-3' },
 			'catalog-2'
+		)
+	})
+
+	it('repairs missing technical default variants in current catalog', async () => {
+		repo.findDefaultVariantRepairCandidates
+			.mockResolvedValueOnce([
+				{
+					id: 'product-1',
+					sku: 'LEGACY-PRODUCT',
+					price: 100,
+					status: 'ACTIVE'
+				}
+			] as any)
+			.mockResolvedValueOnce([])
+		repo.ensureDefaultVariant.mockResolvedValue(true)
+		repo.findByIdsWithDetails.mockResolvedValue([
+			{ id: 'product-1', slug: 'legacy-product' }
+		] as any)
+
+		const result = await runWithCatalog(() =>
+			service.repairMissingDefaultVariantsForCurrentCatalog()
+		)
+
+		expect(result).toEqual({
+			checkedProducts: 1,
+			repairedProducts: 1,
+			affectedCatalogs: 1
+		})
+		expect(repo.findDefaultVariantRepairCandidates).toHaveBeenCalledWith(
+			'catalog-1',
+			100,
+			undefined
+		)
+		expect(repo.ensureDefaultVariant).toHaveBeenCalledWith(
+			'product-1',
+			'catalog-1',
+			expect.objectContaining({
+				sku: 'LEGACY-PRODUCT',
+				variantKey: 'default',
+				price: 100,
+				status: 'OUT_OF_STOCK',
+				attributes: []
+			})
+		)
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			PRODUCTS_CACHE_VERSION,
+			'catalog-1'
+		)
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			CATEGORY_PRODUCTS_CACHE_VERSION,
+			'catalog-1'
+		)
+		expect(productSeoSync.syncProduct).toHaveBeenCalledWith(
+			expect.objectContaining({ id: 'product-1' }),
+			'catalog-1'
 		)
 	})
 
@@ -2072,6 +2129,49 @@ describe('ProductService', () => {
 			undefined,
 			undefined
 		)
+	})
+
+	it('repairs a missing default variant before legacy product update when variants are disabled', async () => {
+		capabilities.canUseProductVariants.mockResolvedValue(false)
+		repo.findSkuById.mockResolvedValue({
+			id: 'product-1',
+			sku: 'LEGACY-PRODUCT',
+			price: 100,
+			productTypeId: null
+		} as any)
+		repo.ensureDefaultVariant.mockResolvedValue(true)
+		repo.update.mockResolvedValue({
+			id: 'product-1',
+			slug: 'legacy-product',
+			name: 'Legacy Product',
+			price: 120,
+			status: 'ACTIVE',
+			media: [],
+			productAttributes: [],
+			variants: [],
+			categoryProducts: []
+		} as any)
+
+		await runWithCatalog(() =>
+			service.update('product-1', {
+				name: 'Legacy Product',
+				price: 120
+			})
+		)
+
+		expect(repo.ensureDefaultVariant).toHaveBeenCalledWith(
+			'product-1',
+			'catalog-1',
+			expect.objectContaining({
+				sku: 'LEGACY-PRODUCT',
+				variantKey: 'default',
+				price: 120,
+				stock: 0,
+				status: 'OUT_OF_STOCK',
+				attributes: []
+			})
+		)
+		expect(repo.update).toHaveBeenCalled()
 	})
 
 	it('removes old product type values when product type relation is cleared', async () => {
