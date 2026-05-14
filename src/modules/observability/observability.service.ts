@@ -82,6 +82,68 @@ export class ObservabilityService {
 		registers: [this.registry]
 	})
 
+	private readonly orderExportEventsTotal = new Counter({
+		name: `${this.settings.metricPrefix}_order_export_events_total`,
+		help: 'Total number of order export domain events.',
+		labelNames: ['provider', 'trigger', 'outcome'] as const,
+		registers: [this.registry]
+	})
+
+	private readonly integrationSyncRunsTotal = new Counter({
+		name: `${this.settings.metricPrefix}_integration_sync_runs_total`,
+		help:
+			'Total number of integration sync runs by provider, mode, trigger and outcome.',
+		labelNames: ['provider', 'mode', 'trigger', 'outcome'] as const,
+		registers: [this.registry]
+	})
+
+	private readonly integrationSyncDurationSeconds = new Histogram({
+		name: `${this.settings.metricPrefix}_integration_sync_duration_seconds`,
+		help: 'Integration sync run duration in seconds.',
+		labelNames: ['provider', 'mode', 'trigger', 'outcome'] as const,
+		buckets: [0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1200],
+		registers: [this.registry]
+	})
+
+	private readonly integrationSyncItemsTotal = new Counter({
+		name: `${this.settings.metricPrefix}_integration_sync_items_total`,
+		help: 'Total number of integration sync items by entity and outcome.',
+		labelNames: ['provider', 'mode', 'entity', 'outcome'] as const,
+		registers: [this.registry]
+	})
+
+	private readonly integrationStockFreshness = new Map<
+		string,
+		{ provider: string; catalogId: string; lastSyncedAt: Date }
+	>()
+
+	private readonly integrationStockStaleAgeSeconds = new Gauge({
+		name: `${this.settings.metricPrefix}_integration_stock_stale_age_seconds`,
+		help: 'Age of the last successful integration stock sync in seconds.',
+		labelNames: ['provider', 'catalog_id'] as const,
+		registers: [this.registry],
+		collect: () => {
+			const now = Date.now()
+			for (const item of this.integrationStockFreshness.values()) {
+				this.integrationStockStaleAgeSeconds.set(
+					{
+						provider: item.provider,
+						catalog_id: item.catalogId
+					},
+					Math.max(0, (now - item.lastSyncedAt.getTime()) / 1000)
+				)
+			}
+		}
+	})
+
+	private readonly inventoryMovementsTotal = new Counter({
+		name: `${this.settings.metricPrefix}_inventory_movements_total`,
+		help:
+			'Total number of inventory movements by movement type, source and outcome.',
+		labelNames: ['type', 'source', 'outcome'] as const,
+		registers: [this.registry]
+	})
+
 	private readonly cacheOperationsTotal = new Counter({
 		name: `${this.settings.metricPrefix}_cache_operations_total`,
 		help: 'Total number of cache operations.',
@@ -264,6 +326,88 @@ export class ObservabilityService {
 
 		this.queueJobsTotal.inc(labels)
 		this.queueJobDurationSeconds.observe(labels, durationMs / 1000)
+	}
+
+	recordOrderExportEvent(
+		provider: string,
+		trigger: string,
+		outcome: 'queued' | 'success' | 'error' | 'skipped'
+	) {
+		if (!this.settings.metricsEnabled) return
+
+		this.orderExportEventsTotal.inc({
+			provider,
+			trigger,
+			outcome
+		})
+	}
+
+	recordIntegrationSyncRun(
+		provider: string,
+		mode: string,
+		trigger: string,
+		outcome: 'success' | 'error' | 'skipped',
+		durationMs: number
+	) {
+		if (!this.settings.metricsEnabled) return
+
+		const labels = { provider, mode, trigger, outcome }
+		this.integrationSyncRunsTotal.inc(labels)
+		this.integrationSyncDurationSeconds.observe(labels, durationMs / 1000)
+	}
+
+	recordIntegrationSyncItems(
+		provider: string,
+		mode: string,
+		entity: 'product' | 'variant' | 'stock_row',
+		outcome: 'created' | 'updated' | 'deleted' | 'skipped' | 'applied',
+		count: number
+	) {
+		if (!this.settings.metricsEnabled || count <= 0) return
+
+		this.integrationSyncItemsTotal.inc(
+			{
+				provider,
+				mode,
+				entity,
+				outcome
+			},
+			count
+		)
+	}
+
+	recordIntegrationStockFreshness(
+		provider: string,
+		catalogId: string,
+		lastSyncedAt: Date
+	) {
+		if (!this.settings.metricsEnabled || Number.isNaN(lastSyncedAt.getTime())) {
+			return
+		}
+
+		this.integrationStockFreshness.set(`${provider}:${catalogId}`, {
+			provider,
+			catalogId,
+			lastSyncedAt
+		})
+	}
+
+	recordInventoryMovement(
+		type: string,
+		source: string,
+		outcome: 'success' | 'error' = 'success',
+		count = 1
+	) {
+		if (!this.settings.metricsEnabled || count <= 0) return
+
+		this.inventoryMovementsTotal.inc(
+			{
+				type,
+				source,
+				outcome
+			},
+			count
+		)
 	}
 
 	recordCacheOperation(

@@ -84,7 +84,11 @@ export function resolveObservabilitySettings(
 		serviceVersion,
 		deploymentEnvironment,
 		metricsEnabled:
-			enabled && parseBoolean(env.OBSERVABILITY_METRICS_ENABLED, env.NODE_ENV !== 'production'),
+			enabled &&
+			parseBoolean(
+				env.OBSERVABILITY_METRICS_ENABLED,
+				env.NODE_ENV !== 'production'
+			),
 		metricsPath,
 		jsonLogsEnabled:
 			enabled &&

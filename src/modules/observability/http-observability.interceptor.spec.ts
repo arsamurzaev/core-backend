@@ -8,7 +8,10 @@ describe('HttpObservabilityInterceptor', () => {
 		jest.restoreAllMocks()
 	})
 
-	function createContext(req: Record<string, unknown>, res: Record<string, unknown>) {
+	function createContext(
+		req: Record<string, unknown>,
+		res: Record<string, unknown>
+	) {
 		return {
 			getType: () => 'http',
 			switchToHttp: () => ({

@@ -1,4 +1,4 @@
-import { SeoEntityType } from '@generated/enums'
+import { CatalogStatus, SeoEntityType } from '@generated/enums'
 import { NotFoundException } from '@nestjs/common'
 
 import {
@@ -73,6 +73,7 @@ function createTransactionMock() {
 function createService(tx = createTransactionMock()) {
 	const prisma = {
 		catalog: {
+			findMany: jest.fn().mockResolvedValue([]),
 			findUnique: jest.fn().mockResolvedValue({ id: 'catalog-1' })
 		},
 		$transaction: jest.fn(async callback => callback(tx))
@@ -80,14 +81,24 @@ function createService(tx = createTransactionMock()) {
 	const cache = {
 		bumpVersion: jest.fn().mockResolvedValue(undefined)
 	}
+	const capabilities = {
+		getCatalogCapabilities: jest.fn().mockResolvedValue({
+			raw: {},
+			effective: {},
+			flags: {},
+			definitions: [],
+			items: []
+		})
+	}
 	const service = new AdminService(
 		prisma as any,
 		{} as any,
 		{} as any,
-		cache as any
+		cache as any,
+		capabilities as any
 	)
 
-	return { cache, prisma, service, tx }
+	return { cache, capabilities, prisma, service, tx }
 }
 
 describe('AdminService', () => {
@@ -100,6 +111,60 @@ describe('AdminService', () => {
 		)
 
 		expect(prisma.$transaction).not.toHaveBeenCalled()
+	})
+
+	it('exposes inventory mode and entitlement in admin catalog config', async () => {
+		const { prisma, service } = createService()
+		prisma.catalog.findMany.mockResolvedValue([
+			{
+				id: 'catalog-1',
+				slug: 'catalog-one',
+				domain: null,
+				name: 'Catalog One',
+				typeId: 'type-1',
+				parentId: null,
+				userId: 'user-1',
+				promoCodeId: null,
+				subscriptionEndsAt: null,
+				metrics: [],
+				payments: [],
+				deleteAt: null,
+				createdAt: new Date('2026-05-10T00:00:00.000Z'),
+				updatedAt: new Date('2026-05-10T00:00:00.000Z'),
+				config: {
+					status: CatalogStatus.OPERATIONAL,
+					logoMedia: null
+				},
+				settings: {
+					inventoryMode: 'INTERNAL'
+				},
+				featureEntitlements: [
+					{
+						feature: 'inventory.internal',
+						enabled: true,
+						expiresAt: new Date('2099-01-01T00:00:00.000Z')
+					}
+				],
+				type: {
+					id: 'type-1',
+					code: 'shop',
+					name: 'Shop',
+					deleteAt: null,
+					createdAt: new Date('2026-05-10T00:00:00.000Z'),
+					updatedAt: new Date('2026-05-10T00:00:00.000Z')
+				},
+				promoCode: null,
+				children: []
+			}
+		])
+
+		const [catalog] = await service.getCatalogs()
+
+		expect(catalog.config).toMatchObject({
+			status: CatalogStatus.OPERATIONAL,
+			inventoryMode: 'INTERNAL',
+			canUseInternalInventory: true
+		})
 	})
 
 	it('soft-deletes catalog content and keeps catalog-level data intact', async () => {
@@ -223,24 +288,24 @@ describe('AdminService', () => {
 		}
 		const { service } = createService(tx)
 
-		await expect(service.deleteCatalogContent('catalog-1')).resolves.toMatchObject(
-			{
-				ok: true,
-				catalogId: 'catalog-1',
-				counts: {
-					products: 0,
-					productVariants: 0,
-					productAttributes: 0,
-					variantAttributes: 0,
-					categories: 0,
-					brands: 0,
-					seoSettings: 0,
-					productMediaLinks: 0,
-					categoryProductLinks: 0,
-					integrationProductLinks: 0,
-					integrationCategoryLinks: 0
-				}
+		await expect(
+			service.deleteCatalogContent('catalog-1')
+		).resolves.toMatchObject({
+			ok: true,
+			catalogId: 'catalog-1',
+			counts: {
+				products: 0,
+				productVariants: 0,
+				productAttributes: 0,
+				variantAttributes: 0,
+				categories: 0,
+				brands: 0,
+				seoSettings: 0,
+				productMediaLinks: 0,
+				categoryProductLinks: 0,
+				integrationProductLinks: 0,
+				integrationCategoryLinks: 0
 			}
-		)
+		})
 	})
 })

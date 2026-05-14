@@ -45,5 +45,4 @@ export class AdminDuplicateCatalogDtoReq {
 	@IsString()
 	@IsNotEmpty()
 	slug: string
-
 }

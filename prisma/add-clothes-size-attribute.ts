@@ -93,25 +93,34 @@ async function main() {
 				})
 
 		for (const [index, size] of SIZE_VALUES.entries()) {
-			await tx.attributeEnumValue.upsert({
+			const current = await tx.attributeEnumValue.findFirst({
 				where: {
-					attributeId_value: {
-						attributeId: attribute.id,
-						value: size.value
-					}
-				},
-				create: {
 					attributeId: attribute.id,
-					value: size.value,
-					displayName: size.displayName,
-					displayOrder: index + 1
+					catalogId: null,
+					value: size.value
 				},
-				update: {
-					displayName: size.displayName,
-					displayOrder: index + 1,
-					deleteAt: null
-				}
+				select: { id: true }
 			})
+
+			if (current) {
+				await tx.attributeEnumValue.update({
+					where: { id: current.id },
+					data: {
+						displayName: size.displayName,
+						displayOrder: index + 1,
+						deleteAt: null
+					}
+				})
+			} else {
+				await tx.attributeEnumValue.create({
+					data: {
+						attributeId: attribute.id,
+						value: size.value,
+						displayName: size.displayName,
+						displayOrder: index + 1
+					}
+				})
+			}
 		}
 
 		const enumValues = await tx.attributeEnumValue.findMany({

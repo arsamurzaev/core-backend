@@ -1,0 +1,156 @@
+model InventoryWarehouse {
+  id String @id @default(uuid()) @db.Uuid
+
+  name String @db.VarChar(255)
+  code String @db.VarChar(100)
+
+  status   InventoryWarehouseStatus @default(ACTIVE)
+  address  String?                  @db.VarChar(500)
+  metadata Json?
+
+  ownerUserId String? @map("owner_user_id") @db.Uuid
+  ownerUser   User?   @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
+
+  catalogs     InventoryWarehouseCatalog[]
+  balances     InventoryStockBalance[]
+  movements    InventoryMovement[]
+  reservations InventoryReservation[]
+
+  deleteAt  DateTime? @map("delete_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@unique([ownerUserId, code])
+  @@index([ownerUserId, status])
+  @@index([code])
+  @@index([status])
+  @@map("inventory_warehouses")
+}
+
+model InventoryWarehouseCatalog {
+  warehouseId String @map("warehouse_id") @db.Uuid
+  catalogId   String @map("catalog_id") @db.Uuid
+
+  isDefault Boolean @default(false) @map("is_default")
+
+  warehouse InventoryWarehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  catalog   Catalog            @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@id([warehouseId, catalogId])
+  @@index([catalogId, isDefault])
+  @@map("inventory_warehouse_catalogs")
+}
+
+model InventoryStockBalance {
+  id String @id @default(uuid()) @db.Uuid
+
+  warehouseId String @map("warehouse_id") @db.Uuid
+  variantId   String @map("variant_id") @db.Uuid
+
+  quantityOnHand    Int @default(0) @map("quantity_on_hand")
+  quantityReserved  Int @default(0) @map("quantity_reserved")
+  quantityAvailable Int @default(0) @map("quantity_available")
+
+  lastMovementAt DateTime? @map("last_movement_at")
+  lastSyncedAt   DateTime? @map("last_synced_at")
+
+  warehouse InventoryWarehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  variant   ProductVariant     @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([warehouseId, variantId])
+  @@index([variantId])
+  @@index([warehouseId])
+  @@index([warehouseId, quantityOnHand])
+  @@map("inventory_stock_balances")
+}
+
+model InventoryMovement {
+  id String @id @default(uuid()) @db.Uuid
+
+  warehouseId String  @map("warehouse_id") @db.Uuid
+  variantId   String? @map("variant_id") @db.Uuid
+
+  type   InventoryMovementType
+  source InventoryMovementSource @default(SYSTEM)
+
+  quantityDelta Int  @map("quantity_delta")
+  quantityAfter Int? @map("quantity_after")
+
+  reservationId String? @map("reservation_id") @db.Uuid
+  orderId       String? @map("order_id") @db.Uuid
+  cartId        String? @map("cart_id") @db.Uuid
+  integrationId String? @map("integration_id") @db.Uuid
+  actorUserId   String? @map("actor_user_id") @db.Uuid
+
+  idempotencyKey     String? @unique @map("idempotency_key") @db.VarChar(191)
+  externalDocumentId String? @map("external_document_id") @db.VarChar(191)
+
+  reason   String? @db.VarChar(255)
+  metadata Json?
+
+  occurredAt DateTime @default(now()) @map("occurred_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  warehouse   InventoryWarehouse    @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  variant     ProductVariant?       @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  reservation InventoryReservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  order       Order?                @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  cart        Cart?                 @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  integration Integration?          @relation(fields: [integrationId], references: [id], onDelete: SetNull)
+  actorUser   User?                 @relation("InventoryMovementActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([warehouseId, occurredAt])
+  @@index([variantId, occurredAt])
+  @@index([type, occurredAt])
+  @@index([orderId])
+  @@index([cartId])
+  @@index([actorUserId])
+  @@index([integrationId, externalDocumentId])
+  @@map("inventory_movements")
+}
+
+model InventoryReservation {
+  id String @id @default(uuid()) @db.Uuid
+
+  warehouseId String @map("warehouse_id") @db.Uuid
+  variantId   String @map("variant_id") @db.Uuid
+
+  quantity Int
+  status   InventoryReservationStatus @default(ACTIVE)
+
+  cartId     String? @map("cart_id") @db.Uuid
+  cartItemId String? @map("cart_item_id") @db.Uuid
+  orderId    String? @map("order_id") @db.Uuid
+
+  expiresAt  DateTime? @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  releasedAt DateTime? @map("released_at")
+
+  idempotencyKey String? @unique @map("idempotency_key") @db.VarChar(191)
+  metadata       Json?
+
+  warehouse InventoryWarehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  variant   ProductVariant     @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  cart      Cart?              @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  cartItem  CartItem?          @relation(fields: [cartItemId], references: [id], onDelete: SetNull)
+  order     Order?             @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  movements InventoryMovement[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([warehouseId, status])
+  @@index([variantId, status])
+  @@index([cartId, status])
+  @@index([cartItemId])
+  @@index([orderId])
+  @@index([status, expiresAt])
+  @@map("inventory_reservations")
+}

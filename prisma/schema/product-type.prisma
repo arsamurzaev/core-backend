@@ -1,0 +1,51 @@
+enum ProductTypeScope {
+  SYSTEM_TEMPLATE
+  CATALOG
+}
+
+model ProductType {
+  id String @id @default(uuid()) @db.Uuid
+
+  catalogId String?          @map("catalog_id") @db.Uuid
+  catalog   Catalog?         @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  scope     ProductTypeScope
+
+  code        String  @db.VarChar(100)
+  name        String  @db.VarChar(255)
+  description String? @db.VarChar(1000)
+
+  isActive   Boolean   @default(true) @map("is_active")
+  isArchived Boolean   @default(false) @map("is_archived")
+  archivedAt DateTime? @map("archived_at")
+
+  attributes ProductTypeAttribute[]
+  products   Product[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([catalogId, code])
+  @@index([scope, code])
+  @@index([catalogId, isActive, isArchived])
+  @@map("product_types")
+}
+
+model ProductTypeAttribute {
+  productTypeId String @map("product_type_id") @db.Uuid
+  attributeId   String @map("attribute_id") @db.Uuid
+
+  isVariant    Boolean @default(false) @map("is_variant")
+  isRequired   Boolean @default(false) @map("is_required")
+  displayOrder Int     @default(0) @map("display_order")
+
+  productType ProductType @relation(fields: [productTypeId], references: [id], onDelete: Cascade)
+  attribute   Attribute   @relation(fields: [attributeId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@id([productTypeId, attributeId])
+  @@index([attributeId])
+  @@index([productTypeId, displayOrder])
+  @@map("product_type_attributes")
+}

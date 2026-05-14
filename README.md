@@ -57,6 +57,28 @@ $ yarn run test:e2e
 $ yarn run test:cov
 ```
 
+## API contracts
+
+Export the current OpenAPI document without starting the HTTP server:
+
+```bash
+npm run openapi:export -- --output=runtime/openapi.json
+```
+
+Regenerate frontend API clients from that file:
+
+```bash
+# storefront
+cd ../frontend
+$env:ORVAL_OPENAPI_URL="C:/Users/krush/Desktop/www/catalog/backend/runtime/openapi.json"
+bun run api:gen
+
+# platform dashboard
+cd ../dashboard
+$env:ORVAL_OPENAPI_URL="C:/Users/krush/Desktop/www/catalog/backend/runtime/openapi.json"
+bun run api:gen
+```
+
 ## Observability
 
 LGTM overlay is started with a separate Compose file:
@@ -88,6 +110,17 @@ Available dashboards:
 - `Backend Overview`
 - `Auth Overview`
 - `Operations Overview`
+- `Integration Health`
+- `Order Export Health`
+- `Inventory Health`
+
+Dashboard JSON files are provisioned from `ops/observability/grafana/dashboards` into the Grafana `Application` folder.
+
+Domain dashboard metrics:
+
+- `Integration Health`: `catalog_backend_integration_sync_runs_total`, `catalog_backend_integration_sync_duration_seconds`, `catalog_backend_integration_sync_items_total`, `catalog_backend_queue_jobs_total{queue="moysklad-sync"}`
+- `Order Export Health`: `catalog_backend_order_export_events_total`, `catalog_backend_queue_jobs_total{queue="order-export"}`, `catalog_backend_queue_job_duration_seconds{queue="order-export"}`
+- `Inventory Health`: `catalog_backend_inventory_movements_total`, `catalog_backend_integration_stock_stale_age_seconds`, `catalog_backend_integration_sync_items_total{entity="stock_row"}`, `catalog_backend_queue_jobs_total{queue="moysklad-sync",job_name="stock-sync"}`
 
 The backend process itself should be running separately on the host so Alloy can scrape metrics from `http://localhost:4000/metrics` and receive traces through `http://localhost:4318/v1/traces`.
 

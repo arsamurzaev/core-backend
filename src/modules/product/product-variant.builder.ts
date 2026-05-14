@@ -6,6 +6,10 @@ import slugify from 'slugify'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
 import { ProductVariantDtoReq } from './dto/requests/product-variant.dto.req'
+import {
+	normalizeProductValidationScope,
+	type ProductValidationScopeInput
+} from './product-validation-scope'
 
 export type ProductVariantAttributeInput = {
 	attributeId: string
@@ -14,13 +18,26 @@ export type ProductVariantAttributeInput = {
 	displayName?: string
 }
 
+export type ProductVariantSaleUnitInput = {
+	catalogSaleUnitId?: string
+	code?: string
+	name?: string
+	baseQuantity?: number
+	price: number
+	barcode?: string | null
+	isDefault?: boolean
+	isActive?: boolean
+	displayOrder?: number
+}
+
 export type ProductVariantData = {
 	sku: string
 	variantKey: string
 	stock: number
-	price: number
+	price: number | null
 	status: ProductVariantStatus
 	attributes: ProductVariantAttributeInput[]
+	saleUnits?: ProductVariantSaleUnitInput[]
 }
 
 type VariantAttributeMeta = {
@@ -39,7 +56,7 @@ type EnumValueMeta = {
 
 type BuildOptions = {
 	variantAttributeId?: string
-	defaultPrice?: number
+	defaultPrice?: number | null
 }
 
 const SKU_MAX_LENGTH = 100
@@ -58,13 +75,14 @@ export class ProductVariantBuilder {
 	constructor(private readonly prisma: PrismaService) {}
 
 	async build(
-		typeId: string,
+		scope: ProductValidationScopeInput,
 		inputs?: ProductVariantDtoReq[],
 		productSku?: string,
 		options: BuildOptions = {}
 	): Promise<ProductVariantData[]> {
 		const hasInputs = Boolean(inputs?.length)
-		const variantAttributes = await this.loadVariantAttributes(typeId)
+		const normalizedScope = normalizeProductValidationScope(scope)
+		const variantAttributes = await this.loadVariantAttributes(normalizedScope)
 		if (!variantAttributes.length) {
 			if (!hasInputs) return []
 			throw new BadRequestException('У типа нет вариантных атрибутов')
@@ -120,7 +138,7 @@ export class ProductVariantBuilder {
 		for (const [index, input] of inputs.entries()) {
 			const variantLabel = `варианта #${index + 1}`
 			const stock = input.stock ?? 0
-			const price = input.price ?? options.defaultPrice ?? 0
+			const price = input.price ?? options.defaultPrice ?? null
 			const status = this.resolveStatus(input, stock)
 
 			if (!Number.isInteger(stock) || stock < 0) {
@@ -128,7 +146,7 @@ export class ProductVariantBuilder {
 					`Некорректное значение остатка для ${variantLabel}`
 				)
 			}
-			if (!Number.isFinite(price) || price < 0) {
+			if (price !== null && (!Number.isFinite(price) || price < 0)) {
 				throw new BadRequestException(`Некорректная цена для ${variantLabel}`)
 			}
 
@@ -208,16 +226,19 @@ export class ProductVariantBuilder {
 				}
 			}
 		}
-		const enumValueMap = await this.loadEnumValues([...enumValueIds])
-		const enumValuesByAttribute = await this.loadEnumValuesByAttribute([
-			...valueAttributeIds
-		])
+		const enumValueMap = await this.loadEnumValues(
+			[...enumValueIds],
+			normalizedScope.catalogId
+		)
+		const enumValuesByAttribute = await this.loadEnumValuesByAttribute(
+			[...valueAttributeIds],
+			normalizedScope.catalogId
+		)
 		const variantKeySet = new Set<string>()
 
 		return preparedInputs.map(({ input, status }) => {
 			const valueByAttribute = new Map<string, string>()
 			const preparedAttributes: ProductVariantAttributeInput[] = []
-			const shouldPersistAttributes = status !== ProductVariantStatus.DISABLED
 
 			for (const attr of input.attributes ?? []) {
 				const attributeId = attr.attributeId.trim()
@@ -239,9 +260,7 @@ export class ProductVariantBuilder {
 					}
 
 					valueByAttribute.set(attributeId, enumValue.value)
-					if (shouldPersistAttributes) {
-						preparedAttributes.push({ attributeId, enumValueId })
-					}
+					preparedAttributes.push({ attributeId, enumValueId })
 					continue
 				}
 
@@ -272,13 +291,11 @@ export class ProductVariantBuilder {
 				}
 
 				valueByAttribute.set(attributeId, normalizedValue)
-				if (shouldPersistAttributes) {
-					preparedAttributes.push({
-						attributeId,
-						value: normalizedValue,
-						displayName: normalizeEnumLabel(valueLabel)
-					})
-				}
+				preparedAttributes.push({
+					attributeId,
+					value: normalizedValue,
+					displayName: normalizeEnumLabel(valueLabel)
+				})
 			}
 
 			const usedAttributes = orderedAttributes.filter(attr =>
@@ -310,7 +327,7 @@ export class ProductVariantBuilder {
 			skuSet.add(sku)
 
 			const stock = input.stock ?? 0
-			const price = input.price ?? options.defaultPrice ?? 0
+			const price = input.price ?? options.defaultPrice ?? null
 
 			return {
 				sku,
@@ -318,7 +335,8 @@ export class ProductVariantBuilder {
 				stock,
 				price,
 				status,
-				attributes: preparedAttributes
+				attributes: preparedAttributes,
+				saleUnits: input.saleUnits
 			}
 		})
 	}
@@ -357,13 +375,53 @@ export class ProductVariantBuilder {
 	}
 
 	private async loadVariantAttributes(
-		typeId: string
+		scopeInput: ProductValidationScopeInput
 	): Promise<VariantAttributeMeta[]> {
+		const scope = normalizeProductValidationScope(scopeInput)
+		if (scope.productTypeId) {
+			const attributes = await this.prisma.productTypeAttribute.findMany({
+				where: {
+					productTypeId: scope.productTypeId,
+					isVariant: true,
+					attribute: {
+						deleteAt: null
+					}
+				},
+				select: {
+					isRequired: true,
+					displayOrder: true,
+					attribute: {
+						select: {
+							id: true,
+							key: true,
+							dataType: true
+						}
+					}
+				},
+				orderBy: [{ displayOrder: 'asc' }, { attributeId: 'asc' }]
+			})
+
+			return attributes
+				.map(item => ({
+					id: item.attribute.id,
+					key: item.attribute.key,
+					displayOrder: item.displayOrder,
+					dataType: item.attribute.dataType,
+					isRequired: item.isRequired
+				}))
+				.sort((left, right) => {
+					if (left.displayOrder !== right.displayOrder) {
+						return left.displayOrder - right.displayOrder
+					}
+					return left.key.localeCompare(right.key)
+				})
+		}
+
 		return this.prisma.attribute.findMany({
 			where: {
 				deleteAt: null,
 				isVariantAttribute: true,
-				types: { some: { id: typeId } }
+				types: { some: { id: scope.catalogTypeId } }
 			},
 			select: {
 				id: true,
@@ -392,12 +450,17 @@ export class ProductVariantBuilder {
 	}
 
 	private async loadEnumValues(
-		enumValueIds: string[]
+		enumValueIds: string[],
+		catalogId?: string | null
 	): Promise<Map<string, EnumValueMeta>> {
 		if (!enumValueIds.length) return new Map()
 
 		const values = await this.prisma.attributeEnumValue.findMany({
-			where: { id: { in: enumValueIds }, deleteAt: null },
+			where: {
+				id: { in: enumValueIds },
+				deleteAt: null,
+				...(catalogId ? { OR: [{ catalogId }, { catalogId: null }] } : {})
+			},
 			select: { id: true, attributeId: true, value: true }
 		})
 
@@ -405,12 +468,17 @@ export class ProductVariantBuilder {
 	}
 
 	private async loadEnumValuesByAttribute(
-		attributeIds: string[]
+		attributeIds: string[],
+		catalogId?: string | null
 	): Promise<Map<string, Map<string, EnumValueMeta>>> {
 		if (!attributeIds.length) return new Map()
 
 		const values = await this.prisma.attributeEnumValue.findMany({
-			where: { attributeId: { in: attributeIds }, deleteAt: null },
+			where: {
+				attributeId: { in: attributeIds },
+				deleteAt: null,
+				...(catalogId ? { catalogId } : {})
+			},
 			select: { id: true, attributeId: true, value: true }
 		})
 

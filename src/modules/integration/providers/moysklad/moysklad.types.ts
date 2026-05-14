@@ -8,6 +8,15 @@ export type MoySkladMeta = {
 	downloadHref?: string
 }
 
+export type MoySkladMetaRef = {
+	meta: {
+		href: string
+		type: string
+		mediaType?: string
+		metadataHref?: string
+	}
+}
+
 export type MoySkladImage = {
 	meta: MoySkladMeta
 	title?: string
@@ -50,6 +59,42 @@ export type MoySkladProductFolder = MoySkladProductFolderRef & {
 	productFolder?: MoySkladProductFolderRef
 }
 
+export type MoySkladNamedEntity = {
+	meta?: MoySkladMeta
+	id: string
+	name: string
+	code?: string
+	externalCode?: string
+	archived?: boolean
+	updated?: string
+}
+
+export type MoySkladOrganization = MoySkladNamedEntity
+
+export type MoySkladCounterparty = MoySkladNamedEntity
+
+export type MoySkladStore = MoySkladNamedEntity
+
+export type MoySkladProductRef = {
+	meta: MoySkladMeta
+	id?: string
+	name?: string
+}
+
+export type MoySkladVariantCharacteristic = {
+	id?: string
+	meta?: MoySkladMeta
+	name: string
+	value: string
+}
+
+export type MoySkladBarcode = {
+	ean13?: string
+	ean8?: string
+	code128?: string
+	gtin?: string
+}
+
 export type MoySkladEntityType = 'product' | 'service' | 'bundle' | 'variant'
 
 export type MoySkladProduct = {
@@ -63,12 +108,20 @@ export type MoySkladProduct = {
 	archived: boolean
 	updated: string
 	stock?: number
+	barcodes?: MoySkladBarcode[]
 	salePrices?: MoySkladSalePrice[]
 	images?: {
 		meta: MoySkladMeta
 		rows?: MoySkladImage[]
 	}
 	productFolder?: MoySkladProductFolderRef
+	product?: MoySkladProductRef
+	characteristics?: MoySkladVariantCharacteristic[]
+}
+
+export type MoySkladVariant = MoySkladProduct & {
+	product: MoySkladProductRef
+	characteristics: MoySkladVariantCharacteristic[]
 }
 
 export type MoySkladListResponse<T> = {
@@ -96,14 +149,53 @@ export type MoySkladStockResponse = {
 	rows: MoySkladStockItem[]
 }
 
+export type MoySkladStockReportFilters = {
+	assortmentId?: string | string[]
+	storeId?: string | string[]
+	warehouseId?: string | string[]
+}
+
+export type MoySkladCustomerOrderPosition = {
+	quantity: number
+	price: number
+	discount?: number
+	vat?: number
+	assortment: MoySkladMetaRef
+}
+
+export type MoySkladCreateCustomerOrderPayload = {
+	externalCode: string
+	moment?: string
+	description?: string
+	organization: MoySkladMetaRef
+	agent: MoySkladMetaRef
+	store?: MoySkladMetaRef
+	positions: MoySkladCustomerOrderPosition[]
+}
+
+export type MoySkladCustomerOrder = {
+	meta?: MoySkladMeta
+	id: string
+	name?: string
+	externalCode?: string
+	moment?: string
+	created?: string
+	updated?: string
+}
+
 export type MoySkladMetadata = {
 	token: string
 	priceTypeName: string
 	importImages: boolean
 	syncStock: boolean
+	exportOrders: boolean
+	orderExportOrganizationId: string | null
+	orderExportCounterpartyId: string | null
+	orderExportStoreId: string | null
 	scheduleEnabled: boolean
 	schedulePattern: string | null
 	scheduleTimezone: string
+	lastStockSyncedAt: string | null
 }
 
 export type EncryptedMoySkladToken = {

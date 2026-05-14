@@ -10,8 +10,10 @@ model User {
 
   isEmailConfirmed Boolean
 
-  catalogs Catalog[]
-  regions  Regionality[]
+  catalogs            Catalog[]
+  regions             Regionality[]
+  inventoryWarehouses InventoryWarehouse[]
+  inventoryMovements  InventoryMovement[]  @relation("InventoryMovementActor")
 
   deleteAt  DateTime? @map("delete_at") // Дата удаления 
   createdAt DateTime  @default(now()) @map("created_at")

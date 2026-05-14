@@ -1,4 +1,4 @@
-import { ProductStatus, SeoChangeFreq, SeoEntityType } from '@generated/enums'
+﻿import { ProductStatus, SeoChangeFreq, SeoEntityType } from '@generated/enums'
 import { SeoSettingCreateInput, SeoSettingUpdateInput } from '@generated/models'
 import { Injectable } from '@nestjs/common'
 
@@ -240,12 +240,16 @@ export class ProductSeoSyncService {
 		attributeSummary: string | null
 	): string {
 		const parts = [
-			`Купить ${product.name}${product.brand?.name ? ` ${product.brand.name}` : ''}.`,
+			`РљСѓРїРёС‚СЊ ${product.name}${product.brand?.name ? ` ${product.brand.name}` : ''}.`,
 			categoryNames.length
-				? `Категория: ${categoryNames.slice(0, 2).join(', ')}.`
+				? `РљР°С‚РµРіРѕСЂРёСЏ: ${categoryNames.slice(0, 2).join(', ')}.`
 				: null,
-			`Цена: ${this.formatPrice(product.price)} ${currency}.`,
-			attributeSummary ? `Характеристики: ${attributeSummary}.` : null
+			product.price === null
+				? null
+				: `Р¦РµРЅР°: ${this.formatPrice(product.price)} ${currency}.`,
+			attributeSummary
+				? `РҐР°СЂР°РєС‚РµСЂРёСЃС‚РёРєРё: ${attributeSummary}.`
+				: null
 		].filter((part): part is string => Boolean(part))
 
 		return this.truncateText(parts.join(' '), 500)
@@ -258,12 +262,16 @@ export class ProductSeoSyncService {
 		attributeSummary: string | null
 	): string {
 		const parts = [
-			`${product.name} доступен в каталоге с актуальной ценой ${this.formatPrice(product.price)} ${currency}.`,
-			product.brand?.name ? `Бренд: ${product.brand.name}.` : null,
+			product.price === null
+				? `${product.name} доступен в каталоге.`
+				: `${product.name} РґРѕСЃС‚СѓРїРµРЅ РІ РєР°С‚Р°Р»РѕРіРµ СЃ Р°РєС‚СѓР°Р»СЊРЅРѕР№ С†РµРЅРѕР№ ${this.formatPrice(product.price)} ${currency}.`,
+			product.brand?.name ? `Р‘СЂРµРЅРґ: ${product.brand.name}.` : null,
 			categoryNames.length
-				? `Разделы: ${categoryNames.slice(0, 3).join(', ')}.`
+				? `Р Р°Р·РґРµР»С‹: ${categoryNames.slice(0, 3).join(', ')}.`
 				: null,
-			attributeSummary ? `Основные характеристики: ${attributeSummary}.` : null
+			attributeSummary
+				? `РћСЃРЅРѕРІРЅС‹Рµ С…Р°СЂР°РєС‚РµСЂРёСЃС‚РёРєРё: ${attributeSummary}.`
+				: null
 		].filter((part): part is string => Boolean(part))
 
 		return parts.join(' ')
@@ -334,7 +342,9 @@ export class ProductSeoSyncService {
 			offers: {
 				'@type': 'Offer',
 				priceCurrency: catalog.currency,
-				price: this.formatPrice(product.price),
+				...(product.price === null
+					? {}
+					: { price: this.formatPrice(product.price) }),
 				availability,
 				itemCondition: 'https://schema.org/NewCondition',
 				...(canonicalUrl ? { url: canonicalUrl } : {})
@@ -390,7 +400,7 @@ export class ProductSeoSyncService {
 		if (attribute.valueDecimal !== null)
 			return this.formatPrice(attribute.valueDecimal)
 		if (attribute.valueBoolean !== null) {
-			return attribute.valueBoolean ? 'да' : 'нет'
+			return attribute.valueBoolean ? 'РґР°' : 'РЅРµС‚'
 		}
 		if (attribute.valueDateTime) {
 			return new Date(attribute.valueDateTime).toISOString().slice(0, 10)

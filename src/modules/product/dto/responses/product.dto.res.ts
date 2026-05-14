@@ -104,6 +104,75 @@ export class VariantAttributeDto {
 	enumValue: ProductAttributeEnumValueDto
 }
 
+export class ProductIntegrationDto {
+	@ApiProperty({ enum: IntegrationProvider })
+	provider: IntegrationProvider
+
+	@ApiProperty({ type: String })
+	externalId: string
+
+	@ApiProperty({ type: String, nullable: true })
+	externalCode: string | null
+
+	@ApiProperty({ type: String, format: 'date-time', nullable: true })
+	lastSyncedAt: string | null
+}
+
+export class ProductVariantCatalogSaleUnitDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	code: string
+
+	@ApiProperty({ type: String })
+	name: string
+
+	@ApiProperty({ type: String, example: '1.0000' })
+	defaultBaseQuantity: string
+}
+
+export class ProductVariantSaleUnitDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String, nullable: true })
+	catalogSaleUnitId: string | null
+
+	@ApiProperty({ type: String })
+	code: string
+
+	@ApiProperty({ type: String })
+	name: string
+
+	@ApiProperty({ type: String, example: '1.0000' })
+	baseQuantity: string
+
+	@ApiProperty({ type: String, example: '999.00' })
+	price: string
+
+	@ApiProperty({ type: String, nullable: true })
+	barcode: string | null
+
+	@ApiProperty({ type: Boolean })
+	isDefault: boolean
+
+	@ApiProperty({ type: Boolean })
+	isActive: boolean
+
+	@ApiProperty({ type: Number })
+	displayOrder: number
+
+	@ApiProperty({ type: String, format: 'date-time' })
+	createdAt: string
+
+	@ApiProperty({ type: String, format: 'date-time' })
+	updatedAt: string
+
+	@ApiProperty({ type: () => ProductVariantCatalogSaleUnitDto, nullable: true })
+	catalogSaleUnit: ProductVariantCatalogSaleUnitDto | null
+}
+
 export class ProductVariantDto {
 	@ApiProperty({ type: String })
 	id: string
@@ -117,8 +186,8 @@ export class ProductVariantDto {
 	@ApiProperty({ type: Number })
 	stock: number
 
-	@ApiProperty({ type: String, example: '0.00' })
-	price: string
+	@ApiProperty({ type: String, example: '0.00', nullable: true })
+	price: string | null
 
 	@ApiProperty({ enum: ProductVariantStatus })
 	status: ProductVariantStatus
@@ -134,6 +203,16 @@ export class ProductVariantDto {
 
 	@ApiProperty({ type: [VariantAttributeDto] })
 	attributes: VariantAttributeDto[]
+
+	@ApiProperty({ type: [ProductVariantSaleUnitDto] })
+	saleUnits: ProductVariantSaleUnitDto[]
+
+	@ApiProperty({
+		type: () => ProductIntegrationDto,
+		nullable: true,
+		required: false
+	})
+	integration?: ProductIntegrationDto | null
 }
 
 export class ProductMediaDto {
@@ -158,6 +237,17 @@ export class ProductBrandDto {
 	slug: string
 }
 
+export class ProductTypeRefDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	code: string
+
+	@ApiProperty({ type: String })
+	name: string
+}
+
 export class ProductCategoryDto {
 	@ApiProperty({ type: String })
 	id: string
@@ -169,18 +259,50 @@ export class ProductCategoryDto {
 	position: number
 }
 
-export class ProductIntegrationDto {
-	@ApiProperty({ enum: IntegrationProvider })
-	provider: IntegrationProvider
+export class ProductVariantSummaryDto {
+	@ApiProperty({ type: String, nullable: true, example: '999.00' })
+	minPrice: string | null
 
-	@ApiProperty({ type: String })
-	externalId: string
+	@ApiProperty({ type: String, nullable: true, example: '1299.00' })
+	maxPrice: string | null
+
+	@ApiProperty({ type: Number })
+	activeCount: number
+
+	@ApiProperty({ type: Number })
+	totalStock: number
 
 	@ApiProperty({ type: String, nullable: true })
-	externalCode: string | null
+	singleVariantId: string | null
+}
 
-	@ApiProperty({ type: String, format: 'date-time', nullable: true })
-	lastSyncedAt: string | null
+export class ProductVariantPickerOptionDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	label: string
+
+	@ApiProperty({ type: String, example: '999.00', nullable: true })
+	price: string | null
+
+	@ApiProperty({ type: Number })
+	stock: number
+
+	@ApiProperty({ enum: ProductVariantStatus })
+	status: ProductVariantStatus
+
+	@ApiProperty({ type: Boolean })
+	isAvailable: boolean
+
+	@ApiProperty({ type: String, nullable: true })
+	saleUnitId: string | null
+
+	@ApiProperty({ type: String, nullable: true, example: '999.00' })
+	saleUnitPrice: string | null
+
+	@ApiProperty({ type: Number })
+	maxQuantity: number
 }
 
 export class ProductDto {
@@ -196,14 +318,17 @@ export class ProductDto {
 	@ApiProperty({ type: String })
 	slug: string
 
-	@ApiProperty({ type: String, example: '999.00' })
-	price: string
+	@ApiProperty({ type: String, example: '999.00', nullable: true })
+	price: string | null
 
 	@ApiProperty({ type: [ProductMediaDto] })
 	media: ProductMediaDto[]
 
 	@ApiProperty({ type: ProductBrandDto, nullable: true })
 	brand: ProductBrandDto | null
+
+	@ApiProperty({ type: ProductTypeRefDto, nullable: true })
+	productType: ProductTypeRefDto | null
 
 	@ApiProperty({ type: [ProductCategoryDto] })
 	categories: ProductCategoryDto[]
@@ -230,6 +355,12 @@ export class ProductDto {
 export class ProductWithAttributesDto extends ProductDto {
 	@ApiProperty({ type: [ProductAttributeDto] })
 	productAttributes: ProductAttributeDto[]
+
+	@ApiProperty({ type: ProductVariantSummaryDto })
+	variantSummary: ProductVariantSummaryDto
+
+	@ApiProperty({ type: [ProductVariantPickerOptionDto] })
+	variantPickerOptions: ProductVariantPickerOptionDto[]
 }
 
 export class ProductWithDetailsDto extends ProductWithAttributesDto {
@@ -284,6 +415,69 @@ export class ProductCursorCardPageDto {
 
 	@ApiProperty({ type: String, nullable: true })
 	nextCursor: string | null
+}
+
+export class ProductTypeCompatibilityIssueDto {
+	@ApiProperty({ type: String })
+	attributeId: string
+
+	@ApiProperty({ type: String })
+	key: string
+
+	@ApiProperty({ type: String })
+	displayName: string
+
+	@ApiProperty({ type: [String] })
+	variantKeys: string[]
+
+	@ApiProperty({
+		enum: ['MISSING_IN_TARGET_TYPE', 'SCOPE_MISMATCH', 'TARGET_TYPE_EMPTY']
+	})
+	reason: 'MISSING_IN_TARGET_TYPE' | 'SCOPE_MISMATCH' | 'TARGET_TYPE_EMPTY'
+
+	@ApiProperty({ type: Boolean, nullable: true })
+	targetIsVariant: boolean | null
+}
+
+export class ProductTypeCompatibilityPreviewDto {
+	@ApiProperty({ type: String })
+	productId: string
+
+	@ApiProperty({ type: String, nullable: true })
+	currentProductTypeId: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	requestedProductTypeId: string | null
+
+	@ApiProperty({ type: Boolean })
+	sameProductType: boolean
+
+	@ApiProperty({ type: Boolean })
+	hasScopedData: boolean
+
+	@ApiProperty({ type: Boolean })
+	canChangeNow: boolean
+
+	@ApiProperty({ type: Boolean })
+	compatible: boolean
+
+	@ApiProperty({ type: Boolean })
+	requiresUserDecision: boolean
+
+	@ApiProperty({ type: String, nullable: true })
+	blockingReason: string | null
+
+	@ApiProperty({ type: Number })
+	productAttributeCount: number
+
+	@ApiProperty({ type: Number })
+	variantAttributeCount: number
+
+	@ApiProperty({ type: [ProductTypeCompatibilityIssueDto] })
+	productAttributeConflicts: ProductTypeCompatibilityIssueDto[]
+
+	@ApiProperty({ type: [ProductTypeCompatibilityIssueDto] })
+	variantAttributeConflicts: ProductTypeCompatibilityIssueDto[]
 }
 
 export class ProductUpdateResponseDto extends ProductWithDetailsDto {

@@ -19,6 +19,11 @@ export type ProductMappableRecord = {
 		category?: { id: string; name: string } | null
 	}[]
 	integrationLinks?: ProductIntegrationLinkRecord[]
+	variants?: Array<
+		Record<string, unknown> & {
+			integrationLinks?: ProductIntegrationLinkRecord[]
+		}
+	>
 }
 
 export type ProductIntegrationMapped = {
@@ -46,9 +51,10 @@ export class ProductMediaMapper {
 		variantNames?: readonly string[]
 	): ProductMediaMapped<T> {
 		const { media, categoryProducts, integrationLinks, ...rest } = product
+		const mappedRest = this.mapVariantIntegrations(rest)
 
 		return {
-			...rest,
+			...mappedRest,
 			media: (media ?? []).map(item => ({
 				position: item.position,
 				kind: item.kind ?? null,
@@ -69,6 +75,29 @@ export class ProductMediaMapper {
 		} as ProductMediaMapped<T>
 	}
 
+	private mapVariantIntegrations<T extends Record<string, unknown>>(
+		value: T
+	): T {
+		if (!Array.isArray(value.variants)) return value
+
+		return {
+			...value,
+			variants: value.variants.map(variant => {
+				if (!isRecord(variant) || !('integrationLinks' in variant)) {
+					return variant
+				}
+
+				const { integrationLinks, ...rest } = variant
+				return {
+					...rest,
+					integration: this.mapIntegration(
+						Array.isArray(integrationLinks) ? integrationLinks : undefined
+					)
+				}
+			})
+		}
+	}
+
 	mapIntegration(
 		integrationLinks?: ProductIntegrationLinkRecord[]
 	): ProductIntegrationMapped {
@@ -82,4 +111,8 @@ export class ProductMediaMapper {
 			lastSyncedAt: link.lastSyncedAt ?? null
 		}
 	}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

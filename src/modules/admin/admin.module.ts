@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 
+import { CapabilityModule } from '@/modules/capability/capability.module'
 import { S3Module } from '@/modules/s3/s3.module'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 
@@ -8,7 +9,7 @@ import { AdminController } from './admin.controller'
 import { AdminService } from './admin.service'
 
 @Module({
-	imports: [S3Module],
+	imports: [S3Module, CapabilityModule],
 	controllers: [AdminController, AdminSsoController],
 	providers: [AdminService, MediaUrlService]
 })

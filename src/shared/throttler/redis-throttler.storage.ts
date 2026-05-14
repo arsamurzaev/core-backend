@@ -64,7 +64,12 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
 			this.logger.error('Throttler Redis недоступен, запрос пропущен', {
 				error: error instanceof Error ? error.message : String(error)
 			})
-			return { totalHits: 1, timeToExpire: ttl, isBlocked: false, timeToBlockExpire: 0 }
+			return {
+				totalHits: 1,
+				timeToExpire: ttl,
+				isBlocked: false,
+				timeToBlockExpire: 0
+			}
 		}
 	}
 }

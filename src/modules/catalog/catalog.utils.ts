@@ -1,13 +1,14 @@
 import { CatalogExperienceMode, ContactType } from '@generated/enums'
+import type { CatalogInventoryMode } from '@generated/enums'
 import type { CatalogUpdateInput } from '@generated/models'
 import { BadRequestException } from '@nestjs/common'
 import slugify from 'slugify'
 
+import { normalizeCatalogCheckoutSettings } from './catalog-checkout'
 import type {
 	UpdateCatalogContactDtoReq,
 	UpdateCatalogDtoReq
 } from './dto/requests/update-catalog.dto.req'
-import { normalizeCatalogCheckoutSettings } from './catalog-checkout'
 
 const RESERVED_SUBDOMAINS = new Set(
 	(
@@ -32,6 +33,7 @@ export type CatalogUpdateAccess = {
 type CatalogSettingsSnapshot = {
 	defaultMode: CatalogExperienceMode
 	allowedModes: CatalogExperienceMode[]
+	inventoryMode?: CatalogInventoryMode
 	address?: string | null
 	checkout?: unknown
 	typeCode?: string | null
@@ -229,11 +231,11 @@ export function buildCatalogSettingsUpsert(
 	const nextAllowedModes =
 		dto.allowedModes !== undefined
 			? normalizeCatalogAllowedModes(dto.allowedModes)
-			: currentSettings?.allowedModes ?? [CatalogExperienceMode.DELIVERY]
+			: (currentSettings?.allowedModes ?? [CatalogExperienceMode.DELIVERY])
 	const nextDefaultMode =
 		dto.defaultMode !== undefined
 			? dto.defaultMode
-			: currentSettings?.defaultMode ?? CatalogExperienceMode.DELIVERY
+			: (currentSettings?.defaultMode ?? CatalogExperienceMode.DELIVERY)
 
 	if (dto.allowedModes !== undefined || dto.defaultMode !== undefined) {
 		ensureCatalogExperienceSettingsValid(nextDefaultMode, nextAllowedModes)
@@ -247,6 +249,11 @@ export function buildCatalogSettingsUpsert(
 	if (dto.allowedModes !== undefined) {
 		update.allowedModes = nextAllowedModes
 		create.allowedModes = nextAllowedModes
+	}
+
+	if (dto.inventoryMode !== undefined) {
+		update.inventoryMode = dto.inventoryMode
+		create.inventoryMode = dto.inventoryMode
 	}
 
 	if (!hasValues(update)) return undefined
@@ -312,8 +319,6 @@ function ensureCatalogExperienceSettingsValid(
 	allowedModes: CatalogExperienceMode[]
 ): void {
 	if (!allowedModes.includes(defaultMode)) {
-		throw new BadRequestException(
-			'defaultMode must be included in allowedModes'
-		)
+		throw new BadRequestException('defaultMode must be included in allowedModes')
 	}
 }

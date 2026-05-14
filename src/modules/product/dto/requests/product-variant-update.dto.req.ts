@@ -2,6 +2,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {
+	IsArray,
 	IsEnum,
 	IsInt,
 	IsNotEmpty,
@@ -9,8 +10,11 @@ import {
 	IsOptional,
 	IsString,
 	MaxLength,
-	Min
+	Min,
+	ValidateNested
 } from 'class-validator'
+
+import { ProductVariantSaleUnitDtoReq } from './product-variant.dto.req'
 
 export class ProductVariantUpdateDtoReq {
 	@ApiProperty({
@@ -31,12 +35,17 @@ export class ProductVariantUpdateDtoReq {
 	})
 	variantKey: string
 
-	@ApiPropertyOptional({ type: Number, example: 0 })
+	@ApiPropertyOptional({ type: Number, example: 0, nullable: true })
 	@IsOptional()
-	@Type(() => Number)
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		if (typeof value === 'string' && value.trim().length === 0) return null
+		return Number(value)
+	})
 	@IsNumber()
 	@Min(0)
-	price?: number
+	price?: number | null
 
 	@ApiPropertyOptional({ type: Number, example: 10 })
 	@IsOptional()
@@ -49,4 +58,11 @@ export class ProductVariantUpdateDtoReq {
 	@IsOptional()
 	@IsEnum(ProductVariantStatus)
 	status?: ProductVariantStatus
+
+	@ApiPropertyOptional({ type: [ProductVariantSaleUnitDtoReq] })
+	@IsOptional()
+	@IsArray()
+	@ValidateNested({ each: true })
+	@Type(() => ProductVariantSaleUnitDtoReq)
+	saleUnits?: ProductVariantSaleUnitDtoReq[]
 }

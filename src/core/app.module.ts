@@ -13,14 +13,18 @@ import { RedisModule } from '@/infrastructure/redis/redis.module'
 import { RedisService } from '@/infrastructure/redis/redis.service'
 import { AdminModule } from '@/modules/admin/admin.module'
 import { AttributeModule } from '@/modules/attribute/attribute.module'
+import { AuditModule } from '@/modules/audit/audit.module'
 import { AuthModule } from '@/modules/auth/auth.module'
 import { BrandModule } from '@/modules/brand/brand.module'
 import { CartModule } from '@/modules/cart/cart.module'
+import { CatalogSaleUnitModule } from '@/modules/catalog-sale-unit/catalog-sale-unit.module'
 import { CatalogModule } from '@/modules/catalog/catalog.module'
 import { CategoryModule } from '@/modules/category/category.module'
 import { CronModule } from '@/modules/cron/cron.module'
 import { IntegrationModule } from '@/modules/integration/integration.module'
+import { InventoryModule } from '@/modules/inventory/inventory.module'
 import { ObservabilityModule } from '@/modules/observability/observability.module'
+import { ProductTypeModule } from '@/modules/product-type/product-type.module'
 import { ProductModule } from '@/modules/product/product.module'
 import { S3Module } from '@/modules/s3/s3.module'
 import { SeoModule } from '@/modules/seo/seo.module'
@@ -134,6 +138,7 @@ function shouldSkipAuthThrottler(context: ExecutionContext): boolean {
 		ObservabilityModule,
 		CacheModule,
 		PrismaModule,
+		AuditModule,
 		TypeModule,
 		AuthModule,
 		AdminModule,
@@ -141,11 +146,14 @@ function shouldSkipAuthThrottler(context: ExecutionContext): boolean {
 		BrandModule,
 		UserModule,
 		CatalogModule,
+		CatalogSaleUnitModule,
 		CategoryModule,
 		CronModule,
 		IntegrationModule,
+		InventoryModule,
 		CartModule,
 		ProductModule,
+		ProductTypeModule,
 		S3Module,
 		SeoModule
 	],

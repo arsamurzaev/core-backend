@@ -23,14 +23,11 @@ function wildcardOriginToRegExp(origin: string): RegExp {
 }
 
 function parseCorsOrigins(cors: string | undefined): string[] {
-	return (cors ?? '')
-		.split(',')
-		.map(normalizeCorsEntry)
-		.filter(Boolean)
+	return (cors ?? '').split(',').map(normalizeCorsEntry).filter(Boolean)
 }
 
 function isOriginAllowed(origin: string, allowedOrigins: string[]): boolean {
-	return allowedOrigins.some((allowedOrigin) => {
+	return allowedOrigins.some(allowedOrigin => {
 		if (allowedOrigin === '*') {
 			return true
 		}

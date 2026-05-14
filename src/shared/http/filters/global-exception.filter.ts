@@ -133,6 +133,23 @@ function prismaToHttp(exception: Prisma.PrismaClientKnownRequestError): {
 	}
 }
 
+function formatClientErrorLog(
+	message: string | string[],
+	exception: unknown
+): string {
+	const normalizedMessage = Array.isArray(message) ? message.join(', ') : message
+	if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+		return `${normalizedMessage} (Prisma ${exception.code}: ${formatUnknownValue(exception.meta)})`
+	}
+	if (
+		exception instanceof Prisma.PrismaClientValidationError ||
+		exception instanceof Prisma.PrismaClientUnknownRequestError
+	) {
+		return `${normalizedMessage} (${exception.message})`
+	}
+	return normalizedMessage
+}
+
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
 	private readonly logger = new Logger(GlobalExceptionFilter.name)
@@ -195,7 +212,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 			)
 		} else {
 			this.logger.warn(
-				`${prefix} → ${status}: ${Array.isArray(message) ? message.join(', ') : message}`
+				`${prefix} → ${status}: ${formatClientErrorLog(message, exception)}`
 			)
 		}
 

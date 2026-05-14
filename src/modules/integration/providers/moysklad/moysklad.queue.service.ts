@@ -16,23 +16,30 @@ import { SpanStatusCode, trace } from '@opentelemetry/api'
 import { Job, Queue, Worker } from 'bullmq'
 
 import { AllInterfaces } from '@/core/config'
+import { CapabilityService } from '@/modules/capability/capability.service'
 import { ObservabilityService } from '@/modules/observability/observability.service'
-import { formatUnknownValue } from '@/shared/utils'
+import { buildBullMqSafeJobId } from '@/shared/utils/bullmq-job-id'
 
 import {
 	type IntegrationRecord,
 	IntegrationRepository
 } from '../../integration.repository'
+import {
+	renderSafeProviderErrorMessage,
+	toSafeProviderError
+} from '../../provider-error-redaction'
 
 import { MoySkladMetadataCryptoService } from './moysklad.metadata'
-import { MoySkladSyncService } from './moysklad.sync.service'
+import { MoySkladSyncOrchestratorService } from './moysklad.sync-orchestrator.service'
+import { MoySkladSyncRunRecorderService } from './moysklad.sync-run-recorder.service'
 
 const MOYSKLAD_SYNC_QUEUE_NAME = 'moysklad-sync'
 const MOYSKLAD_SYNC_QUEUE_CONCURRENCY = 1
 const MOYSKLAD_SYNC_SCHEDULER_PREFIX = 'moysklad:catalog'
-const MANUAL_JOB_ID_PREFIX = 'moysklad:manual'
+const MANUAL_JOB_ID_PREFIX = 'moysklad-manual'
 const FULL_SYNC_JOB_NAME = 'catalog-sync'
 const PRODUCT_SYNC_JOB_NAME = 'product-sync'
+const STOCK_SYNC_JOB_NAME = 'stock-sync'
 
 type MoySkladSyncJob = {
 	runId?: string
@@ -61,9 +68,11 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 	constructor(
 		private readonly configService: ConfigService<AllInterfaces>,
 		private readonly repo: IntegrationRepository,
-		private readonly moySkladSync: MoySkladSyncService,
+		private readonly moySkladSync: MoySkladSyncOrchestratorService,
+		private readonly syncRuns: MoySkladSyncRunRecorderService,
 		private readonly metadataCrypto: MoySkladMetadataCryptoService,
-		private readonly observability: ObservabilityService
+		private readonly observability: ObservabilityService,
+		private readonly featureEntitlements: CapabilityService
 	) {
 		const redis = this.configService.get('redis', { infer: true })
 		const connection: Record<string, any> = {
@@ -95,7 +104,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		this.worker.on('failed', (job, error) => {
 			this.logger.error('MoySklad sync queue worker failed', {
 				jobId: job?.id,
-				error: error?.message ?? error
+				error: this.renderErrorMessage(error)
 			})
 		})
 	}
@@ -110,6 +119,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 	}
 
 	async enqueueCatalogSync(catalogId: string): Promise<QueuedSyncResult> {
+		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
 		const integration = await this.getActiveIntegrationOrThrow(catalogId)
 		await this.assertNoActiveRun(catalogId)
 		this.logger.log(
@@ -154,9 +164,10 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 				trigger: IntegrationSyncRunTrigger.MANUAL
 			}
 		} catch (error) {
-			await this.repo.failSyncRun(run.id, this.renderErrorMessage(error))
+			const message = this.renderErrorMessage(error)
+			await this.syncRuns.failRun(run.id, message)
 			throw new InternalServerErrorException(
-				`Не удалось поставить синхронизацию MoySklad в очередь: ${this.renderErrorMessage(error)}`
+				`Не удалось поставить синхронизацию MoySklad в очередь: ${message}`
 			)
 		}
 	}
@@ -165,6 +176,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		catalogId: string,
 		productId: string
 	): Promise<QueuedSyncResult> {
+		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
 		const integration = await this.getActiveIntegrationOrThrow(catalogId)
 		await this.assertNoActiveRun(catalogId)
 		this.logger.log(
@@ -211,9 +223,64 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 				trigger: IntegrationSyncRunTrigger.MANUAL
 			}
 		} catch (error) {
-			await this.repo.failSyncRun(run.id, this.renderErrorMessage(error))
+			const message = this.renderErrorMessage(error)
+			await this.syncRuns.failRun(run.id, message)
 			throw new InternalServerErrorException(
-				`Не удалось поставить синхронизацию товара с MoySklad в очередь: ${this.renderErrorMessage(error)}`
+				`Не удалось поставить синхронизацию товара с MoySklad в очередь: ${message}`
+			)
+		}
+	}
+
+	async enqueueStockSync(catalogId: string): Promise<QueuedSyncResult> {
+		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		const integration = await this.getActiveIntegrationOrThrow(catalogId)
+		await this.assertNoActiveRun(catalogId)
+		this.logger.log(
+			`Queueing MoySklad stock sync for catalog ${catalogId} (integration ${integration.id})`
+		)
+
+		const run = await this.repo.createSyncRun({
+			integrationId: integration.id,
+			catalogId,
+			mode: IntegrationSyncRunMode.STOCK,
+			trigger: IntegrationSyncRunTrigger.MANUAL
+		})
+
+		try {
+			const jobId = this.buildManualJobId(run.id)
+			const job = await this.queue.add(
+				STOCK_SYNC_JOB_NAME,
+				{
+					runId: run.id,
+					catalogId,
+					mode: IntegrationSyncRunMode.STOCK,
+					trigger: IntegrationSyncRunTrigger.MANUAL
+				},
+				{ jobId }
+			)
+			const resolvedJobId = String(job.id ?? jobId)
+			this.observability.recordQueueJobEnqueued(
+				MOYSKLAD_SYNC_QUEUE_NAME,
+				STOCK_SYNC_JOB_NAME
+			)
+			await this.repo.attachSyncRunJobId(run.id, resolvedJobId)
+			this.logger.log(
+				`Queued MoySklad stock sync for catalog ${catalogId}: runId=${run.id}, jobId=${resolvedJobId}`
+			)
+
+			return {
+				ok: true,
+				queued: true,
+				runId: run.id,
+				jobId: resolvedJobId,
+				mode: IntegrationSyncRunMode.STOCK,
+				trigger: IntegrationSyncRunTrigger.MANUAL
+			}
+		} catch (error) {
+			const message = this.renderErrorMessage(error)
+			await this.syncRuns.failRun(run.id, message)
+			throw new InternalServerErrorException(
+				`РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕСЃС‚Р°РІРёС‚СЊ sync РѕСЃС‚Р°С‚РєРѕРІ MoySklad РІ РѕС‡РµСЂРµРґСЊ: ${message}`
 			)
 		}
 	}
@@ -224,6 +291,18 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		const schedulerId = this.buildSchedulerId(integration.catalogId)
 
 		try {
+			if (
+				!(await this.featureEntitlements.canUseMoySkladIntegration(
+					integration.catalogId
+				))
+			) {
+				await this.queue.removeJobScheduler(schedulerId)
+				this.logger.log(
+					`Removed MoySklad scheduler for catalog ${integration.catalogId}: integration capability disabled`
+				)
+				return
+			}
+
 			const metadata = this.metadataCrypto.parseStoredMetadata(
 				integration.metadata
 			)
@@ -262,7 +341,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 				catalogId: integration.catalogId,
 				error: this.renderErrorMessage(error)
 			})
-			throw error
+			throw this.toError(error)
 		}
 	}
 
@@ -343,6 +422,25 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 					this.logger.log(
 						`Starting MoySklad queue job ${jobId || '<unknown>'}: catalog=${job.data.catalogId}, mode=${job.data.mode}, trigger=${job.data.trigger}, runId=${runId ?? 'pending'}`
 					)
+					if (
+						!(await this.featureEntitlements.canUseMoySkladIntegration(
+							job.data.catalogId
+						))
+					) {
+						if (runId) {
+							await this.syncRuns.skipRun(runId, 'feature_disabled')
+						}
+						this.logger.warn(
+							`Skipping MoySklad queue job ${jobId || '<unknown>'}: integration capability disabled for catalog ${job.data.catalogId}`
+						)
+						this.syncRuns.recordOutcome(
+							job.data,
+							'skipped',
+							this.elapsedMs(startedAt)
+						)
+						this.recordQueueOutcome(jobName, 'skipped', startedAt)
+						return { ok: true, skipped: true, reason: 'feature_disabled' }
+					}
 
 					if (!runId) {
 						runId = await this.prepareScheduledRun(job.data, jobId)
@@ -350,12 +448,17 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 							this.logger.warn(
 								`Skipping MoySklad queue job ${jobId || '<unknown>'}: scheduled run was not created`
 							)
+							this.syncRuns.recordOutcome(
+								job.data,
+								'skipped',
+								this.elapsedMs(startedAt)
+							)
 							this.recordQueueOutcome(jobName, 'skipped', startedAt)
 							return { ok: true, skipped: true }
 						}
 					}
 
-					const runningRun = await this.repo.markSyncRunRunning(runId, jobId)
+					const runningRun = await this.syncRuns.markRunning(runId, jobId)
 					if (!runningRun) {
 						throw new InternalServerErrorException(
 							`Не найден запуск синхронизации MoySklad ${runId}`
@@ -369,19 +472,18 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 							)
 						}
 
-						const result = await this.moySkladSync.syncProduct(
-							job.data.catalogId,
-							job.data.productId
-						)
-						await this.repo.completeSyncRun(runId, {
-							externalId: result.externalId,
-							totalProducts: 1,
-							createdProducts: result.created ? 1 : 0,
-							updatedProducts: result.updated ? 1 : 0,
-							deletedProducts: 0,
-							imagesImported: result.imagesImported,
-							durationMs: result.durationMs
+						const execution = await this.moySkladSync.syncProduct({
+							catalogId: job.data.catalogId,
+							productId: job.data.productId,
+							runId
 						})
+						const result = execution.result
+						await this.syncRuns.completeProductSync(
+							runId,
+							job.data,
+							execution.completion,
+							result
+						)
 						this.logger.log(
 							`Finished MoySklad product sync job ${jobId || '<unknown>'}: catalog=${job.data.catalogId}, product=${job.data.productId}, externalId=${result.externalId}, created=${result.created}, updated=${result.updated}, imagesImported=${result.imagesImported}, durationMs=${result.durationMs}`
 						)
@@ -389,15 +491,36 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 						return result
 					}
 
-					const result = await this.moySkladSync.syncCatalog(job.data.catalogId)
-					await this.repo.completeSyncRun(runId, {
-						totalProducts: result.total,
-						createdProducts: result.created,
-						updatedProducts: result.updated,
-						deletedProducts: result.deleted,
-						imagesImported: 0,
-						durationMs: result.durationMs
+					if (job.data.mode === IntegrationSyncRunMode.STOCK) {
+						const execution = await this.moySkladSync.syncStock({
+							catalogId: job.data.catalogId,
+							runId
+						})
+						const result = execution.result
+						await this.syncRuns.completeStockSync(
+							runId,
+							job.data,
+							execution.completion,
+							result
+						)
+						this.logger.log(
+							`Finished MoySklad stock sync job ${jobId || '<unknown>'}: catalog=${job.data.catalogId}, total=${result.total}, updated=${result.updated}, updatedProducts=${result.updatedProducts}, updatedVariants=${result.updatedVariants}, skipped=${result.skipped}, durationMs=${result.durationMs}`
+						)
+						this.recordQueueOutcome(jobName, 'success', startedAt)
+						return result
+					}
+
+					const execution = await this.moySkladSync.syncCatalog({
+						catalogId: job.data.catalogId,
+						runId
 					})
+					const result = execution.result
+					await this.syncRuns.completeCatalogSync(
+						runId,
+						job.data,
+						execution.completion,
+						result
+					)
 					this.logger.log(
 						`Finished MoySklad catalog sync job ${jobId || '<unknown>'}: catalog=${job.data.catalogId}, total=${result.total}, created=${result.created}, updated=${result.updated}, deleted=${result.deleted}, durationMs=${result.durationMs}`
 					)
@@ -408,7 +531,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 
 					if (runId) {
 						try {
-							await this.repo.failSyncRun(runId, message)
+							await this.syncRuns.failRun(runId, message)
 						} catch (repoError) {
 							this.logger.error('Failed to persist MoySklad sync run error', {
 								runId,
@@ -417,6 +540,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 						}
 					}
 
+					this.syncRuns.recordOutcome(job.data, 'error', this.elapsedMs(startedAt))
 					this.recordQueueOutcome(jobName, 'error', startedAt)
 					span.recordException(this.toError(error))
 					span.setStatus({
@@ -426,7 +550,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 					this.logger.error(
 						`MoySklad queue job ${jobId || '<unknown>'} failed for catalog ${job.data.catalogId}: ${message}`
 					)
-					throw error
+					throw this.toError(error)
 				} finally {
 					this.observability.decrementQueueJobActive(
 						MOYSKLAD_SYNC_QUEUE_NAME,
@@ -468,7 +592,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 					jobId,
 					productId: job.productId ?? null
 				})
-				await this.repo.skipSyncRun(
+				await this.syncRuns.skipRun(
 					skipped.id,
 					'Scheduled MoySklad sync is disabled or not configured'
 				)
@@ -487,7 +611,8 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 				jobId,
 				productId: job.productId ?? null
 			})
-			await this.repo.skipSyncRun(skipped.id, this.renderErrorMessage(error))
+			const message = this.renderErrorMessage(error)
+			await this.syncRuns.skipRun(skipped.id, message)
 			return null
 		}
 
@@ -533,7 +658,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 	}
 
 	private buildManualJobId(runId: string): string {
-		return `${MANUAL_JOB_ID_PREFIX}:${runId}`
+		return buildBullMqSafeJobId(MANUAL_JOB_ID_PREFIX, runId)
 	}
 
 	private resolveJobName(job: Job<MoySkladSyncJob>): string {
@@ -541,9 +666,14 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 			return job.name
 		}
 
-		return job.data.mode === IntegrationSyncRunMode.PRODUCT
-			? PRODUCT_SYNC_JOB_NAME
-			: FULL_SYNC_JOB_NAME
+		switch (job.data.mode) {
+			case IntegrationSyncRunMode.PRODUCT:
+				return PRODUCT_SYNC_JOB_NAME
+			case IntegrationSyncRunMode.STOCK:
+				return STOCK_SYNC_JOB_NAME
+			default:
+				return FULL_SYNC_JOB_NAME
+		}
 	}
 
 	private recordQueueOutcome(
@@ -551,7 +681,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		status: 'success' | 'error' | 'skipped',
 		startedAt: bigint
 	) {
-		const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000
+		const durationMs = this.elapsedMs(startedAt)
 		this.observability.recordQueueJob(
 			MOYSKLAD_SYNC_QUEUE_NAME,
 			jobName,
@@ -560,15 +690,15 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		)
 	}
 
-	private renderErrorMessage(error: unknown): string {
-		if (error instanceof Error && error.message) {
-			return error.message
-		}
+	private elapsedMs(startedAt: bigint): number {
+		return Number(process.hrtime.bigint() - startedAt) / 1_000_000
+	}
 
-		return 'Unknown error'
+	private renderErrorMessage(error: unknown): string {
+		return renderSafeProviderErrorMessage(error)
 	}
 
 	private toError(error: unknown): Error {
-		return error instanceof Error ? error : new Error(formatUnknownValue(error))
+		return toSafeProviderError(error)
 	}
 }

@@ -1,7 +1,10 @@
 import { CatalogStatus, PaymentKind } from '@generated/enums'
+import type { CatalogInventoryMode } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
+
+const CATALOG_INVENTORY_MODE_VALUES = ['NONE', 'EXTERNAL', 'INTERNAL'] as const
 
 export class AdminDeleteInfoDto {
 	@ApiProperty({ type: Boolean })
@@ -197,6 +200,40 @@ export class AdminActivityListItemDto {
 export class AdminCatalogConfigListItemDto {
 	@ApiProperty({ enum: CatalogStatus })
 	status: CatalogStatus
+
+	@ApiProperty({ enum: CATALOG_INVENTORY_MODE_VALUES })
+	inventoryMode: CatalogInventoryMode
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Whether the catalog can use product type schemas.'
+	})
+	canUseProductTypes: boolean
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Whether the catalog can use product variants.'
+	})
+	canUseProductVariants: boolean
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Whether the catalog can use catalog sale units.'
+	})
+	canUseCatalogSaleUnits: boolean
+
+	@ApiProperty({
+		type: Boolean,
+		description:
+			'Whether the catalog can use the paid internal inventory feature.'
+	})
+	canUseInternalInventory: boolean
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Whether the catalog can use MoySklad integration.'
+	})
+	canUseMoySkladIntegration: boolean
 }
 
 export class AdminCatalogChildListItemDto {

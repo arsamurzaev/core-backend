@@ -1,5 +1,10 @@
-import { CartCheckoutMethod, CartStatus, OrderStatus } from '@generated/client'
-import { ApiProperty } from '@nestjs/swagger'
+import {
+	CartCheckoutMethod,
+	CartStatus,
+	OrderStatus,
+	ProductVariantStatus
+} from '@generated/client'
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 
@@ -13,8 +18,102 @@ export class CartProductShortDto {
 	@ApiProperty({ type: String, example: 'futbolka-bazovaya' })
 	slug: string
 
+	@ApiProperty({ type: Number, example: 1999, nullable: true })
+	price: number | null
+}
+
+export class CartVariantAttributeRefDto {
+	@ApiProperty({ type: String, format: 'uuid' })
+	id: string
+
+	@ApiProperty({ type: String, example: 'size' })
+	key: string
+
+	@ApiProperty({ type: String, example: 'Размер' })
+	displayName: string
+}
+
+export class CartVariantEnumValueDto {
+	@ApiProperty({ type: String, format: 'uuid' })
+	id: string
+
+	@ApiProperty({ type: String, example: 'xl' })
+	value: string
+
+	@ApiProperty({ type: String, nullable: true, example: 'XL' })
+	displayName: string | null
+}
+
+export class CartVariantAttributeDto {
+	@ApiProperty({ type: CartVariantAttributeRefDto })
+	attribute: CartVariantAttributeRefDto
+
+	@ApiProperty({ type: CartVariantEnumValueDto })
+	enumValue: CartVariantEnumValueDto
+}
+
+export class CartVariantDto {
+	@ApiProperty({ type: String, format: 'uuid' })
+	id: string
+
+	@ApiProperty({ type: String, example: 'NIKE-DRI-XL-WHT' })
+	sku: string
+
+	@ApiProperty({ type: String, example: 'size=xl;color=white' })
+	variantKey: string
+
+	@ApiProperty({ type: String, example: 'Size: XL, Color: white' })
+	label: string
+
+	@ApiProperty({ type: Number, example: 2199, nullable: true })
+	price: number | null
+
+	@ApiProperty({ type: Number, example: 4 })
+	stock: number
+
+	@ApiProperty({ enum: ProductVariantStatus, enumName: 'ProductVariantStatus' })
+	status: ProductVariantStatus
+
+	@ApiProperty({ type: Boolean })
+	isAvailable: boolean
+
+	@ApiProperty({ type: [CartVariantAttributeDto] })
+	attributes: CartVariantAttributeDto[]
+}
+
+export class CartSaleUnitDto {
+	@ApiProperty({ type: String, format: 'uuid' })
+	id: string
+
+	@ApiProperty({ type: String, format: 'uuid' })
+	variantId: string
+
+	@ApiProperty({ type: String, format: 'uuid', nullable: true })
+	catalogSaleUnitId: string | null
+
+	@ApiProperty({ type: String, example: 'pcs' })
+	code: string
+
+	@ApiProperty({ type: String, example: 'шт' })
+	name: string
+
+	@ApiProperty({ type: Number, example: 1 })
+	baseQuantity: number
+
 	@ApiProperty({ type: Number, example: 1999 })
 	price: number
+
+	@ApiProperty({ type: String, nullable: true, example: '4601234567890' })
+	barcode: string | null
+
+	@ApiProperty({ type: Boolean })
+	isDefault: boolean
+
+	@ApiProperty({ type: Boolean })
+	isActive: boolean
+
+	@ApiProperty({ type: Number, example: 0 })
+	displayOrder: number
 }
 
 export class CartItemDto {
@@ -27,11 +126,46 @@ export class CartItemDto {
 	@ApiProperty({ type: String, format: 'uuid', nullable: true })
 	variantId: string | null
 
+	@ApiPropertyOptional({ type: String, format: 'uuid', nullable: true })
+	saleUnitId: string | null
+
 	@ApiProperty({ type: Number, example: 2 })
 	quantity: number
 
+	@ApiProperty({ type: Number, example: 12 })
+	baseQuantity: number
+
 	@ApiProperty({ type: CartProductShortDto })
 	product: CartProductShortDto
+
+	@ApiProperty({ type: CartVariantDto, nullable: true })
+	variant: CartVariantDto | null
+
+	@ApiProperty({ type: CartSaleUnitDto, nullable: true })
+	saleUnit: CartSaleUnitDto | null
+
+	@ApiProperty({ type: Number, example: 1999 })
+	unitPrice: number
+
+	@ApiProperty({
+		type: Number,
+		example: 2499,
+		description: 'Базовая цена единицы до применения скидки'
+	})
+	baseUnitPrice: number
+
+	@ApiProperty({
+		type: Number,
+		example: 10,
+		description: 'Процент скидки, примененный к строке'
+	})
+	discountPercent: number
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Признак активной скидки в сохраненном снимке цены'
+	})
+	hasDiscount: boolean
 
 	@ApiProperty({ type: Number, example: 3998 })
 	lineTotal: number
@@ -49,6 +183,26 @@ export class CartTotalsDto {
 
 	@ApiProperty({ type: Number, example: 4997 })
 	subtotal: number
+
+	@ApiProperty({
+		type: Number,
+		example: 5997,
+		description: 'Сумма без скидок'
+	})
+	baseSubtotal: number
+
+	@ApiProperty({
+		type: Number,
+		example: 1000,
+		description: 'Суммарная экономия по корзине'
+	})
+	discountTotal: number
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Есть ли скидка хотя бы в одной строке'
+	})
+	hasDiscount: boolean
 
 	@ApiProperty({
 		type: Number,
@@ -172,11 +326,32 @@ export class CompletedOrderItemDto {
 	@ApiProperty({ type: String, format: 'uuid', nullable: true })
 	variantId: string | null
 
+	@ApiProperty({ type: String, format: 'uuid', nullable: true })
+	saleUnitId: string | null
+
 	@ApiProperty({ type: Number, example: 2 })
 	quantity: number
 
+	@ApiProperty({ type: Number, example: 12 })
+	baseQuantity: number
+
 	@ApiProperty({ type: Number, example: 1999 })
 	unitPrice: number
+
+	@ApiProperty({ type: Number, example: 2499 })
+	baseUnitPrice: number
+
+	@ApiProperty({ type: Number, example: 10 })
+	discountPercent: number
+
+	@ApiProperty({ type: Boolean })
+	hasDiscount: boolean
+
+	@ApiProperty({ type: CartVariantDto, nullable: true })
+	variant: CartVariantDto | null
+
+	@ApiProperty({ type: CartSaleUnitDto, nullable: true })
+	saleUnit: CartSaleUnitDto | null
 }
 
 export class CompletedOrderDto {

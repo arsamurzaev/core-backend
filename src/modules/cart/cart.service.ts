@@ -1,69 +1,35 @@
-import {
-	CartCheckoutMethod,
-	CartStatus,
-	ContactType,
-	OrderStatus,
-	Prisma,
-	Role
-} from '@generated/client'
+import { CartStatus } from '@generated/client'
 import {
 	BadRequestException,
-	ForbiddenException,
+	Inject,
 	Injectable,
 	Logger,
-	MessageEvent,
-	NotFoundException,
 	OnModuleDestroy,
 	OnModuleInit
 } from '@nestjs/common'
-import type Redis from 'ioredis'
-import { randomBytes } from 'node:crypto'
-import { Observable, Subject } from 'rxjs'
 
-import { PrismaService } from '@/infrastructure/prisma/prisma.service'
-import { RedisService } from '@/infrastructure/redis/redis.service'
 import type { SessionUser } from '@/modules/auth/types/auth-request'
+import { MediaUrlService } from '@/shared/media/media-url.service'
 import {
-	normalizeCartCheckoutData,
-	resolveCatalogCheckoutConfig,
-	resolveCheckoutContactsSnapshot,
-	type CatalogCheckoutData
-} from '@/modules/catalog/catalog-checkout'
-import { buildMediaSelect } from '@/shared/media/media-select'
-import {
-	MEDIA_VARIANT_NAMES,
-	MediaUrlService
-} from '@/shared/media/media-url.service'
-import { normalizeOrderProducts } from '@/shared/order/order-products.utils'
+	CAPABILITY_READER_PORT,
+	type CapabilityReaderPort
+} from '@/modules/capability/contracts'
 
+import { CartCurrentService } from './cart-current.service'
+import { CartLifecycleService } from './cart-lifecycle.service'
+import { CartLineService } from './cart-line.service'
+import { CartLookupService } from './cart-lookup.service'
+import { CartManagerSessionService } from './cart-manager-session.service'
+import { type CartShareInput, CartShareService } from './cart-share.service'
+import { type CartSsePayload, CartSseService } from './cart-sse.service'
+import type { CartEntity } from './cart.selects'
 import {
 	CART_COOKIE_NAME,
-	CART_SSE_HEARTBEAT_MS,
-	CART_TOKEN_BYTES,
 	mapCartEntity,
-	MAX_CART_ITEMS,
-	MAX_ITEM_QUANTITY,
-	normalizeCartItemInput,
-	type NormalizedCartItemInput,
-	PUBLIC_KEY_BYTES,
 	readCartTokenFromCookie,
 	type UpsertCartItemInput
 } from './cart.utils'
-
-type SsePayload = string | Record<string, unknown>
-type CartSsePubSubMessage = {
-	cartId: string
-	eventId?: string
-	originId: string
-	payload: SsePayload
-	type: string
-}
-
-type CartSseStoredEvent = {
-	eventId: string
-	payload: SsePayload
-	type: string
-}
+import { OrderCheckoutService } from './order-checkout.service'
 
 const CART_MANAGER_INACTIVITY_MS =
 	Number(process.env.CART_MANAGER_INACTIVITY_MS ?? 60_000) || 60_000
@@ -74,125 +40,39 @@ const CART_DRAFT_TTL_MS =
 	7 * 24 * 60 * 60 * 1000
 const CART_DRAFT_SWEEP_MS =
 	Number(process.env.CART_DRAFT_SWEEP_MS ?? 60 * 60 * 1000) || 60 * 60 * 1000
-const CURRENT_CART_VISIBLE_STATUSES = [
-	CartStatus.DRAFT,
-	CartStatus.SHARED,
-	CartStatus.IN_PROGRESS,
-	CartStatus.PAUSED
-] as const
 const TERMINAL_CART_STATUSES = new Set<CartStatus>([
 	CartStatus.CONVERTED,
 	CartStatus.CANCELLED,
 	CartStatus.EXPIRED
 ])
-const CART_SSE_REDIS_CHANNEL = 'cart:sse'
-const CART_SSE_STREAM_PREFIX = 'cart:sse:stream'
-const CART_SSE_STREAM_MAXLEN =
-	Number(process.env.CART_SSE_STREAM_MAXLEN ?? 100) || 100
-const CART_SSE_STREAM_TTL_SEC =
-	Number(process.env.CART_SSE_STREAM_TTL_SEC ?? 24 * 60 * 60) || 24 * 60 * 60
 
-const cartSelect = {
-	id: true,
-	catalogId: true,
-	token: true,
-	status: true,
-	statusChangedAt: true,
-	publicKey: true,
-	checkoutKey: true,
-	checkoutAt: true,
-	checkoutMethod: true,
-	checkoutData: true,
-	checkoutContacts: true,
-	comment: true,
-	assignedManagerId: true,
-	managerSessionStartedAt: true,
-	managerLastSeenAt: true,
-	closedAt: true,
-	createdAt: true,
-	updatedAt: true,
-	items: {
-		where: { deleteAt: null },
-		select: {
-			id: true,
-			productId: true,
-			variantId: true,
-			quantity: true,
-			createdAt: true,
-			updatedAt: true,
-			product: {
-				select: {
-					id: true,
-					name: true,
-					slug: true,
-					price: true,
-					media: {
-						select: {
-							position: true,
-							media: { select: buildMediaSelect([MEDIA_VARIANT_NAMES.thumb]) }
-						},
-						orderBy: { position: 'asc' as const },
-						take: 1
-					}
-				}
-			}
-		},
-		orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }]
-	}
+type CartMutationResult = {
+	cart: CartEntity
+	changed: boolean
+	inventoryCacheCatalogIds?: string[]
 }
-
-type CartEntity = Prisma.CartGetPayload<{ select: typeof cartSelect }>
-type CartContext = {
-	id: string
-	catalogId: string
-	parentCatalogId: string | null
-	status: CartStatus
-}
-type ExistingCartItem = {
-	id: string
-	deleteAt: Date | null
-	quantity: number
-} | null
-type CartMutationResult = { cart: CartEntity; changed: boolean }
-
-const completedOrderSelect = {
-	id: true,
-	status: true,
-	catalogId: true,
-	totalAmount: true,
-	createdAt: true,
-	products: true,
-	checkoutMethod: true,
-	checkoutData: true,
-	checkoutContacts: true
-}
-
-type CompletedOrderEntity = Prisma.OrderGetPayload<{
-	select: typeof completedOrderSelect
-}>
-type ShareCartInput = {
-	checkoutData?: unknown
-	checkoutMethod?: CartCheckoutMethod
-	comment?: string | null
-}
-
 @Injectable()
 export class CartService implements OnModuleInit, OnModuleDestroy {
 	private readonly logger = new Logger(CartService.name)
-	private readonly sseStreams = new Map<string, Set<Subject<MessageEvent>>>()
-	private readonly sseOriginId = randomBytes(8).toString('hex')
-	private redisSubscriber: Redis | null = null
 	private managerSweepTimer: NodeJS.Timeout | null = null
 	private draftSweepTimer: NodeJS.Timeout | null = null
 
 	constructor(
-		private readonly prisma: PrismaService,
 		private readonly mediaUrl: MediaUrlService,
-		private readonly redis: RedisService
+		private readonly currentCart: CartCurrentService,
+		private readonly cartLine: CartLineService,
+		private readonly lookup: CartLookupService,
+		private readonly lifecycle: CartLifecycleService,
+		private readonly managerSession: CartManagerSessionService,
+		private readonly share: CartShareService,
+		private readonly cartSse: CartSseService,
+		private readonly orderCheckout: OrderCheckoutService,
+		@Inject(CAPABILITY_READER_PORT)
+		private readonly capabilities: CapabilityReaderPort
 	) {}
 
 	onModuleInit() {
-		this.setupRedisSseSubscriber()
+		this.cartSse.setupRedisSubscriber()
 
 		if (CART_MANAGER_SWEEP_MS > 0) {
 			this.managerSweepTimer = setInterval(() => {
@@ -218,15 +98,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	}
 
 	onModuleDestroy() {
-		if (this.redisSubscriber) {
-			this.redisSubscriber.removeAllListeners()
-			void this.redisSubscriber.quit().catch(error => {
-				this.logger.warn('Cart SSE Redis subscriber shutdown failed', {
-					error: error instanceof Error ? error.message : String(error)
-				})
-			})
-			this.redisSubscriber = null
-		}
+		this.cartSse.shutdown()
 
 		if (this.managerSweepTimer) {
 			clearInterval(this.managerSweepTimer)
@@ -247,90 +119,30 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	}
 
 	async getOrCreateCurrentCart(catalogId: string, token?: string | null) {
-		const normalizedToken = token?.trim()
-		if (normalizedToken) {
-			const existing = await this.findByToken(catalogId, normalizedToken)
-			if (existing) {
-				return {
-					cart: this.mapCart(existing),
-					token: normalizedToken,
-					isNew: false
-				}
-			}
+		const result = await this.currentCart.getOrCreate(catalogId, token)
+		return {
+			cart: await this.mapCart(result.cart),
+			isNew: result.isNew,
+			token: result.token
 		}
-
-		const newToken = await this.generateUniqueToken()
-		const created = await this.prisma.cart.create({
-			data: {
-				catalogId,
-				token: newToken,
-				status: CartStatus.DRAFT
-			},
-			select: cartSelect
-		})
-
-		return { cart: this.mapCart(created), token: newToken, isNew: true }
 	}
 
 	async getCurrentCartOrThrow(catalogId: string, token?: string | null) {
-		const normalizedToken = token?.trim()
-		if (!normalizedToken) {
-			throw new NotFoundException('Корзина не найдена')
-		}
-
-		const cart = await this.findByToken(catalogId, normalizedToken)
-		if (!cart) {
-			throw new NotFoundException('Корзина не найдена')
-		}
-
-		return { cart: this.mapCart(cart), token: normalizedToken }
+		const result = await this.currentCart.getOrThrow(catalogId, token)
+		return { cart: await this.mapCart(result.cart), token: result.token }
 	}
 
 	async shareCurrentCart(
 		catalogId: string,
 		token?: string | null,
-		input: ShareCartInput | string | null = {}
+		input: CartShareInput | string | null = {}
 	) {
-		const shareInput: ShareCartInput =
-			typeof input === 'string' ? { comment: input } : (input ?? {})
-		const current = await this.getOrCreateCurrentCart(catalogId, token)
-		let publicKey = current.cart.publicKey
-		const now = new Date()
-		const data: Prisma.CartUpdateInput = {}
-		const normalizedComment = this.normalizeCartComment(shareInput.comment)
-		const checkout = await this.resolveCheckoutForShare(catalogId, shareInput)
-
-		if (!publicKey) {
-			publicKey = await this.generateUniquePublicKey()
-			data.publicKey = publicKey
-		}
-
-		if (current.cart.status === CartStatus.DRAFT) {
-			data.status = CartStatus.SHARED
-			data.statusChangedAt = now
-		}
-
-		if (normalizedComment !== current.cart.comment) {
-			data.comment = normalizedComment
-		}
-
-		data.checkoutMethod = checkout.checkoutMethod
-		data.checkoutData = checkout.checkoutData as Prisma.InputJsonValue
-		data.checkoutContacts = checkout.checkoutContacts as Prisma.InputJsonValue
-
-		if (Object.keys(data).length > 0) {
-			await this.prisma.cart.update({
-				where: { id: current.cart.id },
-				data
-			})
-		}
-
-		const fresh = await this.findByIdOrThrow(current.cart.id)
-		return { cart: this.mapCart(fresh), token: current.token }
+		const result = await this.share.shareCurrentCart(catalogId, token, input)
+		return { cart: await this.mapCart(result.cart), token: result.token }
 	}
 
 	async getPublicCart(publicKey: string) {
-		const cart = await this.findByPublicKeyOrThrow(publicKey)
+		const cart = await this.lookup.findByPublicKeyOrThrow(publicKey)
 		return this.mapCart(cart)
 	}
 
@@ -341,14 +153,11 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	) {
 		const current = await this.getOrCreateCurrentCart(catalogId, token)
 		const updated = await this.upsertItem(current.cart.id, input)
+		const cart = await this.mapCart(updated.cart)
 		if (updated.changed) {
-			this.broadcastCart(
-				updated.cart.id,
-				'cart.updated',
-				this.mapCart(updated.cart)
-			)
+			this.broadcastCart(updated.cart.id, 'cart.updated', cart)
 		}
-		return { cart: this.mapCart(updated.cart), token: current.token }
+		return { cart, token: current.token }
 	}
 
 	async removeCurrentItem(
@@ -358,274 +167,92 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	) {
 		const current = await this.getCurrentCartOrThrow(catalogId, token)
 		const updated = await this.removeItem(current.cart.id, itemId)
+		const cart = await this.mapCart(updated.cart)
 		if (updated.changed) {
-			this.broadcastCart(
-				updated.cart.id,
-				'cart.updated',
-				this.mapCart(updated.cart)
-			)
+			this.broadcastCart(updated.cart.id, 'cart.updated', cart)
 		}
-		return { cart: this.mapCart(updated.cart), token: current.token }
+		return { cart, token: current.token }
 	}
 
 	async deleteCurrentCart(catalogId: string, token: string | null | undefined) {
-		const current = await this.getCurrentCartOrThrow(catalogId, token)
-		const cart = current.cart
+		const result = await this.lifecycle.deleteCurrentCart(catalogId, token)
 
-		if (cart.status === CartStatus.IN_PROGRESS || cart.assignedManagerId) {
-			await this.prisma.cart.update({
-				where: { id: cart.id },
-				data: {
-					token: null,
-					userId: null
-				}
+		if (result.mode === 'deleted') {
+			this.broadcastCart(result.cartId, 'cart.detached', {
+				cartId: result.cartId,
+				deletedAt: result.deletedAt.toISOString()
 			})
-
-			return { mode: 'detached' as const, token: current.token }
 		}
 
-		const now = new Date()
-		await this.prisma.$transaction(async tx => {
-			await tx.cartItem.updateMany({
-				where: {
-					cartId: cart.id,
-					deleteAt: null
-				},
-				data: { deleteAt: now }
-			})
-			await tx.cart.update({
-				where: { id: cart.id },
-				data: {
-					deleteAt: now,
-					token: null,
-					userId: null,
-					publicKey: null,
-					checkoutKey: null,
-					checkoutMethod: null,
-					checkoutData: Prisma.DbNull,
-					checkoutContacts: Prisma.DbNull
-				}
-			})
-		})
-
-		this.broadcastCart(cart.id, 'cart.detached', {
-			cartId: cart.id,
-			deletedAt: now.toISOString()
-		})
-
-		return { mode: 'deleted' as const, token: current.token }
+		return { mode: result.mode, token: result.token }
 	}
 
 	async upsertPublicItem(publicKey: string, input: UpsertCartItemInput) {
-		const cart = await this.findByPublicKeyOrThrow(publicKey)
+		const cart = await this.lookup.findByPublicKeyOrThrow(publicKey)
 		const updated = await this.upsertItem(cart.id, input)
+		const mappedCart = await this.mapCart(updated.cart)
 		if (updated.changed) {
-			this.broadcastCart(
-				updated.cart.id,
-				'cart.updated',
-				this.mapCart(updated.cart)
-			)
+			this.broadcastCart(updated.cart.id, 'cart.updated', mappedCart)
 		}
-		return this.mapCart(updated.cart)
+		return mappedCart
 	}
 
 	async removePublicItem(publicKey: string, itemId: string) {
-		const cart = await this.findByPublicKeyOrThrow(publicKey)
+		const cart = await this.lookup.findByPublicKeyOrThrow(publicKey)
 		const updated = await this.removeItem(cart.id, itemId)
+		const mappedCart = await this.mapCart(updated.cart)
 		if (updated.changed) {
-			this.broadcastCart(
-				updated.cart.id,
-				'cart.updated',
-				this.mapCart(updated.cart)
-			)
+			this.broadcastCart(updated.cart.id, 'cart.updated', mappedCart)
 		}
-		return this.mapCart(updated.cart)
+		return mappedCart
 	}
 
 	async beginManagerSession(publicKey: string, user: SessionUser) {
-		const cart = await this.findManageableCartByPublicKeyOrThrow(publicKey, user)
-		this.ensureCartIsOpen(cart.status)
-		this.ensureManagerCanTakeCart(cart, user)
-
-		const now = new Date()
-		const statusChanged =
-			cart.status !== CartStatus.IN_PROGRESS || cart.assignedManagerId !== user.id
-
-		await this.prisma.cart.update({
-			where: { id: cart.id },
-			data: {
-				status: CartStatus.IN_PROGRESS,
-				statusChangedAt: statusChanged ? now : cart.statusChangedAt,
-				assignedManagerId: user.id,
-				managerSessionStartedAt:
-					cart.status === CartStatus.IN_PROGRESS &&
-					cart.assignedManagerId === user.id &&
-					cart.managerSessionStartedAt
-						? cart.managerSessionStartedAt
-						: now,
-				managerLastSeenAt: now
-			}
-		})
-
-		const fresh = await this.findByIdOrThrow(cart.id)
-		if (statusChanged) {
-			this.broadcastCartStatusChanged(fresh)
+		const result = await this.managerSession.begin(publicKey, user)
+		const cart = await this.mapCart(result.cart)
+		if (result.statusChanged) {
+			this.broadcastCart(result.cart.id, 'cart.status_changed', cart)
 		}
 
-		return this.mapCart(fresh)
+		return cart
 	}
 
 	async heartbeatManagerSession(publicKey: string, user: SessionUser) {
-		const cart = await this.findManageableCartByPublicKeyOrThrow(publicKey, user)
-		this.ensureCartIsOpen(cart.status)
-		this.ensureManagerCanRefreshPresence(cart, user)
-
-		const now = new Date()
-		const statusChanged =
-			cart.status !== CartStatus.IN_PROGRESS || cart.assignedManagerId !== user.id
-
-		await this.prisma.cart.update({
-			where: { id: cart.id },
-			data: {
-				status: CartStatus.IN_PROGRESS,
-				statusChangedAt: statusChanged ? now : cart.statusChangedAt,
-				assignedManagerId: user.id,
-				managerSessionStartedAt:
-					cart.status === CartStatus.IN_PROGRESS &&
-					cart.assignedManagerId === user.id &&
-					cart.managerSessionStartedAt
-						? cart.managerSessionStartedAt
-						: now,
-				managerLastSeenAt: now
-			}
-		})
-
-		const fresh = await this.findByIdOrThrow(cart.id)
-		if (statusChanged) {
-			this.broadcastCartStatusChanged(fresh)
+		const result = await this.managerSession.heartbeat(publicKey, user)
+		const cart = await this.mapCart(result.cart)
+		if (result.statusChanged) {
+			this.broadcastCart(result.cart.id, 'cart.status_changed', cart)
 		}
 
-		return this.mapCart(fresh)
+		return cart
 	}
 
 	async releaseManagerSession(publicKey: string, user: SessionUser) {
-		const cart = await this.findManageableCartByPublicKeyOrThrow(publicKey, user)
-		this.ensureCartIsOpen(cart.status)
-		this.ensureManagerCanRefreshPresence(cart, user)
-
-		const now = new Date()
-		const statusChanged =
-			cart.status !== CartStatus.PAUSED || cart.assignedManagerId !== user.id
-
-		await this.prisma.cart.update({
-			where: { id: cart.id },
-			data: {
-				status: CartStatus.PAUSED,
-				statusChangedAt: statusChanged ? now : cart.statusChangedAt,
-				assignedManagerId: user.id,
-				managerSessionStartedAt: cart.managerSessionStartedAt ?? now,
-				managerLastSeenAt: now
-			}
-		})
-
-		const fresh = await this.findByIdOrThrow(cart.id)
-		if (statusChanged) {
-			this.broadcastCartStatusChanged(fresh)
+		const result = await this.managerSession.release(publicKey, user)
+		const cart = await this.mapCart(result.cart)
+		if (result.statusChanged) {
+			this.broadcastCart(result.cart.id, 'cart.status_changed', cart)
 		}
 
-		return this.mapCart(fresh)
+		return cart
 	}
 
 	async completeManagerOrder(publicKey: string, user: SessionUser) {
-		const cart = await this.findManageableCartByPublicKeyOrThrow(publicKey, user)
+		const cart = await this.managerSession.findManageableCartByPublicKeyOrThrow(
+			publicKey,
+			user
+		)
 		this.ensureCartIsOpen(cart.status)
 
 		if (!cart.items.length) {
 			throw new BadRequestException('Нельзя оформить пустую корзину')
 		}
 
-		const now = new Date()
-		const result = await this.prisma.$transaction(async tx => {
-			const freshCart = await this.findByIdOrThrow(cart.id, tx)
-			this.ensureCartIsOpen(freshCart.status)
+		const result = await this.orderCheckout.complete(cart.id, user.id)
+		const freshCart = await this.lookup.findByIdOrThrow(result.cartId)
+		await this.broadcastCartStatusChanged(freshCart)
 
-			if (!freshCart.items.length) {
-				throw new BadRequestException('Нельзя оформить пустую корзину')
-			}
-
-			for (const item of freshCart.items) {
-				if (item.variantId) {
-					await this.ensureVariantInStock(tx, item.variantId, item.quantity)
-				}
-			}
-
-			const snapshotItems = freshCart.items.map(item => {
-				const unitPriceCents = Math.round(Number(String(item.product.price)) * 100)
-				const lineTotalCents = unitPriceCents * item.quantity
-				return {
-					id: item.id,
-					productId: item.productId,
-					variantId: item.variantId,
-					quantity: item.quantity,
-					unitPrice: unitPriceCents / 100,
-					lineTotal: lineTotalCents / 100,
-					product: {
-						id: item.product.id,
-						name: item.product.name,
-						slug: item.product.slug
-					}
-				}
-			})
-
-			const totalAmountCents = snapshotItems.reduce(
-				(sum, item) => sum + Math.round(item.unitPrice * 100) * item.quantity,
-				0
-			)
-			const totalAmount = Math.round(totalAmountCents / 100)
-			const deliveryAddress = this.resolveDeliveryAddress(freshCart)
-
-			const order = await tx.order.create({
-				data: {
-					status: OrderStatus.COMPLETED,
-					catalogId: freshCart.catalogId,
-					comment: freshCart.comment,
-					isDelivery: freshCart.checkoutMethod === CartCheckoutMethod.DELIVERY,
-					address: deliveryAddress,
-					checkoutMethod: freshCart.checkoutMethod,
-					checkoutData: (freshCart.checkoutData ?? undefined) as
-						| Prisma.InputJsonValue
-						| undefined,
-					checkoutContacts: (freshCart.checkoutContacts ?? undefined) as
-						| Prisma.InputJsonValue
-						| undefined,
-					paymentProof: [],
-					products: snapshotItems,
-					totalAmount
-				},
-				select: completedOrderSelect
-			})
-
-			await tx.cart.update({
-				where: { id: freshCart.id },
-				data: {
-					status: CartStatus.CONVERTED,
-					statusChangedAt: now,
-					assignedManagerId: user.id,
-					managerLastSeenAt: now,
-					closedAt: now,
-					publicKey: null,
-					checkoutKey: null
-				}
-			})
-
-			return {
-				order,
-				cart: await this.findByIdOrThrow(freshCart.id, tx)
-			}
-		})
-
-		this.broadcastCartStatusChanged(result.cart)
-		return { order: this.mapCompletedOrder(result.order) }
+		return { order: result.order }
 	}
 
 	async connectCurrentSse(
@@ -634,10 +261,10 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		lastEventId?: string | null
 	) {
 		const current = await this.getCurrentCartOrThrow(catalogId, token)
-		return this.createSseStream(
+		return this.cartSse.connect(
 			current.cart.id,
 			async () => {
-				const fresh = await this.findByIdOrThrow(current.cart.id)
+				const fresh = await this.lookup.findByIdOrThrow(current.cart.id)
 				return this.mapCart(fresh)
 			},
 			lastEventId
@@ -645,8 +272,8 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	}
 
 	async connectPublicSse(publicKey: string, lastEventId?: string | null) {
-		const cart = await this.findByPublicKeyOrThrow(publicKey)
-		return this.createSseStream(
+		const cart = await this.lookup.findByPublicKeyOrThrow(publicKey)
+		return this.cartSse.connect(
 			cart.id,
 			() => this.getPublicCart(publicKey),
 			lastEventId
@@ -657,474 +284,45 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		cartId: string,
 		input: UpsertCartItemInput
 	): Promise<CartMutationResult> {
-		const normalizedInput = normalizeCartItemInput(input)
-
-		return this.prisma.$transaction(async tx =>
-			this.upsertItemInTransaction(cartId, normalizedInput, tx)
-		)
+		const result = await this.cartLine.upsertItem(cartId, input)
+		return {
+			cart: await this.lookup.findByIdOrThrow(result.cartId),
+			changed: result.changed,
+			inventoryCacheCatalogIds: result.inventoryCacheCatalogIds
+		}
 	}
 
 	private async removeItem(
 		cartId: string,
 		itemId: string
 	): Promise<CartMutationResult> {
-		const normalizedItemId = itemId.trim()
-		if (!normalizedItemId) {
-			throw new BadRequestException('Параметр itemId обязателен')
-		}
-
-		return this.prisma.$transaction(async tx => {
-			const cart = await this.findCartContextOrThrow(cartId, tx)
-			this.ensureCartIsOpen(cart.status)
-
-			const item = await tx.cartItem.findFirst({
-				where: {
-					id: normalizedItemId,
-					cartId,
-					deleteAt: null
-				},
-				select: { id: true }
-			})
-			if (!item) {
-				throw new NotFoundException('Позиция корзины не найдена')
-			}
-
-			await tx.cartItem.update({
-				where: { id: item.id },
-				data: { deleteAt: new Date() }
-			})
-
-			await this.touchCart(tx, cartId)
-
-			return {
-				cart: await this.findByIdOrThrow(cartId, tx),
-				changed: true
-			}
-		})
-	}
-
-	private createSseStream(
-		cartId: string,
-		loadSnapshot: () => Promise<SsePayload>,
-		lastEventId?: string | null
-	): Observable<MessageEvent> {
-		return new Observable<MessageEvent>(subscriber => {
-			const stream = new Subject<MessageEvent>()
-			const set = this.sseStreams.get(cartId) ?? new Set<Subject<MessageEvent>>()
-			set.add(stream)
-			this.sseStreams.set(cartId, set)
-
-			const sub = stream.subscribe(subscriber)
-			stream.next({
-				id: this.buildCartSseEventId(cartId, 'connected'),
-				type: 'connected',
-				data: { cartId, timestamp: new Date().toISOString() }
-			})
-
-			void this.replayCartSseEvents(cartId, lastEventId, stream)
-				.catch(error => {
-					this.logger.warn('Cart SSE replay failed', {
-						cartId,
-						error: error instanceof Error ? error.message : String(error)
-					})
-				})
-				.finally(() => {
-					void loadSnapshot()
-						.then(snapshot => {
-							stream.next({
-								id: this.buildCartSseEventId(cartId, 'cart.snapshot', snapshot),
-								type: 'cart.snapshot',
-								data: snapshot
-							})
-						})
-						.catch(error => {
-							this.logger.warn('Cart SSE snapshot failed', {
-								cartId,
-								error: error instanceof Error ? error.message : String(error)
-							})
-						})
-				})
-
-			const pingTimer = setInterval(() => {
-				stream.next({
-					id: this.buildCartSseEventId(cartId, 'ping'),
-					type: 'ping',
-					data: { timestamp: new Date().toISOString() }
-				})
-			}, CART_SSE_HEARTBEAT_MS)
-
-			return () => {
-				clearInterval(pingTimer)
-				sub.unsubscribe()
-				set.delete(stream)
-				stream.complete()
-				if (set.size === 0) {
-					this.sseStreams.delete(cartId)
-				}
-			}
-		})
-	}
-
-	private broadcastCart(cartId: string, type: string, payload: SsePayload) {
-		void this.persistAndBroadcastCartEvent(cartId, type, payload).catch(error => {
-			const eventId = this.buildCartSseEventId(cartId, type, payload)
-			this.logger.warn('Cart SSE Redis stream write failed', {
-				cartId,
-				error: error instanceof Error ? error.message : String(error),
-				type
-			})
-			this.broadcastCartLocal(cartId, type, payload, eventId)
-		})
-	}
-
-	private broadcastCartLocal(
-		cartId: string,
-		type: string,
-		payload: SsePayload,
-		eventId?: string
-	) {
-		const streams = this.sseStreams.get(cartId)
-		if (!streams?.size) return
-
-		for (const stream of streams) {
-			stream.next({
-				...(eventId ? { id: eventId } : {}),
-				type,
-				data: payload
-			})
+		const result = await this.cartLine.removeItem(cartId, itemId)
+		return {
+			cart: await this.lookup.findByIdOrThrow(result.cartId),
+			changed: result.changed,
+			inventoryCacheCatalogIds: result.inventoryCacheCatalogIds
 		}
 	}
 
-	private broadcastCartStatusChanged(cart: CartEntity) {
-		const payload = this.mapCart(cart)
+	private broadcastCart(cartId: string, type: string, payload: CartSsePayload) {
+		this.cartSse.broadcast(cartId, type, payload)
+	}
+
+	private async broadcastCartStatusChanged(cart: CartEntity) {
+		const payload = await this.mapCart(cart)
 		this.broadcastCart(cart.id, 'cart.status_changed', payload)
 	}
 
-	private async persistAndBroadcastCartEvent(
-		cartId: string,
-		type: string,
-		payload: SsePayload
-	) {
-		const eventId = await this.appendCartSseStreamEvent(cartId, type, payload)
-		this.logger.debug('Cart SSE event persisted', {
-			cartId,
-			eventId,
-			type
-		})
-		this.broadcastCartLocal(cartId, type, payload, eventId)
-
-		const message: CartSsePubSubMessage = {
-			cartId,
-			eventId,
-			originId: this.sseOriginId,
-			type,
-			payload
-		}
-		await this.redis.publish(CART_SSE_REDIS_CHANNEL, JSON.stringify(message))
-	}
-
-	private async appendCartSseStreamEvent(
-		cartId: string,
-		type: string,
-		payload: SsePayload
-	) {
-		const streamKey = this.buildCartSseStreamKey(cartId)
-		const eventId = await this.redis.xadd(
-			streamKey,
-			'MAXLEN',
-			'~',
-			String(CART_SSE_STREAM_MAXLEN),
-			'*',
-			'type',
-			type,
-			'payload',
-			JSON.stringify(payload),
-			'originId',
-			this.sseOriginId
+	private async mapCart(cart: CartEntity) {
+		const features = await this.capabilities.getCurrentFeatures(cart.catalogId)
+		return mapCartEntity(
+			cart,
+			media => this.mediaUrl.mapMedia(media),
+			{
+				canUseProductVariants: features.canUseProductVariants,
+				canUseCatalogSaleUnits: features.canUseCatalogSaleUnits
+			}
 		)
-
-		await this.redis.expire(streamKey, CART_SSE_STREAM_TTL_SEC)
-		return eventId ?? this.buildCartSseEventId(cartId, type, payload)
-	}
-
-	private async replayCartSseEvents(
-		cartId: string,
-		lastEventId: string | null | undefined,
-		stream: Subject<MessageEvent>
-	) {
-		const replayStartId = this.normalizeRedisStreamLastEventId(lastEventId)
-		if (!replayStartId) {
-			return
-		}
-
-		const entries = await this.redis.xrange(
-			this.buildCartSseStreamKey(cartId),
-			`(${replayStartId}`,
-			'+',
-			'COUNT',
-			String(CART_SSE_STREAM_MAXLEN)
-		)
-
-		if (entries.length > 0) {
-			this.logger.debug('Cart SSE replaying missed events', {
-				cartId,
-				count: entries.length,
-				lastEventId: replayStartId
-			})
-		}
-
-		for (const [eventId, rawFields] of entries) {
-			const event = this.parseCartSseStreamEntry(eventId, rawFields)
-			if (!event) {
-				continue
-			}
-
-			stream.next({
-				id: event.eventId,
-				type: event.type,
-				data: event.payload
-			})
-		}
-	}
-
-	private parseCartSseStreamEntry(
-		eventId: string,
-		rawFields: string[]
-	): CartSseStoredEvent | null {
-		const fields: Record<string, string> = {}
-		for (let index = 0; index < rawFields.length - 1; index += 2) {
-			fields[rawFields[index]] = rawFields[index + 1]
-		}
-
-		const type = fields.type
-		const rawPayload = fields.payload
-		if (!type || !rawPayload) {
-			return null
-		}
-
-		try {
-			return {
-				eventId,
-				type,
-				payload: JSON.parse(rawPayload) as SsePayload
-			}
-		} catch {
-			return {
-				eventId,
-				type,
-				payload: rawPayload
-			}
-		}
-	}
-
-	private normalizeRedisStreamLastEventId(value?: string | null): string | null {
-		const normalized = value?.trim()
-		if (!normalized) {
-			return null
-		}
-
-		return /^\d+-\d+$/.test(normalized) ? normalized : null
-	}
-
-	private buildCartSseStreamKey(cartId: string) {
-		return `${CART_SSE_STREAM_PREFIX}:${cartId}`
-	}
-
-	private setupRedisSseSubscriber() {
-		const subscriber = this.redis.duplicate()
-		this.redisSubscriber = subscriber
-
-		subscriber.on('message', (channel, rawMessage) => {
-			if (channel !== CART_SSE_REDIS_CHANNEL) {
-				return
-			}
-
-			const message = this.parseCartSsePubSubMessage(rawMessage)
-			if (!message) {
-				return
-			}
-
-			if (message.originId === this.sseOriginId) {
-				return
-			}
-
-			this.broadcastCartLocal(
-				message.cartId,
-				message.type,
-				message.payload,
-				message.eventId
-			)
-		})
-
-		subscriber.on('error', error => {
-			this.logger.error('Cart SSE Redis subscriber error', {
-				error: error instanceof Error ? error.message : String(error)
-			})
-		})
-
-		void subscriber.subscribe(CART_SSE_REDIS_CHANNEL).catch(error => {
-			this.logger.error('Cart SSE Redis subscribe failed', {
-				error: error instanceof Error ? error.message : String(error)
-			})
-		})
-	}
-
-	private parseCartSsePubSubMessage(
-		rawMessage: string
-	): CartSsePubSubMessage | null {
-		try {
-			const parsed = JSON.parse(rawMessage) as Partial<CartSsePubSubMessage>
-			if (
-				!parsed ||
-				typeof parsed.cartId !== 'string' ||
-				typeof parsed.originId !== 'string' ||
-				typeof parsed.type !== 'string' ||
-				!('payload' in parsed)
-			) {
-				return null
-			}
-
-			return {
-				cartId: parsed.cartId,
-				eventId: typeof parsed.eventId === 'string' ? parsed.eventId : undefined,
-				originId: parsed.originId,
-				type: parsed.type,
-				payload: parsed.payload
-			}
-		} catch {
-			return null
-		}
-	}
-
-	private mapCart(cart: CartEntity) {
-		return mapCartEntity(cart, media => this.mediaUrl.mapMedia(media))
-	}
-
-	private async resolveCheckoutForShare(
-		catalogId: string,
-		input: ShareCartInput
-	): Promise<{
-		checkoutContacts: Record<string, string>
-		checkoutData: CatalogCheckoutData
-		checkoutMethod: CartCheckoutMethod | null
-	}> {
-		const catalog = await this.prisma.catalog.findFirst({
-			where: { id: catalogId, deleteAt: null },
-			select: {
-				type: { select: { code: true } },
-				settings: { select: { address: true, checkout: true } },
-				contacts: {
-					where: { deleteAt: null },
-					select: { type: true, value: true },
-					orderBy: [{ position: 'asc' as const }, { createdAt: 'asc' as const }]
-				}
-			}
-		})
-
-		if (!catalog) {
-			throw new NotFoundException('РљР°С‚Р°Р»РѕРі РЅРµ РЅР°Р№РґРµРЅ')
-		}
-
-		const config = resolveCatalogCheckoutConfig({
-			checkout: catalog.settings?.checkout,
-			typeCode: catalog.type?.code
-		})
-		const mapUrl = this.resolveCatalogMapUrl(catalog.contacts)
-		const checkout = normalizeCartCheckoutData({
-			catalogAddress: catalog.settings?.address,
-			config,
-			data: input.checkoutData,
-			mapUrl,
-			method: input.checkoutMethod
-		})
-		const checkoutContacts = resolveCheckoutContactsSnapshot({
-			catalogContacts: catalog.contacts,
-			config,
-			method: checkout.checkoutMethod
-		})
-
-		return {
-			checkoutContacts: checkoutContacts as Record<string, string>,
-			checkoutData: checkout.checkoutData,
-			checkoutMethod: checkout.checkoutMethod
-		}
-	}
-
-	private resolveCatalogMapUrl(
-		contacts: Array<{ type: ContactType; value: string }>
-	): string | null {
-		const contact = contacts.find(item => item.type === ContactType.MAP)
-		const value = contact?.value?.trim()
-		return value || null
-	}
-
-	private resolveDeliveryAddress(cart: CartEntity): string | null {
-		if (cart.checkoutMethod !== CartCheckoutMethod.DELIVERY) return null
-		const data = cart.checkoutData
-		if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-			return null
-		}
-
-		const address = (data as Record<string, unknown>).address
-		return typeof address === 'string' && address.trim() ? address.trim() : null
-	}
-
-	private buildCartSseEventId(
-		cartId: string,
-		type: string,
-		payload?: SsePayload
-	) {
-		const version =
-			typeof payload === 'object' && payload !== null
-				? this.resolveCartPayloadVersion(payload)
-				: new Date().toISOString()
-
-		return `${cartId}:${type}:${version}`
-	}
-
-	private resolveCartPayloadVersion(payload: Record<string, unknown>) {
-		const updatedAt = payload.updatedAt
-		const statusChangedAt = payload.statusChangedAt
-
-		if (typeof updatedAt === 'string' && updatedAt) {
-			return updatedAt
-		}
-		if (updatedAt instanceof Date) {
-			return updatedAt.toISOString()
-		}
-		if (typeof statusChangedAt === 'string' && statusChangedAt) {
-			return statusChangedAt
-		}
-		if (statusChangedAt instanceof Date) {
-			return statusChangedAt.toISOString()
-		}
-
-		return new Date().toISOString()
-	}
-
-	private mapCompletedOrder(order: CompletedOrderEntity) {
-		return {
-			id: order.id,
-			status: order.status,
-			catalogId: order.catalogId,
-			totalAmount: Number(order.totalAmount),
-			checkoutMethod: order.checkoutMethod,
-			checkoutData: order.checkoutData,
-			checkoutContacts: order.checkoutContacts,
-			items: normalizeOrderProducts(order.products).map(item => ({
-				id: item.id,
-				productId: item.productId ?? '',
-				variantId: item.variantId,
-				quantity: item.quantity,
-				unitPrice: item.unitPrice
-			})),
-			createdAt: order.createdAt
-		}
-	}
-
-	private normalizeCartComment(comment?: string | null) {
-		const normalized = comment?.trim()
-		return normalized ? normalized : null
 	}
 
 	private ensureCartIsOpen(status: CartStatus) {
@@ -1132,401 +330,24 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		throw new BadRequestException('Корзина уже закрыта')
 	}
 
-	private ensureManagerCanTakeCart(cart: CartEntity, user: SessionUser) {
-		if (
-			cart.status === CartStatus.IN_PROGRESS &&
-			cart.assignedManagerId &&
-			cart.assignedManagerId !== user.id &&
-			user.role !== Role.ADMIN
-		) {
-			throw new ForbiddenException('Эту корзину уже обрабатывает другой менеджер')
-		}
-	}
-
-	private ensureManagerCanRefreshPresence(cart: CartEntity, user: SessionUser) {
-		if (
-			cart.assignedManagerId &&
-			cart.assignedManagerId !== user.id &&
-			user.role !== Role.ADMIN
-		) {
-			throw new ForbiddenException('Корзина закреплена за другим менеджером')
-		}
-	}
-
-	private async ensureManagerOwnsCatalog(
-		catalogId: string,
-		user: SessionUser
-	): Promise<void> {
-		if (user.role === Role.ADMIN) return
-		if (user.role !== Role.CATALOG) {
-			throw new ForbiddenException(
-				'Управлять корзинами могут только менеджеры каталога'
-			)
-		}
-
-		const catalog = await this.prisma.catalog.findFirst({
-			where: { id: catalogId, deleteAt: null },
-			select: { id: true, userId: true }
-		})
-
-		if (!catalog) {
-			throw new NotFoundException('Каталог не найден')
-		}
-
-		if (!catalog.userId || catalog.userId !== user.id) {
-			throw new ForbiddenException('У вас нет доступа к этой корзине')
-		}
-	}
-
-	private async findManageableCartByPublicKeyOrThrow(
-		publicKey: string,
-		user: SessionUser
-	) {
-		const cart = await this.findByPublicKeyOrThrow(publicKey)
-		await this.ensureManagerOwnsCatalog(cart.catalogId, user)
-		return cart
-	}
-
-	private async findByToken(catalogId: string, token: string) {
-		return this.prisma.cart.findFirst({
-			where: {
-				catalogId,
-				token,
-				status: { in: [...CURRENT_CART_VISIBLE_STATUSES] },
-				deleteAt: null
-			},
-			select: cartSelect
-		})
-	}
-
-	private async findByPublicKeyOrThrow(publicKey: string) {
-		const normalized = publicKey.trim()
-		if (!normalized) {
-			throw new BadRequestException('Параметр publicKey обязателен')
-		}
-
-		const cart = await this.prisma.cart.findFirst({
-			where: {
-				publicKey: normalized,
-				deleteAt: null
-			},
-			select: cartSelect
-		})
-
-		if (!cart) throw new NotFoundException('Корзина не найдена')
-
-		return cart
-	}
-
-	private async findByIdOrThrow(
-		id: string,
-		tx?: Prisma.TransactionClient
-	): Promise<CartEntity> {
-		const client = tx ?? this.prisma
-		const cart = await client.cart.findFirst({
-			where: { id, deleteAt: null },
-			select: cartSelect
-		})
-
-		if (!cart) throw new NotFoundException('Корзина не найдена')
-
-		return cart
-	}
-
-	private async upsertItemInTransaction(
-		cartId: string,
-		input: NormalizedCartItemInput,
-		tx: Prisma.TransactionClient
-	): Promise<CartMutationResult> {
-		const cart = await this.findCartContextOrThrow(cartId, tx)
-		this.ensureCartIsOpen(cart.status)
-		await this.ensureProductInCatalog(tx, cart, input.productId)
-		await this.ensureVariantMatchesProduct(tx, input.productId, input.variantId)
-
-		if (input.quantity > 0) {
-			if (input.quantity > MAX_ITEM_QUANTITY) {
-				throw new BadRequestException(
-					`Максимальное количество единиц одного товара: ${MAX_ITEM_QUANTITY}`
-				)
-			}
-
-			if (input.variantId) {
-				await this.ensureVariantInStock(tx, input.variantId, input.quantity)
-			}
-		}
-
-		const existing = await this.findExistingItem(
-			tx,
-			cart.id,
-			input.productId,
-			input.variantId
-		)
-
-		if (input.quantity > 0 && (!existing || existing.deleteAt)) {
-			const activeCount = await tx.cartItem.count({
-				where: { cartId: cart.id, deleteAt: null }
-			})
-			if (activeCount >= MAX_CART_ITEMS) {
-				throw new BadRequestException(
-					`Максимальное количество позиций в корзине: ${MAX_CART_ITEMS}`
-				)
-			}
-		}
-
-		const changed = await this.applyCartItemChange(tx, cart.id, existing, input)
-
-		if (changed) {
-			await this.touchCart(tx, cart.id)
-		}
-
-		return {
-			cart: await this.findByIdOrThrow(cart.id, tx),
-			changed
-		}
-	}
-
-	private async ensureVariantInStock(
-		tx: Prisma.TransactionClient,
-		variantId: string,
-		quantity: number
-	): Promise<void> {
-		const variant = await tx.productVariant.findUnique({
-			where: { id: variantId },
-			select: { stock: true, isAvailable: true }
-		})
-
-		if (!variant) return
-
-		if (!variant.isAvailable || variant.stock < quantity) {
-			throw new BadRequestException(
-				`Недостаточно товара на складе. Доступно: ${variant.stock}`
-			)
-		}
-	}
-
-	private async findCartContextOrThrow(
-		cartId: string,
-		tx: Prisma.TransactionClient
-	): Promise<CartContext> {
-		const cart = await tx.cart.findFirst({
-			where: { id: cartId, deleteAt: null },
-			select: {
-				id: true,
-				catalogId: true,
-				status: true,
-				catalog: { select: { parentId: true } }
-			}
-		})
-
-		if (!cart) throw new NotFoundException('Корзина не найдена')
-
-		return {
-			id: cart.id,
-			catalogId: cart.catalogId,
-			parentCatalogId: cart.catalog.parentId ?? null,
-			status: cart.status
-		}
-	}
-
-	private async ensureProductInCatalog(
-		tx: Prisma.TransactionClient,
-		cart: CartContext,
-		productId: string
-	): Promise<void> {
-		const allowedCatalogIds = [cart.catalogId, cart.parentCatalogId].filter(
-			(id): id is string => Boolean(id)
-		)
-		const product = await tx.product.findFirst({
-			where: {
-				id: productId,
-				catalogId: { in: allowedCatalogIds },
-				deleteAt: null
-			},
-			select: { id: true }
-		})
-
-		if (!product) {
-			throw new BadRequestException('Товар не найден в текущем каталоге')
-		}
-	}
-
-	private async ensureVariantMatchesProduct(
-		tx: Prisma.TransactionClient,
-		productId: string,
-		variantId: string | null
-	): Promise<void> {
-		if (!variantId) return
-
-		const variant = await tx.productVariant.findFirst({
-			where: {
-				id: variantId,
-				productId,
-				deleteAt: null
-			},
-			select: { id: true }
-		})
-
-		if (!variant) {
-			throw new BadRequestException('Вариация не найдена для выбранного товара')
-		}
-	}
-
-	private async findExistingItem(
-		tx: Prisma.TransactionClient,
-		cartId: string,
-		productId: string,
-		variantId: string | null
-	): Promise<ExistingCartItem> {
-		return tx.cartItem.findFirst({
-			where: {
-				cartId,
-				productId,
-				variantId
-			},
-			select: { id: true, deleteAt: true, quantity: true }
-		})
-	}
-
-	private async applyCartItemChange(
-		tx: Prisma.TransactionClient,
-		cartId: string,
-		existing: ExistingCartItem,
-		input: NormalizedCartItemInput
-	): Promise<boolean> {
-		if (input.quantity === 0) {
-			if (existing && !existing.deleteAt) {
-				await tx.cartItem.update({
-					where: { id: existing.id },
-					data: { deleteAt: new Date() }
-				})
-				return true
-			}
-			return false
-		}
-
-		if (existing) {
-			if (!existing.deleteAt && existing.quantity === input.quantity) {
-				return false
-			}
-
-			await tx.cartItem.update({
-				where: { id: existing.id },
-				data: { quantity: input.quantity, deleteAt: null }
-			})
-			return true
-		}
-
-		await tx.cartItem.create({
-			data: {
-				cartId,
-				productId: input.productId,
-				variantId: input.variantId,
-				quantity: input.quantity
-			}
-		})
-
-		return true
-	}
-
-	private async touchCart(tx: Prisma.TransactionClient, cartId: string) {
-		await tx.cart.update({
-			where: { id: cartId },
-			data: { updatedAt: new Date() }
-		})
-	}
-
 	private async expireInactiveManagerSessions() {
-		const threshold = new Date(Date.now() - CART_MANAGER_INACTIVITY_MS)
-		const stale = await this.prisma.cart.findMany({
-			where: {
-				deleteAt: null,
-				status: CartStatus.IN_PROGRESS,
-				managerLastSeenAt: { lt: threshold }
-			},
-			select: { id: true }
-		})
+		const result = await this.lifecycle.expireInactiveManagerSessions(
+			CART_MANAGER_INACTIVITY_MS
+		)
 
-		if (!stale.length) return
-
-		const now = new Date()
-		const staleIds = stale.map(cart => cart.id)
-
-		await this.prisma.cart.updateMany({
-			where: {
-				id: { in: staleIds },
-				status: CartStatus.IN_PROGRESS
-			},
-			data: {
-				status: CartStatus.PAUSED,
-				statusChangedAt: now
-			}
-		})
-
-		const fresh = await this.prisma.cart.findMany({
-			where: {
-				id: { in: staleIds },
-				deleteAt: null
-			},
-			select: cartSelect
-		})
-
-		for (const cart of fresh) {
-			if (cart.status === CartStatus.PAUSED) {
-				this.broadcastCartStatusChanged(cart)
-			}
+		for (const cart of result.pausedCarts) {
+			await this.broadcastCartStatusChanged(cart)
 		}
 	}
 
 	private async expireAbandonedDraftCarts() {
-		const threshold = new Date(Date.now() - CART_DRAFT_TTL_MS)
-		const stale = await this.prisma.cart.findMany({
-			where: {
-				deleteAt: null,
-				status: { in: [CartStatus.DRAFT, CartStatus.SHARED] },
-				updatedAt: { lt: threshold }
-			},
-			select: { id: true }
-		})
+		const result =
+			await this.lifecycle.expireAbandonedDraftCarts(CART_DRAFT_TTL_MS)
 
-		if (!stale.length) return
-
-		const staleIds = stale.map(c => c.id)
-
-		await this.prisma.cart.updateMany({
-			where: {
-				id: { in: staleIds },
-				status: { in: [CartStatus.DRAFT, CartStatus.SHARED] }
-			},
-			data: {
-				status: CartStatus.EXPIRED,
-				statusChangedAt: new Date()
-			}
-		})
+		if (!result.expiredCount) return
 
 		this.logger.log(
-			`Cart draft TTL sweep: expired ${staleIds.length} abandoned cart(s)`
+			`Cart draft TTL sweep: expired ${result.expiredCount} abandoned cart(s)`
 		)
-	}
-
-	private async generateUniqueToken() {
-		for (;;) {
-			const candidate = randomBytes(CART_TOKEN_BYTES).toString('hex')
-			const exists = await this.prisma.cart.findFirst({
-				where: { token: candidate },
-				select: { id: true }
-			})
-			if (!exists) return candidate
-		}
-	}
-
-	private async generateUniquePublicKey() {
-		for (;;) {
-			const candidate = randomBytes(PUBLIC_KEY_BYTES).toString('base64url')
-			const exists = await this.prisma.cart.findFirst({
-				where: { publicKey: candidate },
-				select: { id: true }
-			})
-			if (!exists) return candidate
-		}
 	}
 }

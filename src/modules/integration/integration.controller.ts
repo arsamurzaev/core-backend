@@ -9,6 +9,7 @@ import {
 	Post,
 	Put,
 	Query,
+	Req,
 	UseGuards
 } from '@nestjs/common'
 import {
@@ -25,14 +26,22 @@ import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { Roles } from '../auth/decorators/roles.decorator'
 import { CatalogAccessGuard } from '../auth/guards/catalog-access.guard'
 import { SessionGuard } from '../auth/guards/session.guard'
+import type { AuthRequest } from '../auth/types/auth-request'
 
+import { ApplyMoySkladMappingDtoReq } from './dto/requests/apply-moysklad-mapping.dto.req'
 import { TestMoySkladConnectionDtoReq } from './dto/requests/test-moysklad-connection.dto.req'
 import { UpdateMoySkladIntegrationDtoReq } from './dto/requests/update-moysklad-integration.dto.req'
 import { UpsertMoySkladIntegrationDtoReq } from './dto/requests/upsert-moysklad-integration.dto.req'
 import {
 	MoySkladIntegrationDto,
 	MoySkladIntegrationStatusDto,
+	MoySkladMappingApplyReportDto,
+	MoySkladMappingPreviewDto,
+	MoySkladOrderExportDto,
+	MoySkladOrderExportRefsDto,
+	MoySkladQueuedOrderExportDto,
 	MoySkladQueuedSyncDto,
+	MoySkladSyncProgressDto,
 	MoySkladSyncRunDto,
 	MoySkladTestConnectionDto
 } from './dto/responses/moysklad.dto.res'
@@ -75,8 +84,68 @@ export class IntegrationController {
 		description: 'Сколько последних запусков вернуть'
 	})
 	@ApiOkResponse({ type: MoySkladSyncRunDto, isArray: true })
-	async getMoySkladRuns(@Query('limit') limit?: number) {
+	async getMoySkladRuns(@Query('limit') limit?: number | string) {
 		return this.integrationService.getMoySkladRuns(limit)
+	}
+
+	@Get('/moysklad/runs/:runId/progress')
+	@ApiOperation({ summary: 'Получить прогресс sync MoySklad' })
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiParam({ name: 'runId' })
+	@ApiOkResponse({ type: MoySkladSyncProgressDto })
+	async getMoySkladRunProgress(@Param('runId') runId: string) {
+		return this.integrationService.getMoySkladRunProgress(runId)
+	}
+
+	@Get('/moysklad/order-exports')
+	@ApiOperation({ summary: 'Получить историю экспорта заказов MoySklad' })
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiQuery({
+		name: 'limit',
+		required: false,
+		type: Number,
+		description: 'Сколько последних экспортов заказов вернуть'
+	})
+	@ApiOkResponse({ type: MoySkladOrderExportDto, isArray: true })
+	async getMoySkladOrderExports(@Query('limit') limit?: number | string) {
+		return this.integrationService.getMoySkladOrderExports(limit)
+	}
+
+	@Get('/moysklad/order-export-refs')
+	@ApiOperation({
+		summary:
+			'Получить организации, контрагентов и склады MoySklad для экспорта заказов'
+	})
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiOkResponse({ type: MoySkladOrderExportRefsDto })
+	async getMoySkladOrderExportRefs() {
+		return this.integrationService.getMoySkladOrderExportRefs()
+	}
+
+	@Get('/moysklad/mapping-preview')
+	@ApiOperation({ summary: 'Preview MoySklad characteristic mapping' })
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiOkResponse({ type: MoySkladMappingPreviewDto })
+	async previewMoySkladMapping() {
+		return this.integrationService.previewMoySkladMapping()
+	}
+
+	@Post('/moysklad/mapping-preview/apply')
+	@ApiOperation({ summary: 'Apply MoySklad characteristic mapping preview' })
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiOkResponse({ type: MoySkladMappingApplyReportDto })
+	async applyMoySkladMapping(@Body() dto: ApplyMoySkladMappingDtoReq) {
+		return this.integrationService.applyMoySkladMapping(dto)
 	}
 
 	@Put('/moysklad')
@@ -141,6 +210,37 @@ export class IntegrationController {
 	@ApiOkResponse({ type: MoySkladQueuedSyncDto })
 	async syncMoySkladProduct(@Param('id') id: string) {
 		return this.integrationService.syncMoySkladProduct(id)
+	}
+
+	@Post('/moysklad/sync-stock')
+	@ApiOperation({
+		summary: 'РџРѕСЃС‚Р°РІРёС‚СЊ sync РѕСЃС‚Р°С‚РєРѕРІ MoySklad РІ РѕС‡РµСЂРµРґСЊ'
+	})
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiOkResponse({ type: MoySkladQueuedSyncDto })
+	async syncMoySkladStock() {
+		return this.integrationService.syncMoySkladStock()
+	}
+
+	@Post('/moysklad/order-exports/:id/retry')
+	@ApiOperation({
+		summary: 'Повторно поставить экспорт заказа MoySklad в очередь'
+	})
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiParam({
+		name: 'id',
+		description: 'ID записи IntegrationOrderExport'
+	})
+	@ApiOkResponse({ type: MoySkladQueuedOrderExportDto })
+	async retryMoySkladOrderExport(
+		@Param('id') id: string,
+		@Req() req: AuthRequest
+	) {
+		return this.integrationService.retryMoySkladOrderExport(id, req)
 	}
 
 	@Delete('/moysklad/sync')

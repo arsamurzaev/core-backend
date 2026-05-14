@@ -228,14 +228,11 @@ export class SessionService {
 				const ttlResult = results[index * 2 + 1]
 				const raw = rawResult?.[1]
 				const ttl = ttlResult?.[1]
-				const data = parseStoredSessionData(
-					typeof raw === 'string' ? raw : null
-				)
+				const data = parseStoredSessionData(typeof raw === 'string' ? raw : null)
 
 				if (!data || data.userId !== userId) continue
 
-				const ttlSeconds =
-					typeof ttl === 'number' && ttl >= 0 ? ttl : null
+				const ttlSeconds = typeof ttl === 'number' && ttl >= 0 ? ttl : null
 
 				seen.add(entry.sid)
 				activeEntries.push({

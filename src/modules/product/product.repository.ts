@@ -1,8 +1,14 @@
 ﻿import type { Prisma } from '@generated/client'
 import { Prisma as PrismaSql } from '@generated/client'
-import { DataType, ProductStatus, ProductVariantStatus } from '@generated/enums'
+import {
+	DataType,
+	ProductStatus,
+	ProductTypeScope,
+	ProductVariantStatus
+} from '@generated/enums'
 import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import { BadRequestException, Injectable } from '@nestjs/common'
+import slugify from 'slugify'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { buildMediaSelect } from '@/shared/media/media-select'
@@ -15,14 +21,16 @@ import type { ProductAttributeValueData } from './product-attribute.builder'
 import { tokenizeProductSearchTerm } from './product-search.utils'
 import type {
 	ProductVariantAttributeInput,
-	ProductVariantData
+	ProductVariantData,
+	ProductVariantSaleUnitInput
 } from './product-variant.builder'
 
 export type ProductVariantUpdateData = {
 	variantKey: string
-	price?: number
+	price?: number | null
 	stock?: number
 	status?: ProductVariantStatus
+	saleUnits?: ProductVariantSaleUnitInput[]
 }
 
 export type AttributeFilterMeta = {
@@ -85,6 +93,7 @@ export type DiscountAttributeIds = {
 
 export type ProductFilterQueryBase = {
 	catalogId: string
+	productTypeId?: string
 	categoryIds: string[]
 	brandIds: string[]
 	minPrice?: number
@@ -108,8 +117,98 @@ export type ProductSeededPageCursor = {
 	id: string
 }
 
+const DEFAULT_VARIANT_KEY = 'default'
+
 const productIdSelect = {
 	id: true
+}
+
+const productValidationRefSelect = {
+	id: true,
+	productTypeId: true,
+	productAttributes: {
+		where: { deleteAt: null },
+		select: { attributeId: true }
+	},
+	variants: {
+		where: { deleteAt: null },
+		select: {
+			variantKey: true,
+			attributes: {
+				where: { deleteAt: null },
+				select: {
+					attributeId: true,
+					enumValueId: true
+				}
+			}
+		}
+	}
+}
+
+const productTypeCompatibilityAttributeSelect = {
+	id: true,
+	key: true,
+	displayName: true,
+	dataType: true,
+	isVariantAttribute: true,
+	isHidden: true,
+	types: {
+		select: { id: true }
+	}
+}
+
+const productTypeCompatibilityPreviewSelect = {
+	id: true,
+	productTypeId: true,
+	catalog: {
+		select: { typeId: true }
+	},
+	productAttributes: {
+		where: { deleteAt: null },
+		select: {
+			attributeId: true,
+			attribute: {
+				select: productTypeCompatibilityAttributeSelect
+			}
+		}
+	},
+	variants: {
+		where: { deleteAt: null },
+		select: {
+			variantKey: true,
+			attributes: {
+				where: { deleteAt: null },
+				select: {
+					attributeId: true,
+					attribute: {
+						select: productTypeCompatibilityAttributeSelect
+					}
+				}
+			}
+		}
+	}
+}
+
+const productTypeValidationSchemaSelect = {
+	id: true,
+	catalogId: true,
+	attributes: {
+		where: { attribute: { deleteAt: null } },
+		select: {
+			attributeId: true,
+			isVariant: true,
+			isRequired: true,
+			displayOrder: true,
+			attribute: {
+				select: {
+					id: true,
+					key: true,
+					dataType: true
+				}
+			}
+		},
+		orderBy: [{ displayOrder: 'asc' as const }, { attributeId: 'asc' as const }]
+	}
 }
 
 function buildProductMediaSelect(variantNames?: readonly string[]) {
@@ -125,6 +224,17 @@ function buildProductMediaSelect(variantNames?: readonly string[]) {
 	}
 }
 
+const integrationLinkPublicSelect = {
+	externalId: true,
+	externalCode: true,
+	lastSyncedAt: true,
+	integration: {
+		select: {
+			provider: true
+		}
+	}
+}
+
 function buildProductSelect(variantNames?: readonly string[]) {
 	return {
 		id: true,
@@ -137,6 +247,13 @@ function buildProductSelect(variantNames?: readonly string[]) {
 				id: true,
 				name: true,
 				slug: true
+			}
+		},
+		productType: {
+			select: {
+				id: true,
+				code: true,
+				name: true
 			}
 		},
 		media: buildProductMediaSelect(variantNames),
@@ -158,16 +275,7 @@ function buildProductSelect(variantNames?: readonly string[]) {
 			orderBy: { position: 'asc' as const }
 		},
 		integrationLinks: {
-			select: {
-				externalId: true,
-				externalCode: true,
-				lastSyncedAt: true,
-				integration: {
-					select: {
-						provider: true
-					}
-				}
-			},
+			select: integrationLinkPublicSelect,
 			orderBy: { createdAt: 'asc' as const },
 			take: 1
 		},
@@ -231,6 +339,29 @@ const variantAttributeSelect = {
 	}
 }
 
+const productVariantSaleUnitSelect = {
+	id: true,
+	catalogSaleUnitId: true,
+	code: true,
+	name: true,
+	baseQuantity: true,
+	price: true,
+	barcode: true,
+	isDefault: true,
+	isActive: true,
+	displayOrder: true,
+	catalogSaleUnit: {
+		select: {
+			id: true,
+			code: true,
+			name: true,
+			defaultBaseQuantity: true
+		}
+	},
+	createdAt: true,
+	updatedAt: true
+}
+
 const productVariantSelect = {
 	id: true,
 	sku: true,
@@ -245,6 +376,59 @@ const productVariantSelect = {
 		where: { deleteAt: null },
 		select: variantAttributeSelect,
 		orderBy: { attributeId: 'asc' as const }
+	},
+	saleUnits: {
+		where: { deleteAt: null },
+		select: productVariantSaleUnitSelect,
+		orderBy: [
+			{ isDefault: 'desc' as const },
+			{ displayOrder: 'asc' as const },
+			{ code: 'asc' as const }
+		]
+	}
+}
+
+const productVariantPickerOptionSelect = {
+	id: true,
+	productId: true,
+	sku: true,
+	variantKey: true,
+	stock: true,
+	price: true,
+	status: true,
+	isAvailable: true,
+	createdAt: true,
+	attributes: {
+		where: { deleteAt: null },
+		select: variantAttributeSelect,
+		orderBy: { attributeId: 'asc' as const }
+	},
+	saleUnits: {
+		where: {
+			deleteAt: null,
+			isActive: true
+		},
+		select: {
+			id: true,
+			baseQuantity: true,
+			price: true,
+			isDefault: true,
+			displayOrder: true
+		},
+		orderBy: [
+			{ isDefault: 'desc' as const },
+			{ displayOrder: 'asc' as const },
+			{ createdAt: 'asc' as const }
+		]
+	}
+}
+
+const productVariantSelectWithIntegration = {
+	...productVariantSelect,
+	integrationLinks: {
+		select: integrationLinkPublicSelect,
+		orderBy: { createdAt: 'asc' as const },
+		take: 1
 	}
 }
 
@@ -270,6 +454,18 @@ const productDetailSelectWithDetails = {
 	...productDetailSelectWithAttributes,
 	variants: {
 		where: { deleteAt: null },
+		select: productVariantSelectWithIntegration,
+		orderBy: [{ status: 'asc' as const }, { createdAt: 'desc' as const }]
+	}
+}
+
+const productPublicDetailSelectWithDetails = {
+	...productDetailSelectWithAttributes,
+	variants: {
+		where: {
+			deleteAt: null,
+			status: { not: ProductVariantStatus.DISABLED }
+		},
 		select: productVariantSelect,
 		orderBy: [{ status: 'asc' as const }, { createdAt: 'desc' as const }]
 	}
@@ -291,6 +487,35 @@ export type ProductDetailsItem = Prisma.ProductGetPayload<{
 	select: typeof productDetailSelectWithDetails
 }>
 
+export type ProductPublicDetailsItem = Prisma.ProductGetPayload<{
+	select: typeof productPublicDetailSelectWithDetails
+}>
+
+export type ProductValidationRef = Prisma.ProductGetPayload<{
+	select: typeof productValidationRefSelect
+}>
+
+export type ProductTypeCompatibilityPreviewRef = Prisma.ProductGetPayload<{
+	select: typeof productTypeCompatibilityPreviewSelect
+}>
+
+export type ProductTypeValidationSchema = Prisma.ProductTypeGetPayload<{
+	select: typeof productTypeValidationSchemaSelect
+}>
+
+export type ProductVariantSummaryRecord = {
+	productId: string
+	minPrice: string | null
+	maxPrice: string | null
+	activeCount: number
+	totalStock: number
+	singleVariantId: string | null
+}
+
+export type ProductVariantPickerOptionRecord = Prisma.ProductVariantGetPayload<{
+	select: typeof productVariantPickerOptionSelect
+}>
+
 export type ExpiredDiscountProductRef = {
 	productId: string
 	catalogId: string
@@ -300,11 +525,16 @@ type ProductReadExecutor =
 	| Pick<PrismaService, 'product'>
 	| Pick<Prisma.TransactionClient, 'product'>
 
+type ProductVariantInvariantExecutor =
+	| Pick<PrismaService, 'product' | 'productVariant'>
+	| Pick<Prisma.TransactionClient, 'product' | 'productVariant'>
+
 type ProductUpdateChanges = {
 	hasData: boolean
 	hasBrandChanges: boolean
 	hasAttributeChanges: boolean
 	hasRemovedAttributeChanges: boolean
+	hasRemovedVariantAttributeChanges: boolean
 	hasVariantChanges: boolean
 	hasMediaChanges: boolean
 }
@@ -324,6 +554,18 @@ type ExistingVariantUpdateRow = {
 	id: string
 	variantKey: string
 	status: ProductVariantStatus
+}
+
+type NormalizedVariantSaleUnit = {
+	catalogSaleUnitId: string
+	code: string
+	name: string
+	baseQuantity: number
+	price: number
+	barcode: string | null
+	isDefault: boolean
+	isActive: boolean
+	displayOrder: number
 }
 
 type ResolvedVariantAttribute = {
@@ -407,6 +649,22 @@ export class ProductRepository {
 		})
 	}
 
+	findPublicById(
+		id: string,
+		catalogId: string,
+		includeInactive = false
+	): Promise<ProductPublicDetailsItem | null> {
+		return this.prisma.product.findFirst({
+			where: {
+				id,
+				catalogId,
+				deleteAt: null,
+				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
+			},
+			select: productPublicDetailSelectWithDetails
+		})
+	}
+
 	findBySlug(
 		slug: string,
 		catalogId: string,
@@ -420,6 +678,22 @@ export class ProductRepository {
 				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
 			},
 			select: productDetailSelectWithDetails
+		})
+	}
+
+	findPublicBySlug(
+		slug: string,
+		catalogId: string,
+		includeInactive = false
+	): Promise<ProductPublicDetailsItem | null> {
+		return this.prisma.product.findFirst({
+			where: {
+				slug,
+				catalogId,
+				deleteAt: null,
+				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
+			},
+			select: productPublicDetailSelectWithDetails
 		})
 	}
 
@@ -438,6 +712,72 @@ export class ProductRepository {
 				...(includeInactive ? {} : { status: ProductStatus.ACTIVE })
 			},
 			select: productListSelectWithAttributes
+		})
+	}
+
+	async findVariantSummaries(
+		productIds: string[]
+	): Promise<ProductVariantSummaryRecord[]> {
+		const ids = [...new Set(productIds.filter(Boolean))]
+		if (!ids.length) return []
+
+		const rows = await this.prisma.$queryRaw<
+			Array<{
+				productId: string
+				minPrice: string | null
+				maxPrice: string | null
+				activeCount: number
+				totalStock: number
+				singleVariantId: string | null
+			}>
+		>(PrismaSql.sql`
+			SELECT
+				product_id::text as "productId",
+				MIN(price)::text as "minPrice",
+				MAX(price)::text as "maxPrice",
+				COUNT(*)::int as "activeCount",
+				COALESCE(SUM(stock), 0)::int as "totalStock",
+				CASE
+					WHEN COUNT(*) = 1 THEN (ARRAY_AGG(id::text ORDER BY id::text))[1]
+					ELSE NULL
+				END as "singleVariantId"
+			FROM product_variants
+			WHERE delete_at IS NULL
+				AND status::text <> ${ProductVariantStatus.DISABLED}
+				AND product_id IN (${PrismaSql.join(ids.map(id => PrismaSql.sql`${id}::uuid`))})
+			GROUP BY product_id
+		`)
+
+		return rows.map(row => ({
+			productId: row.productId,
+			minPrice: row.minPrice,
+			maxPrice: row.maxPrice,
+			activeCount: Number(row.activeCount),
+			totalStock: Number(row.totalStock),
+			singleVariantId: row.singleVariantId
+		}))
+	}
+
+	findVariantPickerOptions(
+		productIds: string[]
+	): Promise<ProductVariantPickerOptionRecord[]> {
+		const ids = [...new Set(productIds.filter(Boolean))]
+		if (!ids.length)
+			return Promise.resolve<ProductVariantPickerOptionRecord[]>([])
+
+		return this.prisma.productVariant.findMany({
+			where: {
+				productId: { in: ids },
+				deleteAt: null,
+				status: { not: ProductVariantStatus.DISABLED }
+			},
+			select: productVariantPickerOptionSelect,
+			orderBy: [
+				{ productId: 'asc' },
+				{ status: 'asc' },
+				{ createdAt: 'asc' },
+				{ id: 'asc' }
+			]
 		})
 	}
 
@@ -625,7 +965,27 @@ export class ProductRepository {
 	findSkuById(id: string, catalogId: string) {
 		return this.prisma.product.findFirst({
 			where: { id, catalogId, deleteAt: null },
-			select: { id: true, sku: true, price: true }
+			select: { id: true, sku: true, price: true, productTypeId: true }
+		})
+	}
+
+	findProductValidationRef(
+		id: string,
+		catalogId: string
+	): Promise<ProductValidationRef | null> {
+		return this.prisma.product.findFirst({
+			where: { id, catalogId, deleteAt: null },
+			select: productValidationRefSelect
+		})
+	}
+
+	findProductTypeCompatibilityPreviewRef(
+		id: string,
+		catalogId: string
+	): Promise<ProductTypeCompatibilityPreviewRef | null> {
+		return this.prisma.product.findFirst({
+			where: { id, catalogId, deleteAt: null },
+			select: productTypeCompatibilityPreviewSelect
 		})
 	}
 
@@ -633,6 +993,40 @@ export class ProductRepository {
 		return this.prisma.brand.findFirst({
 			where: { id, catalogId, deleteAt: null },
 			select: { id: true }
+		})
+	}
+
+	findProductTypeById(id: string, catalogId: string) {
+		return this.prisma.productType.findFirst({
+			where: {
+				id,
+				catalogId,
+				scope: ProductTypeScope.CATALOG,
+				isActive: true,
+				isArchived: false
+			},
+			select: { id: true }
+		})
+	}
+
+	findProductTypeValidationSchemaById(
+		id: string,
+		catalogId: string,
+		options: { includeArchived?: boolean } = {}
+	): Promise<ProductTypeValidationSchema | null> {
+		return this.prisma.productType.findFirst({
+			where: {
+				id,
+				catalogId,
+				scope: ProductTypeScope.CATALOG,
+				...(options.includeArchived
+					? {}
+					: {
+							isActive: true,
+							isArchived: false
+						})
+			},
+			select: productTypeValidationSchemaSelect
 		})
 	}
 
@@ -697,17 +1091,24 @@ export class ProductRepository {
 		return product.id !== excludeId
 	}
 
+	async existsVariantSku(sku: string, excludeId?: string): Promise<boolean> {
+		const variant = await this.prisma.productVariant.findUnique({
+			where: { sku },
+			select: { id: true }
+		})
+		if (!variant) return false
+		if (!excludeId) return true
+		return variant.id !== excludeId
+	}
+
 	create(
+		catalogId: string,
 		data: ProductCreateInput,
 		attributes?: ProductAttributeValueData[],
 		variants?: ProductVariantData[]
 	) {
-		if (!attributes?.length && !variants?.length) {
-			return this.prisma.product.create({ data, select: productIdSelect })
-		}
-
 		return this.prisma.$transaction(tx =>
-			this.createWithRelations(tx, data, attributes, variants)
+			this.createWithRelations(tx, catalogId, data, attributes, variants)
 		)
 	}
 
@@ -718,14 +1119,16 @@ export class ProductRepository {
 		attributes?: ProductAttributeValueData[],
 		removeAttributeIds?: string[],
 		variantUpdates?: ProductVariantUpdateData[],
-		mediaIds?: string[]
+		mediaIds?: string[],
+		removeVariantAttributeIds?: string[]
 	) {
 		const changes = this.describeUpdateChanges(
 			data,
 			attributes,
 			removeAttributeIds,
 			variantUpdates,
-			mediaIds
+			mediaIds,
+			removeVariantAttributeIds
 		)
 
 		if (this.canUpdateDirectly(changes)) {
@@ -737,13 +1140,18 @@ export class ProductRepository {
 			if (!existing) return null
 
 			await this.applyProductDataUpdate(tx, id, data, changes.hasData)
+			if (variantUpdates === undefined) {
+				await this.syncSingleDefaultVariantPrice(tx, id, data)
+			}
 			await this.removeProductAttributes(tx, id, removeAttributeIds)
+			await this.removeVariantAttributes(tx, id, removeVariantAttributeIds)
 			await this.upsertProductAttributes(tx, id, attributes)
 			await this.replaceProductMedia(tx, id, mediaIds)
 
 			if (variantUpdates?.length) {
-				await this.applyVariantUpdates(tx, id, variantUpdates)
+				await this.applyVariantUpdates(tx, catalogId, id, variantUpdates)
 			}
+			await this.assertActiveProductHasValidVariant(tx, id)
 
 			return this.findProductWithDetails(tx, id, catalogId)
 		})
@@ -759,10 +1167,39 @@ export class ProductRepository {
 						select: {
 							mediaId: true
 						}
+					},
+					categoryProducts: {
+						where: {
+							category: { catalogId, deleteAt: null }
+						},
+						select: {
+							categoryId: true,
+							position: true
+						}
 					}
 				}
 			})
 			if (!existing) return null
+
+			const categoryIds = existing.categoryProducts.map(item => item.categoryId)
+			await this.normalizeCategoryProductPositions(tx, categoryIds)
+			const categoryProducts = categoryIds.length
+				? await tx.categoryProduct.findMany({
+						where: {
+							productId: id,
+							category: { catalogId, deleteAt: null }
+						},
+						select: {
+							categoryId: true,
+							position: true
+						}
+					})
+				: []
+			await this.closeCategoryProductGaps(tx, categoryProducts)
+
+			await tx.categoryProduct.deleteMany({
+				where: { productId: id }
+			})
 
 			await tx.productMedia.deleteMany({
 				where: { productId: id }
@@ -784,23 +1221,28 @@ export class ProductRepository {
 		id: string,
 		catalogId: string
 	): Promise<ProductDetailsItem | null> {
-		const existing = await this.prisma.product.findFirst({
-			where: { id, catalogId, deleteAt: null },
-			select: { id: true, status: true }
-		})
-		if (!existing) return null
+		return this.prisma.$transaction(async tx => {
+			const existing = await tx.product.findFirst({
+				where: { id, catalogId, deleteAt: null },
+				select: { id: true, status: true }
+			})
+			if (!existing) return null
 
-		await this.prisma.product.update({
-			where: { id },
-			data: {
-				status:
-					existing.status === ProductStatus.ACTIVE
-						? ProductStatus.HIDDEN
-						: ProductStatus.ACTIVE
-			}
-		})
+			const nextStatus =
+				existing.status === ProductStatus.ACTIVE
+					? ProductStatus.HIDDEN
+					: ProductStatus.ACTIVE
+			await this.assertActiveProductHasValidVariant(tx, id, nextStatus)
 
-		return this.findProductWithDetails(this.prisma, id, catalogId)
+			await tx.product.update({
+				where: { id },
+				data: {
+					status: nextStatus
+				}
+			})
+
+			return this.findProductWithDetails(tx, id, catalogId)
+		})
 	}
 
 	async togglePopular(
@@ -930,7 +1372,32 @@ export class ProductRepository {
 			const existing = await this.findActiveProductRef(tx, id, catalogId)
 			if (!existing) return null
 
-			await this.applyVariants(tx, id, variants)
+			await this.applyVariants(tx, catalogId, id, variants)
+			await this.assertActiveProductHasValidVariant(tx, id)
+
+			return this.findProductWithDetails(tx, id, catalogId)
+		})
+	}
+
+	async applyProductTypeChange(
+		id: string,
+		catalogId: string,
+		data: ProductUpdateInput,
+		removeAttributeIds: string[],
+		attributes?: ProductAttributeValueData[],
+		variants?: ProductVariantData[]
+	): Promise<ProductDetailsItem | null> {
+		return this.prisma.$transaction(async tx => {
+			const existing = await this.findActiveProductRef(tx, id, catalogId)
+			if (!existing) return null
+
+			await this.applyProductDataUpdate(tx, id, data, true)
+			await this.removeProductAttributes(tx, id, removeAttributeIds)
+			await this.upsertProductAttributes(tx, id, attributes)
+			if (variants !== undefined) {
+				await this.applyVariants(tx, catalogId, id, variants)
+			}
+			await this.assertActiveProductHasValidVariant(tx, id)
 
 			return this.findProductWithDetails(tx, id, catalogId)
 		})
@@ -941,13 +1408,15 @@ export class ProductRepository {
 		attributes?: ProductAttributeValueData[],
 		removeAttributeIds?: string[],
 		variantUpdates?: ProductVariantUpdateData[],
-		mediaIds?: string[]
+		mediaIds?: string[],
+		removeVariantAttributeIds?: string[]
 	): ProductUpdateChanges {
 		return {
 			hasData: Object.keys(data).length > 0,
 			hasBrandChanges: Object.hasOwn(data, 'brand'),
 			hasAttributeChanges: attributes !== undefined,
 			hasRemovedAttributeChanges: removeAttributeIds !== undefined,
+			hasRemovedVariantAttributeChanges: removeVariantAttributeIds !== undefined,
 			hasVariantChanges: variantUpdates !== undefined,
 			hasMediaChanges: mediaIds !== undefined
 		}
@@ -957,6 +1426,7 @@ export class ProductRepository {
 		return (
 			!changes.hasAttributeChanges &&
 			!changes.hasRemovedAttributeChanges &&
+			!changes.hasRemovedVariantAttributeChanges &&
 			!changes.hasVariantChanges &&
 			!changes.hasMediaChanges &&
 			!changes.hasBrandChanges
@@ -965,6 +1435,7 @@ export class ProductRepository {
 
 	private async createWithRelations(
 		tx: Prisma.TransactionClient,
+		catalogId: string,
 		data: ProductCreateInput,
 		attributes?: ProductAttributeValueData[],
 		variants?: ProductVariantData[]
@@ -977,8 +1448,9 @@ export class ProductRepository {
 		await this.createProductAttributes(tx, product.id, attributes)
 
 		if (variants?.length) {
-			await this.applyVariants(tx, product.id, variants)
+			await this.applyVariants(tx, catalogId, product.id, variants)
 		}
+		await this.assertActiveProductHasValidVariant(tx, product.id)
 
 		return product
 	}
@@ -1004,18 +1476,111 @@ export class ProductRepository {
 		catalogId: string,
 		hasData: boolean
 	): Promise<ProductDetailsItem | null> {
-		if (hasData) {
-			const result = await this.prisma.product.updateMany({
-				where: { id, catalogId, deleteAt: null },
-				data
-			})
-			if (!result.count) return null
-		} else {
-			const existing = await this.findActiveProductRef(this.prisma, id, catalogId)
-			if (!existing) return null
+		return this.prisma.$transaction(async tx => {
+			if (hasData) {
+				const result = await tx.product.updateMany({
+					where: { id, catalogId, deleteAt: null },
+					data
+				})
+				if (!result.count) return null
+				await this.syncSingleDefaultVariantPrice(tx, id, data)
+			} else {
+				const existing = await this.findActiveProductRef(tx, id, catalogId)
+				if (!existing) return null
+			}
+			await this.assertActiveProductHasValidVariant(tx, id)
+
+			return this.findProductWithDetails(tx, id, catalogId)
+		})
+	}
+
+	private async assertActiveProductHasValidVariant(
+		db: ProductVariantInvariantExecutor,
+		productId: string,
+		statusOverride?: ProductStatus
+	): Promise<void> {
+		const status =
+			statusOverride ??
+			(
+				await db.product.findFirst({
+					where: { id: productId, deleteAt: null },
+					select: { status: true }
+				})
+			)?.status
+
+		if (status !== ProductStatus.ACTIVE) return
+
+		const variant = await db.productVariant.findFirst({
+			where: {
+				productId,
+				deleteAt: null,
+				OR: [
+					{
+						status: ProductVariantStatus.ACTIVE,
+						isAvailable: true
+					},
+					{
+						variantKey: DEFAULT_VARIANT_KEY,
+						status: { not: ProductVariantStatus.DISABLED }
+					}
+				]
+			},
+			select: { id: true }
+		})
+
+		if (!variant) {
+			throw new BadRequestException(
+				'Активный товар должен иметь активный или default variant'
+			)
+		}
+	}
+
+	private async syncSingleDefaultVariantPrice(
+		db: Prisma.TransactionClient | PrismaService,
+		productId: string,
+		data: ProductUpdateInput
+	): Promise<void> {
+		if (!Object.hasOwn(data, 'price')) return
+
+		const rawPrice = (data as { price?: unknown }).price
+		const price = rawPrice === null ? null : Number(rawPrice)
+		if (price !== null && (!Number.isFinite(price) || price < 0)) return
+
+		const variants = await db.productVariant.findMany({
+			where: { productId, deleteAt: null },
+			orderBy: { createdAt: 'asc' },
+			take: 2,
+			select: {
+				id: true,
+				variantKey: true,
+				price: true,
+				attributes: {
+					where: { deleteAt: null },
+					select: { id: true },
+					take: 1
+				},
+				integrationLinks: {
+					select: { id: true },
+					take: 1
+				}
+			}
+		})
+		if (variants.length !== 1) return
+
+		const [variant] = variants
+		if (
+			variant.variantKey !== DEFAULT_VARIANT_KEY ||
+			variant.attributes.length > 0 ||
+			variant.integrationLinks.length > 0 ||
+			(price === null ? variant.price === null : Number(variant.price) === price)
+		) {
+			return
 		}
 
-		return this.findProductWithDetails(this.prisma, id, catalogId)
+		await db.productVariant.update({
+			where: { id: variant.id },
+			data: { price }
+		})
 	}
 
 	private async findActiveProductRef(
@@ -1077,6 +1642,25 @@ export class ProductRepository {
 				productId,
 				attributeId: { in: removeAttributeIds },
 				deleteAt: null
+			},
+			data: {
+				deleteAt: new Date()
+			}
+		})
+	}
+
+	private async removeVariantAttributes(
+		tx: Prisma.TransactionClient,
+		productId: string,
+		removeAttributeIds?: string[]
+	): Promise<void> {
+		if (!removeAttributeIds?.length) return
+
+		await tx.variantAttribute.updateMany({
+			where: {
+				attributeId: { in: removeAttributeIds },
+				deleteAt: null,
+				variant: { productId, deleteAt: null }
 			},
 			data: {
 				deleteAt: new Date()
@@ -1288,6 +1872,7 @@ export class ProductRepository {
 			const siblingCount = await tx.categoryProduct.count({
 				where: {
 					categoryId,
+					product: { deleteAt: null },
 					...(current ? { productId: { not: productId } } : {})
 				}
 			})
@@ -1311,6 +1896,7 @@ export class ProductRepository {
 				await tx.categoryProduct.updateMany({
 					where: {
 						categoryId,
+						product: { deleteAt: null },
 						position: { gt: current.position, lte: targetPosition }
 					},
 					data: { position: { decrement: 1 } }
@@ -1319,6 +1905,7 @@ export class ProductRepository {
 				await tx.categoryProduct.updateMany({
 					where: {
 						categoryId,
+						product: { deleteAt: null },
 						position: { gte: targetPosition, lt: current.position }
 					},
 					data: { position: { increment: 1 } }
@@ -1364,6 +1951,9 @@ export class ProductRepository {
 					VALUES ${PrismaSql.join(values)}
 				) AS input("category_id")
 					ON category_product."category_id" = input."category_id"
+				INNER JOIN "products" AS active_product
+					ON active_product."id" = category_product."product_id"
+					AND active_product."delete_at" IS NULL
 			) AS ranked
 			WHERE
 				category_product."category_id" = ranked."category_id"
@@ -1391,7 +1981,14 @@ export class ProductRepository {
 			) AS input("category_id")
 			WHERE
 				category_product."category_id" = input."category_id"
-				AND category_product."position" >= ${fromPosition}
+				AND category_product."position" >= CAST(${fromPosition} AS integer)
+				AND EXISTS (
+					SELECT 1
+					FROM "products" AS active_product
+					WHERE
+						active_product."id" = category_product."product_id"
+						AND active_product."delete_at" IS NULL
+				)
 		`)
 	}
 
@@ -1403,7 +2000,7 @@ export class ProductRepository {
 
 		const values = removals.map(
 			removal =>
-				PrismaSql.sql`(CAST(${removal.categoryId} AS uuid), ${removal.position})`
+				PrismaSql.sql`(CAST(${removal.categoryId} AS uuid), CAST(${removal.position} AS integer))`
 		)
 
 		await tx.$executeRaw(PrismaSql.sql`
@@ -1415,6 +2012,13 @@ export class ProductRepository {
 			WHERE
 				category_product."category_id" = input."category_id"
 				AND category_product."position" > input."position"
+				AND EXISTS (
+					SELECT 1
+					FROM "products" AS active_product
+					WHERE
+						active_product."id" = category_product."product_id"
+						AND active_product."delete_at" IS NULL
+				)
 		`)
 	}
 
@@ -1432,6 +2036,7 @@ export class ProductRepository {
 		return [
 			...this.buildPriceFilterClauses(query.minPrice, query.maxPrice),
 			...[
+				this.buildProductTypeFilterClause(query.productTypeId),
 				this.buildCategoryFilterClause(query.categoryIds),
 				this.buildBrandFilterClause(query.brandIds),
 				this.buildSearchFilterClause(query.searchTerm),
@@ -1810,6 +2415,13 @@ export class ProductRepository {
 		return clauses
 	}
 
+	private buildProductTypeFilterClause(
+		productTypeId?: string
+	): Prisma.Sql | null {
+		if (!productTypeId) return null
+		return PrismaSql.sql`p.product_type_id = ${productTypeId}::uuid`
+	}
+
 	private buildSearchFilterClause(searchTerm?: string): Prisma.Sql | null {
 		const tokens = tokenizeProductSearchTerm(searchTerm)
 		if (!tokens.length) return null
@@ -1941,6 +2553,7 @@ export class ProductRepository {
 
 	private async applyVariants(
 		tx: Prisma.TransactionClient,
+		catalogId: string,
 		productId: string,
 		variants: ProductVariantData[]
 	): Promise<void> {
@@ -1967,6 +2580,7 @@ export class ProductRepository {
 		for (const variant of variants) {
 			await this.upsertVariant(
 				tx,
+				catalogId,
 				productId,
 				variant,
 				existingBySku,
@@ -1978,6 +2592,7 @@ export class ProductRepository {
 
 	private async resolveVariantAttributes(
 		tx: Prisma.TransactionClient,
+		catalogId: string,
 		attributes: ProductVariantAttributeInput[],
 		cache: Map<string, string>
 	): Promise<ResolvedVariantAttribute[]> {
@@ -1985,7 +2600,12 @@ export class ProductRepository {
 
 		const resolved: ResolvedVariantAttribute[] = []
 		for (const attribute of attributes) {
-			const enumValueId = await this.resolveEnumValueId(tx, attribute, cache)
+			const enumValueId = await this.resolveEnumValueId(
+				tx,
+				catalogId,
+				attribute,
+				cache
+			)
 			resolved.push({ attributeId: attribute.attributeId, enumValueId })
 		}
 
@@ -1994,6 +2614,7 @@ export class ProductRepository {
 
 	private async resolveEnumValueId(
 		tx: Prisma.TransactionClient,
+		catalogId: string,
 		attribute: ProductVariantAttributeInput,
 		cache: Map<string, string>
 	): Promise<string> {
@@ -2006,12 +2627,12 @@ export class ProductRepository {
 			)
 		}
 
-		const cacheKey = `${attribute.attributeId}:${value}`
+		const cacheKey = `${catalogId}:${attribute.attributeId}:${value}`
 		const cached = cache.get(cacheKey)
 		if (cached) return cached
 
 		const existing = await tx.attributeEnumValue.findFirst({
-			where: { attributeId: attribute.attributeId, value },
+			where: { attributeId: attribute.attributeId, catalogId, value },
 			select: { id: true, deleteAt: true }
 		})
 
@@ -2035,6 +2656,7 @@ export class ProductRepository {
 		const created = await tx.attributeEnumValue.create({
 			data: {
 				attributeId: attribute.attributeId,
+				catalogId,
 				value,
 				displayName: normalizedDisplayName,
 				displayOrder: 0
@@ -2047,6 +2669,7 @@ export class ProductRepository {
 
 	private async applyVariantUpdates(
 		tx: Prisma.TransactionClient,
+		catalogId: string,
 		productId: string,
 		variants: ProductVariantUpdateData[]
 	): Promise<void> {
@@ -2064,12 +2687,20 @@ export class ProductRepository {
 			if (!current) continue
 
 			const data = this.buildVariantUpdateData(variant, current.status)
-			if (!Object.keys(data).length) continue
-
-			await tx.productVariant.update({
-				where: { id: current.id },
-				data
-			})
+			if (Object.keys(data).length) {
+				await tx.productVariant.update({
+					where: { id: current.id },
+					data
+				})
+			}
+			if (variant.saleUnits !== undefined) {
+				await this.syncVariantSaleUnits(
+					tx,
+					catalogId,
+					current.id,
+					variant.saleUnits
+				)
+			}
 		}
 	}
 
@@ -2163,6 +2794,7 @@ export class ProductRepository {
 
 	private async upsertVariant(
 		tx: Prisma.TransactionClient,
+		catalogId: string,
 		productId: string,
 		variant: ProductVariantData,
 		existingBySku: Map<string, ExistingVariantBySku>,
@@ -2171,6 +2803,7 @@ export class ProductRepository {
 	): Promise<void> {
 		const resolvedAttributes = await this.resolveVariantAttributes(
 			tx,
+			catalogId,
 			variant.attributes,
 			enumValueCache
 		)
@@ -2179,6 +2812,7 @@ export class ProductRepository {
 		if (existing?.productId === productId) {
 			await this.updateExistingVariant(
 				tx,
+				catalogId,
 				existing.id,
 				variant,
 				resolvedAttributes,
@@ -2187,11 +2821,18 @@ export class ProductRepository {
 			return
 		}
 
-		await this.createVariant(tx, productId, variant, resolvedAttributes)
+		await this.createVariant(
+			tx,
+			catalogId,
+			productId,
+			variant,
+			resolvedAttributes
+		)
 	}
 
 	private async updateExistingVariant(
 		tx: Prisma.TransactionClient,
+		catalogId: string,
 		variantId: string,
 		variant: ProductVariantData,
 		attributes: ResolvedVariantAttribute[],
@@ -2210,6 +2851,7 @@ export class ProductRepository {
 		})
 
 		await this.syncVariantAttributes(tx, variantId, attributes, deleteAt)
+		await this.syncVariantSaleUnits(tx, catalogId, variantId, variant.saleUnits)
 	}
 
 	private async syncVariantAttributes(
@@ -2253,8 +2895,296 @@ export class ProductRepository {
 		}
 	}
 
+	private async syncVariantSaleUnits(
+		tx: Prisma.TransactionClient,
+		catalogId: string,
+		variantId: string,
+		saleUnits: ProductVariantSaleUnitInput[] | undefined
+	): Promise<void> {
+		if (saleUnits === undefined) {
+			return
+		}
+
+		if (!saleUnits.length) {
+			await tx.productVariantSaleUnit.updateMany({
+				where: { variantId, deleteAt: null },
+				data: { deleteAt: new Date(), isActive: false, isDefault: false }
+			})
+			return
+		}
+
+		const normalized = await this.normalizeVariantSaleUnits(
+			tx,
+			catalogId,
+			saleUnits
+		)
+		const now = new Date()
+		const keptIds: string[] = []
+
+		await tx.productVariantSaleUnit.updateMany({
+			where: { variantId, deleteAt: null },
+			data: { isDefault: false }
+		})
+
+		for (const unit of normalized) {
+			const existing = await tx.productVariantSaleUnit.findFirst({
+				where: {
+					variantId,
+					OR: [
+						{ catalogSaleUnitId: unit.catalogSaleUnitId },
+						{ catalogSaleUnitId: null, code: unit.code }
+					]
+				},
+				select: { id: true }
+			})
+
+			if (existing) {
+				await tx.productVariantSaleUnit.update({
+					where: { id: existing.id },
+					data: {
+						catalogSaleUnitId: unit.catalogSaleUnitId,
+						code: unit.code,
+						name: unit.name,
+						baseQuantity: unit.baseQuantity,
+						price: unit.price,
+						barcode: unit.barcode,
+						isDefault: unit.isDefault,
+						isActive: unit.isActive,
+						displayOrder: unit.displayOrder,
+						deleteAt: null
+					}
+				})
+				keptIds.push(existing.id)
+				continue
+			}
+
+			const created = await tx.productVariantSaleUnit.create({
+				data: {
+					variantId,
+					catalogSaleUnitId: unit.catalogSaleUnitId,
+					code: unit.code,
+					name: unit.name,
+					baseQuantity: unit.baseQuantity,
+					price: unit.price,
+					barcode: unit.barcode,
+					isDefault: unit.isDefault,
+					isActive: unit.isActive,
+					displayOrder: unit.displayOrder
+				},
+				select: { id: true }
+			})
+			keptIds.push(created.id)
+		}
+
+		await tx.productVariantSaleUnit.updateMany({
+			where: {
+				variantId,
+				deleteAt: null,
+				id: { notIn: keptIds }
+			},
+			data: { deleteAt: now, isActive: false, isDefault: false }
+		})
+	}
+
+	private async normalizeVariantSaleUnits(
+		tx: Prisma.TransactionClient,
+		catalogId: string,
+		saleUnits: ProductVariantSaleUnitInput[]
+	): Promise<NormalizedVariantSaleUnit[]> {
+		const seenCatalogSaleUnitIds = new Set<string>()
+		const normalized: NormalizedVariantSaleUnit[] = []
+
+		for (const [index, unit] of saleUnits.entries()) {
+			const catalogSaleUnit = await this.resolveCatalogSaleUnit(
+				tx,
+				catalogId,
+				unit,
+				index
+			)
+			const baseQuantity = Number(
+				unit.baseQuantity ?? catalogSaleUnit.defaultBaseQuantity
+			)
+			const price = Number(unit.price)
+			const barcode =
+				unit.barcode === undefined
+					? (catalogSaleUnit.barcode ?? null)
+					: unit.barcode === null
+						? null
+						: String(unit.barcode).trim() || null
+
+			if (seenCatalogSaleUnitIds.has(catalogSaleUnit.id)) {
+				throw new BadRequestException(
+					`Единица продажи ${catalogSaleUnit.name} уже добавлена к варианту`
+				)
+			}
+			if (!Number.isFinite(baseQuantity) || baseQuantity <= 0) {
+				throw new BadRequestException(
+					`Некорректное количество внутри для единицы продажи ${catalogSaleUnit.name}`
+				)
+			}
+			if (!Number.isFinite(price) || price < 0) {
+				throw new BadRequestException(
+					`Некорректная цена для единицы продажи ${catalogSaleUnit.name}`
+				)
+			}
+
+			seenCatalogSaleUnitIds.add(catalogSaleUnit.id)
+			normalized.push({
+				catalogSaleUnitId: catalogSaleUnit.id,
+				code: catalogSaleUnit.code,
+				name: catalogSaleUnit.name,
+				baseQuantity,
+				price,
+				barcode,
+				isDefault: unit.isDefault ?? false,
+				isActive: unit.isActive ?? true,
+				displayOrder: unit.displayOrder ?? index
+			})
+		}
+
+		const defaultUnits = normalized.filter(unit => unit.isDefault)
+		if (defaultUnits.length === 0) {
+			normalized[0].isDefault = true
+		} else if (defaultUnits.length > 1) {
+			throw new BadRequestException(
+				'У варианта должна быть ровно одна default единица продажи'
+			)
+		}
+
+		return normalized
+	}
+
+	private async resolveCatalogSaleUnit(
+		tx: Prisma.TransactionClient,
+		catalogId: string,
+		unit: ProductVariantSaleUnitInput,
+		index: number
+	): Promise<{
+		id: string
+		code: string
+		name: string
+		defaultBaseQuantity: Prisma.Decimal | number
+		barcode: string | null
+	}> {
+		const catalogSaleUnitId = unit.catalogSaleUnitId?.trim()
+
+		if (catalogSaleUnitId) {
+			const found = await tx.catalogSaleUnit.findFirst({
+				where: {
+					id: catalogSaleUnitId,
+					catalogId,
+					isActive: true,
+					deleteAt: null
+				},
+				select: {
+					id: true,
+					code: true,
+					name: true,
+					defaultBaseQuantity: true,
+					barcode: true
+				}
+			})
+			if (!found) {
+				throw new BadRequestException(
+					'Единица продажи не найдена в текущем каталоге'
+				)
+			}
+			return found
+		}
+
+		const name = String(unit.name ?? '').trim()
+		if (!name) {
+			throw new BadRequestException(
+				'Выберите единицу продажи из справочника каталога или укажите название'
+			)
+		}
+
+		const code = this.normalizeSaleUnitCode(unit.code, name, index, new Set())
+		const existing = await tx.catalogSaleUnit.findUnique({
+			where: { catalogId_code: { catalogId, code } },
+			select: {
+				id: true,
+				code: true,
+				name: true,
+				defaultBaseQuantity: true,
+				barcode: true,
+				deleteAt: true
+			}
+		})
+
+		if (existing) {
+			if (existing.deleteAt) {
+				await tx.catalogSaleUnit.update({
+					where: { id: existing.id },
+					data: { deleteAt: null, isActive: true, name }
+				})
+			}
+			return {
+				id: existing.id,
+				code: existing.code,
+				name: existing.deleteAt ? name : existing.name,
+				defaultBaseQuantity: existing.defaultBaseQuantity,
+				barcode: existing.barcode
+			}
+		}
+
+		return tx.catalogSaleUnit.create({
+			data: {
+				catalogId,
+				code,
+				name,
+				defaultBaseQuantity: this.resolveCatalogSaleUnitDefaultQuantity(unit),
+				barcode:
+					unit.barcode === undefined || unit.barcode === null
+						? null
+						: String(unit.barcode).trim() || null,
+				displayOrder: index
+			},
+			select: {
+				id: true,
+				code: true,
+				name: true,
+				defaultBaseQuantity: true,
+				barcode: true
+			}
+		})
+	}
+
+	private resolveCatalogSaleUnitDefaultQuantity(
+		unit: ProductVariantSaleUnitInput
+	): number {
+		const quantity = Number(unit.baseQuantity ?? 1)
+		return Number.isFinite(quantity) && quantity > 0 ? quantity : 1
+	}
+
+	private normalizeSaleUnitCode(
+		code: string | undefined,
+		name: string,
+		index: number,
+		seenCodes: Set<string>
+	): string {
+		const rawCode = code?.trim()
+		const rawName = name.trim()
+		const base =
+			(rawCode
+				? slugify(rawCode, { lower: true, strict: true, trim: true })
+				: slugify(rawName, { lower: true, strict: true, trim: true })) ||
+			`unit-${index + 1}`
+
+		let candidate = base.slice(0, 100)
+		let suffix = 2
+		while (seenCodes.has(candidate)) {
+			const suffixText = `-${suffix}`
+			candidate = `${base.slice(0, 100 - suffixText.length)}${suffixText}`
+			suffix += 1
+		}
+		seenCodes.add(candidate)
+		return candidate
+	}
+
 	private async createVariant(
 		tx: Prisma.TransactionClient,
+		catalogId: string,
 		productId: string,
 		variant: ProductVariantData,
 		attributes: ResolvedVariantAttribute[]
@@ -2271,15 +3201,17 @@ export class ProductRepository {
 			}
 		})
 
-		if (!attributes.length) return
+		await this.syncVariantSaleUnits(tx, catalogId, created.id, variant.saleUnits)
 
-		await tx.variantAttribute.createMany({
-			data: attributes.map(attribute => ({
-				variantId: created.id,
-				attributeId: attribute.attributeId,
-				enumValueId: attribute.enumValueId
-			}))
-		})
+		if (attributes.length) {
+			await tx.variantAttribute.createMany({
+				data: attributes.map(attribute => ({
+					variantId: created.id,
+					attributeId: attribute.attributeId,
+					enumValueId: attribute.enumValueId
+				}))
+			})
+		}
 	}
 
 	private async loadExistingVariantsForUpdate(

@@ -51,22 +51,28 @@ model Catalog {
   promoCodeId String?    @map("promo_code_id") @db.Uuid
   promoCode   PromoCode? @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
 
-  payments     Payment[]
-  activity     Activity[]
-  region       Regionality[]
-  config       CatalogConfig?
-  settings     CatalogSettings?
-  seoSettings  SeoSetting[]
-  metrics      Metrics[]
-  contacts     CatalogContact[]
-  products     Product[]
-  integrations Integration[]
-  category     Category[]
-  brands       Brand[]
-  order        Order[]
-  cart         Cart[]
-  media        Media[]
-  domains      CatalogDomain[]
+  payments            Payment[]
+  activity            Activity[]
+  region              Regionality[]
+  config              CatalogConfig?
+  settings            CatalogSettings?
+  seoSettings         SeoSetting[]
+  metrics             Metrics[]
+  contacts            CatalogContact[]
+  products            Product[]
+  productTypes        ProductType[]
+  attributeEnumValues AttributeEnumValue[]
+  attributeEnumValueAliases AttributeEnumValueAlias[]
+  integrations        Integration[]
+  category            Category[]
+  brands              Brand[]
+  saleUnits           CatalogSaleUnit[]
+  order               Order[]
+  cart                Cart[]
+  media               Media[]
+  domains             CatalogDomain[]
+  featureEntitlements CatalogFeatureEntitlement[]
+  inventoryWarehouses InventoryWarehouseCatalog[]
 
   subscriptionEndsAt DateTime? @map("subscription_ends_at") // Дата окончания подписки
 
@@ -79,7 +85,55 @@ model Catalog {
   @@map("catalogs")
 }
 
+model CatalogSaleUnit {
+  id String @id @default(uuid()) @db.Uuid
+
+  catalogId String @map("catalog_id") @db.Uuid
+
+  code                String  @db.VarChar(100)
+  name                String  @db.VarChar(255)
+  defaultBaseQuantity Decimal @default(1) @map("default_base_quantity") @db.Decimal(12, 4)
+  barcode             String? @db.VarChar(100)
+
+  isActive     Boolean @default(true) @map("is_active")
+  displayOrder Int     @default(0) @map("display_order")
+
+  deleteAt DateTime? @map("delete_at")
+
+  catalog          Catalog                  @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  variantSaleUnits ProductVariantSaleUnit[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([catalogId, code])
+  @@index([catalogId, isActive, displayOrder])
+  @@index([catalogId, deleteAt])
+  @@index([barcode])
+  @@map("catalog_sale_units")
+}
+
 // Здесь основные ключи отображения
+model CatalogFeatureEntitlement {
+  id String @id @default(uuid()) @db.Uuid
+
+  catalog   Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  catalogId String  @map("catalog_id") @db.Uuid
+
+  feature   String    @db.VarChar(100)
+  enabled   Boolean   @default(false)
+  expiresAt DateTime? @map("expires_at")
+  metadata  Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([catalogId, feature])
+  @@index([feature, enabled])
+  @@index([expiresAt])
+  @@map("catalog_feature_entitlements")
+}
+
 model CatalogDomain {
   id String @id @default(uuid()) @db.Uuid
 
@@ -161,8 +215,9 @@ model CatalogSettings {
 
   isActive Boolean @default(true) @map("is_active")
 
-  defaultMode  CatalogExperienceMode   @default(DELIVERY) @map("default_mode")
-  allowedModes CatalogExperienceMode[] @default([DELIVERY]) @map("allowed_modes")
+  defaultMode   CatalogExperienceMode   @default(DELIVERY) @map("default_mode")
+  allowedModes  CatalogExperienceMode[] @default([DELIVERY]) @map("allowed_modes")
+  inventoryMode CatalogInventoryMode    @default(NONE) @map("inventory_mode")
 
   address  String? @map("address")
   checkout Json?

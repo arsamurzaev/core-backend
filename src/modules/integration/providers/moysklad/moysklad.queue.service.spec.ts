@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config'
 import { Test, TestingModule } from '@nestjs/testing'
 import { Queue, Worker } from 'bullmq'
 
+import { CapabilityService } from '@/modules/capability/capability.service'
 import { ObservabilityService } from '@/modules/observability/observability.service'
 
 import { IntegrationRepository } from '../../integration.repository'
@@ -18,6 +19,8 @@ import {
 	MoySkladMetadataCryptoService
 } from './moysklad.metadata'
 import { MoySkladQueueService } from './moysklad.queue.service'
+import { MoySkladSyncOrchestratorService } from './moysklad.sync-orchestrator.service'
+import { MoySkladSyncRunRecorderService } from './moysklad.sync-run-recorder.service'
 import { MoySkladSyncService } from './moysklad.sync.service'
 
 let workerProcessor:
@@ -55,6 +58,7 @@ describe('MoySkladQueueService', () => {
 		incrementQueueJobActive: jest.Mock
 		decrementQueueJobActive: jest.Mock
 		recordQueueJob: jest.Mock
+		recordIntegrationStockFreshness: jest.Mock
 	}
 
 	const queueMock = () =>
@@ -145,6 +149,8 @@ describe('MoySkladQueueService', () => {
 		const module: TestingModule = await Test.createTestingModule({
 			providers: [
 				MoySkladQueueService,
+				MoySkladSyncOrchestratorService,
+				MoySkladSyncRunRecorderService,
 				{
 					provide: ConfigService,
 					useValue: {
@@ -177,7 +183,8 @@ describe('MoySkladQueueService', () => {
 					provide: MoySkladSyncService,
 					useValue: {
 						syncCatalog: jest.fn(),
-						syncProduct: jest.fn()
+						syncProduct: jest.fn(),
+						syncStock: jest.fn()
 					}
 				},
 				{
@@ -192,7 +199,17 @@ describe('MoySkladQueueService', () => {
 						recordQueueJobEnqueued: jest.fn(),
 						incrementQueueJobActive: jest.fn(),
 						decrementQueueJobActive: jest.fn(),
-						recordQueueJob: jest.fn()
+						recordQueueJob: jest.fn(),
+						recordIntegrationSyncRun: jest.fn(),
+						recordIntegrationSyncItems: jest.fn(),
+						recordIntegrationStockFreshness: jest.fn()
+					}
+				},
+				{
+					provide: CapabilityService,
+					useValue: {
+						assertCanUseMoySkladIntegration: jest.fn().mockResolvedValue(undefined),
+						canUseMoySkladIntegration: jest.fn().mockResolvedValue(true)
 					}
 				}
 			]
@@ -230,7 +247,7 @@ describe('MoySkladQueueService', () => {
 				trigger: IntegrationSyncRunTrigger.MANUAL
 			}),
 			expect.objectContaining({
-				jobId: 'moysklad:manual:run-1'
+				jobId: 'moysklad-manual--run-1'
 			})
 		)
 		expect(repo.attachSyncRunJobId).toHaveBeenCalledWith('run-1', 'job-1')
@@ -239,6 +256,87 @@ describe('MoySkladQueueService', () => {
 			'catalog-sync'
 		)
 		expect(result.jobId).toBe('job-1')
+	})
+
+	it('queues manual product sync and stores job id', async () => {
+		repo.findMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.findLatestActiveSyncRun.mockResolvedValue(null)
+		repo.createSyncRun.mockResolvedValue({
+			...syncRunRecord,
+			mode: IntegrationSyncRunMode.PRODUCT,
+			productId: 'product-1'
+		} as any)
+		queueMock().add.mockResolvedValue({ id: 'job-product' })
+
+		const result = await service.enqueueProductSync('catalog-1', 'product-1')
+
+		expect(repo.createSyncRun).toHaveBeenCalledWith(
+			expect.objectContaining({
+				integrationId: 'integration-1',
+				catalogId: 'catalog-1',
+				mode: IntegrationSyncRunMode.PRODUCT,
+				trigger: IntegrationSyncRunTrigger.MANUAL,
+				productId: 'product-1'
+			})
+		)
+		expect(queueMock().add).toHaveBeenCalledWith(
+			'product-sync',
+			expect.objectContaining({
+				runId: 'run-1',
+				catalogId: 'catalog-1',
+				mode: IntegrationSyncRunMode.PRODUCT,
+				trigger: IntegrationSyncRunTrigger.MANUAL,
+				productId: 'product-1'
+			}),
+			expect.objectContaining({
+				jobId: 'moysklad-manual--run-1'
+			})
+		)
+		expect(repo.attachSyncRunJobId).toHaveBeenCalledWith('run-1', 'job-product')
+		expect(observability.recordQueueJobEnqueued).toHaveBeenCalledWith(
+			'moysklad-sync',
+			'product-sync'
+		)
+		expect(result.mode).toBe(IntegrationSyncRunMode.PRODUCT)
+	})
+
+	it('queues manual stock sync and stores job id', async () => {
+		repo.findMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.findLatestActiveSyncRun.mockResolvedValue(null)
+		repo.createSyncRun.mockResolvedValue({
+			...syncRunRecord,
+			mode: IntegrationSyncRunMode.STOCK
+		} as any)
+		queueMock().add.mockResolvedValue({ id: 'job-stock' })
+
+		const result = await service.enqueueStockSync('catalog-1')
+
+		expect(repo.createSyncRun).toHaveBeenCalledWith(
+			expect.objectContaining({
+				integrationId: 'integration-1',
+				catalogId: 'catalog-1',
+				mode: IntegrationSyncRunMode.STOCK,
+				trigger: IntegrationSyncRunTrigger.MANUAL
+			})
+		)
+		expect(queueMock().add).toHaveBeenCalledWith(
+			'stock-sync',
+			expect.objectContaining({
+				runId: 'run-1',
+				catalogId: 'catalog-1',
+				mode: IntegrationSyncRunMode.STOCK,
+				trigger: IntegrationSyncRunTrigger.MANUAL
+			}),
+			expect.objectContaining({
+				jobId: 'moysklad-manual--run-1'
+			})
+		)
+		expect(repo.attachSyncRunJobId).toHaveBeenCalledWith('run-1', 'job-stock')
+		expect(observability.recordQueueJobEnqueued).toHaveBeenCalledWith(
+			'moysklad-sync',
+			'stock-sync'
+		)
+		expect(result.mode).toBe(IntegrationSyncRunMode.STOCK)
 	})
 
 	it('upserts scheduler for enabled integration', async () => {
@@ -280,9 +378,26 @@ describe('MoySkladQueueService', () => {
 		sync.syncCatalog.mockResolvedValue({
 			ok: true,
 			total: 2,
+			totalProducts: 1,
+			totalVariants: 1,
 			created: 1,
+			createdProducts: 1,
+			createdVariants: 0,
 			updated: 1,
+			updatedProducts: 0,
+			updatedVariants: 1,
 			deleted: 0,
+			skippedProducts: 0,
+			skippedVariants: 0,
+			warnings: [
+				{
+					code: 'MOYSKLAD_PRODUCT_FOLDER_MISSING',
+					message: 'Skipped without folder',
+					externalId: null,
+					count: 1
+				}
+			],
+			errors: [],
 			durationMs: 250,
 			syncedAt: new Date('2026-03-23T12:15:00.000Z')
 		})
@@ -305,7 +420,7 @@ describe('MoySkladQueueService', () => {
 				jobId: 'job-2'
 			})
 		)
-		expect(sync.syncCatalog).toHaveBeenCalledWith('catalog-1')
+		expect(sync.syncCatalog).toHaveBeenCalledWith('catalog-1', { runId: 'run-1' })
 		expect(repo.completeSyncRun).toHaveBeenCalledWith(
 			'run-1',
 			expect.objectContaining({
@@ -314,7 +429,29 @@ describe('MoySkladQueueService', () => {
 				updatedProducts: 1,
 				deletedProducts: 0,
 				imagesImported: 0,
-				durationMs: 250
+				durationMs: 250,
+				metadata: expect.objectContaining({
+					products: expect.objectContaining({
+						total: 1,
+						created: 1,
+						updated: 0,
+						deleted: 0,
+						skipped: 0
+					}),
+					variants: expect.objectContaining({
+						total: 1,
+						created: 0,
+						updated: 1,
+						deleted: 0,
+						skipped: 0
+					}),
+					warnings: [
+						expect.objectContaining({
+							code: 'MOYSKLAD_PRODUCT_FOLDER_MISSING'
+						})
+					],
+					errors: []
+				})
 			})
 		)
 		expect(observability.incrementQueueJobActive).toHaveBeenCalledWith(
@@ -327,9 +464,114 @@ describe('MoySkladQueueService', () => {
 			'success',
 			expect.any(Number)
 		)
+		expect(observability.recordIntegrationSyncRun).toHaveBeenCalledWith(
+			'MOYSKLAD',
+			IntegrationSyncRunMode.FULL,
+			IntegrationSyncRunTrigger.SCHEDULED,
+			'success',
+			250
+		)
+		expect(observability.recordIntegrationSyncItems).toHaveBeenCalledWith(
+			'MOYSKLAD',
+			IntegrationSyncRunMode.FULL,
+			'product',
+			'created',
+			1
+		)
+		expect(observability.recordIntegrationSyncItems).toHaveBeenCalledWith(
+			'MOYSKLAD',
+			IntegrationSyncRunMode.FULL,
+			'variant',
+			'updated',
+			1
+		)
 		expect(observability.decrementQueueJobActive).toHaveBeenCalledWith(
 			'moysklad-sync',
 			'catalog-sync'
+		)
+	})
+
+	it('processes stock sync run', async () => {
+		repo.markSyncRunRunning.mockResolvedValue({
+			...syncRunRecord,
+			mode: IntegrationSyncRunMode.STOCK,
+			status: IntegrationSyncRunStatus.RUNNING,
+			jobId: 'job-stock',
+			startedAt: new Date('2026-03-23T12:10:05.000Z')
+		} as any)
+		sync.syncStock.mockResolvedValue({
+			ok: true,
+			total: 4,
+			updated: 3,
+			updatedProducts: 1,
+			updatedVariants: 2,
+			skipped: 1,
+			durationMs: 180,
+			syncedAt: new Date('2026-03-23T12:15:00.000Z')
+		})
+
+		await workerProcessor?.({
+			id: 'job-stock',
+			data: {
+				runId: 'run-1',
+				catalogId: 'catalog-1',
+				mode: IntegrationSyncRunMode.STOCK,
+				trigger: IntegrationSyncRunTrigger.MANUAL
+			}
+		})
+
+		expect(sync.syncStock).toHaveBeenCalledWith('catalog-1', { runId: 'run-1' })
+		expect(repo.completeSyncRun).toHaveBeenCalledWith(
+			'run-1',
+			expect.objectContaining({
+				totalProducts: 4,
+				createdProducts: 0,
+				updatedProducts: 3,
+				deletedProducts: 0,
+				imagesImported: 0,
+				durationMs: 180,
+				metadata: expect.objectContaining({
+					stockRows: expect.objectContaining({
+						lastStockSyncedAt: '2026-03-23T12:15:00.000Z'
+					})
+				})
+			})
+		)
+		expect(observability.incrementQueueJobActive).toHaveBeenCalledWith(
+			'moysklad-sync',
+			'stock-sync'
+		)
+		expect(observability.recordQueueJob).toHaveBeenCalledWith(
+			'moysklad-sync',
+			'stock-sync',
+			'success',
+			expect.any(Number)
+		)
+		expect(observability.recordIntegrationSyncRun).toHaveBeenCalledWith(
+			'MOYSKLAD',
+			IntegrationSyncRunMode.STOCK,
+			IntegrationSyncRunTrigger.MANUAL,
+			'success',
+			180
+		)
+		expect(observability.recordIntegrationSyncItems).toHaveBeenCalledWith(
+			'MOYSKLAD',
+			IntegrationSyncRunMode.STOCK,
+			'stock_row',
+			'applied',
+			3
+		)
+		expect(observability.recordIntegrationSyncItems).toHaveBeenCalledWith(
+			'MOYSKLAD',
+			IntegrationSyncRunMode.STOCK,
+			'variant',
+			'updated',
+			2
+		)
+		expect(observability.recordIntegrationStockFreshness).toHaveBeenCalledWith(
+			'MOYSKLAD',
+			'catalog-1',
+			new Date('2026-03-23T12:15:00.000Z')
 		)
 	})
 })

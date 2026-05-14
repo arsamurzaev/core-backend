@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {
+	IsIn,
 	IsInt,
 	IsNotEmpty,
 	IsOptional,
@@ -8,6 +9,9 @@ import {
 	MaxLength,
 	Min
 } from 'class-validator'
+
+import { ATTRIBUTE_ENUM_VALUE_SOURCES } from './create-attribute-enum.dto.req'
+import type { AttributeEnumValueSourceInput } from './create-attribute-enum.dto.req'
 
 function normalizeOptionalString(value: unknown): string | undefined {
 	if (value === undefined) return undefined
@@ -62,4 +66,17 @@ export class UpdateAttributeEnumDtoReq {
 	@IsNotEmpty()
 	@MaxLength(255)
 	businessId?: string | null
+
+	@ApiPropertyOptional({
+		enum: ATTRIBUTE_ENUM_VALUE_SOURCES,
+		example: 'MANUAL',
+		description: 'Origin of the enum value'
+	})
+	@IsOptional()
+	@Transform(({ value }: { value: unknown }) => {
+		const normalized = normalizeOptionalString(value)
+		return normalized === undefined ? undefined : normalized.toUpperCase()
+	})
+	@IsIn(ATTRIBUTE_ENUM_VALUE_SOURCES)
+	source?: AttributeEnumValueSourceInput
 }

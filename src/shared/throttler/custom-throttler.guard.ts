@@ -19,7 +19,7 @@ function hasAnySessionCookie(
 ): boolean {
 	return Boolean(
 		readCookieValue(cookieHeader, SID_COOKIE) ||
-			readCookieValue(cookieHeader, ADMIN_SID_COOKIE)
+		readCookieValue(cookieHeader, ADMIN_SID_COOKIE)
 	)
 }
 

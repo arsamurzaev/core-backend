@@ -32,7 +32,7 @@ type DomainRecord = Awaited<ReturnType<CatalogDomainRepository['findById']>>
 type DomainListRecord = Awaited<
 	ReturnType<CatalogDomainRepository['listByCatalog']>
 >[number]
-type DomainDtoRecord = NonNullable<DomainRecord> | DomainListRecord
+type DomainDtoRecord = NonNullable<DomainRecord>
 type DnsRecordInstruction = {
 	type: string
 	name: string
@@ -303,7 +303,8 @@ export class CatalogDomainService {
 				name: hostname,
 				value: ip,
 				required: false,
-				description: 'Основной вариант для apex-домена, если DNS-провайдер не поддерживает ALIAS/ANAME.'
+				description:
+					'Основной вариант для apex-домена, если DNS-провайдер не поддерживает ALIAS/ANAME.'
 			})
 		}
 

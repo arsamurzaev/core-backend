@@ -18,8 +18,8 @@ export const CATALOG_CURRENT_CACHE_TTL_SEC =
 export const CATALOG_CACHE_VERSION = 'catalog'
 export const CATALOG_TYPE_CACHE_VERSION = 'catalog-type'
 export const CATEGORY_LIST_CACHE_VERSION = 'categories-v2'
-export const PRODUCTS_CACHE_VERSION = 'products-v2'
-export const CATEGORY_PRODUCTS_CACHE_VERSION = 'category-products-v2'
+export const PRODUCTS_CACHE_VERSION = 'products-v5'
+export const CATEGORY_PRODUCTS_CACHE_VERSION = 'category-products-v5'
 
 export const CATEGORY_LIST_CACHE_TTL_SEC =
 	Number(

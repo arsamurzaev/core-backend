@@ -6,6 +6,7 @@ import {
 	Param,
 	Patch,
 	Post,
+	Req,
 	Res,
 	UseGuards
 } from '@nestjs/common'
@@ -29,6 +30,7 @@ import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 import { Roles } from '../auth/decorators/roles.decorator'
 import { CatalogAccessGuard } from '../auth/guards/catalog-access.guard'
 import { SessionGuard } from '../auth/guards/session.guard'
+import type { AuthRequest } from '../auth/types/auth-request'
 
 import { CatalogService } from './catalog.service'
 import { CreateCatalogDtoReq } from './dto/requests/create-catalog.dto.req'
@@ -36,6 +38,7 @@ import { UpdateCatalogDtoReq } from './dto/requests/update-catalog.dto.req'
 import {
 	CatalogCreateResponseDto,
 	CatalogCurrentDto,
+	CatalogCurrentFeaturesDto,
 	CatalogCurrentShellDto,
 	CatalogDto,
 	CatalogTypeDto
@@ -81,16 +84,27 @@ export class CatalogController {
 		return this.catalogService.getCurrentTypeSchema() as Promise<CatalogTypeDto>
 	}
 
+	@Get('/current/features')
+	@ApiOperation({ summary: 'Get current catalog feature flags' })
+	@Roles(Role.CATALOG)
+	@UseGuards(CatalogAccessGuard)
+	@ApiOkResponse({ type: CatalogCurrentFeaturesDto })
+	async getCurrentFeatures(): Promise<CatalogCurrentFeaturesDto> {
+		return this.catalogService.getCurrentFeatures()
+	}
+
 	@Patch('/current')
 	@ApiOperation({ summary: 'Update current catalog' })
 	@Roles(Role.CATALOG)
 	@UseGuards(CatalogAccessGuard)
 	@ApiOkResponse({ type: CatalogCurrentShellDto })
 	async updateCurrent(
-		@Body() dto: UpdateCatalogDtoReq
+		@Body() dto: UpdateCatalogDtoReq,
+		@Req() req: AuthRequest
 	): Promise<CatalogCurrentShellDto> {
 		return this.catalogService.updateCurrent(
-			dto
+			dto,
+			req
 		) as Promise<CatalogCurrentShellDto>
 	}
 
@@ -127,9 +141,10 @@ export class CatalogController {
 	@ApiOkResponse({ type: CatalogDto })
 	async updateById(
 		@Param('id') id: string,
-		@Body() dto: UpdateCatalogDtoReq
+		@Body() dto: UpdateCatalogDtoReq,
+		@Req() req: AuthRequest
 	): Promise<CatalogDto> {
-		return this.catalogService.updateById(id, dto) as Promise<CatalogDto>
+		return this.catalogService.updateById(id, dto, req) as Promise<CatalogDto>
 	}
 
 	@Post()

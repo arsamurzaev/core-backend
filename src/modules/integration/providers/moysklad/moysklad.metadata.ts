@@ -36,9 +36,14 @@ const storedMoySkladMetadataSchema = z
 		priceTypeName: z.string().optional(),
 		importImages: z.boolean().optional(),
 		syncStock: z.boolean().optional(),
+		exportOrders: z.boolean().optional(),
+		orderExportOrganizationId: z.string().nullable().optional(),
+		orderExportCounterpartyId: z.string().nullable().optional(),
+		orderExportStoreId: z.string().nullable().optional(),
 		scheduleEnabled: z.boolean().optional(),
 		schedulePattern: z.string().nullable().optional(),
-		scheduleTimezone: z.string().optional()
+		scheduleTimezone: z.string().optional(),
+		lastStockSyncedAt: z.string().nullable().optional()
 	})
 	.refine(data => data.token || data.tokenEncrypted, {
 		message: 'Токен MoySklad обязателен'
@@ -49,9 +54,14 @@ type PartialMoySkladMetadata = {
 	priceTypeName?: string | null
 	importImages?: boolean
 	syncStock?: boolean
+	exportOrders?: boolean
+	orderExportOrganizationId?: string | null
+	orderExportCounterpartyId?: string | null
+	orderExportStoreId?: string | null
 	scheduleEnabled?: boolean
 	schedulePattern?: string | null
 	scheduleTimezone?: string | null
+	lastStockSyncedAt?: string | null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -87,10 +97,30 @@ export function buildMoySkladMetadata(
 	const scheduleTimezone =
 		rawScheduleTimezone.trim() || MOYSKLAD_DEFAULT_SCHEDULE_TIMEZONE
 	const scheduleEnabled = input.scheduleEnabled ?? false
+	const exportOrders = input.exportOrders ?? false
+	const orderExportOrganizationId = normalizeOptionalString(
+		input.orderExportOrganizationId
+	)
+	const orderExportCounterpartyId = normalizeOptionalString(
+		input.orderExportCounterpartyId
+	)
+	const orderExportStoreId = normalizeOptionalString(input.orderExportStoreId)
+	const lastStockSyncedAt = normalizeOptionalString(input.lastStockSyncedAt)
 
 	if (scheduleEnabled && !schedulePattern) {
 		throw new BadRequestException(
 			'Для планового sync MoySklad укажите schedulePattern'
+		)
+	}
+
+	if (
+		exportOrders &&
+		(!orderExportOrganizationId ||
+			!orderExportCounterpartyId ||
+			!orderExportStoreId)
+	) {
+		throw new BadRequestException(
+			'For MoySklad order export, organization, counterparty and store ids are required'
 		)
 	}
 
@@ -99,10 +129,20 @@ export function buildMoySkladMetadata(
 		priceTypeName,
 		importImages: input.importImages ?? true,
 		syncStock: input.syncStock ?? true,
+		exportOrders,
+		orderExportOrganizationId,
+		orderExportCounterpartyId,
+		orderExportStoreId,
 		scheduleEnabled,
 		schedulePattern,
-		scheduleTimezone
+		scheduleTimezone,
+		lastStockSyncedAt
 	}
+}
+
+function normalizeOptionalString(value?: string | null): string | null {
+	const normalized = typeof value === 'string' ? value.trim() : ''
+	return normalized || null
 }
 
 export function maskToken(token: string): string | null {
@@ -146,9 +186,14 @@ export class MoySkladMetadataCryptoService {
 			priceTypeName: metadata.priceTypeName,
 			importImages: metadata.importImages,
 			syncStock: metadata.syncStock,
+			exportOrders: metadata.exportOrders,
+			orderExportOrganizationId: metadata.orderExportOrganizationId,
+			orderExportCounterpartyId: metadata.orderExportCounterpartyId,
+			orderExportStoreId: metadata.orderExportStoreId,
 			scheduleEnabled: metadata.scheduleEnabled,
 			schedulePattern: metadata.schedulePattern,
 			scheduleTimezone: metadata.scheduleTimezone,
+			lastStockSyncedAt: metadata.lastStockSyncedAt,
 			tokenEncrypted: this.encryptToken(metadata.token)
 		}
 	}
@@ -163,9 +208,14 @@ export class MoySkladMetadataCryptoService {
 			priceTypeName: parsed.priceTypeName,
 			importImages: parsed.importImages,
 			syncStock: parsed.syncStock,
+			exportOrders: parsed.exportOrders,
+			orderExportOrganizationId: parsed.orderExportOrganizationId,
+			orderExportCounterpartyId: parsed.orderExportCounterpartyId,
+			orderExportStoreId: parsed.orderExportStoreId,
 			scheduleEnabled: parsed.scheduleEnabled,
 			schedulePattern: parsed.schedulePattern,
-			scheduleTimezone: parsed.scheduleTimezone
+			scheduleTimezone: parsed.scheduleTimezone,
+			lastStockSyncedAt: parsed.lastStockSyncedAt
 		})
 	}
 

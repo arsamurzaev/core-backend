@@ -8,6 +8,7 @@ import {
 import { BadRequestException } from '@nestjs/common'
 import slugify from 'slugify'
 
+import { CreateAttributeEnumAliasDtoReq } from './dto/requests/create-attribute-enum-alias.dto.req'
 import { CreateAttributeEnumDtoReq } from './dto/requests/create-attribute-enum.dto.req'
 import { CreateAttributeDtoReq } from './dto/requests/create-attribute.dto.req'
 import { UpdateAttributeEnumDtoReq } from './dto/requests/update-attribute-enum.dto.req'
@@ -18,16 +19,20 @@ export const ENUM_VALUE_MAX_LENGTH = 255
 const ATTRIBUTE_KEY_FALLBACK = 'attr'
 const ENUM_VALUE_FALLBACK = 'value'
 
+export function normalizeAttributeDictionaryText(value: string): string {
+	return value.normalize('NFKC').replace(/\s+/g, ' ').trim()
+}
+
 export function normalizeAttributeKey(value: string): string {
-	return value.trim().toLowerCase()
+	return normalizeAttributeDictionaryText(value).toLowerCase()
 }
 
 export function normalizeAttributeLabel(value: string): string {
-	return value.trim()
+	return normalizeAttributeDictionaryText(value)
 }
 
 export function normalizeAttributeEnumValue(value: string): string {
-	return value.trim().toLowerCase()
+	return normalizeAttributeDictionaryText(value).toLowerCase()
 }
 
 export function ensureVariantAttributeRules(
@@ -134,8 +139,9 @@ export function buildAttributeUpdateInput(dto: UpdateAttributeDtoReq): {
 export function buildAttributeEnumValueCreateInput(
 	attributeId: string,
 	dto: CreateAttributeEnumDtoReq,
-	value: string
-): AttributeEnumValueCreateInput {
+	value: string,
+	catalogId?: string | null
+): AttributeEnumValueCreateInput & { source?: string } {
 	return {
 		value,
 		displayName:
@@ -144,14 +150,16 @@ export function buildAttributeEnumValueCreateInput(
 				: normalizeAttributeLabel(dto.displayName),
 		displayOrder: dto.displayOrder ?? 0,
 		businessId: dto.businessId?.trim() || null,
+		source: dto.source ?? 'MANUAL',
+		catalog: catalogId ? { connect: { id: catalogId } } : undefined,
 		attribute: { connect: { id: attributeId } }
 	}
 }
 
 export function buildAttributeEnumValueUpdateInput(
 	dto: UpdateAttributeEnumDtoReq
-): AttributeEnumValueUpdateInput {
-	const data: AttributeEnumValueUpdateInput = {}
+): AttributeEnumValueUpdateInput & { source?: string } {
+	const data: AttributeEnumValueUpdateInput & { source?: string } = {}
 
 	if (dto.value !== undefined) {
 		data.value = normalizeAttributeEnumValue(dto.value)
@@ -165,8 +173,30 @@ export function buildAttributeEnumValueUpdateInput(
 	if (dto.businessId !== undefined) {
 		data.businessId = dto.businessId?.trim() || null
 	}
+	if (dto.source !== undefined) {
+		data.source = dto.source
+	}
 
 	return data
+}
+
+export function buildAttributeEnumValueAliasCreateInput(
+	attributeId: string,
+	enumValueId: string,
+	dto: CreateAttributeEnumAliasDtoReq,
+	value: string,
+	catalogId?: string | null
+) {
+	return {
+		attributeId,
+		catalogId: catalogId ?? null,
+		enumValueId,
+		value,
+		displayName:
+			dto.displayName === undefined
+				? null
+				: normalizeAttributeLabel(dto.displayName)
+	}
 }
 
 export function getAttributeTypeIds(
@@ -189,6 +219,10 @@ export function mapAttributeWithTypeIds<T extends { types?: { id: string }[] }>(
 }
 
 function slugifyAttributeValue(value: string): string {
-	const slug = slugify(value, { lower: true, strict: true, trim: true })
+	const slug = slugify(normalizeAttributeDictionaryText(value), {
+		lower: true,
+		strict: true,
+		trim: true
+	})
 	return slug.replace(/-+/g, '-').replace(/^[-_]+|[-_]+$/g, '')
 }

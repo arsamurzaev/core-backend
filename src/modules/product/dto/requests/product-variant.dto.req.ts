@@ -15,6 +15,100 @@ import {
 	ValidateNested
 } from 'class-validator'
 
+export class ProductVariantSaleUnitDtoReq {
+	@ApiPropertyOptional({
+		type: String,
+		example: 'catalog-sale-unit-id',
+		description:
+			'Ссылка на формат продажи из справочника текущего каталога. Если не передать, backend создаст/найдет формат по name.'
+	})
+	@IsOptional()
+	@IsString()
+	@IsNotEmpty()
+	catalogSaleUnitId?: string
+
+	@ApiPropertyOptional({
+		type: String,
+		example: 'box-12',
+		description:
+			'Технический код можно не передавать: backend сгенерирует его из названия.'
+	})
+	@IsOptional()
+	@IsString()
+	@MaxLength(100)
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined || value === null) return undefined
+		if (typeof value !== 'string') return value
+		const trimmed = value.trim()
+		return trimmed.length ? trimmed : undefined
+	})
+	code?: string
+
+	@ApiPropertyOptional({
+		type: String,
+		example: 'Короб',
+		description:
+			'Название формата продажи. Не нужно, если передан catalogSaleUnitId.'
+	})
+	@IsOptional()
+	@IsString()
+	@MaxLength(255)
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined || value === null) return undefined
+		if (typeof value !== 'string') return value
+		const trimmed = value.trim()
+		return trimmed.length ? trimmed : undefined
+	})
+	name?: string
+
+	@ApiPropertyOptional({
+		type: Number,
+		example: 12,
+		description: 'Сколько базовых единиц внутри для конкретного товара/варианта.'
+	})
+	@IsOptional()
+	@Type(() => Number)
+	@IsNumber()
+	@Min(0.0001)
+	baseQuantity?: number
+
+	@ApiProperty({ type: Number, example: 999 })
+	@Type(() => Number)
+	@IsNumber()
+	@Min(0)
+	price: number
+
+	@ApiPropertyOptional({ type: String, example: '4601234567890' })
+	@IsOptional()
+	@IsString()
+	@MaxLength(100)
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		if (typeof value !== 'string') return value
+		const trimmed = value.trim()
+		return trimmed.length ? trimmed : null
+	})
+	barcode?: string | null
+
+	@ApiPropertyOptional({ type: Boolean, example: true })
+	@IsOptional()
+	@IsBoolean()
+	isDefault?: boolean
+
+	@ApiPropertyOptional({ type: Boolean, example: true })
+	@IsOptional()
+	@IsBoolean()
+	isActive?: boolean
+
+	@ApiPropertyOptional({ type: Number, example: 0 })
+	@IsOptional()
+	@Type(() => Number)
+	@IsInt()
+	@Min(0)
+	displayOrder?: number
+}
+
 export class ProductVariantAttributeDtoReq {
 	@ApiProperty({ type: String, example: 'attribute-id' })
 	@IsString()
@@ -57,12 +151,17 @@ export class ProductVariantAttributeDtoReq {
 }
 
 export class ProductVariantDtoReq {
-	@ApiPropertyOptional({ type: Number, example: 0 })
+	@ApiPropertyOptional({ type: Number, example: 0, nullable: true })
 	@IsOptional()
-	@Type(() => Number)
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		if (typeof value === 'string' && value.trim().length === 0) return null
+		return Number(value)
+	})
 	@IsNumber()
 	@Min(0)
-	price?: number
+	price?: number | null
 
 	@ApiPropertyOptional({ type: Number, example: 10 })
 	@IsOptional()
@@ -87,4 +186,11 @@ export class ProductVariantDtoReq {
 	@ValidateNested({ each: true })
 	@Type(() => ProductVariantAttributeDtoReq)
 	attributes?: ProductVariantAttributeDtoReq[]
+
+	@ApiPropertyOptional({ type: [ProductVariantSaleUnitDtoReq] })
+	@IsOptional()
+	@IsArray()
+	@ValidateNested({ each: true })
+	@Type(() => ProductVariantSaleUnitDtoReq)
+	saleUnits?: ProductVariantSaleUnitDtoReq[]
 }

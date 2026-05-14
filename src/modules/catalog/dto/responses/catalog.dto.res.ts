@@ -6,12 +6,16 @@ import {
 	Metric,
 	MetricScope
 } from '@generated/enums'
+import type { CatalogInventoryMode } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
 import { AttributeDto } from '@/modules/attribute/dto/responses/attribute.dto.res'
+import { CATALOG_CAPABILITIES } from '@/modules/capability/capability.constants'
 import { SeoDto } from '@/modules/seo/dto/responses/seo.dto.res'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
+
+const CATALOG_INVENTORY_MODES = ['NONE', 'EXTERNAL', 'INTERNAL'] as const
 
 export class CatalogConfigDto {
 	@ApiProperty({ enum: CatalogStatus })
@@ -74,6 +78,9 @@ export class CatalogSettingsDto {
 	@ApiProperty({ enum: CatalogExperienceMode, isArray: true })
 	allowedModes: CatalogExperienceMode[]
 
+	@ApiProperty({ enum: CATALOG_INVENTORY_MODES })
+	inventoryMode: CatalogInventoryMode
+
 	@ApiProperty({ type: String, nullable: true })
 	address: string | null
 
@@ -85,6 +92,80 @@ export class CatalogSettingsDto {
 
 	@ApiProperty({ type: String, nullable: true })
 	yandexVerification: string | null
+}
+
+export class CatalogCurrentFeaturesDto {
+	@ApiProperty({ enum: CATALOG_INVENTORY_MODES })
+	inventoryMode: CatalogInventoryMode
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Whether the current catalog can use product type schemas.'
+	})
+	canUseProductTypes: boolean
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Whether the current catalog can use product variants.'
+	})
+	canUseProductVariants: boolean
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Whether the current catalog can use catalog sale units.'
+	})
+	canUseCatalogSaleUnits: boolean
+
+	@ApiProperty({
+		type: Boolean,
+		description:
+			'Whether the current catalog can use the paid internal inventory feature.'
+	})
+	canUseInternalInventory: boolean
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Whether the current catalog can use MoySklad integration.'
+	})
+	canUseMoySkladIntegration: boolean
+
+	@ApiProperty({
+		type: Object,
+		additionalProperties: { type: 'boolean' },
+		description: 'Raw admin entitlements before dependency resolution.'
+	})
+	raw: Record<(typeof CATALOG_CAPABILITIES)[number], boolean>
+
+	@ApiProperty({
+		type: Object,
+		additionalProperties: { type: 'boolean' },
+		description: 'Effective capabilities after dependency resolution.'
+	})
+	effective: Record<(typeof CATALOG_CAPABILITIES)[number], boolean>
+
+	@ApiProperty({
+		type: Object,
+		isArray: true,
+		description: 'Capability definitions for UI and admin surfaces.'
+	})
+	definitions: Array<{
+		key: (typeof CATALOG_CAPABILITIES)[number]
+		title: string
+		description: string
+		dependsOn: Array<(typeof CATALOG_CAPABILITIES)[number]>
+	}>
+
+	@ApiProperty({
+		type: Object,
+		isArray: true,
+		description: 'Per-capability state with disabled reasons.'
+	})
+	items: Array<{
+		key: (typeof CATALOG_CAPABILITIES)[number]
+		raw: boolean
+		effective: boolean
+		disabledReason: string | null
+	}>
 }
 
 export class CatalogMetricDto {
@@ -171,6 +252,9 @@ export class CatalogDto {
 }
 
 export class CatalogCurrentDto extends CatalogDto {
+	@ApiProperty({ type: CatalogCurrentFeaturesDto })
+	features: CatalogCurrentFeaturesDto
+
 	@ApiProperty({ type: [CatalogContactDto] })
 	contacts: CatalogContactDto[]
 
@@ -182,6 +266,9 @@ export class CatalogCurrentDto extends CatalogDto {
 }
 
 export class CatalogCurrentShellDto extends CatalogDto {
+	@ApiProperty({ type: CatalogCurrentFeaturesDto })
+	features: CatalogCurrentFeaturesDto
+
 	@ApiProperty({ type: [CatalogContactDto] })
 	contacts: CatalogContactDto[]
 

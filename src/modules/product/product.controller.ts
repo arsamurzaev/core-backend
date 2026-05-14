@@ -37,8 +37,13 @@ import { OptionalSessionGuard } from '../auth/guards/optional-session.guard'
 import { SessionGuard } from '../auth/guards/session.guard'
 import type { AuthRequest } from '../auth/types/auth-request'
 
+import { ApplyProductTypeChangeDtoReq } from './dto/requests/apply-product-type-change.dto.req'
 import { CreateProductDtoReq } from './dto/requests/create-product.dto.req'
-import { SetProductVariantsDtoReq } from './dto/requests/set-product-variants.dto.req'
+import { ProductTypeCompatibilityPreviewDtoReq } from './dto/requests/product-type-compatibility-preview.dto.req'
+import {
+	SetProductVariantMatrixDtoReq,
+	SetProductVariantsDtoReq
+} from './dto/requests/set-product-variants.dto.req'
 import { UpdateProductCategoryPositionDtoReq } from './dto/requests/update-product-category-position.dto.req'
 import { UpdateProductDtoReq } from './dto/requests/update-product.dto.req'
 import {
@@ -47,24 +52,29 @@ import {
 	ProductCursorCardPageDto,
 	ProductCursorPageDto,
 	ProductInfinitePageDto,
+	ProductTypeCompatibilityPreviewDto,
 	ProductUpdateResponseDto,
 	ProductVariantsResponseDto,
 	ProductWithAttributesDto,
 	ProductWithDetailsDto
 } from './dto/responses/product.dto.res'
+import { ProductReadService } from './product-read.service'
 import { ProductService } from './product.service'
 
 @ApiTags('Товар')
 @Controller('product')
 export class ProductController {
-	constructor(private readonly productService: ProductService) {}
+	constructor(
+		private readonly productService: ProductService,
+		private readonly productReads: ProductReadService
+	) {}
 
 	@Get()
 	@UseGuards(OptionalSessionGuard)
 	@ApiOperation({
 		summary: 'Список товаров',
 		description:
-			'В массовой выдаче возвращаются productAttributes, но без variants. В media.variants для каждого изображения возвращается только variant с назначением card.'
+			'В массовой выдаче возвращаются productAttributes и variantSummary, но без полного variants. В media.variants для каждого изображения возвращается только variant с назначением card.'
 	})
 	@ApiOkResponse({ type: ProductWithAttributesDto, isArray: true })
 	async getAll(
@@ -72,7 +82,7 @@ export class ProductController {
 		@Res({ passthrough: true }) res: Response
 	) {
 		this.applyPublicReadCacheHeaders(res, req)
-		return this.productService.getAll({
+		return this.productReads.getAll({
 			includeInactive: this.canReadInactive(req)
 		})
 	}
@@ -82,7 +92,7 @@ export class ProductController {
 	@ApiOperation({
 		summary: 'Лёгкий card-feed товаров (бесконечный скролл)',
 		description:
-			'Возвращает карточки товаров с productAttributes, но без variants. Поддерживает те же фильтры, что и /product/infinite.'
+			'Возвращает карточки товаров с productAttributes и variantSummary, но без полного variants. Поддерживает те же фильтры, что и /product/infinite.'
 	})
 	@ApiQuery({
 		name: 'cursor',
@@ -108,6 +118,11 @@ export class ProductController {
 		name: 'brands',
 		required: false,
 		description: 'ID брендов через запятую'
+	})
+	@ApiQuery({
+		name: 'productTypeId',
+		required: false,
+		description: 'ID типа товара внутри текущего каталога'
 	})
 	@ApiQuery({
 		name: 'minPrice',
@@ -148,7 +163,7 @@ export class ProductController {
 		@Res({ passthrough: true }) res: Response
 	) {
 		this.applyPublicReadCacheHeaders(res, req)
-		return this.productService.getInfiniteCards(query, {
+		return this.productReads.getInfiniteCards(query, {
 			includeInactive: this.canReadInactive(req)
 		})
 	}
@@ -184,6 +199,11 @@ export class ProductController {
 		name: 'brands',
 		required: false,
 		description: 'ID брендов через запятую'
+	})
+	@ApiQuery({
+		name: 'productTypeId',
+		required: false,
+		description: 'ID типа товара внутри текущего каталога'
 	})
 	@ApiQuery({
 		name: 'minPrice',
@@ -224,7 +244,7 @@ export class ProductController {
 		@Res({ passthrough: true }) res: Response
 	) {
 		this.applyPublicReadCacheHeaders(res, req)
-		return this.productService.getInfinite(query, {
+		return this.productReads.getInfinite(query, {
 			includeInactive: this.canReadInactive(req)
 		})
 	}
@@ -234,7 +254,7 @@ export class ProductController {
 	@ApiOperation({
 		summary: 'Лёгкий card-feed рекомендаций',
 		description:
-			'Возвращает карточки рекомендаций с productAttributes, но без variants. Поддерживает те же query-параметры, что и /product/recommendations/infinite.'
+			'Возвращает карточки рекомендаций с productAttributes и variantSummary, но без полного variants. Поддерживает те же query-параметры, что и /product/recommendations/infinite.'
 	})
 	@ApiQuery({
 		name: 'cursor',
@@ -260,6 +280,11 @@ export class ProductController {
 		name: 'brands',
 		required: false,
 		description: 'ID брендов через запятую'
+	})
+	@ApiQuery({
+		name: 'productTypeId',
+		required: false,
+		description: 'ID типа товара внутри текущего каталога'
 	})
 	@ApiQuery({
 		name: 'minPrice',
@@ -300,7 +325,7 @@ export class ProductController {
 		@Res({ passthrough: true }) res: Response
 	) {
 		this.applyPublicReadCacheHeaders(res, req)
-		return this.productService.getRecommendationsInfiniteCards(query, {
+		return this.productReads.getRecommendationsInfiniteCards(query, {
 			includeInactive: this.canReadInactive(req)
 		})
 	}
@@ -336,6 +361,11 @@ export class ProductController {
 		name: 'brands',
 		required: false,
 		description: 'ID брендов через запятую'
+	})
+	@ApiQuery({
+		name: 'productTypeId',
+		required: false,
+		description: 'ID типа товара внутри текущего каталога'
 	})
 	@ApiQuery({
 		name: 'minPrice',
@@ -376,7 +406,7 @@ export class ProductController {
 		@Res({ passthrough: true }) res: Response
 	) {
 		this.applyPublicReadCacheHeaders(res, req)
-		return this.productService.getRecommendationsInfinite(query, {
+		return this.productReads.getRecommendationsInfinite(query, {
 			includeInactive: this.canReadInactive(req)
 		})
 	}
@@ -386,7 +416,7 @@ export class ProductController {
 	@ApiOperation({
 		summary: 'Лёгкий список популярных товаров',
 		description:
-			'Возвращает популярные товары с productAttributes, но без variants.'
+			'Возвращает популярные товары с productAttributes и variantSummary, но без полного variants.'
 	})
 	@ApiOkResponse({ type: ProductWithAttributesDto, isArray: true })
 	async getPopularCards(
@@ -394,7 +424,7 @@ export class ProductController {
 		@Res({ passthrough: true }) res: Response
 	) {
 		this.applyPublicReadCacheHeaders(res, req)
-		return this.productService.getPopularCards({
+		return this.productReads.getPopularCards({
 			includeInactive: this.canReadInactive(req)
 		})
 	}
@@ -404,7 +434,7 @@ export class ProductController {
 	@ApiOperation({
 		summary: 'Лёгкий список товаров без категории',
 		description:
-			'Возвращает карточки товаров без активной категории с productAttributes, но без variants.'
+			'Возвращает карточки товаров без активной категории с productAttributes и variantSummary, но без полного variants.'
 	})
 	@ApiQuery({
 		name: 'cursor',
@@ -424,7 +454,7 @@ export class ProductController {
 		@Res({ passthrough: true }) res: Response
 	) {
 		this.applyPublicReadCacheHeaders(res, req)
-		return this.productService.getUncategorizedInfiniteCards({
+		return this.productReads.getUncategorizedInfiniteCards({
 			cursor,
 			limit,
 			includeInactive: this.canReadInactive(req)
@@ -456,7 +486,7 @@ export class ProductController {
 		@Res({ passthrough: true }) res: Response
 	) {
 		this.applyPublicReadCacheHeaders(res, req)
-		return this.productService.getUncategorizedInfinite({
+		return this.productReads.getUncategorizedInfinite({
 			cursor,
 			limit,
 			includeInactive: this.canReadInactive(req)
@@ -468,7 +498,7 @@ export class ProductController {
 	@ApiOperation({
 		summary: 'Список популярных товаров',
 		description:
-			'В массовой выдаче возвращаются productAttributes, но без variants. В media.variants для каждого изображения возвращается только variant с назначением card.'
+			'В массовой выдаче возвращаются productAttributes и variantSummary, но без полного variants. В media.variants для каждого изображения возвращается только variant с назначением card.'
 	})
 	@ApiOkResponse({ type: ProductWithAttributesDto, isArray: true })
 	async getPopular(
@@ -476,7 +506,7 @@ export class ProductController {
 		@Res({ passthrough: true }) res: Response
 	) {
 		this.applyPublicReadCacheHeaders(res, req)
-		return this.productService.getPopular({
+		return this.productReads.getPopular({
 			includeInactive: this.canReadInactive(req)
 		})
 	}
@@ -499,8 +529,10 @@ export class ProductController {
 		@Res({ passthrough: true }) res: Response
 	) {
 		this.applyPublicReadCacheHeaders(res, req)
-		return this.productService.getBySlug(slug, {
-			includeInactive: this.canReadInactive(req)
+		const canReadInactive = this.canReadInactive(req)
+		return this.productReads.getBySlug(slug, {
+			includeInactive: canReadInactive,
+			includeVariantIntegration: canReadInactive
 		})
 	}
 
@@ -522,8 +554,10 @@ export class ProductController {
 		@Res({ passthrough: true }) res: Response
 	) {
 		this.applyPublicReadCacheHeaders(res, req)
-		return this.productService.getById(id, {
-			includeInactive: this.canReadInactive(req)
+		const canReadInactive = this.canReadInactive(req)
+		return this.productReads.getById(id, {
+			includeInactive: canReadInactive,
+			includeVariantIntegration: canReadInactive
 		})
 	}
 
@@ -557,6 +591,44 @@ export class ProductController {
 	@ApiCreatedResponse({ type: ProductCreateResponseDto })
 	async duplicate(@Param('id') id: string) {
 		return this.productService.duplicate(id)
+	}
+
+	@Post('/:id/product-type/compatibility-preview')
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({
+		summary: 'Preview product type change compatibility without writing'
+	})
+	@ApiParam({
+		name: 'id',
+		description: 'ID товара'
+	})
+	@ApiOkResponse({ type: ProductTypeCompatibilityPreviewDto })
+	async previewProductTypeCompatibility(
+		@Param('id') id: string,
+		@Body() dto: ProductTypeCompatibilityPreviewDtoReq
+	) {
+		return this.productService.previewProductTypeCompatibility(id, dto)
+	}
+
+	@Post('/:id/product-type/apply')
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({
+		summary: 'Apply explicit product type change with confirmed remap/removal'
+	})
+	@ApiParam({
+		name: 'id',
+		description: 'ID товара'
+	})
+	@ApiOkResponse({ type: ProductUpdateResponseDto })
+	async applyProductTypeChange(
+		@Param('id') id: string,
+		@Body() dto: ApplyProductTypeChangeDtoReq
+	) {
+		return this.productService.applyProductTypeChange(id, dto)
 	}
 
 	@Patch('/:id')
@@ -652,6 +724,27 @@ export class ProductController {
 		@Body() dto: SetProductVariantsDtoReq
 	) {
 		return this.productService.setVariants(id, dto)
+	}
+
+	@Post('/:id/variant-matrix')
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({
+		summary: 'Создать/заменить матрицу вариаций товара',
+		description:
+			'Заменяет полную матрицу вариантов товара. В ответе media.variants возвращаются варианты thumb и detail.'
+	})
+	@ApiParam({
+		name: 'id',
+		description: 'ID товара'
+	})
+	@ApiOkResponse({ type: ProductVariantsResponseDto })
+	async setVariantMatrix(
+		@Param('id') id: string,
+		@Body() dto: SetProductVariantMatrixDtoReq
+	) {
+		return this.productService.setVariantMatrix(id, dto)
 	}
 
 	@Delete('/:id')

@@ -1,6 +1,7 @@
 import { ProductStatus } from '@generated/enums'
 import { Test, TestingModule } from '@nestjs/testing'
 
+import { CapabilityService } from '@/modules/capability/capability.service'
 import { S3Service } from '@/modules/s3/s3.service'
 import { CacheService } from '@/shared/cache/cache.service'
 import { MediaRepository } from '@/shared/media/media.repository'
@@ -8,8 +9,15 @@ import { MediaRepository } from '@/shared/media/media.repository'
 import { IntegrationRepository } from '../../integration.repository'
 
 import { MoySkladClient } from './moysklad.client'
+import { MoySkladImageImportService } from './moysklad.image-import.service'
 import { MoySkladMetadataCryptoService } from './moysklad.metadata'
+import { MoySkladMissingProductSyncService } from './moysklad.missing-product-sync.service'
+import { MoySkladProductFolderSyncService } from './moysklad.product-folder-sync.service'
+import { MoySkladProductSyncService } from './moysklad.product-sync.service'
+import { MoySkladStockSyncService } from './moysklad.stock-sync.service'
 import { MoySkladSyncService } from './moysklad.sync.service'
+import { MoySkladVariantAttributeResolverService } from './moysklad.variant-attribute-resolver.service'
+import { MoySkladVariantSyncService } from './moysklad.variant-sync.service'
 
 describe('MoySkladSyncService', () => {
 	let service: MoySkladSyncService
@@ -18,6 +26,7 @@ describe('MoySkladSyncService', () => {
 	let s3: jest.Mocked<S3Service>
 	let mediaRepo: jest.Mocked<MediaRepository>
 	let metadataCrypto: jest.Mocked<MoySkladMetadataCryptoService>
+	let productSync: MoySkladProductSyncService
 	const testProductFolder = {
 		id: 'folder-1',
 		meta: {
@@ -29,15 +38,33 @@ describe('MoySkladSyncService', () => {
 		const module: TestingModule = await Test.createTestingModule({
 			providers: [
 				MoySkladSyncService,
+				MoySkladImageImportService,
+				MoySkladMissingProductSyncService,
+				MoySkladProductFolderSyncService,
+				MoySkladProductSyncService,
+				MoySkladStockSyncService,
+				MoySkladVariantAttributeResolverService,
+				MoySkladVariantSyncService,
 				{
 					provide: IntegrationRepository,
 					useValue: {
 						beginMoySkladSync: jest.fn(),
 						findMoySklad: jest.fn(),
+						findCatalogInventoryMode: jest.fn(),
 						findProductLinkByExternalId: jest.fn(),
 						findProductLinkByProductId: jest.fn(),
 						findProductById: jest.fn(),
 						findProductByCatalogAndSku: jest.fn(),
+						upsertMoySkladVariantAttribute: jest.fn(),
+						ensureMoySkladProductTypeForVariantAttributes: jest.fn(),
+						upsertIntegratedProductVariant: jest.fn(),
+						ensureDefaultVariantForProduct: jest.fn(),
+						archiveMissingIntegratedProductVariants: jest.fn(),
+						findVariantLinksByIntegration: jest.fn(),
+						findProductIdsWithVariantLinks: jest.fn(),
+						updateLinkedProductStock: jest.fn(),
+						updateLinkedVariantStock: jest.fn(),
+						recomputeProductStatusFromVariants: jest.fn(),
 						existsProductSlug: jest.fn(),
 						existsProductSku: jest.fn(),
 						createProduct: jest.fn(),
@@ -54,6 +81,7 @@ describe('MoySkladSyncService', () => {
 						findCategoryLinkByCategoryId: jest.fn(),
 						upsertCategoryLink: jest.fn(),
 						syncManagedProductCategories: jest.fn(),
+						updateSyncRunProgress: jest.fn(),
 						finishMoySkladSync: jest.fn(),
 						failMoySkladSync: jest.fn()
 					}
@@ -88,6 +116,19 @@ describe('MoySkladSyncService', () => {
 							syncStock: true
 						})
 					}
+				},
+				{
+					provide: CapabilityService,
+					useValue: {
+						assertCanUseMoySkladIntegration: jest.fn().mockResolvedValue(undefined),
+						getCurrentFeatures: jest.fn().mockResolvedValue({
+							canUseProductTypes: true,
+							canUseProductVariants: true,
+							canUseCatalogSaleUnits: true,
+							canUseInternalInventory: false,
+							canUseMoySkladIntegration: true
+						})
+					}
 				}
 			]
 		}).compile()
@@ -98,15 +139,33 @@ describe('MoySkladSyncService', () => {
 		s3 = module.get(S3Service)
 		mediaRepo = module.get(MediaRepository)
 		metadataCrypto = module.get(MoySkladMetadataCryptoService)
+		productSync = module.get(MoySkladProductSyncService)
 		repo.findCategoriesByName.mockResolvedValue([])
 		repo.findCategoryLinkByExternalId.mockResolvedValue(null)
 		repo.findCategoryLinkByCategoryId.mockResolvedValue(null)
+		repo.ensureDefaultVariantForProduct.mockResolvedValue({
+			variant: null,
+			created: false,
+			updated: false,
+			skipped: false
+		} as any)
+		repo.ensureMoySkladProductTypeForVariantAttributes.mockResolvedValue({
+			productTypeId: 'moysklad-product-type',
+			created: false,
+			assigned: false,
+			changed: false
+		} as any)
+		repo.archiveMissingIntegratedProductVariants.mockResolvedValue(0)
+		repo.findCatalogInventoryMode.mockResolvedValue('EXTERNAL' as any)
 		repo.syncManagedProductCategories.mockResolvedValue({
 			added: 0,
 			removed: 0
 		})
 		jest
 			.spyOn(MoySkladClient.prototype, 'getProductFolderChain')
+			.mockResolvedValue([])
+		jest
+			.spyOn(MoySkladClient.prototype, 'getVariantsByProduct')
 			.mockResolvedValue([])
 	})
 
@@ -238,6 +297,17 @@ describe('MoySkladSyncService', () => {
 				integrationId: integration.id,
 				productId: 'local-1',
 				externalId: 'external-key-1'
+			}),
+			undefined
+		)
+		expect(repo.ensureDefaultVariantForProduct).toHaveBeenCalledWith(
+			expect.objectContaining({
+				integrationId: integration.id,
+				productId: 'local-1',
+				sku: 'MSK-1',
+				price: 125,
+				stock: 5,
+				status: 'ACTIVE'
 			}),
 			undefined
 		)
@@ -381,6 +451,275 @@ describe('MoySkladSyncService', () => {
 		])
 	})
 
+	it('continues catalog sync when one MoySklad product item fails', async () => {
+		const catalogId = 'catalog-1'
+		const integration = {
+			id: 'integration-1',
+			catalogId,
+			metadata: {},
+			isActive: true,
+			lastSyncAt: null
+		}
+		const failedProduct = {
+			id: 'external-raw-failed',
+			externalCode: 'external-key-failed',
+			meta: { type: 'product' },
+			name: 'Broken Product',
+			code: 'MSK-BROKEN',
+			archived: false,
+			stock: 1,
+			productFolder: testProductFolder,
+			salePrices: [{ value: 9900, priceType: { name: 'Retail' } }],
+			images: { rows: [] }
+		}
+		const successfulProduct = {
+			id: 'external-raw-ok',
+			externalCode: 'external-key-ok',
+			meta: { type: 'product' },
+			name: 'Good Product',
+			code: 'MSK-OK',
+			archived: false,
+			stock: 2,
+			productFolder: testProductFolder,
+			salePrices: [{ value: 12900, priceType: { name: 'Retail' } }],
+			images: { rows: [] }
+		}
+		const loggerErrorSpy = jest
+			.spyOn((service as any).logger, 'error')
+			.mockImplementation(() => undefined)
+
+		repo.beginMoySkladSync.mockResolvedValue(integration as any)
+		repo.findMoySklad.mockResolvedValue(integration as any)
+		repo.findProductLinksByIntegration.mockResolvedValue([] as any)
+		repo.finishMoySkladSync.mockResolvedValue(integration as any)
+		jest
+			.spyOn(MoySkladClient.prototype, 'getAllAssortment')
+			.mockResolvedValue([failedProduct, successfulProduct] as any)
+		jest
+			.spyOn(productSync, 'syncExternalProduct')
+			.mockRejectedValueOnce(new Error('single item failed'))
+			.mockResolvedValueOnce({
+				productId: 'local-ok',
+				externalId: successfulProduct.externalCode,
+				created: true,
+				updated: false,
+				imagesImported: 0
+			})
+
+		const result = await service.syncCatalog(catalogId)
+
+		expect(result.ok).toBe(true)
+		expect(result.total).toBe(2)
+		expect(result.created).toBe(1)
+		expect(result.errors).toEqual([
+			expect.objectContaining({
+				code: 'MOYSKLAD_PRODUCT_SYNC_FAILED',
+				externalId: 'external-key-failed',
+				message: 'single item failed'
+			})
+		])
+		expect(loggerErrorSpy).toHaveBeenCalledWith(
+			'MoySklad product sync item failed',
+			expect.objectContaining({
+				externalId: 'external-key-failed',
+				error: 'single item failed'
+			})
+		)
+		expect(repo.failMoySkladSync).not.toHaveBeenCalled()
+		expect(repo.finishMoySkladSync).toHaveBeenCalled()
+	})
+
+	it('imports MoySklad variants as product variants linked to the parent product', async () => {
+		const catalogId = 'catalog-1'
+		const integration = {
+			id: 'integration-1',
+			catalogId,
+			metadata: {},
+			isActive: true,
+			lastSyncAt: null
+		}
+		const parent = {
+			id: 'external-product-raw-id',
+			externalCode: 'external-key-product',
+			meta: { type: 'product' },
+			name: 'Sneaker',
+			code: 'MSK-1',
+			updated: '2026-03-23 14:00:00',
+			archived: false,
+			stock: 5,
+			productFolder: testProductFolder,
+			salePrices: [{ value: 10000, priceType: { name: 'Retail' } }],
+			images: { rows: [] }
+		}
+		const variant = {
+			id: 'external-variant-raw-id',
+			externalCode: 'external-key-variant',
+			meta: { type: 'variant' },
+			name: 'Sneaker / 42 / Black',
+			code: 'SKU-42-BLK',
+			updated: '2026-03-23 14:01:00',
+			archived: false,
+			stock: 7,
+			barcodes: [
+				{
+					ean13: '4607000000001',
+					code128: 'SKU-42-BLK'
+				}
+			],
+			product: {
+				id: parent.id,
+				name: parent.name,
+				meta: {
+					href: `https://api.moysklad.ru/api/remap/1.2/entity/product/${parent.id}`,
+					type: 'product'
+				}
+			},
+			characteristics: [
+				{ id: 'size-id', name: 'Size', value: '42' },
+				{ id: 'color-id', name: 'Color', value: 'Black' }
+			],
+			salePrices: [{ value: 15000, priceType: { name: 'Retail' } }],
+			images: { rows: [] }
+		}
+
+		metadataCrypto.parseStoredMetadata.mockReturnValue({
+			token: 'token',
+			priceTypeName: 'Retail',
+			importImages: false,
+			syncStock: true
+		} as any)
+		repo.beginMoySkladSync.mockResolvedValue(integration as any)
+		repo.findMoySklad.mockResolvedValue(integration as any)
+		repo.findProductLinkByExternalId.mockResolvedValue(null)
+		repo.findProductByCatalogAndSku.mockResolvedValue(null)
+		repo.existsProductSlug.mockResolvedValue(false)
+		repo.existsProductSku.mockResolvedValue(false)
+		repo.createProduct.mockResolvedValue({
+			id: 'local-product',
+			catalogId,
+			name: parent.name,
+			sku: 'MSK-1',
+			slug: 'sneaker',
+			price: 100,
+			status: ProductStatus.ACTIVE,
+			deleteAt: null
+		} as any)
+		repo.upsertProductLink.mockResolvedValue({ id: 'product-link' } as any)
+		repo.findProductLinksByIntegration.mockResolvedValue([] as any)
+		repo.findProductById.mockResolvedValue({
+			id: 'local-product',
+			catalogId,
+			name: parent.name,
+			sku: 'MSK-1',
+			slug: 'sneaker',
+			price: 100,
+			status: ProductStatus.ACTIVE,
+			deleteAt: null
+		} as any)
+		repo.upsertMoySkladVariantAttribute
+			.mockResolvedValueOnce({
+				id: 'attr-size',
+				key: 'moysklad_size',
+				displayName: 'Size',
+				displayOrder: 1
+			} as any)
+			.mockResolvedValueOnce({
+				id: 'attr-color',
+				key: 'moysklad_color',
+				displayName: 'Color',
+				displayOrder: 2
+			} as any)
+		repo.upsertIntegratedProductVariant.mockResolvedValue({
+			variant: {
+				id: 'local-variant',
+				productId: 'local-product',
+				sku: 'SKU-42-BLK-6B1ED3FC',
+				variantKey: 'moysklad_size=42;moysklad_color=black',
+				price: 150,
+				stock: 7
+			},
+			link: { id: 'variant-link' },
+			created: true,
+			updated: false
+		} as any)
+		repo.finishMoySkladSync.mockResolvedValue(integration as any)
+
+		jest
+			.spyOn(MoySkladClient.prototype, 'getAllAssortment')
+			.mockResolvedValue([parent, variant] as any)
+
+		const result = await service.syncCatalog(catalogId)
+
+		expect(result.ok).toBe(true)
+		expect(result.total).toBe(2)
+		expect(result.created).toBe(2)
+		expect(repo.createProduct).toHaveBeenCalledTimes(1)
+		expect(repo.ensureDefaultVariantForProduct).not.toHaveBeenCalled()
+		expect(repo.upsertMoySkladVariantAttribute).toHaveBeenCalledTimes(2)
+		expect(
+			repo.ensureMoySkladProductTypeForVariantAttributes
+		).toHaveBeenCalledWith(
+			{
+				catalogId,
+				productId: 'local-product',
+				attributes: [
+					expect.objectContaining({
+						attributeId: 'attr-size',
+						key: 'moysklad_size',
+						attributeDisplayName: 'Size',
+						displayName: '42'
+					}),
+					expect.objectContaining({
+						attributeId: 'attr-color',
+						key: 'moysklad_color',
+						attributeDisplayName: 'Color',
+						displayName: 'Black'
+					})
+				]
+			},
+			undefined
+		)
+		expect(repo.upsertIntegratedProductVariant).toHaveBeenCalledWith(
+			expect.objectContaining({
+				catalogId,
+				integrationId: integration.id,
+				productId: 'local-product',
+				externalId: variant.id,
+				externalCode: variant.code,
+				sku: expect.stringMatching(/^SKU-42-BLK-[A-F0-9]{8}$/),
+				variantKey: 'moysklad_size=42;moysklad_color=black',
+				price: 150,
+				stock: 7,
+				status: 'ACTIVE',
+				attributes: [
+					{
+						attributeId: 'attr-size',
+						value: '42',
+						displayName: '42'
+					},
+					{
+						attributeId: 'attr-color',
+						value: 'black',
+						displayName: 'Black'
+					}
+				],
+				rawMeta: expect.objectContaining({
+					id: variant.id,
+					type: 'variant',
+					product: expect.objectContaining({ id: parent.id }),
+					barcodes: [
+						expect.objectContaining({
+							ean13: '4607000000001',
+							code128: 'SKU-42-BLK'
+						})
+					],
+					characteristics: expect.any(Array)
+				})
+			}),
+			undefined
+		)
+	})
+
 	it('skips missing-product archival during incremental catalog sync', async () => {
 		const catalogId = 'catalog-1'
 		const lastSyncAt = new Date('2026-03-23T15:37:00.336Z')
@@ -414,6 +753,186 @@ describe('MoySkladSyncService', () => {
 				deletedProducts: 0
 			})
 		)
+	})
+
+	it('syncs MoySklad stock for linked products and variants', async () => {
+		const catalogId = 'catalog-1'
+		const integration = {
+			id: 'integration-1',
+			catalogId,
+			metadata: {},
+			isActive: true,
+			lastSyncAt: null
+		}
+
+		repo.beginMoySkladSync.mockResolvedValue(integration as any)
+		repo.findMoySklad.mockResolvedValue(integration as any)
+		repo.findProductLinksByIntegration.mockResolvedValue([
+			{
+				id: 'product-link-simple',
+				integrationId: integration.id,
+				productId: 'product-simple',
+				externalId: 'simple-external-code',
+				rawMeta: { id: 'simple-raw-id' }
+			},
+			{
+				id: 'product-link-parent',
+				integrationId: integration.id,
+				productId: 'product-with-variants',
+				externalId: 'parent-external-code',
+				rawMeta: { id: 'parent-raw-id' }
+			}
+		] as any)
+		repo.findVariantLinksByIntegration.mockResolvedValue([
+			{
+				id: 'variant-link',
+				integrationId: integration.id,
+				variantId: 'variant-1',
+				externalId: 'variant-raw-id',
+				rawMeta: { id: 'variant-raw-id' }
+			}
+		] as any)
+		repo.findProductIdsWithVariantLinks.mockResolvedValue([
+			'product-with-variants'
+		])
+		repo.updateLinkedVariantStock.mockResolvedValue({
+			changed: true,
+			productId: 'product-with-variants'
+		})
+		repo.recomputeProductStatusFromVariants.mockResolvedValue(true)
+		repo.updateLinkedProductStock.mockResolvedValue(true)
+		repo.finishMoySkladSync.mockResolvedValue(integration as any)
+
+		jest.spyOn(MoySkladClient.prototype, 'getStockAll').mockResolvedValue(
+			new Map([
+				['simple-raw-id', 5],
+				['parent-raw-id', 12],
+				['variant-raw-id', 3]
+			])
+		)
+
+		const result = await service.syncStock(catalogId)
+
+		expect(result).toEqual(
+			expect.objectContaining({
+				ok: true,
+				total: 3,
+				updated: 3,
+				updatedProducts: 2,
+				updatedVariants: 1,
+				skipped: 1
+			})
+		)
+		expect(repo.updateLinkedVariantStock).toHaveBeenCalledWith('variant-1', 3)
+		expect(repo.recomputeProductStatusFromVariants).toHaveBeenCalledWith(
+			catalogId,
+			'product-with-variants'
+		)
+		expect(repo.updateLinkedProductStock).toHaveBeenCalledWith(
+			catalogId,
+			'product-simple',
+			5
+		)
+		expect(repo.updateLinkedProductStock).not.toHaveBeenCalledWith(
+			catalogId,
+			'product-with-variants',
+			expect.any(Number)
+		)
+		expect(repo.finishMoySkladSync).toHaveBeenCalledWith(
+			catalogId,
+			expect.objectContaining({
+				totalProducts: 3,
+				createdProducts: 0,
+				updatedProducts: 3,
+				deletedProducts: 0,
+				lastStockSyncedAt: result.syncedAt
+			})
+		)
+		expect(cache.bumpVersion).toHaveBeenCalledTimes(2)
+	})
+
+	it('keeps external stock as reconciliation-only for INTERNAL inventory catalogs', async () => {
+		const catalogId = 'catalog-1'
+		const integration = {
+			id: 'integration-1',
+			catalogId,
+			metadata: {},
+			isActive: true,
+			lastSyncAt: null
+		}
+
+		repo.beginMoySkladSync.mockResolvedValue(integration as any)
+		repo.findMoySklad.mockResolvedValue(integration as any)
+		repo.findCatalogInventoryMode.mockResolvedValue('INTERNAL' as any)
+		repo.finishMoySkladSync.mockResolvedValue(integration as any)
+
+		const stockSpy = jest
+			.spyOn(MoySkladClient.prototype, 'getStockAll')
+			.mockResolvedValue(
+				new Map([
+					['simple-raw-id', 5],
+					['variant-raw-id', 3]
+				])
+			)
+
+		const result = await service.syncStock(catalogId)
+
+		expect(result).toEqual(
+			expect.objectContaining({
+				ok: true,
+				total: 0,
+				updated: 0,
+				updatedProducts: 0,
+				updatedVariants: 0,
+				skipped: 0
+			})
+		)
+		expect(stockSpy).not.toHaveBeenCalled()
+		expect(repo.findProductLinksByIntegration).not.toHaveBeenCalled()
+		expect(repo.findVariantLinksByIntegration).not.toHaveBeenCalled()
+		expect(repo.updateLinkedVariantStock).not.toHaveBeenCalled()
+		expect(repo.updateLinkedProductStock).not.toHaveBeenCalled()
+		expect(repo.finishMoySkladSync).toHaveBeenCalledWith(
+			catalogId,
+			expect.objectContaining({
+				totalProducts: 0,
+				updatedProducts: 0,
+				lastStockSyncedAt: result.syncedAt
+			})
+		)
+		expect(cache.bumpVersion).not.toHaveBeenCalled()
+	})
+
+	it('rejects stock sync when stock import is disabled', async () => {
+		const catalogId = 'catalog-1'
+		const integration = {
+			id: 'integration-1',
+			catalogId,
+			metadata: {},
+			isActive: true,
+			lastSyncAt: null
+		}
+
+		metadataCrypto.parseStoredMetadata.mockReturnValue({
+			token: 'token',
+			priceTypeName: 'Retail',
+			importImages: false,
+			syncStock: false
+		} as any)
+		repo.beginMoySkladSync.mockResolvedValue(integration as any)
+		repo.findMoySklad.mockResolvedValue(integration as any)
+		const stockSpy = jest
+			.spyOn(MoySkladClient.prototype, 'getStockAll')
+			.mockResolvedValue(new Map())
+
+		await expect(service.syncStock(catalogId)).rejects.toThrow(
+			'MoySklad stock sync is disabled'
+		)
+		expect(repo.failMoySkladSync).toHaveBeenCalledWith(
+			catalogId,
+			'MoySklad stock sync is disabled in integration settings'
+		)
+		expect(stockSpy).not.toHaveBeenCalled()
 	})
 
 	it('creates only root and leaf categories for nested MoySklad product folders and links product to leaf category', async () => {
@@ -804,6 +1323,207 @@ describe('MoySkladSyncService', () => {
 		expect(repo.findProductMediaIds).not.toHaveBeenCalled()
 		expect(repo.replaceProductMedia).not.toHaveBeenCalled()
 		expect(downloadImageSpy).not.toHaveBeenCalled()
+	})
+
+	it('syncs product variants and their stock during product sync', async () => {
+		const catalogId = 'catalog-1'
+		const productId = 'local-1'
+		const integration = {
+			id: 'integration-1',
+			catalogId,
+			metadata: {},
+			isActive: true,
+			lastSyncAt: null
+		}
+		const localProduct = {
+			id: productId,
+			catalogId,
+			name: 'Sneaker',
+			sku: 'MSK-1',
+			slug: 'sneaker',
+			price: 200,
+			status: ProductStatus.ACTIVE,
+			deleteAt: null
+		}
+		const externalProduct = {
+			id: 'external-product-1',
+			externalCode: 'external-key-1',
+			meta: { type: 'product' },
+			name: 'Sneaker',
+			code: 'MSK-1',
+			updated: '2026-03-23 14:00:00',
+			archived: false,
+			stock: 8,
+			productFolder: testProductFolder,
+			salePrices: [{ value: 20000, priceType: { name: 'Retail' } }],
+			images: { rows: [] }
+		}
+		const variants = [
+			{
+				id: 'variant-1',
+				meta: { type: 'variant' },
+				name: 'Sneaker / 42',
+				code: 'SKU-42',
+				updated: '2026-03-23 14:01:00',
+				archived: false,
+				stock: 99,
+				product: {
+					id: externalProduct.id,
+					meta: {
+						href: `https://api.moysklad.ru/api/remap/1.2/entity/product/${externalProduct.id}`,
+						type: 'product'
+					}
+				},
+				characteristics: [{ id: 'size-id', name: 'Size', value: '42' }],
+				salePrices: [{ value: 21000, priceType: { name: 'Retail' } }]
+			},
+			{
+				id: 'variant-2',
+				meta: { type: 'variant' },
+				name: 'Sneaker / 43',
+				code: 'SKU-43',
+				updated: '2026-03-23 14:02:00',
+				archived: false,
+				stock: 99,
+				product: {
+					id: externalProduct.id,
+					meta: {
+						href: `https://api.moysklad.ru/api/remap/1.2/entity/product/${externalProduct.id}`,
+						type: 'product'
+					}
+				},
+				characteristics: [{ id: 'size-id', name: 'Size', value: '43' }],
+				salePrices: [{ value: 22000, priceType: { name: 'Retail' } }]
+			}
+		]
+
+		metadataCrypto.parseStoredMetadata.mockReturnValue({
+			token: 'token',
+			priceTypeName: 'Retail',
+			importImages: false,
+			syncStock: true
+		} as any)
+		repo.beginMoySkladSync.mockResolvedValue(integration as any)
+		repo.findMoySklad.mockResolvedValue(integration as any)
+		repo.findProductById.mockResolvedValue(localProduct as any)
+		repo.findProductLinkByProductId.mockResolvedValue({
+			id: 'link-1',
+			productId,
+			externalId: 'external-key-1',
+			rawMeta: { id: externalProduct.id },
+			externalUpdatedAt: new Date('2026-03-22T10:00:00.000Z')
+		} as any)
+		repo.findProductLinkByExternalId.mockResolvedValue({
+			id: 'link-1',
+			productId,
+			externalId: 'external-key-1',
+			rawMeta: { id: externalProduct.id },
+			externalUpdatedAt: new Date('2026-03-22T10:00:00.000Z')
+		} as any)
+		repo.archiveMissingIntegratedProductVariants.mockResolvedValue(1)
+		repo.upsertProductLink.mockResolvedValue({ id: 'link-1' } as any)
+		repo.upsertMoySkladVariantAttribute.mockResolvedValue({
+			id: 'attr-size',
+			key: 'moysklad_size',
+			displayName: 'Size',
+			displayOrder: 1
+		} as any)
+		repo.upsertIntegratedProductVariant
+			.mockResolvedValueOnce({
+				variant: {
+					id: 'local-variant-1',
+					productId,
+					sku: 'SKU-42',
+					variantKey: 'moysklad_size=42',
+					price: 210,
+					stock: 4
+				},
+				link: { id: 'variant-link-1' },
+				created: true,
+				updated: false
+			} as any)
+			.mockResolvedValueOnce({
+				variant: {
+					id: 'local-variant-2',
+					productId,
+					sku: 'SKU-43',
+					variantKey: 'moysklad_size=43',
+					price: 220,
+					stock: 0
+				},
+				link: { id: 'variant-link-2' },
+				created: false,
+				updated: true
+			} as any)
+		repo.recomputeProductStatusFromVariants.mockResolvedValue(true)
+		repo.finishMoySkladSync.mockResolvedValue(integration as any)
+
+		jest
+			.spyOn(MoySkladClient.prototype, 'getAssortmentItemByExternalCode')
+			.mockResolvedValue(externalProduct as any)
+		jest
+			.spyOn(MoySkladClient.prototype, 'getVariantsByProduct')
+			.mockResolvedValue(variants as any)
+		jest.spyOn(MoySkladClient.prototype, 'getStockAll').mockResolvedValue(
+			new Map([
+				['variant-1', 4],
+				['variant-2', 0]
+			])
+		)
+
+		const result = await service.syncProduct(catalogId, productId)
+
+		expect(result.ok).toBe(true)
+		expect(result.totalVariants).toBe(2)
+		expect(result.createdVariants).toBe(1)
+		expect(result.updatedVariants).toBe(1)
+		expect(result.deletedVariants).toBe(1)
+		expect(result.updated).toBe(true)
+		expect(MoySkladClient.prototype.getVariantsByProduct).toHaveBeenCalledWith(
+			externalProduct.id
+		)
+		expect(MoySkladClient.prototype.getStockAll).toHaveBeenCalledWith({
+			assortmentId: ['variant-1', 'variant-2']
+		})
+		expect(repo.archiveMissingIntegratedProductVariants).toHaveBeenCalledWith({
+			integrationId: integration.id,
+			productId,
+			externalIds: ['variant-1', 'variant-2']
+		})
+		expect(repo.ensureDefaultVariantForProduct).not.toHaveBeenCalled()
+		expect(repo.upsertIntegratedProductVariant).toHaveBeenNthCalledWith(
+			1,
+			expect.objectContaining({
+				productId,
+				externalId: 'variant-1',
+				stock: 4,
+				status: 'ACTIVE'
+			}),
+			undefined
+		)
+		expect(repo.upsertIntegratedProductVariant).toHaveBeenNthCalledWith(
+			2,
+			expect.objectContaining({
+				productId,
+				externalId: 'variant-2',
+				stock: 0,
+				status: 'OUT_OF_STOCK'
+			}),
+			undefined
+		)
+		expect(repo.recomputeProductStatusFromVariants).toHaveBeenCalledWith(
+			catalogId,
+			productId
+		)
+		expect(repo.finishMoySkladSync).toHaveBeenCalledWith(
+			catalogId,
+			expect.objectContaining({
+				totalProducts: 3,
+				createdProducts: 1,
+				updatedProducts: 2,
+				deletedProducts: 1
+			})
+		)
 	})
 
 	it('refreshes images for an existing product during product sync', async () => {

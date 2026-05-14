@@ -13,7 +13,9 @@ export type CatalogCheckoutField = {
 export type CatalogCheckoutConfig = {
 	availableMethods: CartCheckoutMethod[]
 	enabledMethods: CartCheckoutMethod[]
-	methodContacts: Partial<Record<CartCheckoutMethod, CatalogCheckoutContactValues>>
+	methodContacts: Partial<
+		Record<CartCheckoutMethod, CatalogCheckoutContactValues>
+	>
 	methodFields: Record<CartCheckoutMethod, CatalogCheckoutField[]>
 }
 
@@ -153,9 +155,7 @@ export function resolveCatalogCheckoutConfig(params: {
 		availableMethods
 	)
 	const enabledMethods =
-		normalizedEnabledMethods === null
-			? fallbackMethods
-			: normalizedEnabledMethods
+		normalizedEnabledMethods === null ? fallbackMethods : normalizedEnabledMethods
 
 	return {
 		availableMethods,
@@ -165,7 +165,9 @@ export function resolveCatalogCheckoutConfig(params: {
 	}
 }
 
-export function normalizeCheckoutMethod(value: unknown): CartCheckoutMethod | null {
+export function normalizeCheckoutMethod(
+	value: unknown
+): CartCheckoutMethod | null {
 	if (typeof value !== 'string') return null
 	const normalized = value.trim().toUpperCase()
 	if (
@@ -282,7 +284,7 @@ function normalizeMethodArray(
 	if (!Array.isArray(value)) return null
 	const methods = Array.from(
 		new Set(value.map(normalizeCheckoutMethod).filter(Boolean))
-	) as CartCheckoutMethod[]
+	)
 	const filtered = methods.filter(method => availableMethods.includes(method))
 
 	if (strict && methods.length > 0 && filtered.length === 0) {
@@ -297,7 +299,9 @@ function normalizeMethodContacts(
 ): Partial<Record<CartCheckoutMethod, CatalogCheckoutContactValues>> | null {
 	if (!isRecord(value)) return null
 
-	const result: Partial<Record<CartCheckoutMethod, CatalogCheckoutContactValues>> = {}
+	const result: Partial<
+		Record<CartCheckoutMethod, CatalogCheckoutContactValues>
+	> = {}
 	for (const [methodKey, contactsValue] of Object.entries(value)) {
 		const method = normalizeCheckoutMethod(methodKey)
 		if (!method || !isRecord(contactsValue)) continue

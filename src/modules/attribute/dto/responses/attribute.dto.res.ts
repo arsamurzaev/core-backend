@@ -1,12 +1,41 @@
 import { DataType } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
+export class AttributeEnumValueAliasDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	attributeId: string
+
+	@ApiProperty({ type: String, nullable: true })
+	catalogId: string | null
+
+	@ApiProperty({ type: String })
+	enumValueId: string
+
+	@ApiProperty({ type: String })
+	value: string
+
+	@ApiProperty({ type: String, nullable: true })
+	displayName: string | null
+
+	@ApiProperty({ type: String, format: 'date-time' })
+	createdAt: string
+
+	@ApiProperty({ type: String, format: 'date-time' })
+	updatedAt: string
+}
+
 export class AttributeEnumValueDto {
 	@ApiProperty({ type: String })
 	id: string
 
 	@ApiProperty({ type: String })
 	attributeId: string
+
+	@ApiProperty({ type: String, nullable: true })
+	catalogId: string | null
 
 	@ApiProperty({ type: String })
 	value: string
@@ -19,6 +48,15 @@ export class AttributeEnumValueDto {
 
 	@ApiProperty({ type: String, nullable: true })
 	businessId: string | null
+
+	@ApiProperty({ enum: ['MANUAL', 'AUTO', 'IMPORTED'] })
+	source: string
+
+	@ApiProperty({ type: String, nullable: true })
+	mergedIntoId: string | null
+
+	@ApiPropertyOptional({ type: [AttributeEnumValueAliasDto] })
+	aliases?: AttributeEnumValueAliasDto[]
 
 	@ApiProperty({ type: String, format: 'date-time' })
 	createdAt: string

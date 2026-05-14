@@ -24,10 +24,16 @@ export class CreateProductDtoReq {
 	@MaxLength(255)
 	name: string
 
-	@ApiProperty({ type: Number, example: 999.0 })
-	@Type(() => Number)
+	@ApiPropertyOptional({ type: Number, example: 999.0, nullable: true })
+	@IsOptional()
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		if (typeof value === 'string' && value.trim().length === 0) return null
+		return Number(value)
+	})
 	@IsNumber()
-	price: number
+	price?: number | null
 
 	@ApiPropertyOptional({ type: [String], example: ['media-uuid'] })
 	@IsOptional()
@@ -63,6 +69,22 @@ export class CreateProductDtoReq {
 		return normalized.length ? normalized : null
 	})
 	brandId?: string | null
+
+	@ApiPropertyOptional({
+		type: String,
+		example: 'product-type-uuid',
+		nullable: true
+	})
+	@IsOptional()
+	@IsString()
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		if (typeof value !== 'string') return value
+		const normalized = value.trim()
+		return normalized.length ? normalized : null
+	})
+	productTypeId?: string | null
 
 	@ApiPropertyOptional({
 		type: [String],

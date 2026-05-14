@@ -2,8 +2,8 @@ import { CartCheckoutMethod, ContactType } from '@generated/enums'
 import { BadRequestException } from '@nestjs/common'
 
 import {
-	normalizeCatalogCheckoutSettings,
 	normalizeCartCheckoutData,
+	normalizeCatalogCheckoutSettings,
 	resolveCatalogCheckoutConfig,
 	resolveCheckoutAvailableMethods,
 	resolveCheckoutContactsSnapshot
@@ -35,15 +35,15 @@ describe('catalog checkout helpers', () => {
 		expect(
 			resolveCatalogCheckoutConfig({ typeCode: 'restaurant' }).enabledMethods
 		).toEqual([CartCheckoutMethod.DELIVERY, CartCheckoutMethod.PICKUP])
-		expect(resolveCatalogCheckoutConfig({ typeCode: 'cafe' }).enabledMethods).toEqual(
-			[CartCheckoutMethod.DELIVERY, CartCheckoutMethod.PICKUP]
-		)
+		expect(
+			resolveCatalogCheckoutConfig({ typeCode: 'cafe' }).enabledMethods
+		).toEqual([CartCheckoutMethod.DELIVERY, CartCheckoutMethod.PICKUP])
 		expect(
 			resolveCatalogCheckoutConfig({ typeCode: 'wholesale' }).enabledMethods
 		).toEqual([])
-		expect(resolveCatalogCheckoutConfig({ typeCode: 'clothes' }).enabledMethods).toEqual(
-			[]
-		)
+		expect(
+			resolveCatalogCheckoutConfig({ typeCode: 'clothes' }).enabledMethods
+		).toEqual([])
 	})
 
 	it('keeps explicit empty enabled methods', () => {

@@ -65,7 +65,8 @@ describe('MoySkladMetadataCryptoService', () => {
 			syncStock: true,
 			scheduleEnabled: true,
 			schedulePattern: '0 */6 * * *',
-			scheduleTimezone: 'Europe/Moscow'
+			scheduleTimezone: 'Europe/Moscow',
+			lastStockSyncedAt: '2026-03-23T12:15:00.000Z'
 		})
 
 		const result = service.parseStoredMetadata(stored)
@@ -78,7 +79,8 @@ describe('MoySkladMetadataCryptoService', () => {
 				syncStock: true,
 				scheduleEnabled: true,
 				schedulePattern: '0 */6 * * *',
-				scheduleTimezone: 'Europe/Moscow'
+				scheduleTimezone: 'Europe/Moscow',
+				lastStockSyncedAt: '2026-03-23T12:15:00.000Z'
 			})
 		)
 	})
@@ -95,5 +97,47 @@ describe('MoySkladMetadataCryptoService', () => {
 		})
 
 		expect(result.token).toBe('legacy-token')
+	})
+
+	it('requires order export refs when exportOrders is enabled', () => {
+		expect(() =>
+			buildMoySkladMetadata({
+				token: 'secret-token',
+				exportOrders: true
+			})
+		).toThrow(
+			'For MoySklad order export, organization, counterparty and store ids are required'
+		)
+	})
+
+	it('keeps order export disabled by default', () => {
+		const result = buildMoySkladMetadata({
+			token: 'secret-token'
+		})
+
+		expect(result.exportOrders).toBe(false)
+		expect(result.orderExportOrganizationId).toBeNull()
+		expect(result.orderExportCounterpartyId).toBeNull()
+		expect(result.orderExportStoreId).toBeNull()
+	})
+
+	it('stores order export settings with encrypted metadata', () => {
+		const result = service.buildStoredMetadata({
+			token: 'secret-token',
+			exportOrders: true,
+			orderExportOrganizationId: ' organization-1 ',
+			orderExportCounterpartyId: 'counterparty-1',
+			orderExportStoreId: 'store-1'
+		})
+
+		expect(result).toEqual(
+			expect.objectContaining({
+				exportOrders: true,
+				orderExportOrganizationId: 'organization-1',
+				orderExportCounterpartyId: 'counterparty-1',
+				orderExportStoreId: 'store-1'
+			})
+		)
+		expect(result.tokenEncrypted).toEqual(expect.any(Object))
 	})
 })

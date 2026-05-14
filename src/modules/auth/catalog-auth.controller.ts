@@ -1,7 +1,7 @@
 ﻿import { Role } from '@generated/enums'
 import {
-	Body,
 	BadRequestException,
+	Body,
 	Controller,
 	Get,
 	NotFoundException,
@@ -44,7 +44,10 @@ import {
 	AuthSessionsResponseDto
 } from './dto/responses/session.dto.res'
 import { SessionGuard } from './guards/session.guard'
-import { SessionService, type ActiveSessionEntry } from './session/session.service'
+import {
+	type ActiveSessionEntry,
+	SessionService
+} from './session/session.service'
 import type { AuthRequest } from './types/auth-request'
 
 @ApiTags('Catalog Auth')
@@ -106,7 +109,7 @@ export class CatalogAuthController {
 	async changePassword(@Body() dto: ChangePasswordDtoReq, @Req() req: Request) {
 		const authReq = req as AuthRequest
 		await this.auth.changePassword(
-			authReq.user!.id,
+			authReq.user.id,
 			dto,
 			authReq.sessionId ?? null
 		)
@@ -125,7 +128,7 @@ export class CatalogAuthController {
 	@ApiUnauthorizedResponse({ description: 'Не авторизован' })
 	async sessionsList(@Req() req: Request): Promise<AuthSessionsResponseDto> {
 		const authReq = req as AuthRequest
-		const entries = await this.sessions.listActiveForUser(authReq.user!.id)
+		const entries = await this.sessions.listActiveForUser(authReq.user.id)
 
 		return {
 			ok: true,
@@ -140,12 +143,15 @@ export class CatalogAuthController {
 	@Post('sessions/revoke-others')
 	@ApiOperation({ summary: 'Revoke all other catalog user sessions' })
 	@ApiSecurity('csrf')
-	@ApiOkResponse({ description: 'Остальные сессии сброшены', type: OkResponseDto })
+	@ApiOkResponse({
+		description: 'Остальные сессии сброшены',
+		type: OkResponseDto
+	})
 	@ApiUnauthorizedResponse({ description: 'Не авторизован' })
 	async revokeOtherSessions(@Req() req: Request) {
 		const authReq = req as AuthRequest
 		await this.sessions.destroyAllForUserExcept(
-			authReq.user!.id,
+			authReq.user.id,
 			authReq.sessionId ?? ''
 		)
 		return { ok: true }
@@ -165,7 +171,7 @@ export class CatalogAuthController {
 			throw new BadRequestException('Текущую сессию нельзя сбросить здесь')
 		}
 
-		await this.sessions.destroyForUser(authReq.user!.id, sid)
+		await this.sessions.destroyForUser(authReq.user.id, sid)
 		return { ok: true }
 	}
 

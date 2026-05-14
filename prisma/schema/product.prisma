@@ -20,6 +20,7 @@ model Product {
   // FK на каталог (H&M, KFC) — через каталог определяется тип и атрибуты
   catalogId String  @map("catalog_id") @db.Uuid
   brandId   String? @map("brand_id") @db.Uuid
+  productTypeId String? @map("product_type_id") @db.Uuid
 
   // Артикул товара (уникален глобально)
   // Пример: "HM-TSHIRT-001", "KFC-BUCKET-001"
@@ -38,7 +39,7 @@ model Product {
   // Базовая цена товара (без учёта модификаторов вариантов)
   // Пример: 999.00, 2499.00, 599.00
   // Итоговая цена варианта = basePrice + variant.priceModifier
-  price Decimal @db.Decimal(12, 2)
+  price Decimal? @db.Decimal(12, 2)
 
   isPopular Boolean @default(false) @map("is_popular")
 
@@ -55,6 +56,7 @@ model Product {
   // ─── Связи ───
   catalog           Catalog                  @relation(fields: [catalogId], references: [id])
   brand             Brand?                   @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  productType       ProductType?             @relation(fields: [productTypeId], references: [id], onDelete: SetNull)
   // Варианты товара (S+белый, M+чёрный)
   variants          ProductVariant[]
   media             ProductMedia[]
@@ -76,6 +78,7 @@ model Product {
   @@index([catalogId, deleteAt, updatedAt, id])
   @@index([catalogId, isPopular, deleteAt, updatedAt])
   @@index([brandId])
+  @@index([catalogId, productTypeId])
   @@index([status]) // Фильтр по статусу (только активные)
   @@index([slug]) // Поиск по slug
   @@map("products")
@@ -195,7 +198,7 @@ model ProductVariant {
 
   // Модификатор цены
   // Пример: 0.00, 200.00
-  price Decimal @db.Decimal(12, 2)
+  price Decimal? @db.Decimal(12, 2)
 
   // Статус варианта
   // ACTIVE: доступен к покупке
@@ -211,9 +214,15 @@ model ProductVariant {
   deleteAt DateTime? @map("delete_at") // Дата удаления 
 
   // ─── Связи ───
-  product    Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product               Product                  @relation(fields: [productId], references: [id], onDelete: Cascade)
   // Атрибуты варианта (size=M, color=white)
-  attributes VariantAttribute[]
+  attributes            VariantAttribute[]
+  saleUnits             ProductVariantSaleUnit[]
+  cartItems             CartItem[]
+  integrationLinks      IntegrationVariantLink[]
+  stockBalances         InventoryStockBalance[]
+  inventoryMovements    InventoryMovement[]
+  inventoryReservations InventoryReservation[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -223,6 +232,40 @@ model ProductVariant {
   @@index([isAvailable]) // Фильтр только доступных
   @@index([status]) // Фильтр по статусу
   @@map("product_variants")
+}
+
+model ProductVariantSaleUnit {
+  id String @id @default(uuid()) @db.Uuid
+
+  variantId String @map("variant_id") @db.Uuid
+  catalogSaleUnitId String? @map("catalog_sale_unit_id") @db.Uuid
+
+  code         String  @db.VarChar(100)
+  name         String  @db.VarChar(255)
+  baseQuantity Decimal @default(1) @map("base_quantity") @db.Decimal(12, 4)
+  price        Decimal @db.Decimal(12, 2)
+  barcode      String? @db.VarChar(100)
+
+  isDefault    Boolean @default(false) @map("is_default")
+  isActive     Boolean @default(true) @map("is_active")
+  displayOrder Int     @default(0) @map("display_order")
+
+  deleteAt DateTime? @map("delete_at")
+
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  catalogSaleUnit CatalogSaleUnit? @relation(fields: [catalogSaleUnitId], references: [id], onDelete: SetNull)
+  cartItems CartItem[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([variantId, code])
+  @@unique([variantId, catalogSaleUnitId])
+  @@index([variantId, isDefault])
+  @@index([variantId, isActive, displayOrder])
+  @@index([catalogSaleUnitId])
+  @@index([barcode])
+  @@map("product_variant_sale_units")
 }
 
 // PRODUCT_MEDIA — Связь товаров с медиа

@@ -14,13 +14,23 @@ import {
 	ValidateNested
 } from 'class-validator'
 
+import {
+	ProductVariantDtoReq,
+	ProductVariantSaleUnitDtoReq
+} from './product-variant.dto.req'
+
 export class ProductVariantItemDtoReq {
-	@ApiPropertyOptional({ type: Number, example: 0 })
+	@ApiPropertyOptional({ type: Number, example: 0, nullable: true })
 	@IsOptional()
-	@Type(() => Number)
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		if (typeof value === 'string' && value.trim().length === 0) return null
+		return Number(value)
+	})
 	@IsNumber()
 	@Min(0)
-	price?: number
+	price?: number | null
 
 	@ApiPropertyOptional({ type: Number, example: 10 })
 	@IsOptional()
@@ -67,6 +77,13 @@ export class ProductVariantItemDtoReq {
 		return undefined
 	})
 	value?: string
+
+	@ApiPropertyOptional({ type: [ProductVariantSaleUnitDtoReq] })
+	@IsOptional()
+	@IsArray()
+	@ValidateNested({ each: true })
+	@Type(() => ProductVariantSaleUnitDtoReq)
+	saleUnits?: ProductVariantSaleUnitDtoReq[]
 }
 
 export class SetProductVariantsDtoReq {
@@ -80,4 +97,12 @@ export class SetProductVariantsDtoReq {
 	@ValidateNested({ each: true })
 	@Type(() => ProductVariantItemDtoReq)
 	items: ProductVariantItemDtoReq[]
+}
+
+export class SetProductVariantMatrixDtoReq {
+	@ApiProperty({ type: [ProductVariantDtoReq] })
+	@IsArray()
+	@ValidateNested({ each: true })
+	@Type(() => ProductVariantDtoReq)
+	items: ProductVariantDtoReq[]
 }

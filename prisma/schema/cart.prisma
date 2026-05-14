@@ -1,7 +1,9 @@
 model Cart {
   id String @id @default(uuid()) @db.Uuid
 
-  items CartItem[]
+  items                 CartItem[]
+  inventoryMovements    InventoryMovement[]
+  inventoryReservations InventoryReservation[]
 
   userId String? @map("user_id") @db.Uuid
   token  String?
@@ -41,15 +43,24 @@ model CartItem {
   productId String  @map("product_id") @db.Uuid
 
   quantity Int @default(1)
+  baseQuantity Int? @map("base_quantity")
+  unitPriceSnapshot Decimal? @map("unit_price_snapshot") @db.Decimal(12, 2)
 
   cart   Cart   @relation(fields: [cartId], references: [id])
   cartId String @map("cart_id") @db.Uuid
 
-  variantId String? @map("variant_id") @db.Uuid
+  variant               ProductVariant?        @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  variantId             String?                @map("variant_id") @db.Uuid
+  saleUnit              ProductVariantSaleUnit? @relation(fields: [saleUnitId], references: [id], onDelete: SetNull)
+  saleUnitId            String?                 @map("sale_unit_id") @db.Uuid
+  inventoryReservations InventoryReservation[]
 
   deleteAt  DateTime? @map("delete_at") // Дата удаления 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
+  @@index([cartId, deleteAt])
+  @@index([variantId])
+  @@index([saleUnitId])
   @@map("cart_items")
 }

@@ -1,15 +1,22 @@
 import { Metric, MetricScope } from '@generated/enums'
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import {
+	BadRequestException,
+	Injectable,
+	NotFoundException
+} from '@nestjs/common'
 
+import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { AuthService } from '@/modules/auth/auth.service'
 import { ChangePasswordDtoReq } from '@/modules/auth/dto/requests/change-password.dto.req'
 import {
 	AuthSessionDto,
 	AuthSessionsResponseDto
 } from '@/modules/auth/dto/responses/session.dto.res'
-import { SessionService, type ActiveSessionEntry } from '@/modules/auth/session/session.service'
+import {
+	type ActiveSessionEntry,
+	SessionService
+} from '@/modules/auth/session/session.service'
 import { IntegrationService } from '@/modules/integration/integration.service'
-import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 
@@ -37,11 +44,7 @@ export class CatalogAdvancedSettingsService {
 		sessionId: string | null
 		userId: string
 	}): Promise<void> {
-		return this.auth.changePassword(
-			params.userId,
-			params.dto,
-			params.sessionId
-		)
+		return this.auth.changePassword(params.userId, params.dto, params.sessionId)
 	}
 
 	async listSessions(params: {
@@ -170,6 +173,14 @@ export class CatalogAdvancedSettingsService {
 
 	getMoySkladRuns(limit?: number) {
 		return this.integration.getMoySkladRuns(limit)
+	}
+
+	getMoySkladRunProgress(runId: string) {
+		return this.integration.getMoySkladRunProgress(runId)
+	}
+
+	getMoySkladOrderExportRefs() {
+		return this.integration.getMoySkladOrderExportRefs()
 	}
 
 	upsertMoySklad(dto: Parameters<IntegrationService['upsertMoySklad']>[0]) {

@@ -29,8 +29,8 @@ import type { Response } from 'express'
 import {
 	PUBLIC_CACHE_CONTROL_SHORT,
 	PUBLIC_CACHE_CONTROL_STANDARD,
-	setPublicCacheHeaders,
 	setPrivateNoStoreHeaders,
+	setPublicCacheHeaders,
 	setUserAwarePublicCacheHeaders
 } from '@/shared/http/cache-control'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'

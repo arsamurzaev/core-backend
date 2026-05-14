@@ -25,8 +25,11 @@ model Order {
 
   totalAmount Decimal @default(0) @map("total_amount") @db.Decimal(12, 2)
 
-  catalog   Catalog @relation(fields: [catalogId], references: [id])
-  catalogId String  @map("catalog_id") @db.Uuid
+  catalog               Catalog                  @relation(fields: [catalogId], references: [id])
+  catalogId             String                   @map("catalog_id") @db.Uuid
+  integrationExports    IntegrationOrderExport[]
+  inventoryMovements    InventoryMovement[]
+  inventoryReservations InventoryReservation[]
 
   deleteAt  DateTime? @map("delete_at") // Дата удаления
   createdAt DateTime  @default(now()) @map("created_at")

@@ -18,6 +18,7 @@ enum IntegrationSyncStatus {
 enum IntegrationSyncRunMode {
   FULL
   PRODUCT
+  STOCK
 }
 
 enum IntegrationSyncRunTrigger {
@@ -26,6 +27,14 @@ enum IntegrationSyncRunTrigger {
 }
 
 enum IntegrationSyncRunStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  ERROR
+  SKIPPED
+}
+
+enum IntegrationOrderExportStatus {
   PENDING
   RUNNING
   SUCCESS
@@ -42,6 +51,46 @@ enum CatalogExperienceMode {
   DELIVERY
   BROWSE
   HALL
+}
+
+enum CatalogInventoryMode {
+  NONE
+  EXTERNAL
+  INTERNAL
+}
+
+enum InventoryWarehouseStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum InventoryMovementType {
+  INITIAL
+  RECEIPT
+  WRITE_OFF
+  SALE
+  RETURN
+  RESERVE
+  RELEASE
+  ADJUSTMENT
+  SYNC
+}
+
+enum InventoryMovementSource {
+  MANUAL
+  ORDER
+  CART
+  INTEGRATION
+  MIGRATION
+  SYSTEM
+}
+
+enum InventoryReservationStatus {
+  ACTIVE
+  RELEASED
+  CONSUMED
+  EXPIRED
+  CANCELLED
 }
 
 enum CatalogStatus {

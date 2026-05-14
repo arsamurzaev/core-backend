@@ -1,5 +1,6 @@
 import { runCatalogDiagnostics } from './catalog-diagnostics.js'
 import { runCatalogCockpit, runProductCategoryTools } from './cockpit.js'
+import { runCustomScriptsMenu } from './custom-scripts.js'
 import { runHealthMenu } from './health.js'
 import {
 	chooseModel,
@@ -17,6 +18,7 @@ type PaletteAction =
 	| { type: 'catalog' }
 	| { type: 'catalogDiagnostics' }
 	| { type: 'productTools' }
+	| { type: 'scripts' }
 	| { type: 'health' }
 	| { type: 'restoreBackup' }
 	| { type: 'help' }
@@ -37,6 +39,7 @@ export async function runCommandPalette(
 				value: { type: 'catalogDiagnostics' }
 			},
 			{ name: 'Product/Category tools', value: { type: 'productTools' } },
+			{ name: 'Scripts', value: { type: 'scripts' } },
 			{ name: 'Health checks', value: { type: 'health' } },
 			{ name: 'Restore from backup', value: { type: 'restoreBackup' } },
 			{ name: 'JSON/where help', value: { type: 'help' } },
@@ -62,6 +65,7 @@ export async function runCommandPalette(
 		await pause()
 	}
 	if (action.type === 'productTools') await runProductCategoryTools(ctx, models)
+	if (action.type === 'scripts') await runCustomScriptsMenu(ctx, models)
 	if (action.type === 'health') await runHealthMenu(ctx, models)
 	if (action.type === 'restoreBackup') await restoreFromBackup(ctx, models)
 	if (action.type === 'help') {

@@ -4,6 +4,10 @@ import { BadRequestException, Injectable } from '@nestjs/common'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
 import { ProductAttributeValueDto } from './dto/requests/product-attribute.dto.req'
+import {
+	normalizeProductValidationScope,
+	type ProductValidationScopeInput
+} from './product-validation-scope'
 
 export type ProductAttributeValueData = {
 	attributeId: string
@@ -24,27 +28,32 @@ type AttributeMeta = {
 	isHidden: boolean
 }
 
+type PrepareRemovedAttributeIdsOptions = {
+	allowRequired?: boolean
+}
+
 @Injectable()
 export class ProductAttributeBuilder {
 	constructor(private readonly prisma: PrismaService) {}
 
 	async buildForCreate(
-		typeId: string,
+		scope: ProductValidationScopeInput,
 		inputs?: ProductAttributeValueDto[]
 	): Promise<ProductAttributeValueData[]> {
-		return this.build(typeId, inputs ?? [], { requireAll: false })
+		return this.build(scope, inputs ?? [], { requireAll: false })
 	}
 
 	async buildForUpdate(
-		typeId: string,
+		scope: ProductValidationScopeInput,
 		inputs: ProductAttributeValueDto[]
 	): Promise<ProductAttributeValueData[]> {
-		return this.build(typeId, inputs, { requireAll: false })
+		return this.build(scope, inputs, { requireAll: false })
 	}
 
 	async prepareRemovedAttributeIdsForUpdate(
-		typeId: string,
-		inputs: string[]
+		scope: ProductValidationScopeInput,
+		inputs: string[],
+		options: PrepareRemovedAttributeIdsOptions = {}
 	): Promise<string[]> {
 		const attributeIds = inputs.map(input => {
 			const attributeId = String(input).trim()
@@ -64,7 +73,7 @@ export class ProductAttributeBuilder {
 		}
 
 		const attributes = await this.loadAttributes(
-			typeId,
+			scope,
 			new Set(uniqueAttributeIds)
 		)
 		const attributeMap = new Map(
@@ -84,28 +93,30 @@ export class ProductAttributeBuilder {
 			}
 		}
 
-		const requiredAttributes = attributes.filter(
-			attribute => attribute.isRequired
-		)
-		if (requiredAttributes.length) {
-			throw new BadRequestException(
-				`Нельзя удалить обязательные атрибуты: ${requiredAttributes
-					.map(attribute => attribute.key)
-					.join(', ')}`
+		if (!options.allowRequired) {
+			const requiredAttributes = attributes.filter(
+				attribute => attribute.isRequired
 			)
+			if (requiredAttributes.length) {
+				throw new BadRequestException(
+					`Нельзя удалить обязательные атрибуты: ${requiredAttributes
+						.map(attribute => attribute.key)
+						.join(', ')}`
+				)
+			}
 		}
 
 		return uniqueAttributeIds
 	}
 
 	private async build(
-		typeId: string,
+		scope: ProductValidationScopeInput,
 		inputs: ProductAttributeValueDto[],
 		options: { requireAll: boolean }
 	): Promise<ProductAttributeValueData[]> {
 		if (!inputs.length) {
 			if (options.requireAll) {
-				await this.assertRequiredAttributes(typeId, new Set<string>())
+				await this.assertRequiredAttributes(scope, new Set<string>())
 			}
 			return []
 		}
@@ -118,7 +129,7 @@ export class ProductAttributeBuilder {
 			attributeIds.add(input.attributeId)
 		}
 
-		const attributes = await this.loadAttributes(typeId, attributeIds)
+		const attributes = await this.loadAttributes(scope, attributeIds)
 		const attributeMap = new Map(
 			attributes.map(attribute => [attribute.id, attribute])
 		)
@@ -137,7 +148,7 @@ export class ProductAttributeBuilder {
 		}
 
 		if (options.requireAll) {
-			await this.assertRequiredAttributes(typeId, attributeIds)
+			await this.assertRequiredAttributes(scope, attributeIds)
 		}
 
 		const enumValueIds = [
@@ -152,7 +163,10 @@ export class ProductAttributeBuilder {
 			)
 		]
 
-		const enumValueMap = await this.loadEnumValues(enumValueIds)
+		const enumValueMap = await this.loadEnumValues(
+			enumValueIds,
+			normalizeProductValidationScope(scope).catalogId
+		)
 
 		return inputs.map(input =>
 			this.buildValue(input, attributeMap.get(input.attributeId), enumValueMap)
@@ -160,17 +174,82 @@ export class ProductAttributeBuilder {
 	}
 
 	private async loadAttributes(
-		typeId: string,
+		scopeInput: ProductValidationScopeInput,
 		attributeIds: Set<string>
 	): Promise<AttributeMeta[]> {
 		if (attributeIds.size === 0) return []
+
+		const scope = normalizeProductValidationScope(scopeInput)
+		if (scope.productTypeId) {
+			const productTypeAttributes =
+				await this.prisma.productTypeAttribute.findMany({
+					where: {
+						productTypeId: scope.productTypeId,
+						attributeId: { in: [...attributeIds] },
+						attribute: {
+							deleteAt: null,
+							isHidden: false
+						}
+					},
+					select: {
+						isVariant: true,
+						isRequired: true,
+						attribute: {
+							select: {
+								id: true,
+								key: true,
+								dataType: true,
+								isHidden: true
+							}
+						}
+					}
+				})
+
+			const scopedAttributes = productTypeAttributes.map(item => ({
+				id: item.attribute.id,
+				key: item.attribute.key,
+				dataType: item.attribute.dataType,
+				isRequired: item.isRequired,
+				isVariantAttribute: item.isVariant,
+				isHidden: item.attribute.isHidden
+			}))
+			const scopedAttributeIds = new Set(
+				scopedAttributes.map(attribute => attribute.id)
+			)
+			const catalogAttributeIds = [...attributeIds].filter(
+				attributeId => !scopedAttributeIds.has(attributeId)
+			)
+
+			if (!catalogAttributeIds.length) {
+				return scopedAttributes
+			}
+
+			const catalogAttributes = await this.prisma.attribute.findMany({
+				where: {
+					id: { in: catalogAttributeIds },
+					deleteAt: null,
+					isHidden: false,
+					types: { some: { id: scope.catalogTypeId } }
+				},
+				select: {
+					id: true,
+					key: true,
+					dataType: true,
+					isRequired: true,
+					isVariantAttribute: true,
+					isHidden: true
+				}
+			})
+
+			return [...scopedAttributes, ...catalogAttributes]
+		}
 
 		return this.prisma.attribute.findMany({
 			where: {
 				id: { in: [...attributeIds] },
 				deleteAt: null,
 				isHidden: false,
-				types: { some: { id: typeId } }
+				types: { some: { id: scope.catalogTypeId } }
 			},
 			select: {
 				id: true,
@@ -184,16 +263,49 @@ export class ProductAttributeBuilder {
 	}
 
 	private async assertRequiredAttributes(
-		typeId: string,
+		scopeInput: ProductValidationScopeInput,
 		attributeIds: Set<string>
 	): Promise<void> {
+		const scope = normalizeProductValidationScope(scopeInput)
+		if (scope.productTypeId) {
+			const required = await this.prisma.productTypeAttribute.findMany({
+				where: {
+					productTypeId: scope.productTypeId,
+					isRequired: true,
+					isVariant: false,
+					attribute: {
+						deleteAt: null,
+						isHidden: false
+					}
+				},
+				select: {
+					attributeId: true,
+					attribute: {
+						select: { key: true }
+					}
+				}
+			})
+
+			const missing = required.filter(
+				attribute => !attributeIds.has(attribute.attributeId)
+			)
+			if (missing.length) {
+				throw new BadRequestException(
+					`Отсутствуют обязательные атрибуты: ${missing
+						.map(attribute => attribute.attribute.key)
+						.join(', ')}`
+				)
+			}
+			return
+		}
+
 		const required = await this.prisma.attribute.findMany({
 			where: {
 				deleteAt: null,
 				isHidden: false,
 				isRequired: true,
 				isVariantAttribute: false,
-				types: { some: { id: typeId } }
+				types: { some: { id: scope.catalogTypeId } }
 			},
 			select: { id: true, key: true }
 		})
@@ -209,12 +321,17 @@ export class ProductAttributeBuilder {
 	}
 
 	private async loadEnumValues(
-		enumValueIds: string[]
+		enumValueIds: string[],
+		catalogId?: string | null
 	): Promise<Map<string, string>> {
 		if (!enumValueIds.length) return new Map()
 
 		const values = await this.prisma.attributeEnumValue.findMany({
-			where: { id: { in: enumValueIds }, deleteAt: null },
+			where: {
+				id: { in: enumValueIds },
+				deleteAt: null,
+				...(catalogId ? { OR: [{ catalogId }, { catalogId: null }] } : {})
+			},
 			select: { id: true, attributeId: true }
 		})
 

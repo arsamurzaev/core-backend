@@ -4,6 +4,7 @@ import { runCatalogDiagnostics } from './catalog-diagnostics.js'
 import { dbLabel, parseCliOptions, resolveMode, runtimePaths } from './cli.js'
 import { runCatalogCockpit, runProductCategoryTools } from './cockpit.js'
 import { runCommandMode } from './command-mode.js'
+import { runCustomScriptsMenu } from './custom-scripts.js'
 import { colors, printHeader, printJson, table } from './format.js'
 import { runHealthMenu } from './health.js'
 import { buildModelMeta, readSchemaMeta } from './metadata.js'
@@ -76,6 +77,7 @@ async function mainMenu(
 			{ name: 'Catalog cockpit', value: 'catalog' },
 			{ name: 'Catalog deep diagnostics', value: 'catalogDiagnostics' },
 			{ name: 'Product/Category tools', value: 'productTools' },
+			{ name: 'Scripts', value: 'scripts' },
 			{ name: 'Health checks', value: 'health' },
 			{ name: 'Restore from backup', value: 'restoreBackup' },
 			{ name: 'SQL SELECT через $queryRawUnsafe', value: 'query' },
@@ -110,6 +112,7 @@ async function mainMenu(
 				await pause()
 			}
 			if (action === 'productTools') await runProductCategoryTools(ctx, models)
+			if (action === 'scripts') await runCustomScriptsMenu(ctx, models)
 			if (action === 'health') await runHealthMenu(ctx, models)
 			if (action === 'restoreBackup') await restoreFromBackup(ctx, models)
 			if (action === 'query') await runSqlQuery(ctx)

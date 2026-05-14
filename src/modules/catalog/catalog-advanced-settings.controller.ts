@@ -38,7 +38,9 @@ import { UpsertMoySkladIntegrationDtoReq } from '@/modules/integration/dto/reque
 import {
 	MoySkladIntegrationDto,
 	MoySkladIntegrationStatusDto,
+	MoySkladOrderExportRefsDto,
 	MoySkladQueuedSyncDto,
+	MoySkladSyncProgressDto,
 	MoySkladSyncRunDto,
 	MoySkladTestConnectionDto
 } from '@/modules/integration/dto/responses/moysklad.dto.res'
@@ -71,7 +73,7 @@ export class CatalogAdvancedSettingsController {
 		await this.service.changePassword({
 			dto,
 			sessionId: authReq.sessionId ?? null,
-			userId: authReq.user!.id
+			userId: authReq.user.id
 		})
 		return { ok: true }
 	}
@@ -85,7 +87,7 @@ export class CatalogAdvancedSettingsController {
 		const authReq = req as AuthRequest
 		return this.service.listSessions({
 			currentSessionId: authReq.sessionId ?? null,
-			userId: authReq.user!.id
+			userId: authReq.user.id
 		})
 	}
 
@@ -98,7 +100,7 @@ export class CatalogAdvancedSettingsController {
 		const authReq = req as AuthRequest
 		return this.service.revokeOtherSessions({
 			currentSessionId: authReq.sessionId ?? null,
-			userId: authReq.user!.id
+			userId: authReq.user.id
 		})
 	}
 
@@ -116,7 +118,7 @@ export class CatalogAdvancedSettingsController {
 		return this.service.revokeSession({
 			currentSessionId: authReq.sessionId ?? null,
 			sid,
-			userId: authReq.user!.id
+			userId: authReq.user.id
 		})
 	}
 
@@ -128,9 +130,13 @@ export class CatalogAdvancedSettingsController {
 	}
 
 	@Post('domains')
-	@ApiOperation({ summary: 'Attach advanced settings domain to current catalog' })
+	@ApiOperation({
+		summary: 'Attach advanced settings domain to current catalog'
+	})
 	@ApiCreatedResponse({ type: CatalogDomainDto })
-	createDomain(@Body() dto: CreateCatalogDomainDtoReq): Promise<CatalogDomainDto> {
+	createDomain(
+		@Body() dto: CreateCatalogDomainDtoReq
+	): Promise<CatalogDomainDto> {
 		return this.service.createDomain(dto)
 	}
 
@@ -198,8 +204,31 @@ export class CatalogAdvancedSettingsController {
 		description: 'Сколько последних запусков вернуть'
 	})
 	@ApiOkResponse({ type: MoySkladSyncRunDto, isArray: true })
-	getMoySkladRuns(@Query('limit') limit?: number): Promise<MoySkladSyncRunDto[]> {
+	getMoySkladRuns(
+		@Query('limit') limit?: number
+	): Promise<MoySkladSyncRunDto[]> {
 		return this.service.getMoySkladRuns(limit)
+	}
+
+	@Get('integrations/moysklad/runs/:runId/progress')
+	@ApiOperation({
+		summary: 'Get advanced settings MoySklad sync progress'
+	})
+	@ApiParam({ name: 'runId' })
+	@ApiOkResponse({ type: MoySkladSyncProgressDto })
+	getMoySkladRunProgress(
+		@Param('runId') runId: string
+	): Promise<MoySkladSyncProgressDto> {
+		return this.service.getMoySkladRunProgress(runId)
+	}
+
+	@Get('integrations/moysklad/order-export-refs')
+	@ApiOperation({
+		summary: 'Get advanced settings MoySklad order export refs'
+	})
+	@ApiOkResponse({ type: MoySkladOrderExportRefsDto })
+	getMoySkladOrderExportRefs(): Promise<MoySkladOrderExportRefsDto> {
+		return this.service.getMoySkladOrderExportRefs()
 	}
 
 	@Put('integrations/moysklad')

@@ -41,6 +41,7 @@ export type ParsedProductInfiniteQuery = {
 	cursor?: string
 	limit: number
 	seed?: string
+	productTypeId?: string
 	categoryIds: string[]
 	brandIds: string[]
 	minPrice?: number
@@ -99,6 +100,7 @@ export function parseProductInfiniteQuery(
 		cursor: getSingleQueryValue(query.cursor),
 		limit,
 		seed,
+		productTypeId: getSingleQueryValue(query.productTypeId),
 		categoryIds: extractCsvValues(query.categories),
 		brandIds: extractCsvValues(query.brands),
 		minPrice,

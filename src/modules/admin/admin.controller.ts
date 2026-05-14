@@ -46,6 +46,7 @@ import { AdminCreatePromoCodeDtoReq } from './dto/requests/admin-create-promo-co
 import { AdminCreatePromoPaymentDtoReq } from './dto/requests/admin-create-promo-payment.dto.req'
 import { AdminCreateSubscriptionPaymentDtoReq } from './dto/requests/admin-create-subscription-payment.dto.req'
 import { AdminDuplicateCatalogDtoReq } from './dto/requests/admin-duplicate-catalog.dto.req'
+import { AdminUpdateCatalogFeatureEntitlementDtoReq } from './dto/requests/admin-update-catalog-feature-entitlement.dto.req'
 import { AdminUpdateCatalogDtoReq } from './dto/requests/admin-update-catalog.dto.req'
 
 const MAX_PAYMENT_PROOF_FILE_BYTES = 10 * 1024 * 1024
@@ -107,6 +108,21 @@ export class AdminController {
 			id,
 			dto
 		) as Promise<AdminCatalogListItemDto>
+	}
+
+	@Get('/catalogs/:id/features')
+	@ApiOperation({ summary: 'Get catalog feature entitlements' })
+	async getCatalogFeatureEntitlements(@Param('id', ParseUUIDPipe) id: string) {
+		return this.adminService.getCatalogFeatureEntitlements(id)
+	}
+
+	@Patch('/catalogs/:id/features')
+	@ApiOperation({ summary: 'Enable or disable a catalog feature entitlement' })
+	async updateCatalogFeatureEntitlement(
+		@Param('id', ParseUUIDPipe) id: string,
+		@Body() dto: AdminUpdateCatalogFeatureEntitlementDtoReq
+	) {
+		return this.adminService.updateCatalogFeatureEntitlement(id, dto)
 	}
 
 	@Delete('/catalogs/:id')

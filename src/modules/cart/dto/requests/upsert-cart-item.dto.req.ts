@@ -2,10 +2,10 @@ import { CartCheckoutMethod } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Type } from 'class-transformer'
 import {
+	IsEnum,
 	IsInt,
 	IsNotEmpty,
 	IsObject,
-	IsEnum,
 	IsOptional,
 	IsString,
 	MaxLength,
@@ -59,6 +59,17 @@ export class UpsertCartItemDtoReq {
 	@IsString()
 	@IsNotEmpty()
 	variantId?: string
+
+	@ApiPropertyOptional({
+		type: String,
+		format: 'uuid',
+		example: '0f651b34-c9a7-4e49-92f7-f1545e2711da',
+		description: 'Единица продажи выбранной вариации: штука, упаковка, палета.'
+	})
+	@IsOptional()
+	@IsString()
+	@IsNotEmpty()
+	saleUnitId?: string
 
 	@ApiProperty({
 		type: Number,

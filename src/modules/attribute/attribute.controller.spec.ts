@@ -24,7 +24,11 @@ describe('AttributeController', () => {
 						getEnumValues: jest.fn(),
 						createEnumValue: jest.fn(),
 						updateEnumValue: jest.fn(),
-						removeEnumValue: jest.fn()
+						removeEnumValue: jest.fn(),
+						getEnumValueAliases: jest.fn(),
+						createEnumValueAlias: jest.fn(),
+						removeEnumValueAlias: jest.fn(),
+						mergeEnumValues: jest.fn()
 					}
 				}
 			]

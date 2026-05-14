@@ -59,10 +59,12 @@ model Attribute {
   types             Type[]
   // Допустимые значения для ENUM-атрибутов
   enumValues        AttributeEnumValue[]
+  enumValueAliases  AttributeEnumValueAlias[]
   // Значения этого атрибута у товаров
   productAttributes ProductAttribute[]
   // Значения этого атрибута у вариантов
   variantAttributes VariantAttribute[]
+  productTypeAttributes ProductTypeAttribute[]
 
   deleteAt  DateTime? @map("delete_at") // Дата удаления 
   createdAt DateTime  @default(now()) @map("created_at")
@@ -72,6 +74,12 @@ model Attribute {
   // Уникальность ключа по типу контролируется на уровне приложения
   @@index([key])
   @@map("attributes")
+}
+
+enum AttributeEnumValueSource {
+  MANUAL
+  AUTO
+  IMPORTED
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -101,6 +109,7 @@ model AttributeEnumValue {
 
   // FK на определение атрибута (size, color, brand)
   attributeId String @map("attribute_id") @db.Uuid
+  catalogId   String? @map("catalog_id") @db.Uuid
 
   // Программное значение (используется в коде, API, URL фильтров)
   // Пример: "xs", "s", "m", "white", "black", "nike"
@@ -117,8 +126,16 @@ model AttributeEnumValue {
 
   businessId String? @map("business_id")
 
+  source AttributeEnumValueSource @default(MANUAL)
+
+  mergedIntoId String? @map("merged_into_id") @db.Uuid
+
   // ─── Связи ───
-  attribute         Attribute          @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  attribute         Attribute                 @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  catalog           Catalog?                  @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  aliases           AttributeEnumValueAlias[]
+  mergedInto        AttributeEnumValue?       @relation("AttributeEnumValueMerges", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedValues      AttributeEnumValue[]      @relation("AttributeEnumValueMerges")
   // Товары с этим значением атрибута
   productAttributes ProductAttribute[]
   // Варианты с этим значением
@@ -131,8 +148,39 @@ model AttributeEnumValue {
   // ─── Ограничения ───
   // Значение уникально в рамках атрибута
   // Нельзя создать два "m" для атрибута size
-  @@unique([attributeId, value])
+  @@unique([attributeId, catalogId, value])
+  @@index([catalogId, attributeId])
+  @@index([attributeId, source])
+  @@index([mergedIntoId])
   @@map("attribute_enum_values")
+}
+
+model AttributeEnumValueAlias {
+  id String @id @default(uuid()) @db.Uuid
+
+  attributeId String @map("attribute_id") @db.Uuid
+  catalogId   String? @map("catalog_id") @db.Uuid
+
+  enumValueId String @map("enum_value_id") @db.Uuid
+
+  value String @db.VarChar(255)
+
+  displayName String? @map("display_name") @db.VarChar(255)
+
+  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  enumValue AttributeEnumValue @relation(fields: [enumValueId], references: [id], onDelete: Cascade)
+
+  catalog Catalog? @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+
+  deleteAt  DateTime? @map("delete_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@unique([attributeId, catalogId, value])
+  @@index([catalogId, attributeId])
+  @@index([enumValueId])
+  @@map("attribute_enum_value_aliases")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -1,9 +1,14 @@
-import { CatalogExperienceMode, CatalogStatus, ContactType } from '@generated/enums'
+import {
+	CatalogExperienceMode,
+	CatalogStatus,
+	ContactType
+} from '@generated/enums'
+import type { CatalogInventoryMode } from '@generated/enums'
 import { ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {
-	ArrayNotEmpty,
 	ArrayMaxSize,
+	ArrayNotEmpty,
 	IsArray,
 	IsBoolean,
 	IsEnum,
@@ -20,6 +25,14 @@ const SLUG_PATTERN = /^[a-z0-9-]+$/
 const DOMAIN_PATTERN = /^[a-z0-9.-]+$/
 const SLUG_MIN_LENGTH = 2
 const SLUG_MAX_LENGTH = 63
+const CATALOG_INVENTORY_MODE_VALUES: Record<
+	CatalogInventoryMode,
+	CatalogInventoryMode
+> = {
+	NONE: 'NONE',
+	EXTERNAL: 'EXTERNAL',
+	INTERNAL: 'INTERNAL'
+}
 
 export class UpdateCatalogContactDtoReq {
 	@ApiPropertyOptional({ enum: ContactType, example: ContactType.PHONE })
@@ -195,6 +208,14 @@ export class UpdateCatalogDtoReq {
 	@ArrayNotEmpty()
 	@IsEnum(CatalogExperienceMode, { each: true })
 	allowedModes?: CatalogExperienceMode[]
+
+	@ApiPropertyOptional({
+		enum: CATALOG_INVENTORY_MODE_VALUES,
+		example: CATALOG_INVENTORY_MODE_VALUES.NONE
+	})
+	@IsOptional()
+	@IsEnum(CATALOG_INVENTORY_MODE_VALUES)
+	inventoryMode?: CatalogInventoryMode
 
 	@ApiPropertyOptional({
 		type: Object,

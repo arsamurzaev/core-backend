@@ -22,13 +22,13 @@ import {
 	ApiSecurity,
 	ApiTags
 } from '@nestjs/swagger'
+import type { Response } from 'express'
 
-import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import {
 	PUBLIC_CACHE_CONTROL_SHORT,
 	setUserAwarePublicCacheHeaders
 } from '@/shared/http/cache-control'
-import type { Response } from 'express'
+import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { CatalogAccessGuard } from '../auth/guards/catalog-access.guard'

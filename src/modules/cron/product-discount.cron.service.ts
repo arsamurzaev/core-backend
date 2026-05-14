@@ -3,7 +3,7 @@ import { Cron } from '@nestjs/schedule'
 import { SpanStatusCode, trace } from '@opentelemetry/api'
 
 import { ObservabilityService } from '@/modules/observability/observability.service'
-import { ProductService } from '@/modules/product/product.service'
+import { ProductMaintenanceService } from '@/modules/product/product-maintenance.service'
 
 const PRODUCT_DISCOUNT_EXPIRY_CRON = '0 1 * * *'
 const PRODUCT_DISCOUNT_EXPIRY_TIMEZONE = 'Europe/Moscow'
@@ -15,7 +15,7 @@ export class ProductDiscountCronService {
 	private readonly tracer = trace.getTracer('catalog_backend.cron')
 
 	constructor(
-		private readonly products: ProductService,
+		private readonly products: ProductMaintenanceService,
 		private readonly observability: ObservabilityService
 	) {}
 

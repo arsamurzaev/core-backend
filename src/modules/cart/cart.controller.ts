@@ -150,15 +150,11 @@ export class CartController {
 	) {
 		const token = this.readTokenFromRequest(req)
 		const catalogId = mustCatalogId()
-		const result = await this.cartService.shareCurrentCart(
-			catalogId,
-			token,
-			{
-				checkoutData: dto.checkoutData,
-				checkoutMethod: dto.checkoutMethod,
-				comment: dto.comment
-			}
-		)
+		const result = await this.cartService.shareCurrentCart(catalogId, token, {
+			checkoutData: dto.checkoutData,
+			checkoutMethod: dto.checkoutMethod,
+			comment: dto.comment
+		})
 		this.setTokenCookie(req, res, result.token)
 		return {
 			ok: true,

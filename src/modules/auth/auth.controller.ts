@@ -107,7 +107,7 @@ export class AuthController {
 	async changePassword(@Body() dto: ChangePasswordDtoReq, @Req() req: Request) {
 		const authReq = req as AuthRequest
 		await this.auth.changePassword(
-			authReq.user!.id,
+			authReq.user.id,
 			dto,
 			authReq.sessionId ?? null
 		)

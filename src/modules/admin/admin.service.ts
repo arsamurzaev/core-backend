@@ -15,6 +15,16 @@ import { hash } from 'argon2'
 import { randomInt, randomUUID } from 'node:crypto'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import {
+	CAPABILITY_CATALOG_SALE_UNITS,
+	CAPABILITY_INTEGRATION_MOYSKLAD,
+	CAPABILITY_INVENTORY_INTERNAL,
+	CAPABILITY_PRODUCT_TYPES,
+	CAPABILITY_PRODUCT_VARIANTS,
+	CATALOG_CAPABILITIES,
+	type CatalogCapability
+} from '@/modules/capability/capability.constants'
+import { CapabilityService } from '@/modules/capability/capability.service'
 import { S3Service } from '@/modules/s3/s3.service'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
@@ -46,6 +56,7 @@ import { AdminCreatePromoCodeDtoReq } from './dto/requests/admin-create-promo-co
 import { AdminCreatePromoPaymentDtoReq } from './dto/requests/admin-create-promo-payment.dto.req'
 import { AdminCreateSubscriptionPaymentDtoReq } from './dto/requests/admin-create-subscription-payment.dto.req'
 import { AdminDuplicateCatalogDtoReq } from './dto/requests/admin-duplicate-catalog.dto.req'
+import { AdminUpdateCatalogFeatureEntitlementDtoReq } from './dto/requests/admin-update-catalog-feature-entitlement.dto.req'
 import { AdminUpdateCatalogDtoReq } from './dto/requests/admin-update-catalog.dto.req'
 
 const mediaSelect = buildMediaSelect()
@@ -100,6 +111,21 @@ const adminCatalogSelect = {
 		select: {
 			status: true,
 			logoMedia: { select: mediaSelect }
+		}
+	},
+	settings: {
+		select: {
+			inventoryMode: true
+		}
+	},
+	featureEntitlements: {
+		where: {
+			feature: { in: [...CATALOG_CAPABILITIES] }
+		},
+		select: {
+			feature: true,
+			enabled: true,
+			expiresAt: true
 		}
 	},
 	type: {
@@ -166,7 +192,8 @@ export class AdminService {
 		private readonly prisma: PrismaService,
 		private readonly mediaUrl: MediaUrlService,
 		private readonly s3: S3Service,
-		private readonly cache: CacheService
+		private readonly cache: CacheService,
+		private readonly capabilities: CapabilityService
 	) {}
 
 	async createCatalog(dto: AdminCreateCatalogDtoReq) {
@@ -910,6 +937,54 @@ export class AdminService {
 		return this.mapAdminCatalog(catalog)
 	}
 
+	async getCatalogFeatureEntitlements(id: string) {
+		await this.ensureCatalogExists(id)
+		return this.buildCatalogFeatureEntitlementDto(id)
+	}
+
+	async updateCatalogFeatureEntitlement(
+		id: string,
+		dto: AdminUpdateCatalogFeatureEntitlementDtoReq
+	) {
+		await this.ensureCatalogExists(id)
+		const feature: CatalogCapability = dto.feature
+		const expiresAt =
+			dto.expiresAt === undefined || dto.expiresAt === null
+				? null
+				: new Date(dto.expiresAt)
+		if (expiresAt && Number.isNaN(expiresAt.getTime())) {
+			throw new BadRequestException('expiresAt must be a valid date')
+		}
+		const metadata = (dto.metadata ?? Prisma.JsonNull) as
+			| Prisma.InputJsonValue
+			| Prisma.NullableJsonNullValueInput
+
+		await this.prisma.catalogFeatureEntitlement.upsert({
+			where: {
+				catalogId_feature: {
+					catalogId: id,
+					feature
+				}
+			},
+			create: {
+				catalogId: id,
+				feature,
+				enabled: dto.enabled,
+				expiresAt,
+				metadata
+			},
+			update: {
+				enabled: dto.enabled,
+				expiresAt,
+				metadata
+			},
+			select: { id: true }
+		})
+
+		await this.invalidateCatalogCaches(id)
+		return this.buildCatalogFeatureEntitlementDto(id)
+	}
+
 	async getCatalogs(
 		query: AdminCatalogsQueryDtoReq = new AdminCatalogsQueryDtoReq()
 	) {
@@ -1495,12 +1570,61 @@ export class AdminService {
 		])
 	}
 
+	private async ensureCatalogExists(catalogId: string): Promise<void> {
+		const catalog = await this.prisma.catalog.findUnique({
+			where: { id: catalogId },
+			select: { id: true }
+		})
+		if (!catalog) throw new NotFoundException('Catalog not found')
+	}
+
+	private async buildCatalogFeatureEntitlementDto(catalogId: string) {
+		const capabilities = await this.capabilities.getCatalogCapabilities(catalogId)
+		const entitlements = await this.prisma.catalogFeatureEntitlement.findMany({
+			where: {
+				catalogId,
+				feature: { in: [...CATALOG_CAPABILITIES] }
+			},
+			select: {
+				feature: true,
+				enabled: true,
+				expiresAt: true,
+				metadata: true
+			}
+		})
+		const byFeature = new Map(
+			entitlements.map(entitlement => [entitlement.feature, entitlement])
+		)
+
+		return {
+			catalogId,
+			definitions: capabilities.definitions,
+			raw: capabilities.raw,
+			effective: capabilities.effective,
+			items: capabilities.items,
+			features: CATALOG_CAPABILITIES.map(feature => {
+				const entitlement = byFeature.get(feature)
+				return {
+					feature,
+					enabled: Boolean(
+						entitlement?.enabled &&
+						(!entitlement.expiresAt || entitlement.expiresAt > new Date())
+					),
+					expiresAt: entitlement?.expiresAt ?? null,
+					metadata: entitlement?.metadata ?? null
+				}
+			})
+		}
+	}
+
 	private mapAdminCatalog(catalog: AdminCatalogRecord) {
-		const { config, metrics, payments, ...rest } = catalog
+		const { config, featureEntitlements, metrics, payments, settings, ...rest } =
+			catalog
 		const promoCodePaid = Boolean(
 			rest.promoCodeId &&
 			payments.some(payment => payment.promoCodeId === rest.promoCodeId)
 		)
+		const features = this.mapCatalogFeatureFlags(featureEntitlements)
 
 		return {
 			...rest,
@@ -1508,7 +1632,13 @@ export class AdminService {
 			promoCodePaid,
 			subscriptionDaysLeft: buildSubscriptionDaysLeft(catalog.subscriptionEndsAt),
 			deleteInfo: this.buildDeleteInfo(catalog.deleteAt),
-			config: config ? { status: config.status } : null,
+			config: config
+				? {
+						status: config.status,
+						inventoryMode: settings?.inventoryMode ?? 'NONE',
+						...features
+					}
+				: null,
 			logoMedia: config?.logoMedia
 				? this.mediaUrl.mapMedia(config.logoMedia)
 				: null,
@@ -1522,6 +1652,37 @@ export class AdminService {
 						deleteInfo: this.buildDeleteInfo(catalog.promoCode.deleteAt)
 					}
 				: null
+		}
+	}
+
+	private mapCatalogFeatureFlags(
+		entitlements: Array<{
+			feature: string
+			enabled: boolean
+			expiresAt: Date | null
+		}>
+	) {
+		const now = new Date()
+		const enabledFeatures = new Set(
+			entitlements
+				.filter(
+					entitlement =>
+						entitlement.enabled &&
+						(!entitlement.expiresAt || entitlement.expiresAt > now)
+				)
+				.map(entitlement => entitlement.feature)
+		)
+
+		return {
+			canUseProductTypes: enabledFeatures.has(CAPABILITY_PRODUCT_TYPES),
+			canUseProductVariants:
+				enabledFeatures.has(CAPABILITY_PRODUCT_VARIANTS) &&
+				enabledFeatures.has(CAPABILITY_PRODUCT_TYPES),
+			canUseCatalogSaleUnits: enabledFeatures.has(CAPABILITY_CATALOG_SALE_UNITS),
+			canUseInternalInventory: enabledFeatures.has(CAPABILITY_INVENTORY_INTERNAL),
+			canUseMoySkladIntegration: enabledFeatures.has(
+				CAPABILITY_INTEGRATION_MOYSKLAD
+			)
 		}
 	}
 
@@ -1629,7 +1790,19 @@ function buildSubscriptionDaysLeft(subscriptionEndsAt?: Date | null) {
 	return Math.ceil((subscriptionEndsAt.getTime() - Date.now()) / MS_PER_DAY)
 }
 
-function sortAdminCatalogs<T extends Record<string, any>>(
+type AdminCatalogSortValue = string | number | Date | null | undefined
+
+type AdminCatalogSortable = {
+	slug?: string | null
+	name?: string | null
+	promoCode?: { name?: string | null } | null
+	type?: { name?: string | null } | null
+	subscriptionDaysLeft?: number | null
+	config?: { status?: string | null } | null
+	createdAt?: Date | string | null
+}
+
+function sortAdminCatalogs<T extends AdminCatalogSortable>(
 	catalogs: T[],
 	sortBy: AdminCatalogSortField,
 	sortOrder: AdminCatalogSortOrder
@@ -1644,9 +1817,9 @@ function sortAdminCatalogs<T extends Record<string, any>>(
 }
 
 function getAdminCatalogSortValue(
-	catalog: Record<string, any>,
+	catalog: AdminCatalogSortable,
 	sortBy: AdminCatalogSortField
-) {
+): AdminCatalogSortValue {
 	switch (sortBy) {
 		case 'slug':
 			return catalog.slug
@@ -1667,8 +1840,8 @@ function getAdminCatalogSortValue(
 }
 
 function compareNullableValues(
-	left: unknown,
-	right: unknown,
+	left: AdminCatalogSortValue,
+	right: AdminCatalogSortValue,
 	sortOrder: AdminCatalogSortOrder
 ) {
 	const leftEmpty = left === null || left === undefined
@@ -1688,9 +1861,10 @@ function compareNullableValues(
 	return String(leftValue).localeCompare(String(rightValue), 'ru') * direction
 }
 
-function normalizeSortValue(value: unknown) {
+function normalizeSortValue(value: AdminCatalogSortValue) {
 	if (value instanceof Date) return value.getTime()
 	if (typeof value === 'number') return value
+	if (value === null || value === undefined) return ''
 	return String(value).toLowerCase()
 }
 

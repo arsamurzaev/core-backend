@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing'
 
+import { AuditService } from '@/modules/audit/audit.service'
+import { CapabilityService } from '@/modules/capability/capability.service'
 import { CacheService } from '@/shared/cache/cache.service'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
@@ -9,6 +11,31 @@ import { CatalogSeoSyncService } from './catalog-seo-sync.service'
 import { CatalogRepository } from './catalog.repository'
 import { CatalogService } from './catalog.service'
 
+const INVENTORY_MODE_NONE = 'NONE'
+const INVENTORY_MODE_EXTERNAL = 'EXTERNAL'
+const INVENTORY_MODE_INTERNAL = 'INTERNAL'
+const DEFAULT_FEATURE_FLAGS = {
+	canUseProductTypes: false,
+	canUseProductVariants: false,
+	canUseCatalogSaleUnits: false,
+	canUseInternalInventory: false,
+	canUseMoySkladIntegration: false
+}
+const DEFAULT_CAPABILITY_MAP = {
+	'product.types': false,
+	'product.variants': false,
+	'catalog.sale_units': false,
+	'inventory.internal': false,
+	'integration.moysklad': false
+}
+const DEFAULT_CAPABILITY_RESPONSE = {
+	raw: DEFAULT_CAPABILITY_MAP,
+	effective: DEFAULT_CAPABILITY_MAP,
+	flags: DEFAULT_FEATURE_FLAGS,
+	definitions: [],
+	items: []
+}
+
 describe('CatalogService', () => {
 	let service: CatalogService
 	let serviceState: { cacheTtlSec: number }
@@ -16,6 +43,8 @@ describe('CatalogService', () => {
 	let cache: jest.Mocked<CacheService>
 	let mediaUrl: jest.Mocked<MediaUrlService>
 	let catalogSeoSync: jest.Mocked<CatalogSeoSyncService>
+	let featureEntitlements: jest.Mocked<CapabilityService>
+	let audit: jest.Mocked<AuditService>
 
 	const runWithCatalog = <T>(fn: () => Promise<T>) =>
 		RequestContext.run(
@@ -87,6 +116,20 @@ describe('CatalogService', () => {
 					useValue: {
 						syncCatalog: jest.fn()
 					}
+				},
+				{
+					provide: CapabilityService,
+					useValue: {
+						getCatalogCapabilities: jest.fn(),
+						canUseInternalInventory: jest.fn(),
+						assertCanUseInternalInventory: jest.fn()
+					}
+				},
+				{
+					provide: AuditService,
+					useValue: {
+						record: jest.fn()
+					}
 				}
 			]
 		}).compile()
@@ -97,6 +140,8 @@ describe('CatalogService', () => {
 		cache = module.get(CacheService)
 		mediaUrl = module.get(MediaUrlService)
 		catalogSeoSync = module.get(CatalogSeoSyncService)
+		featureEntitlements = module.get(CapabilityService)
+		audit = module.get(AuditService)
 
 		cache.buildKey.mockImplementation(parts =>
 			parts
@@ -122,7 +167,59 @@ describe('CatalogService', () => {
 					variants: []
 				}) as any
 		)
+		featureEntitlements.getCatalogCapabilities.mockResolvedValue(
+			DEFAULT_CAPABILITY_RESPONSE
+		)
 		serviceState.cacheTtlSec = 0
+	})
+
+	it('returns owner-only current catalog feature flags', async () => {
+		repo.getById.mockResolvedValue({
+			id: 'catalog-1',
+			settings: {
+				inventoryMode: INVENTORY_MODE_INTERNAL
+			}
+		} as any)
+		featureEntitlements.getCatalogCapabilities.mockResolvedValue({
+			...DEFAULT_CAPABILITY_RESPONSE,
+			effective: {
+				...DEFAULT_CAPABILITY_MAP,
+				'inventory.internal': true
+			},
+			flags: {
+				...DEFAULT_FEATURE_FLAGS,
+				canUseInternalInventory: true
+			}
+		})
+
+		await expect(
+			runWithCatalog(() => service.getCurrentFeatures())
+		).resolves.toEqual({
+			inventoryMode: INVENTORY_MODE_INTERNAL,
+			canUseProductTypes: false,
+			canUseProductVariants: false,
+			canUseCatalogSaleUnits: false,
+			canUseInternalInventory: true,
+			canUseMoySkladIntegration: false,
+			raw: DEFAULT_CAPABILITY_MAP,
+			effective: {
+				...DEFAULT_CAPABILITY_MAP,
+				'inventory.internal': true
+			},
+			definitions: [],
+			items: []
+		})
+
+		expect(repo.getById).toHaveBeenCalledWith('catalog-1', {
+			settings: {
+				select: {
+					inventoryMode: true
+				}
+			}
+		})
+		expect(featureEntitlements.getCatalogCapabilities).toHaveBeenCalledWith(
+			'catalog-1'
+		)
 	})
 
 	it('composes current catalog from shell and type schema', async () => {
@@ -284,6 +381,14 @@ describe('CatalogService', () => {
 			contacts: [],
 			config: null,
 			settings: null,
+			features: {
+				inventoryMode: INVENTORY_MODE_NONE,
+				...DEFAULT_FEATURE_FLAGS,
+				raw: DEFAULT_CAPABILITY_MAP,
+				effective: DEFAULT_CAPABILITY_MAP,
+				definitions: [],
+				items: []
+			},
 			type: {
 				id: 'type-1',
 				code: 'clothing',
@@ -357,6 +462,14 @@ describe('CatalogService', () => {
 			userId: null,
 			config: null,
 			settings: null,
+			features: {
+				inventoryMode: INVENTORY_MODE_NONE,
+				...DEFAULT_FEATURE_FLAGS,
+				raw: DEFAULT_CAPABILITY_MAP,
+				effective: DEFAULT_CAPABILITY_MAP,
+				definitions: [],
+				items: []
+			},
 			contacts: [{ id: 'contact-1', type: 'PHONE', position: 0, value: '+7' }]
 		})
 		expect(repo.getTypeByIdWithAttributes).not.toHaveBeenCalled()
@@ -508,13 +621,10 @@ describe('CatalogService', () => {
 			}
 		} as any)
 
-		await service.updateById(
-			'catalog-1',
-			{
-				defaultMode: 'HALL',
-				allowedModes: ['DELIVERY', 'HALL']
-			} as any
-		)
+		await service.updateById('catalog-1', {
+			defaultMode: 'HALL',
+			allowedModes: ['DELIVERY', 'HALL']
+		} as any)
 
 		expect(repo.update).toHaveBeenCalledWith(
 			'catalog-1',
@@ -531,6 +641,147 @@ describe('CatalogService', () => {
 		)
 	})
 
+	it('rejects enabling internal inventory without entitlement', async () => {
+		featureEntitlements.assertCanUseInternalInventory.mockRejectedValue(
+			new Error('Internal inventory is not enabled for this catalog')
+		)
+
+		await expect(
+			service.updateById('catalog-1', {
+				inventoryMode: INVENTORY_MODE_INTERNAL
+			} as any)
+		).rejects.toThrow('Internal inventory is not enabled for this catalog')
+
+		expect(
+			featureEntitlements.assertCanUseInternalInventory
+		).toHaveBeenCalledWith('catalog-1')
+		expect(repo.update).not.toHaveBeenCalled()
+	})
+
+	it('updates internal inventory mode when entitlement exists', async () => {
+		featureEntitlements.assertCanUseInternalInventory.mockResolvedValue(undefined)
+		repo.getById.mockResolvedValue({
+			id: 'catalog-1',
+			settings: {
+				isActive: true,
+				defaultMode: 'DELIVERY',
+				allowedModes: ['DELIVERY'],
+				inventoryMode: INVENTORY_MODE_NONE
+			}
+		} as any)
+		repo.update.mockResolvedValue({
+			id: 'catalog-1',
+			slug: 'store',
+			domain: 'store.test',
+			name: 'Store',
+			typeId: 'type-1',
+			parentId: null,
+			userId: null,
+			config: null,
+			settings: {
+				inventoryMode: INVENTORY_MODE_INTERNAL
+			}
+		} as any)
+
+		await service.updateById('catalog-1', {
+			inventoryMode: INVENTORY_MODE_INTERNAL
+		} as any)
+
+		expect(
+			featureEntitlements.assertCanUseInternalInventory
+		).toHaveBeenCalledWith('catalog-1')
+		expect(repo.update).toHaveBeenCalledWith(
+			'catalog-1',
+			expect.objectContaining({
+				settings: expect.objectContaining({
+					upsert: expect.objectContaining({
+						update: expect.objectContaining({
+							inventoryMode: INVENTORY_MODE_INTERNAL
+						})
+					})
+				})
+			})
+		)
+		expect(audit.record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				action: 'catalog.inventory_mode.enable_internal',
+				targetId: 'catalog-1',
+				changes: [
+					expect.objectContaining({
+						field: 'settings.inventoryMode',
+						oldValue: INVENTORY_MODE_NONE,
+						newValue: INVENTORY_MODE_INTERNAL
+					})
+				]
+			})
+		)
+	})
+
+	it('does not audit internal inventory enable when mode was already internal', async () => {
+		repo.getById.mockResolvedValue({
+			id: 'catalog-1',
+			settings: {
+				isActive: true,
+				defaultMode: 'DELIVERY',
+				allowedModes: ['DELIVERY'],
+				inventoryMode: INVENTORY_MODE_INTERNAL
+			}
+		} as any)
+		repo.update.mockResolvedValue({
+			id: 'catalog-1',
+			slug: 'store',
+			domain: 'store.test',
+			name: 'Store',
+			typeId: 'type-1',
+			parentId: null,
+			userId: null,
+			config: null,
+			settings: {
+				inventoryMode: INVENTORY_MODE_INTERNAL
+			}
+		} as any)
+
+		await service.updateById('catalog-1', {
+			inventoryMode: INVENTORY_MODE_INTERNAL
+		} as any)
+
+		expect(audit.record).not.toHaveBeenCalled()
+	})
+
+	it('allows external inventory mode without internal inventory entitlement', async () => {
+		repo.getById.mockResolvedValue({
+			id: 'catalog-1',
+			settings: {
+				isActive: true,
+				defaultMode: 'DELIVERY',
+				allowedModes: ['DELIVERY'],
+				inventoryMode: INVENTORY_MODE_NONE
+			}
+		} as any)
+		repo.update.mockResolvedValue({
+			id: 'catalog-1',
+			slug: 'store',
+			domain: 'store.test',
+			name: 'Store',
+			typeId: 'type-1',
+			parentId: null,
+			userId: null,
+			config: null,
+			settings: {
+				inventoryMode: INVENTORY_MODE_EXTERNAL
+			}
+		} as any)
+
+		await service.updateById('catalog-1', {
+			inventoryMode: INVENTORY_MODE_EXTERNAL
+		} as any)
+
+		expect(
+			featureEntitlements.assertCanUseInternalInventory
+		).not.toHaveBeenCalled()
+		expect(repo.update).toHaveBeenCalled()
+	})
+
 	it('rejects catalog experience settings when default mode is not allowed', async () => {
 		repo.getById.mockResolvedValue({
 			id: 'catalog-1',
@@ -542,13 +793,10 @@ describe('CatalogService', () => {
 		} as any)
 
 		await expect(
-			service.updateById(
-				'catalog-1',
-				{
-					defaultMode: 'HALL',
-					allowedModes: ['DELIVERY']
-				} as any
-			)
+			service.updateById('catalog-1', {
+				defaultMode: 'HALL',
+				allowedModes: ['DELIVERY']
+			} as any)
 		).rejects.toThrow('defaultMode must be included in allowedModes')
 	})
 })

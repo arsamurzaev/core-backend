@@ -2,16 +2,22 @@ import { CartCheckoutMethod, CartStatus } from '@generated/client'
 import { BadRequestException } from '@nestjs/common'
 
 import type { MediaRecord } from '@/shared/media/media-url.service'
+import {
+	type PriceAttributeLike,
+	resolveLinePricing
+} from '@/shared/order/price-resolver.utils'
 
 export type UpsertCartItemInput = {
 	productId: string
 	variantId?: string
+	saleUnitId?: string
 	quantity: number
 }
 
 export type NormalizedCartItemInput = {
 	productId: string
 	variantId: string | null
+	saleUnitId: string | null
 	quantity: number
 }
 
@@ -45,16 +51,162 @@ type CartItemLike = {
 	id: string
 	productId: string
 	variantId: string | null
+	saleUnitId?: string | null
 	quantity: number
+	baseQuantity?: number | null
+	unitPriceSnapshot?: unknown
 	createdAt: unknown
 	updatedAt: unknown
+	variant?: CartVariantLike | null
+	saleUnit?: CartSaleUnitLike | null
 	product: {
 		id: string
 		name: string
 		slug: string
 		price: unknown
 		media?: CartProductMedia[] | null
+		productAttributes?: PriceAttributeLike[] | null
 	}
+}
+
+type CartVariantLike = {
+	id: string
+	sku: string
+	variantKey: string
+	price: unknown
+	stock: number
+	status: string
+	isAvailable: boolean
+	attributes?: CartVariantAttributeLike[] | null
+}
+
+type CartSaleUnitLike = {
+	id: string
+	variantId: string
+	catalogSaleUnitId?: string | null
+	code: string
+	name: string
+	baseQuantity: unknown
+	price: unknown
+	barcode?: string | null
+	isDefault: boolean
+	isActive: boolean
+	displayOrder: number
+}
+
+type CartVariantAttributeLike = {
+	attribute: {
+		id: string
+		key: string
+		displayName: string
+		displayOrder: number
+	}
+	enumValue: {
+		id: string
+		value: string
+		displayName: string | null
+		displayOrder: number
+	}
+}
+
+export type CartEntityMapOptions = {
+	canUseProductVariants?: boolean
+	canUseCatalogSaleUnits?: boolean
+}
+
+function sortCartVariantAttributes(
+	attributes: CartVariantAttributeLike[]
+): CartVariantAttributeLike[] {
+	return [...attributes].sort(
+		(a, b) =>
+			a.attribute.displayOrder - b.attribute.displayOrder ||
+			a.enumValue.displayOrder - b.enumValue.displayOrder ||
+			a.attribute.key.localeCompare(b.attribute.key) ||
+			a.enumValue.value.localeCompare(b.enumValue.value)
+	)
+}
+
+function trimToNull(value?: string | null): string | null {
+	const trimmed = value?.trim()
+	return trimmed ? trimmed : null
+}
+
+function buildCartItemLineKey(
+	item: CartItemLike,
+	options: {
+		canExposeSaleUnits: boolean
+		canUseProductVariants: boolean
+	}
+): string {
+	return [
+		item.productId,
+		options.canUseProductVariants
+			? (trimToNull(item.variantId) ?? 'default')
+			: 'default',
+		options.canExposeSaleUnits
+			? (trimToNull(item.saleUnitId) ?? 'default')
+			: 'default'
+	].join(':')
+}
+
+function mergeCartItemQuantity(
+	left: number | null | undefined,
+	right: number | null | undefined
+): number | null | undefined {
+	if (left === undefined && right === undefined) return undefined
+	if (left === null && right === null) return null
+	return toNumber(left ?? 0) + toNumber(right ?? 0)
+}
+
+function mergeDuplicateCartItems(
+	items: CartItemLike[],
+	options: {
+		canExposeSaleUnits: boolean
+		canUseProductVariants: boolean
+	}
+): CartItemLike[] {
+	const map = new Map<string, CartItemLike>()
+
+	for (const item of items) {
+		const key = buildCartItemLineKey(item, options)
+		const existing = map.get(key)
+
+		if (!existing) {
+			map.set(key, { ...item })
+			continue
+		}
+
+		existing.quantity += item.quantity
+		existing.baseQuantity = mergeCartItemQuantity(
+			existing.baseQuantity,
+			item.baseQuantity
+		)
+		if (
+			existing.unitPriceSnapshot === null ||
+			existing.unitPriceSnapshot === undefined
+		) {
+			existing.unitPriceSnapshot = item.unitPriceSnapshot
+		}
+	}
+
+	return [...map.values()]
+}
+
+function buildCartVariantLabel(variant: CartVariantLike): string {
+	const label = sortCartVariantAttributes(variant.attributes ?? [])
+		.map(attribute => {
+			const attributeName = trimToNull(attribute.attribute.displayName)
+			const valueName =
+				trimToNull(attribute.enumValue.displayName) ??
+				trimToNull(attribute.enumValue.value)
+
+			if (attributeName && valueName) return `${attributeName}: ${valueName}`
+			return attributeName ?? valueName
+		})
+		.filter((part): part is string => Boolean(part))
+		.join(', ')
+
+	return label || variant.variantKey
 }
 
 export const CART_TOKEN_BYTES = 24
@@ -99,6 +251,7 @@ export function normalizeCartItemInput(
 ): NormalizedCartItemInput {
 	const productId = input.productId.trim()
 	const variantId = input.variantId?.trim() || null
+	const saleUnitId = input.saleUnitId?.trim() || null
 	const quantity = input.quantity
 
 	if (!productId) {
@@ -111,45 +264,154 @@ export function normalizeCartItemInput(
 		)
 	}
 
-	return { productId, variantId, quantity }
+	return { productId, variantId, saleUnitId, quantity }
 }
 
-function toCents(price: any): number {
-	return Math.round(Number(String(price)) * 100)
+function readFiniteNumber(value: unknown): number | null {
+	if (typeof value === 'number') return Number.isFinite(value) ? value : null
+	if (typeof value === 'string' && value.trim()) {
+		const parsed = Number(value)
+		return Number.isFinite(parsed) ? parsed : null
+	}
+	if (typeof value === 'bigint') {
+		const parsed = Number(value)
+		return Number.isFinite(parsed) ? parsed : null
+	}
+	if (typeof value === 'object' && value !== null) {
+		const candidate = value as { toNumber?: unknown }
+		if (typeof candidate.toNumber === 'function') {
+			const toNumber = candidate.toNumber as () => unknown
+			const parsed: unknown = toNumber()
+			return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : null
+		}
+	}
+	return null
+}
+
+function toCents(price: unknown): number {
+	return Math.round((readFiniteNumber(price) ?? 0) * 100)
+}
+
+function toNumber(value: unknown): number {
+	return readFiniteNumber(value) ?? 0
+}
+
+function toOptionalMoney(value: unknown): number | null {
+	if (value === null || value === undefined) return null
+	const parsed = readFiniteNumber(value)
+	if (parsed === null) return null
+	return Number.isFinite(parsed)
+		? Math.max(0, Math.round(parsed * 100)) / 100
+		: null
+}
+
+export function resolveCartItemUnitPriceCents(item: {
+	product: { price: unknown; productAttributes?: PriceAttributeLike[] | null }
+	variant?: { price: unknown } | null
+	saleUnit?: { price: unknown } | null
+	unitPriceSnapshot?: unknown
+}): number {
+	return resolveLinePricing(item).unitPriceCents
+}
+
+export function resolveCartItemPricing(item: {
+	product: { price: unknown; productAttributes?: PriceAttributeLike[] | null }
+	variant?: { price: unknown } | null
+	saleUnit?: { price: unknown } | null
+	unitPriceSnapshot?: unknown
+	quantity: number
+}) {
+	return resolveLinePricing(item)
+}
+
+export function resolveCartItemBaseQuantity(item: {
+	quantity: number
+	baseQuantity?: number | null
+	saleUnit?: { baseQuantity: unknown } | null
+}): number {
+	if (item.baseQuantity !== undefined && item.baseQuantity !== null) {
+		return Math.max(0, Math.ceil(toNumber(item.baseQuantity)))
+	}
+
+	const multiplier = item.saleUnit ? toNumber(item.saleUnit.baseQuantity) : 1
+	const baseQuantity = item.quantity * (multiplier > 0 ? multiplier : 1)
+	return Math.max(0, Math.ceil(baseQuantity))
 }
 
 export function mapCartEntity(
 	cart: CartEntityLike,
-	mapMedia?: (media: MediaRecord) => unknown
+	mapMedia?: (media: MediaRecord) => unknown,
+	options: CartEntityMapOptions = {}
 ) {
-	const items = cart.items.map(item => {
-		const unitPriceCents = toCents(item.product.price)
-		const lineTotalCents = unitPriceCents * item.quantity
-		const primaryMedia = item.product.media?.[0]?.media ?? null
-
-		return {
-			id: item.id,
-			productId: item.productId,
-			variantId: item.variantId,
-			quantity: item.quantity,
-			product: {
-				id: item.product.id,
-				name: item.product.name,
-				slug: item.product.slug,
-				price: unitPriceCents / 100,
-				media: primaryMedia && mapMedia ? mapMedia(primaryMedia) : null
-			},
-			lineTotal: lineTotalCents / 100,
-			createdAt: item.createdAt,
-			updatedAt: item.updatedAt
+	const canUseProductVariants = options.canUseProductVariants ?? true
+	const canUseCatalogSaleUnits = options.canUseCatalogSaleUnits ?? true
+	const canExposeSaleUnits = canUseProductVariants && canUseCatalogSaleUnits
+	const cartItems = mergeDuplicateCartItems(cart.items, {
+		canExposeSaleUnits,
+		canUseProductVariants
+	})
+	const pricedItems = cartItems.map(item => {
+		const itemVariant = canUseProductVariants ? (item.variant ?? null) : null
+		const itemSaleUnit = canExposeSaleUnits ? (item.saleUnit ?? null) : null
+		const shouldUseSnapshot =
+			(canUseProductVariants || !item.variantId) &&
+			(canExposeSaleUnits || !(item.saleUnitId ?? null))
+		const pricingSource = {
+			...item,
+			variant: itemVariant,
+			saleUnit: itemSaleUnit,
+			unitPriceSnapshot: shouldUseSnapshot ? item.unitPriceSnapshot : null
 		}
+		const pricing = resolveCartItemPricing(pricingSource)
+
+		return { item, itemVariant, itemSaleUnit, pricing }
 	})
 
+	const items = pricedItems.map(
+		({ item, itemVariant, itemSaleUnit, pricing }) => {
+			const primaryMedia = item.product.media?.[0]?.media ?? null
+			const hasKnownDisplayPrice =
+				toOptionalMoney(
+					itemSaleUnit?.price ?? itemVariant?.price ?? item.product.price
+				) !== null
+
+			return {
+				id: item.id,
+				productId: item.productId,
+				variantId: canUseProductVariants ? item.variantId : null,
+				saleUnitId: canExposeSaleUnits ? (item.saleUnitId ?? null) : null,
+				quantity: item.quantity,
+				baseQuantity: resolveCartItemBaseQuantity(item),
+				product: {
+					id: item.product.id,
+					name: item.product.name,
+					slug: item.product.slug,
+					price: hasKnownDisplayPrice ? pricing.unitPrice : null,
+					media: primaryMedia && mapMedia ? mapMedia(primaryMedia) : null
+				},
+				variant: mapCartVariant(itemVariant),
+				saleUnit: mapCartSaleUnit(itemSaleUnit),
+				baseUnitPrice: pricing.baseUnitPrice,
+				unitPrice: pricing.unitPrice,
+				discountPercent: pricing.discountPercent,
+				hasDiscount: pricing.hasDiscount,
+				lineTotal: pricing.lineTotal,
+				createdAt: item.createdAt,
+				updatedAt: item.updatedAt
+			}
+		}
+	)
+
 	const itemsCount = items.reduce((acc, item) => acc + item.quantity, 0)
-	const subtotalCents = cart.items.reduce(
-		(acc, item) => acc + toCents(item.product.price) * item.quantity,
+	const baseSubtotalCents = pricedItems.reduce(
+		(acc, { item, pricing }) => acc + pricing.baseUnitPriceCents * item.quantity,
 		0
 	)
+	const subtotalCents = pricedItems.reduce(
+		(acc, { pricing }) => acc + pricing.lineTotalCents,
+		0
+	)
+	const baseSubtotal = baseSubtotalCents / 100
 	const subtotal = subtotalCents / 100
 	const total = subtotal
 
@@ -172,10 +434,61 @@ export function mapCartEntity(
 		items,
 		totals: {
 			itemsCount,
+			baseSubtotal,
+			discountTotal: Math.max(0, baseSubtotal - subtotal),
+			hasDiscount: baseSubtotal > subtotal,
 			subtotal,
 			total
 		},
 		createdAt: cart.createdAt,
 		updatedAt: cart.updatedAt
+	}
+}
+
+export function mapCartSaleUnit(saleUnit?: CartSaleUnitLike | null) {
+	if (!saleUnit) return null
+
+	return {
+		id: saleUnit.id,
+		variantId: saleUnit.variantId,
+		catalogSaleUnitId: saleUnit.catalogSaleUnitId ?? null,
+		code: saleUnit.code,
+		name: saleUnit.name,
+		baseQuantity: toNumber(saleUnit.baseQuantity),
+		price: toCents(saleUnit.price) / 100,
+		barcode: saleUnit.barcode ?? null,
+		isDefault: saleUnit.isDefault,
+		isActive: saleUnit.isActive,
+		displayOrder: saleUnit.displayOrder
+	}
+}
+
+export function mapCartVariant(variant?: CartVariantLike | null) {
+	if (!variant) return null
+	const attributes = sortCartVariantAttributes(variant.attributes ?? []).map(
+		attribute => ({
+			attribute: {
+				id: attribute.attribute.id,
+				key: attribute.attribute.key,
+				displayName: attribute.attribute.displayName
+			},
+			enumValue: {
+				id: attribute.enumValue.id,
+				value: attribute.enumValue.value,
+				displayName: attribute.enumValue.displayName
+			}
+		})
+	)
+
+	return {
+		id: variant.id,
+		sku: variant.sku,
+		variantKey: variant.variantKey,
+		label: buildCartVariantLabel(variant),
+		price: toOptionalMoney(variant.price),
+		stock: variant.stock,
+		status: variant.status,
+		isAvailable: variant.isAvailable,
+		attributes
 	}
 }
