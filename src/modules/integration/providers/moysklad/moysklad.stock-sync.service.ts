@@ -47,7 +47,7 @@ export class MoySkladStockSyncService {
 	}): Promise<MoySkladExternalStockSyncResult> {
 		await params.progress.report({
 			phase: 'SYNCING_STOCK',
-			message: 'РџРѕР»СѓС‡Р°РµРј РѕСЃС‚Р°С‚РєРё РёР· MoySklad',
+			message: 'Получаем остатки из MoySklad',
 			processed: 0,
 			total: null,
 			force: true
@@ -88,7 +88,7 @@ export class MoySkladStockSyncService {
 		await params.progress.report({
 			phase: 'SYNCING_STOCK',
 			message:
-				'РџСЂРёРјРµРЅСЏРµРј РѕСЃС‚Р°С‚РєРё Рє С‚РѕРІР°СЂР°Рј Рё РјРѕРґРёС„РёРєР°С†РёСЏРј',
+				'Применяем остатки к товарам и модификациям',
 			processed: 0,
 			total: totalStockLinks,
 			force: true
@@ -222,7 +222,7 @@ async function reportStockProgress(
 ): Promise<void> {
 	await progress.report({
 		phase: 'SYNCING_STOCK',
-		message: `РћР±РЅРѕРІР»СЏРµРј РѕСЃС‚Р°С‚РєРё: ${processed}/${total}`,
+		message: `Обновляем остатки: ${processed}/${total}`,
 		processed,
 		total
 	})

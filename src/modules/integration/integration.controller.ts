@@ -217,7 +217,7 @@ export class IntegrationController {
 
 	@Post('/moysklad/sync-stock')
 	@ApiOperation({
-		summary: 'РџРѕСЃС‚Р°РІРёС‚СЊ sync РѕСЃС‚Р°С‚РєРѕРІ MoySklad РІ РѕС‡РµСЂРµРґСЊ'
+		summary: 'Поставить sync остатков MoySklad в очередь'
 	})
 	@ApiSecurity('csrf')
 	@UseGuards(SessionGuard, CatalogAccessGuard)

@@ -282,7 +282,7 @@ export class IntegrationService {
 		const integration = await this.getActiveMoySkladIntegration(catalogId)
 		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
 		if (!metadata.token) {
-			throw new NotFoundException('РўРѕРєРµРЅ MoySklad РЅРµ РЅР°СЃС‚СЂРѕРµРЅ')
+			throw new NotFoundException('Токен MoySklad не настроен')
 		}
 
 		const client = new MoySkladClient({ token: metadata.token })

@@ -1109,7 +1109,7 @@ describe('IntegrationService', () => {
 			...integrationRecord,
 			metadata: buildEncryptedMetadata({
 				token: 'token-12345678',
-				priceTypeName: 'Р¦РµРЅР° РїСЂРѕРґР°Р¶Рё',
+				priceTypeName: 'Цена продажи',
 				importImages: true,
 				syncStock: true,
 				scheduleEnabled: false,

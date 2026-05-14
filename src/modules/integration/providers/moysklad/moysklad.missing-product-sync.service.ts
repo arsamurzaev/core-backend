@@ -24,7 +24,11 @@ export class MoySkladMissingProductSyncService {
 		let hidden = 0
 
 		for (const link of links) {
-			if (params.currentExternalIds.has(link.externalId)) {
+			const rawMetaId = readRawMetaString(link.rawMeta, 'id')
+			if (
+				params.currentExternalIds.has(link.externalId) ||
+				(rawMetaId ? params.currentExternalIds.has(rawMetaId) : false)
+			) {
 				continue
 			}
 
@@ -52,4 +56,13 @@ export class MoySkladMissingProductSyncService {
 
 		return hidden
 	}
+}
+
+function readRawMetaString(rawMeta: unknown, key: string): string | null {
+	if (!rawMeta || typeof rawMeta !== 'object' || Array.isArray(rawMeta)) {
+		return null
+	}
+
+	const value = (rawMeta as Record<string, unknown>)[key]
+	return typeof value === 'string' && value.trim() ? value.trim() : null
 }

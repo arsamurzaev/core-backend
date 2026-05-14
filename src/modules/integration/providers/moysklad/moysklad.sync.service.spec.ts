@@ -1191,6 +1191,19 @@ describe('MoySkladSyncService', () => {
 			isActive: true,
 			lastSyncAt: null
 		}
+		const presentProduct = {
+			id: 'external-present-id',
+			externalCode: 'external-present',
+			meta: { type: 'product' },
+			name: 'Present Product',
+			code: 'MSK-PRESENT',
+			updated: '2026-03-23 14:00:00',
+			archived: false,
+			stock: 5,
+			productFolder: testProductFolder,
+			salePrices: [],
+			images: { rows: [] }
+		}
 
 		repo.beginMoySkladSync.mockResolvedValue(integration as any)
 		repo.findMoySklad.mockResolvedValue(integration as any)
@@ -1222,7 +1235,16 @@ describe('MoySkladSyncService', () => {
 		} as any)
 		repo.finishMoySkladSync.mockResolvedValue(integration as any)
 
-		jest.spyOn(MoySkladClient.prototype, 'getAllAssortment').mockResolvedValue([])
+		jest.spyOn(productSync, 'syncExternalProduct').mockResolvedValue({
+			productId: 'local-present',
+			externalId: 'external-present',
+			created: false,
+			updated: false,
+			imagesImported: 0
+		} as any)
+		jest
+			.spyOn(MoySkladClient.prototype, 'getAllAssortment')
+			.mockResolvedValue([presentProduct] as any)
 
 		const result = await service.syncCatalog(catalogId)
 
@@ -1236,6 +1258,40 @@ describe('MoySkladSyncService', () => {
 			catalogId,
 			expect.objectContaining({
 				deletedProducts: 1
+			})
+		)
+	})
+
+	it('does not hide missing products when MoySklad returns an empty product snapshot', async () => {
+		const catalogId = 'catalog-1'
+		const integration = {
+			id: 'integration-1',
+			catalogId,
+			metadata: {},
+			isActive: true,
+			lastSyncAt: null
+		}
+
+		repo.beginMoySkladSync.mockResolvedValue(integration as any)
+		repo.findMoySklad.mockResolvedValue(integration as any)
+		repo.findProductLinksByIntegration.mockResolvedValue([
+			{
+				externalId: 'external-missing',
+				productId: 'local-1'
+			}
+		] as any)
+		repo.finishMoySkladSync.mockResolvedValue(integration as any)
+
+		jest.spyOn(MoySkladClient.prototype, 'getAllAssortment').mockResolvedValue([])
+
+		const result = await service.syncCatalog(catalogId)
+
+		expect(result.ok).toBe(true)
+		expect(repo.updateProduct).not.toHaveBeenCalled()
+		expect(repo.finishMoySkladSync).toHaveBeenCalledWith(
+			catalogId,
+			expect.objectContaining({
+				deletedProducts: 0
 			})
 		)
 	})

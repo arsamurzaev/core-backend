@@ -430,7 +430,7 @@ export class ProductVariantService {
 		const value = Number(price)
 		if (!Number.isFinite(value) || value < 0) {
 			throw new BadRequestException(
-				'РќРµРєРѕСЂСЂРµРєС‚РЅР°СЏ С†РµРЅР° РІР°СЂРёР°РЅС‚Р°'
+				'Некорректная цена варианта'
 			)
 		}
 		return value

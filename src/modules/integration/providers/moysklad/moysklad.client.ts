@@ -430,7 +430,7 @@ export class MoySkladClient {
 		const item = response.rows?.[0]
 		if (!item) {
 			throw new Error(
-				`РџРѕР·РёС†РёСЏ Р°СЃСЃРѕСЂС‚РёРјРµРЅС‚Р° MoySklad СЃ РІРЅРµС€РЅРёРј РєРѕРґРѕРј ${externalCode} РЅРµ РЅР°Р№РґРµРЅР°`
+				`Позиция ассортимента MoySklad с внешним кодом ${externalCode} не найдена`
 			)
 		}
 		return item

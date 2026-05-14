@@ -290,7 +290,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 			const message = this.renderErrorMessage(error)
 			await this.syncRuns.failRun(run.id, message)
 			throw new InternalServerErrorException(
-				`РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕСЃС‚Р°РІРёС‚СЊ sync РѕСЃС‚Р°С‚РєРѕРІ MoySklad РІ РѕС‡РµСЂРµРґСЊ: ${message}`
+				`Не удалось поставить sync остатков MoySklad в очередь: ${message}`
 			)
 		}
 	}

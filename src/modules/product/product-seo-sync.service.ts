@@ -240,15 +240,15 @@ export class ProductSeoSyncService {
 		attributeSummary: string | null
 	): string {
 		const parts = [
-			`РљСѓРїРёС‚СЊ ${product.name}${product.brand?.name ? ` ${product.brand.name}` : ''}.`,
+			`Купить ${product.name}${product.brand?.name ? ` ${product.brand.name}` : ''}.`,
 			categoryNames.length
-				? `РљР°С‚РµРіРѕСЂРёСЏ: ${categoryNames.slice(0, 2).join(', ')}.`
+				? `Категория: ${categoryNames.slice(0, 2).join(', ')}.`
 				: null,
 			product.price === null
 				? null
-				: `Р¦РµРЅР°: ${this.formatPrice(product.price)} ${currency}.`,
+				: `Цена: ${this.formatPrice(product.price)} ${currency}.`,
 			attributeSummary
-				? `РҐР°СЂР°РєС‚РµСЂРёСЃС‚РёРєРё: ${attributeSummary}.`
+				? `Характеристики: ${attributeSummary}.`
 				: null
 		].filter((part): part is string => Boolean(part))
 
@@ -264,13 +264,13 @@ export class ProductSeoSyncService {
 		const parts = [
 			product.price === null
 				? `${product.name} доступен в каталоге.`
-				: `${product.name} РґРѕСЃС‚СѓРїРµРЅ РІ РєР°С‚Р°Р»РѕРіРµ СЃ Р°РєС‚СѓР°Р»СЊРЅРѕР№ С†РµРЅРѕР№ ${this.formatPrice(product.price)} ${currency}.`,
-			product.brand?.name ? `Р‘СЂРµРЅРґ: ${product.brand.name}.` : null,
+				: `${product.name} доступен в каталоге с актуальной ценой ${this.formatPrice(product.price)} ${currency}.`,
+			product.brand?.name ? `Бренд: ${product.brand.name}.` : null,
 			categoryNames.length
-				? `Р Р°Р·РґРµР»С‹: ${categoryNames.slice(0, 3).join(', ')}.`
+				? `Разделы: ${categoryNames.slice(0, 3).join(', ')}.`
 				: null,
 			attributeSummary
-				? `РћСЃРЅРѕРІРЅС‹Рµ С…Р°СЂР°РєС‚РµСЂРёСЃС‚РёРєРё: ${attributeSummary}.`
+				? `Основные характеристики: ${attributeSummary}.`
 				: null
 		].filter((part): part is string => Boolean(part))
 
@@ -400,7 +400,7 @@ export class ProductSeoSyncService {
 		if (attribute.valueDecimal !== null)
 			return this.formatPrice(attribute.valueDecimal)
 		if (attribute.valueBoolean !== null) {
-			return attribute.valueBoolean ? 'РґР°' : 'РЅРµС‚'
+			return attribute.valueBoolean ? 'да' : 'нет'
 		}
 		if (attribute.valueDateTime) {
 			return new Date(attribute.valueDateTime).toISOString().slice(0, 10)

@@ -236,7 +236,7 @@ export class MoySkladSyncService {
 			return { ok: true }
 		} catch (error) {
 			throw new BadGatewayException(
-				`РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ Рє MoySklad: ${this.renderErrorMessage(error)}`
+				`Не удалось подключиться к MoySklad: ${this.renderErrorMessage(error)}`
 			)
 		}
 	}
@@ -264,7 +264,7 @@ export class MoySkladSyncService {
 			await progress.report({
 				phase: 'FETCHING_ASSORTMENT',
 				message:
-					'РџРѕР»СѓС‡Р°РµРј С‚РѕРІР°СЂС‹, СѓСЃР»СѓРіРё, РєРѕРјРїР»РµРєС‚С‹ Рё РјРѕРґРёС„РёРєР°С†РёРё РёР· РњРѕР№РЎРєР»Р°Рґ',
+					'Получаем товары, услуги, комплекты и модификации из МойСклад',
 				processed: 0,
 				total: null,
 				force: true
@@ -300,8 +300,8 @@ export class MoySkladSyncService {
 				phase: products.length > 0 ? 'SYNCING_PRODUCTS' : 'SYNCING_VARIANTS',
 				message:
 					totalSyncItems > 0
-						? 'РЎРёРЅС…СЂРѕРЅРёР·РёСЂСѓРµРј РїРѕР·РёС†РёРё РёР· РњРѕР№РЎРєР»Р°Рґ'
-						: 'Р’ РњРѕР№РЎРєР»Р°Рґ РЅРµ РЅР°Р№РґРµРЅРѕ РїРѕРґС…РѕРґСЏС‰РёС… РїРѕР·РёС†РёР№ РґР»СЏ СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёРё',
+						? 'Синхронизируем позиции из МойСклад'
+						: 'В МойСклад не найдено подходящих позиций для синхронизации',
 				processed: 0,
 				total: totalSyncItems,
 				force: true
@@ -382,6 +382,13 @@ export class MoySkladSyncService {
 					.map(resolveVariantParentProductExternalId)
 					.filter((id): id is string => Boolean(id))
 			)
+			const presentProductExternalIds = new Set<string>()
+			for (const product of productItems) {
+				const externalKey = resolveExternalProductKey(product)
+				const rawId = readMoySkladString(product.id)
+				if (externalKey) presentProductExternalIds.add(externalKey)
+				if (rawId) presentProductExternalIds.add(rawId)
+			}
 
 			// Avoid a long-lived interactive transaction here because image
 			// downloads/uploads can easily exceed Prisma's default timeout.
@@ -426,7 +433,7 @@ export class MoySkladSyncService {
 				} finally {
 					await progress.report({
 						phase: 'SYNCING_PRODUCTS',
-						message: `РЎРёРЅС…СЂРѕРЅРёР·РёСЂСѓРµРј С‚РѕРІР°СЂС‹: ${processed}/${products.length}`,
+						message: `Синхронизируем товары: ${processed}/${products.length}`,
 						processed,
 						total: totalSyncItems
 					})
@@ -466,7 +473,7 @@ export class MoySkladSyncService {
 					)
 					await progress.report({
 						phase: 'SYNCING_VARIANTS',
-						message: `РЎРёРЅС…СЂРѕРЅРёР·РёСЂСѓРµРј РјРѕРґРёС„РёРєР°С†РёРё: ${seenVariants}/${variants.length}`,
+						message: `Синхронизируем модификации: ${seenVariants}/${variants.length}`,
 						processed: products.length + seenVariants,
 						total: totalSyncItems
 					})
@@ -488,7 +495,7 @@ export class MoySkladSyncService {
 					)
 					await progress.report({
 						phase: 'SYNCING_VARIANTS',
-						message: `РЎРёРЅС…СЂРѕРЅРёР·РёСЂСѓРµРј РјРѕРґРёС„РёРєР°С†РёРё: ${seenVariants}/${variants.length}`,
+						message: `Синхронизируем модификации: ${seenVariants}/${variants.length}`,
 						processed: products.length + seenVariants,
 						total: totalSyncItems
 					})
@@ -527,7 +534,7 @@ export class MoySkladSyncService {
 				} finally {
 					await progress.report({
 						phase: 'SYNCING_VARIANTS',
-						message: `РЎРёРЅС…СЂРѕРЅРёР·РёСЂСѓРµРј РјРѕРґРёС„РёРєР°С†РёРё: ${seenVariants}/${variants.length}`,
+						message: `Синхронизируем модификации: ${seenVariants}/${variants.length}`,
 						processed: products.length + seenVariants,
 						total: totalSyncItems
 					})
@@ -548,11 +555,11 @@ export class MoySkladSyncService {
 			}
 
 			// Handle deleted products
-			if (!isIncrementalSync) {
+			if (!isIncrementalSync && productItems.length > 0) {
 				await progress.report({
 					phase: 'ARCHIVING_MISSING',
 					message:
-						'РџСЂРѕРІРµСЂСЏРµРј С‚РѕРІР°СЂС‹, СѓРґР°Р»С‘РЅРЅС‹Рµ РёР»Рё СЃРєСЂС‹С‚С‹Рµ РІ РњРѕР№РЎРєР»Р°Рґ',
+						'Проверяем товары, удаленные или скрытые в МойСклад',
 					processed: totalSyncItems,
 					total: totalSyncItems,
 					force: true
@@ -561,9 +568,13 @@ export class MoySkladSyncService {
 					await this.missingProducts.hideMissingProducts({
 						catalogId,
 						integrationId: integration.id,
-						currentExternalIds: new Set(products.map(resolveExternalProductKey)),
+						currentExternalIds: presentProductExternalIds,
 						productLinks
 					})
+				)
+			} else if (!isIncrementalSync) {
+				this.logger.warn(
+					`Skipped missing-product archival for catalog ${catalogId} because MoySklad returned no product/service/bundle items`
 				)
 			} else {
 				this.logger.log(
@@ -588,7 +599,7 @@ export class MoySkladSyncService {
 			const durationMs = Date.now() - startedAt
 			await progress.report({
 				phase: 'COMPLETED',
-				message: 'РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ РњРѕР№РЎРєР»Р°Рґ Р·Р°РІРµСЂС€РµРЅР°',
+				message: 'Синхронизация МойСклад завершена',
 				processed: totalSyncItems,
 				total: totalSyncItems,
 				force: true
@@ -645,7 +656,7 @@ export class MoySkladSyncService {
 			const localProduct = await this.repo.findProductById(catalogId, productId)
 
 			if (!localProduct) {
-				throw new NotFoundException('РўРѕРІР°СЂ РЅРµ РЅР°Р№РґРµРЅ')
+				throw new NotFoundException('Товар не найден')
 			}
 
 			const link = await this.repo.findProductLinkByProductId(
@@ -653,12 +664,12 @@ export class MoySkladSyncService {
 				productId
 			)
 			if (!link) {
-				throw new NotFoundException('РўРѕРІР°СЂ РЅРµ СЃРІСЏР·Р°РЅ СЃ MoySklad')
+				throw new NotFoundException('Товар не связан с MoySklad')
 			}
 
 			await progress.report({
 				phase: 'FETCHING_PRODUCT',
-				message: 'РџРѕР»СѓС‡Р°РµРј С‚РѕРІР°СЂ РёР· MoySklad',
+				message: 'Получаем товар из MoySklad',
 				processed: 0,
 				total: null,
 				force: true
@@ -688,7 +699,7 @@ export class MoySkladSyncService {
 			const totalSyncItems = 1 + externalVariants.length
 			await progress.report({
 				phase: 'SYNCING_PRODUCTS',
-				message: 'РЎРёРЅС…СЂРѕРЅРёР·РёСЂСѓРµРј РєР°СЂС‚РѕС‡РєСѓ С‚РѕРІР°СЂР°',
+				message: 'Синхронизируем карточку товара',
 				processed: 0,
 				total: totalSyncItems,
 				force: true
@@ -712,7 +723,7 @@ export class MoySkladSyncService {
 			})
 			await progress.report({
 				phase: 'SYNCING_PRODUCTS',
-				message: 'РљР°СЂС‚РѕС‡РєР° С‚РѕРІР°СЂР° СЃРёРЅС…СЂРѕРЅРёР·РёСЂРѕРІР°РЅР°',
+				message: 'Карточка товара синхронизирована',
 				processed: 1,
 				total: totalSyncItems,
 				force: true
@@ -781,7 +792,7 @@ export class MoySkladSyncService {
 			const durationMs = Date.now() - startedAt
 			await progress.report({
 				phase: 'COMPLETED',
-				message: 'РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ С‚РѕРІР°СЂР° Р·Р°РІРµСЂС€РµРЅР°',
+				message: 'Синхронизация товара завершена',
 				processed: totalSyncItems,
 				total: totalSyncItems,
 				force: true
@@ -860,7 +871,7 @@ export class MoySkladSyncService {
 				await progress.report({
 					phase: 'COMPLETED',
 					message:
-						'РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ РѕСЃС‚Р°С‚РєРѕРІ РЅРµ С‚СЂРµР±СѓРµС‚СЃСЏ РґР»СЏ РІРЅСѓС‚СЂРµРЅРЅРµРіРѕ СЃРєР»Р°РґР°',
+						'Синхронизация остатков не требуется для внутреннего склада',
 					processed: 0,
 					total: 0,
 					force: true
@@ -908,7 +919,7 @@ export class MoySkladSyncService {
 			const durationMs = Date.now() - startedAt
 			await progress.report({
 				phase: 'COMPLETED',
-				message: 'РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ РѕСЃС‚Р°С‚РєРѕРІ Р·Р°РІРµСЂС€РµРЅР°',
+				message: 'Синхронизация остатков завершена',
 				processed: stockResult.total,
 				total: stockResult.total,
 				force: true
@@ -1138,17 +1149,17 @@ export class MoySkladSyncService {
 		const integration = await this.repo.findMoySklad(catalogId)
 		if (!integration) {
 			throw new NotFoundException(
-				'РРЅС‚РµРіСЂР°С†РёСЏ MoySklad РЅРµ РЅР°СЃС‚СЂРѕРµРЅР°'
+				'Интеграция MoySklad не настроена'
 			)
 		}
 		if (!integration.isActive) {
 			throw new ConflictException(
-				'РРЅС‚РµРіСЂР°С†РёСЏ MoySklad РѕС‚РєР»СЋС‡РµРЅР°'
+				'Интеграция MoySklad отключена'
 			)
 		}
 
 		throw new ConflictException(
-			'РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ MoySklad СѓР¶Рµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ'
+			'Синхронизация MoySklad уже выполняется'
 		)
 	}
 
@@ -1158,12 +1169,12 @@ export class MoySkladSyncService {
 		const integration = await this.repo.findMoySklad(catalogId)
 		if (!integration) {
 			throw new NotFoundException(
-				'РРЅС‚РµРіСЂР°С†РёСЏ MoySklad РЅРµ РЅР°СЃС‚СЂРѕРµРЅР°'
+				'Интеграция MoySklad не настроена'
 			)
 		}
 		if (!integration.isActive) {
 			throw new ConflictException(
-				'РРЅС‚РµРіСЂР°С†РёСЏ MoySklad РѕС‚РєР»СЋС‡РµРЅР°'
+				'Интеграция MoySklad отключена'
 			)
 		}
 		return integration

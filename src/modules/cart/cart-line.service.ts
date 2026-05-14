@@ -406,7 +406,7 @@ export class CartLineService {
 		)
 
 		if (!rows.length) {
-			throw new NotFoundException('РљРѕСЂР·РёРЅР° РЅРµ РЅР°Р№РґРµРЅР°')
+			throw new NotFoundException('Корзина не найдена')
 		}
 	}
 
