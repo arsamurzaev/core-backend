@@ -1,4 +1,6 @@
-import { Prisma } from '../../prisma/generated/client.js'
+import Redis from 'ioredis'
+
+import { Prisma, ProductStatus } from '../../prisma/generated/client.js'
 
 import { colors, printJson, table } from './format.js'
 import { askText, choose, pause } from './prompt.js'
@@ -18,6 +20,11 @@ const PRODUCT_VARIANT_KIND_DEFAULT = 'DEFAULT'
 const PRODUCT_VARIANT_KIND_MATRIX = 'MATRIX'
 const uuidRegex =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const CATALOG_CACHE_SCOPES_TO_BUMP = [
+	'products-v5',
+	'category-products-v5',
+	'categories-v2'
+] as const
 
 const CUSTOM_SCRIPTS: CustomScript[] = [
 	{
@@ -47,6 +54,13 @@ const CUSTOM_SCRIPTS: CustomScript[] = [
 		description:
 			'Explain visible/hidden MoySklad products for a catalog, including stock/status samples.',
 		run: runMoySkladCatalogVisibility
+	},
+	{
+		id: 'moysklad-restore-zero-stock-visibility',
+		name: 'Restore MoySklad zero-stock visibility',
+		description:
+			'Set zero-stock MoySklad-linked products back to ACTIVE after the old stock hiding behavior.',
+		run: runMoySkladRestoreZeroStockVisibility
 	}
 ]
 
@@ -140,6 +154,22 @@ type MoySkladSyncRunRow = {
 	error: string | null
 	startedAt: Date | null
 	finishedAt: Date | null
+}
+
+type MoySkladRestoreVisibilityCandidateRow = {
+	id: string
+	name: string
+	sku: string
+	status: string
+	externalId: string | null
+	externalCode: string | null
+	rawStock: string | null
+	archived: string | null
+	totalStock: number
+	variants: number
+	activeVariants: number
+	skippedReason: string | null
+	updatedAt: Date
 }
 
 const productVariantInspectionSelect = {
@@ -427,6 +457,14 @@ async function runMoySkladCatalogVisibility(ctx: AppContext) {
 	await pause()
 }
 
+async function runMoySkladRestoreZeroStockVisibility(ctx: AppContext) {
+	const lookup = await askText('Catalog slug/name/domain/id', {
+		required: true
+	})
+	await runMoySkladRestoreZeroStockVisibilityReport(ctx, lookup)
+	await pause()
+}
+
 export async function runMoySkladCatalogVisibilityCommand(
 	ctx: AppContext,
 	options: Record<string, string | boolean>
@@ -439,6 +477,23 @@ export async function runMoySkladCatalogVisibilityCommand(
 	}
 
 	await runMoySkladCatalogVisibilityReport(ctx, lookup, {
+		json: Boolean(options.json)
+	})
+}
+
+export async function runMoySkladRestoreZeroStockVisibilityCommand(
+	ctx: AppContext,
+	options: Record<string, string | boolean>
+) {
+	const lookup = readCatalogLookupOption(options)
+	if (!lookup) {
+		throw new Error(
+			'Catalog lookup is required. Pass --catalog, --slug, --id or --query.'
+		)
+	}
+
+	await runMoySkladRestoreZeroStockVisibilityReport(ctx, lookup, {
+		apply: Boolean(options.yes),
 		json: Boolean(options.json)
 	})
 }
@@ -514,6 +569,117 @@ async function runMoySkladCatalogVisibilityReport(
 
 	console.log(colors.cyan(`Latest MoySklad sync runs (${latestRuns.length})`))
 	table(latestRuns, undefined, latestRuns.length || ctx.options.limit)
+}
+
+async function runMoySkladRestoreZeroStockVisibilityReport(
+	ctx: AppContext,
+	lookup: string,
+	options: { apply?: boolean; json?: boolean } = {}
+) {
+	const catalog = await resolveCatalogForCustomScript(ctx, lookup)
+	const candidates = await loadMoySkladRestoreVisibilityCandidates(
+		ctx,
+		catalog.id
+	)
+
+	if (ctx.options.json || options.json) {
+		if (!options.apply) {
+			printJson({
+				catalog,
+				matched: candidates.length,
+				previewOnly: true,
+				hint: 'Pass --yes to restore these products to ACTIVE.',
+				candidates
+			})
+			return
+		}
+	} else {
+		console.log(
+			colors.cyan(
+				colors.bold(`${catalog.name} / ${catalog.slug}: restore visibility`)
+			)
+		)
+		console.log(colors.yellow(`Matched products: ${candidates.length}`))
+		table(candidates, undefined, candidates.length || ctx.options.limit)
+	}
+
+	if (!candidates.length) {
+		if (ctx.options.json || options.json) {
+			printJson({
+				catalog,
+				matched: 0,
+				updated: 0
+			})
+		}
+		return
+	}
+
+	if (!options.apply) {
+		console.log(
+			colors.yellow('Preview only. Pass --yes to set matched products to ACTIVE.')
+		)
+		return
+	}
+
+	assertCanMutate(ctx, 'moyskladRestoreZeroStockVisibility')
+	const backupPath = await writeBackup(
+		ctx,
+		{ name: 'Product' } as ModelMeta,
+		'moyskladRestoreZeroStockVisibility',
+		candidates as unknown as Record<string, unknown>[],
+		{
+			catalogId: catalog.id,
+			provider: 'MOYSKLAD',
+			status: ProductStatus.HIDDEN,
+			totalStockLte: 0,
+			activeVariants: 0,
+			archivedNotTrue: true
+		}
+	)
+	const ids = candidates.map(candidate => candidate.id)
+	const result = await runAudited(
+		ctx,
+		{
+			action: 'moyskladRestoreZeroStockVisibility',
+			model: 'Product',
+			where: { id: { in: ids }, catalogId: catalog.id },
+			data: { status: ProductStatus.ACTIVE },
+			affectedCount: candidates.length,
+			backupPath
+		},
+		async () =>
+			await ctx.prisma.product.updateMany({
+				where: {
+					id: { in: ids },
+					catalogId: catalog.id,
+					status: ProductStatus.HIDDEN,
+					deleteAt: null
+				},
+				data: { status: ProductStatus.ACTIVE }
+			})
+	)
+	const bumpedCacheScopes = result.count
+		? await bumpCatalogRedisCacheVersions(catalog.id)
+		: []
+
+	if (ctx.options.json || options.json) {
+		printJson({
+			catalog,
+			matched: candidates.length,
+			updated: result.count,
+			backupPath,
+			bumpedCacheScopes
+		})
+	} else {
+		console.log(
+			colors.green(`Restored products: ${result.count}. Backup: ${backupPath}`)
+		)
+		if (bumpedCacheScopes.length) {
+			console.log(
+				colors.green(`Bumped cache scopes: ${bumpedCacheScopes.join(', ')}`)
+			)
+		}
+	}
 }
 
 function readCatalogLookupOption(
@@ -762,6 +928,113 @@ async function loadMoySkladLatestSyncRuns(
 		order by run.requested_at desc
 		limit ${Math.max(1, Math.trunc(limit))}
 	`)
+}
+
+async function loadMoySkladRestoreVisibilityCandidates(
+	ctx: AppContext,
+	catalogId: string,
+	limit?: number
+): Promise<MoySkladRestoreVisibilityCandidateRow[]> {
+	const limitClause =
+		typeof limit === 'number' ? `limit ${Math.max(1, Math.trunc(limit))}` : ''
+
+	return ctx.prisma.$queryRawUnsafe<MoySkladRestoreVisibilityCandidateRow[]>(`
+		select
+			p.id::text,
+			p.name,
+			p.sku,
+			p.status::text as status,
+			link.external_id as "externalId",
+			link.external_code as "externalCode",
+			link.raw_meta ->> 'stock' as "rawStock",
+			link.raw_meta ->> 'archived' as archived,
+			coalesce(sum(greatest(coalesce(v.stock, 0), 0)), 0)::int as "totalStock",
+			count(v.id)::int as variants,
+			count(v.id) filter (
+				where v.status::text = 'ACTIVE'
+					and v.is_available = true
+			)::int as "activeVariants",
+			link.skipped_reason as "skippedReason",
+			p.updated_at as "updatedAt"
+		from products p
+		join integration_product_links link on link.product_id = p.id
+		join integrations integration
+			on integration.id = link.integration_id
+			and integration.provider::text = 'MOYSKLAD'
+			and integration.catalog_id = p.catalog_id
+			and integration.delete_at is null
+		left join product_variants v
+			on v.product_id = p.id
+			and v.delete_at is null
+		where p.catalog_id = '${catalogId}'::uuid
+			and p.delete_at is null
+			and p.status::text = 'HIDDEN'
+			and coalesce(link.raw_meta ->> 'archived', 'false') <> 'true'
+			and coalesce(link.skipped_reason, '') not in (
+				'hidden_after_missing_confirmations',
+				'missing_from_complete_snapshot'
+			)
+		group by
+			p.id,
+			p.name,
+			p.sku,
+			p.status,
+			link.external_id,
+			link.external_code,
+			link.raw_meta,
+			link.skipped_reason,
+			p.updated_at
+		having
+			coalesce(sum(greatest(coalesce(v.stock, 0), 0)), 0) <= 0
+			and count(v.id) filter (
+				where v.status::text = 'ACTIVE'
+					and v.is_available = true
+			) = 0
+		order by p.updated_at desc, p.id asc
+		${limitClause}
+	`)
+}
+
+async function bumpCatalogRedisCacheVersions(catalogId: string) {
+	if (!process.env.REDIS_HOST || !process.env.REDIS_PORT) {
+		console.log(
+			colors.yellow('Redis env is not configured; cache versions were not bumped.')
+		)
+		return [] as string[]
+	}
+
+	const redis = new Redis({
+		username: process.env.REDIS_USER || undefined,
+		password: process.env.REDIS_PASSWORD || undefined,
+		host: process.env.REDIS_HOST,
+		port: Number.parseInt(process.env.REDIS_PORT, 10),
+		commandTimeout: 5000,
+		connectTimeout: 5000,
+		enableOfflineQueue: false,
+		lazyConnect: true,
+		maxRetriesPerRequest: 1
+	})
+
+	try {
+		await redis.connect()
+		await Promise.all(
+			CATALOG_CACHE_SCOPES_TO_BUMP.map(scope =>
+				redis.incr(`cache:version:${scope}:${catalogId}`)
+			)
+		)
+		return [...CATALOG_CACHE_SCOPES_TO_BUMP]
+	} catch (error) {
+		console.log(
+			colors.yellow(
+				`Could not bump Redis cache versions: ${
+					error instanceof Error ? error.message : String(error)
+				}`
+			)
+		)
+		return [] as string[]
+	} finally {
+		redis.disconnect()
+	}
 }
 
 function printProductInspection(product: {
