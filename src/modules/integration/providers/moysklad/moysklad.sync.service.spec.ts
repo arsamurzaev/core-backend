@@ -1307,6 +1307,104 @@ describe('MoySkladSyncService', () => {
 		)
 	})
 
+	it('keeps zero-stock MoySklad products visible and marks only the variant out of stock', async () => {
+		const catalogId = 'catalog-1'
+		const integration = {
+			id: 'integration-1',
+			catalogId,
+			metadata: {},
+			isActive: true,
+			lastSyncAt: null
+		}
+		const product = {
+			id: 'external-1',
+			externalCode: 'external-key-1',
+			meta: { type: 'product' },
+			name: 'Product 1',
+			code: 'MSK-1',
+			updated: '2026-03-23 14:00:00',
+			archived: false,
+			stock: 0,
+			productFolder: testProductFolder,
+			salePrices: [
+				{
+					value: 12500,
+					priceType: {
+						name: 'Retail'
+					}
+				}
+			],
+			images: {
+				rows: []
+			}
+		}
+
+		metadataCrypto.parseStoredMetadata.mockReturnValueOnce({
+			token: 'token',
+			priceTypeName: 'Retail',
+			importImages: false,
+			syncStock: true
+		})
+		repo.beginMoySkladSync.mockResolvedValue(integration as any)
+		repo.findMoySklad.mockResolvedValue(integration as any)
+		repo.findProductLinkByExternalId.mockResolvedValue({
+			id: 'link-1',
+			productId: 'local-1',
+			externalId: 'external-key-1',
+			externalUpdatedAt: new Date('2026-03-22T10:00:00.000Z')
+		} as any)
+		repo.findProductById.mockResolvedValue({
+			id: 'local-1',
+			catalogId,
+			name: 'Product 1',
+			sku: 'MSK-1',
+			slug: 'product-1',
+			price: 125,
+			status: ProductStatus.HIDDEN,
+			deleteAt: null
+		} as any)
+		repo.updateProduct.mockResolvedValue({
+			id: 'local-1',
+			catalogId,
+			name: 'Product 1',
+			sku: 'MSK-1',
+			slug: 'product-1',
+			price: 125,
+			status: ProductStatus.ACTIVE,
+			deleteAt: null
+		} as any)
+		repo.upsertProductLink.mockResolvedValue({ id: 'link-1' } as any)
+		repo.findProductLinksByIntegration.mockResolvedValue([
+			{ externalId: 'external-key-1', productId: 'local-1' }
+		] as any)
+		repo.finishMoySkladSync.mockResolvedValue(integration as any)
+
+		jest
+			.spyOn(MoySkladClient.prototype, 'getAllAssortment')
+			.mockResolvedValue([product] as any)
+
+		const result = await service.syncCatalog(catalogId)
+
+		expect(result.ok).toBe(true)
+		expect(repo.updateProduct).toHaveBeenCalledWith(
+			{
+				productId: 'local-1',
+				catalogId,
+				data: { status: ProductStatus.ACTIVE }
+			},
+			undefined
+		)
+		expect(repo.ensureDefaultVariantForProduct).toHaveBeenCalledWith(
+			expect.objectContaining({
+				integrationId: integration.id,
+				productId: 'local-1',
+				stock: 0,
+				status: 'OUT_OF_STOCK'
+			}),
+			undefined
+		)
+	})
+
 	it('hides missing products after confirmed full snapshots instead of archiving them', async () => {
 		const catalogId = 'catalog-1'
 		const integration = {

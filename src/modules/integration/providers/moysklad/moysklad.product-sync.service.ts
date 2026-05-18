@@ -192,7 +192,7 @@ function resolveProductStatus(
 		return currentStatus ?? ProductStatus.ACTIVE
 	}
 
-	return (stock ?? 0) > 0 ? ProductStatus.ACTIVE : ProductStatus.HIDDEN
+	return ProductStatus.ACTIVE
 }
 
 @Injectable()
@@ -624,6 +624,7 @@ export class MoySkladProductSyncService {
 			code: readMoySkladNullableString(product.code),
 			article: readMoySkladNullableString(product.article),
 			externalCode: readMoySkladNullableString(product.externalCode),
+			archived: Boolean(product.archived),
 			barcodes: Array.isArray(product.barcodes)
 				? product.barcodes.map(barcode => ({
 						ean13: readMoySkladNullableString(barcode.ean13),

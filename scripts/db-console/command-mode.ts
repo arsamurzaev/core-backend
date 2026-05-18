@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 import { runCatalogDiagnostics } from './catalog-diagnostics.js'
+import { runMoySkladCatalogVisibilityCommand } from './custom-scripts.js'
 import { colors, printJson, table } from './format.js'
 import { getDelegate, scalarSelect } from './metadata.js'
 import {
@@ -30,6 +31,14 @@ export async function runCommandMode(ctx: AppContext, models: ModelMeta[]) {
 			json: Boolean(command.options.json),
 			exportFormat: exportFormat(command.options)
 		})
+		return true
+	}
+
+	if (
+		command.subject === 'catalog' &&
+		['moysklad-visibility', 'moyskladVisibility'].includes(command.action)
+	) {
+		await runMoySkladCatalogVisibilityCommand(ctx, command.options)
 		return true
 	}
 

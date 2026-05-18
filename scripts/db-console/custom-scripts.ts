@@ -1,6 +1,6 @@
 import { Prisma } from '../../prisma/generated/client.js'
 
-import { colors, table } from './format.js'
+import { colors, printJson, table } from './format.js'
 import { askText, choose, pause } from './prompt.js'
 import { assertCanMutate, runAudited } from './safety.js'
 import { writeBackup } from './storage.js'
@@ -38,6 +38,13 @@ const CUSTOM_SCRIPTS: CustomScript[] = [
 		description:
 			'Show a product with catalog and selected variants by productId or variantId.',
 		run: runInspectProductVariant
+	},
+	{
+		id: 'moysklad-catalog-visibility',
+		name: 'MoySklad catalog visibility',
+		description:
+			'Explain visible/hidden MoySklad products for a catalog, including stock/status samples.',
+		run: runMoySkladCatalogVisibility
 	}
 ]
 
@@ -82,6 +89,55 @@ type ProductVariantInspectionRow = {
 			domain: string | null
 		}
 	}
+}
+
+type MoySkladVisibilitySummaryRow = {
+	check: string
+	count: number
+	details: string | null
+}
+
+type MoySkladVisibilitySampleRow = {
+	id: string
+	name: string
+	sku: string
+	status: string
+	externalId: string | null
+	externalCode: string | null
+	rawStock: string | null
+	archived: string | null
+	totalStock: number
+	variants: number
+	activeVariants: number
+	skippedReason: string | null
+	lastStockSyncAt: Date | null
+	updatedAt: Date
+}
+
+type MoySkladStatusCountRow = {
+	status: string
+	count: number
+}
+
+type MoySkladVariantStatusCountRow = {
+	status: string
+	isAvailable: boolean
+	count: number
+}
+
+type MoySkladSyncRunRow = {
+	id: string
+	mode: string
+	trigger: string
+	status: string
+	snapshotCompleteness: string
+	totalProducts: number
+	createdProducts: number
+	updatedProducts: number
+	deletedProducts: number
+	error: string | null
+	startedAt: Date | null
+	finishedAt: Date | null
 }
 
 const productVariantInspectionSelect = {
@@ -359,6 +415,353 @@ async function runInspectProductVariant(ctx: AppContext) {
 		}))
 	})
 	await pause()
+}
+
+async function runMoySkladCatalogVisibility(ctx: AppContext) {
+	const lookup = await askText('Catalog slug/name/domain/id', {
+		required: true
+	})
+	await runMoySkladCatalogVisibilityReport(ctx, lookup)
+	await pause()
+}
+
+export async function runMoySkladCatalogVisibilityCommand(
+	ctx: AppContext,
+	options: Record<string, string | boolean>
+) {
+	const lookup = readCatalogLookupOption(options)
+	if (!lookup) {
+		throw new Error(
+			'Catalog lookup is required. Pass --catalog, --slug, --id or --query.'
+		)
+	}
+
+	await runMoySkladCatalogVisibilityReport(ctx, lookup, {
+		json: Boolean(options.json)
+	})
+}
+
+async function runMoySkladCatalogVisibilityReport(
+	ctx: AppContext,
+	lookup: string,
+	options: { json?: boolean } = {}
+) {
+	const catalog = await resolveCatalogForCustomScript(ctx, lookup)
+	const integration = await ctx.prisma.integration.findFirst({
+		where: {
+			catalogId: catalog.id,
+			provider: 'MOYSKLAD',
+			deleteAt: null
+		},
+		select: {
+			id: true,
+			isActive: true,
+			lastSyncStatus: true,
+			lastSyncAt: true,
+			lastSyncError: true,
+			totalProducts: true,
+			createdProducts: true,
+			updatedProducts: true,
+			deletedProducts: true
+		}
+	})
+
+	const [summary, productStatuses, variantStatuses, hiddenSamples, latestRuns] =
+		await Promise.all([
+			loadMoySkladVisibilitySummary(ctx, catalog.id),
+			loadMoySkladProductStatusCounts(ctx, catalog.id),
+			loadMoySkladVariantStatusCounts(ctx, catalog.id),
+			loadMoySkladHiddenProductSamples(ctx, catalog.id, ctx.options.limit),
+			loadMoySkladLatestSyncRuns(ctx, catalog.id, ctx.options.limit)
+		])
+
+	if (ctx.options.json || options.json) {
+		printJson({
+			catalog,
+			integration,
+			summary,
+			productStatuses,
+			variantStatuses,
+			hiddenSamples,
+			latestRuns
+		})
+		return
+	}
+
+	console.log(colors.cyan(colors.bold(`${catalog.name} / ${catalog.slug}`)))
+	console.log(colors.cyan('MoySklad integration'))
+	if (integration) {
+		table([integration], undefined, 1)
+	} else {
+		console.log(colors.yellow('MoySklad integration not found'))
+	}
+
+	console.log(colors.cyan('Visibility summary'))
+	table(summary, undefined, summary.length)
+
+	console.log(colors.cyan('Product statuses'))
+	table(productStatuses, undefined, productStatuses.length)
+
+	console.log(colors.cyan('Variant statuses'))
+	table(variantStatuses, undefined, variantStatuses.length)
+
+	console.log(
+		colors.cyan(`Hidden MoySklad product samples (${hiddenSamples.length})`)
+	)
+	table(hiddenSamples, undefined, hiddenSamples.length || ctx.options.limit)
+
+	console.log(colors.cyan(`Latest MoySklad sync runs (${latestRuns.length})`))
+	table(latestRuns, undefined, latestRuns.length || ctx.options.limit)
+}
+
+function readCatalogLookupOption(
+	options: Record<string, string | boolean>
+): string | null {
+	for (const key of ['catalog', 'slug', 'id', 'query']) {
+		const value = options[key]
+		if (typeof value === 'string' && value.trim()) return value.trim()
+	}
+
+	return null
+}
+
+async function resolveCatalogForCustomScript(ctx: AppContext, lookup: string) {
+	const normalized = lookup.trim()
+	const isUuid =
+		/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+			normalized
+		)
+	const catalog = await ctx.prisma.catalog.findFirst({
+		where: {
+			OR: [
+				...(isUuid ? [{ id: normalized }] : []),
+				{ slug: normalized },
+				{ domain: normalized },
+				{ name: { equals: normalized, mode: 'insensitive' } },
+				{ slug: { contains: normalized, mode: 'insensitive' } },
+				{ domain: { contains: normalized, mode: 'insensitive' } },
+				{ name: { contains: normalized, mode: 'insensitive' } }
+			]
+		},
+		orderBy: { updatedAt: 'desc' },
+		select: {
+			id: true,
+			name: true,
+			slug: true,
+			domain: true,
+			deleteAt: true,
+			updatedAt: true
+		}
+	})
+
+	if (!catalog) throw new Error(`Catalog not found: ${normalized}`)
+	return catalog as {
+		id: string
+		name: string
+		slug: string
+		domain: string | null
+		deleteAt: Date | null
+		updatedAt: Date
+	}
+}
+
+async function loadMoySkladVisibilitySummary(
+	ctx: AppContext,
+	catalogId: string
+): Promise<MoySkladVisibilitySummaryRow[]> {
+	return ctx.prisma.$queryRawUnsafe<MoySkladVisibilitySummaryRow[]>(`
+		with product_stock as (
+			select
+				p.id,
+				p.status::text as status,
+				count(v.id)::int as variants,
+				count(v.id) filter (
+					where v.status::text = 'ACTIVE'
+						and v.is_available = true
+				)::int as active_variants,
+				coalesce(sum(greatest(coalesce(v.stock, 0), 0)), 0)::int as total_stock
+			from products p
+			left join product_variants v
+				on v.product_id = p.id
+				and v.delete_at is null
+			where p.catalog_id = '${catalogId}'::uuid
+				and p.delete_at is null
+			group by p.id, p.status
+		),
+		moysklad_products as (
+			select
+				ps.*,
+				link.id as link_id,
+				link.raw_meta,
+				link.last_stock_sync_at
+			from product_stock ps
+			left join integration_product_links link
+				on link.product_id = ps.id
+			left join integrations integration
+				on integration.id = link.integration_id
+				and integration.provider::text = 'MOYSKLAD'
+				and integration.catalog_id = '${catalogId}'::uuid
+				and integration.delete_at is null
+		)
+		select 'all products' as check, count(*)::int as count, null::text as details
+		from product_stock
+		union all
+		select 'client-visible products', count(*)::int, 'Product.status = ACTIVE'
+		from product_stock
+		where status = 'ACTIVE'
+		union all
+		select 'hidden products', count(*)::int, 'Product.status = HIDDEN'
+		from product_stock
+		where status = 'HIDDEN'
+		union all
+		select 'MoySklad linked products', count(*)::int, 'integration_product_links'
+		from moysklad_products
+		where link_id is not null
+		union all
+		select 'visible MoySklad linked products', count(*)::int, 'linked + ACTIVE'
+		from moysklad_products
+		where link_id is not null and status = 'ACTIVE'
+		union all
+		select 'hidden MoySklad linked products', count(*)::int, 'linked + HIDDEN'
+		from moysklad_products
+		where link_id is not null and status = 'HIDDEN'
+		union all
+		select 'hidden linked with zero total stock', count(*)::int, 'status HIDDEN and sum(variant.stock) <= 0'
+		from moysklad_products
+		where link_id is not null
+			and status = 'HIDDEN'
+			and total_stock <= 0
+		union all
+		select 'hidden linked without active variants', count(*)::int, 'status HIDDEN and no ACTIVE/isAvailable variants'
+		from moysklad_products
+		where link_id is not null
+			and status = 'HIDDEN'
+			and active_variants = 0
+		union all
+		select 'hidden linked archived in MoySklad', count(*)::int, 'raw_meta.archived = true'
+		from moysklad_products
+		where link_id is not null
+			and status = 'HIDDEN'
+			and raw_meta ->> 'archived' = 'true'
+		union all
+		select 'linked without stock sync timestamp', count(*)::int, 'last_stock_sync_at is null'
+		from moysklad_products
+		where link_id is not null
+			and last_stock_sync_at is null
+	`)
+}
+
+async function loadMoySkladProductStatusCounts(
+	ctx: AppContext,
+	catalogId: string
+): Promise<MoySkladStatusCountRow[]> {
+	return ctx.prisma.$queryRawUnsafe<MoySkladStatusCountRow[]>(`
+		select p.status::text as status, count(*)::int as count
+		from products p
+		where p.catalog_id = '${catalogId}'::uuid
+			and p.delete_at is null
+		group by p.status
+		order by count desc, status asc
+	`)
+}
+
+async function loadMoySkladVariantStatusCounts(
+	ctx: AppContext,
+	catalogId: string
+): Promise<MoySkladVariantStatusCountRow[]> {
+	return ctx.prisma.$queryRawUnsafe<MoySkladVariantStatusCountRow[]>(`
+		select
+			v.status::text as status,
+			v.is_available as "isAvailable",
+			count(*)::int as count
+		from product_variants v
+		join products p on p.id = v.product_id
+		where p.catalog_id = '${catalogId}'::uuid
+			and p.delete_at is null
+			and v.delete_at is null
+		group by v.status, v.is_available
+		order by count desc, status asc, v.is_available desc
+	`)
+}
+
+async function loadMoySkladHiddenProductSamples(
+	ctx: AppContext,
+	catalogId: string,
+	limit: number
+): Promise<MoySkladVisibilitySampleRow[]> {
+	return ctx.prisma.$queryRawUnsafe<MoySkladVisibilitySampleRow[]>(`
+		select
+			p.id::text,
+			p.name,
+			p.sku,
+			p.status::text as status,
+			link.external_id as "externalId",
+			link.external_code as "externalCode",
+			link.raw_meta ->> 'stock' as "rawStock",
+			link.raw_meta ->> 'archived' as archived,
+			coalesce(sum(greatest(coalesce(v.stock, 0), 0)), 0)::int as "totalStock",
+			count(v.id)::int as variants,
+			count(v.id) filter (
+				where v.status::text = 'ACTIVE'
+					and v.is_available = true
+			)::int as "activeVariants",
+			link.skipped_reason as "skippedReason",
+			link.last_stock_sync_at as "lastStockSyncAt",
+			p.updated_at as "updatedAt"
+		from products p
+		join integration_product_links link on link.product_id = p.id
+		join integrations integration
+			on integration.id = link.integration_id
+			and integration.provider::text = 'MOYSKLAD'
+			and integration.catalog_id = p.catalog_id
+			and integration.delete_at is null
+		left join product_variants v
+			on v.product_id = p.id
+			and v.delete_at is null
+		where p.catalog_id = '${catalogId}'::uuid
+			and p.delete_at is null
+			and p.status::text = 'HIDDEN'
+		group by
+			p.id,
+			p.name,
+			p.sku,
+			p.status,
+			link.external_id,
+			link.external_code,
+			link.raw_meta,
+			link.skipped_reason,
+			link.last_stock_sync_at,
+			p.updated_at
+		order by "totalStock" asc, p.updated_at desc, p.id asc
+		limit ${Math.max(1, Math.trunc(limit))}
+	`)
+}
+
+async function loadMoySkladLatestSyncRuns(
+	ctx: AppContext,
+	catalogId: string,
+	limit: number
+): Promise<MoySkladSyncRunRow[]> {
+	return ctx.prisma.$queryRawUnsafe<MoySkladSyncRunRow[]>(`
+		select
+			run.id::text,
+			run.mode::text as mode,
+			run.trigger::text as trigger,
+			run.status::text as status,
+			run.snapshot_completeness::text as "snapshotCompleteness",
+			run.total_products as "totalProducts",
+			run.created_products as "createdProducts",
+			run.updated_products as "updatedProducts",
+			run.deleted_products as "deletedProducts",
+			run.error,
+			run.started_at as "startedAt",
+			run.finished_at as "finishedAt"
+		from integration_sync_runs run
+		where run.catalog_id = '${catalogId}'::uuid
+			and run.provider::text = 'MOYSKLAD'
+		order by run.requested_at desc
+		limit ${Math.max(1, Math.trunc(limit))}
+	`)
 }
 
 function printProductInspection(product: {

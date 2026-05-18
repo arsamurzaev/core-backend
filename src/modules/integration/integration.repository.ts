@@ -2654,19 +2654,6 @@ export class IntegrationRepository {
 		})
 		if (!product) return emptyVariantStockUpdateResult()
 
-		let changed = false
-		const nextProductStatus = this.resolveStockProductStatus(
-			product.status,
-			stock
-		)
-		if (product.status !== nextProductStatus) {
-			await db.product.update({
-				where: { id: product.id },
-				data: { status: nextProductStatus }
-			})
-			changed = true
-		}
-
 		const defaultVariantUpdate = await this.updateDefaultVariantStock(
 			db,
 			product.id,
@@ -2675,7 +2662,7 @@ export class IntegrationRepository {
 
 		return {
 			...defaultVariantUpdate,
-			changed: changed || defaultVariantUpdate.changed,
+			changed: defaultVariantUpdate.changed,
 			productId: product.id
 		}
 	}
@@ -2807,25 +2794,7 @@ export class IntegrationRepository {
 			return false
 		}
 
-		const activeVariants = await db.productVariant.count({
-			where: {
-				productId,
-				deleteAt: null,
-				status: ProductVariantStatus.ACTIVE,
-				isAvailable: true
-			}
-		})
-		const nextStatus =
-			activeVariants > 0 ? ProductStatus.ACTIVE : ProductStatus.HIDDEN
-		if (product.status === nextStatus) {
-			return false
-		}
-
-		await db.product.update({
-			where: { id: product.id },
-			data: { status: nextStatus }
-		})
-		return true
+		return false
 	}
 
 	findProductById(
@@ -3974,20 +3943,6 @@ export class IntegrationRepository {
 		})
 
 		return result.count > 0
-	}
-
-	private resolveStockProductStatus(
-		currentStatus: ProductStatus,
-		stock: number
-	): ProductStatus {
-		if (
-			currentStatus === ProductStatus.DRAFT ||
-			currentStatus === ProductStatus.DELETE
-		) {
-			return currentStatus
-		}
-
-		return stock > 0 ? ProductStatus.ACTIVE : ProductStatus.HIDDEN
 	}
 
 	private resolveStockVariantStatus(

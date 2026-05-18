@@ -1,8 +1,90 @@
-import { ProductVariantStatus } from '@generated/enums'
+import {
+	ProductStatus,
+	ProductVariantKind,
+	ProductVariantStatus
+} from '@generated/enums'
 
 import { IntegrationRepository } from './integration.repository'
 
 describe('IntegrationRepository', () => {
+	it('updates default variant stock without hiding the parent product', async () => {
+		const db = {
+			product: {
+				findFirst: jest.fn().mockResolvedValue({
+					id: 'product-1',
+					status: ProductStatus.ACTIVE
+				}),
+				update: jest.fn()
+			},
+			productVariant: {
+				findFirst: jest.fn().mockResolvedValue({
+					id: 'variant-1',
+					productId: 'product-1',
+					sku: 'SKU-1',
+					variantKey: 'default',
+					kind: ProductVariantKind.DEFAULT,
+					stock: 5,
+					price: 100,
+					status: ProductVariantStatus.ACTIVE,
+					isAvailable: true,
+					deleteAt: null
+				}),
+				update: jest.fn().mockResolvedValue({})
+			}
+		}
+		const repo = new IntegrationRepository(db as any)
+
+		const result = await repo.updateLinkedProductStock(
+			'catalog-1',
+			'product-1',
+			0
+		)
+
+		expect(result).toEqual(
+			expect.objectContaining({
+				changed: true,
+				productId: 'product-1',
+				variantId: 'variant-1',
+				previousStock: 5,
+				nextStock: 0
+			})
+		)
+		expect(db.product.update).not.toHaveBeenCalled()
+		expect(db.productVariant.update).toHaveBeenCalledWith({
+			where: { id: 'variant-1' },
+			data: {
+				stock: 0,
+				status: ProductVariantStatus.OUT_OF_STOCK,
+				isAvailable: false
+			}
+		})
+	})
+
+	it('does not hide a product when all integrated variants are out of stock', async () => {
+		const db = {
+			product: {
+				findFirst: jest.fn().mockResolvedValue({
+					id: 'product-1',
+					status: ProductStatus.ACTIVE
+				}),
+				update: jest.fn()
+			},
+			productVariant: {
+				count: jest.fn()
+			}
+		}
+		const repo = new IntegrationRepository(db as any)
+
+		const changed = await repo.recomputeProductStatusFromVariants(
+			'catalog-1',
+			'product-1'
+		)
+
+		expect(changed).toBe(false)
+		expect(db.productVariant.count).not.toHaveBeenCalled()
+		expect(db.product.update).not.toHaveBeenCalled()
+	})
+
 	it('marks product and variant stock links with skipped reasons', async () => {
 		const at = new Date('2026-05-17T09:00:00.000Z')
 		const prisma = {
