@@ -1307,7 +1307,7 @@ describe('MoySkladSyncService', () => {
 		)
 	})
 
-	it('keeps zero-stock MoySklad products visible and marks only the variant out of stock', async () => {
+	it('hides zero-stock MoySklad products and marks the default variant out of stock', async () => {
 		const catalogId = 'catalog-1'
 		const integration = {
 			id: 'integration-1',
@@ -1360,7 +1360,7 @@ describe('MoySkladSyncService', () => {
 			sku: 'MSK-1',
 			slug: 'product-1',
 			price: 125,
-			status: ProductStatus.HIDDEN,
+			status: ProductStatus.ACTIVE,
 			deleteAt: null
 		} as any)
 		repo.updateProduct.mockResolvedValue({
@@ -1370,7 +1370,7 @@ describe('MoySkladSyncService', () => {
 			sku: 'MSK-1',
 			slug: 'product-1',
 			price: 125,
-			status: ProductStatus.ACTIVE,
+			status: ProductStatus.HIDDEN,
 			deleteAt: null
 		} as any)
 		repo.upsertProductLink.mockResolvedValue({ id: 'link-1' } as any)
@@ -1390,7 +1390,7 @@ describe('MoySkladSyncService', () => {
 			{
 				productId: 'local-1',
 				catalogId,
-				data: { status: ProductStatus.ACTIVE }
+				data: { status: ProductStatus.HIDDEN }
 			},
 			undefined
 		)

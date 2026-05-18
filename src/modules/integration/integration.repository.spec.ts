@@ -7,12 +7,13 @@ import {
 import { IntegrationRepository } from './integration.repository'
 
 describe('IntegrationRepository', () => {
-	it('updates default variant stock without hiding the parent product', async () => {
+	it('hides the parent product when default variant stock reaches zero', async () => {
 		const db = {
 			product: {
 				findFirst: jest.fn().mockResolvedValue({
 					id: 'product-1',
-					status: ProductStatus.ACTIVE
+					status: ProductStatus.ACTIVE,
+					integrationLinks: []
 				}),
 				update: jest.fn()
 			},
@@ -49,7 +50,10 @@ describe('IntegrationRepository', () => {
 				nextStock: 0
 			})
 		)
-		expect(db.product.update).not.toHaveBeenCalled()
+		expect(db.product.update).toHaveBeenCalledWith({
+			where: { id: 'product-1' },
+			data: { status: ProductStatus.HIDDEN }
+		})
 		expect(db.productVariant.update).toHaveBeenCalledWith({
 			where: { id: 'variant-1' },
 			data: {
@@ -60,7 +64,48 @@ describe('IntegrationRepository', () => {
 		})
 	})
 
-	it('does not hide a product when all integrated variants are out of stock', async () => {
+	it('keeps stockless MoySklad services visible and purchasable', async () => {
+		const db = {
+			product: {
+				findFirst: jest.fn().mockResolvedValue({
+					id: 'product-1',
+					status: ProductStatus.ACTIVE,
+					integrationLinks: [{ rawMeta: { type: 'service' } }]
+				}),
+				update: jest.fn()
+			},
+			productVariant: {
+				findFirst: jest.fn().mockResolvedValue({
+					id: 'variant-1',
+					productId: 'product-1',
+					sku: 'SKU-1',
+					variantKey: 'default',
+					kind: ProductVariantKind.DEFAULT,
+					stock: 5,
+					price: 100,
+					status: ProductVariantStatus.OUT_OF_STOCK,
+					isAvailable: false,
+					deleteAt: null
+				}),
+				update: jest.fn().mockResolvedValue({})
+			}
+		}
+		const repo = new IntegrationRepository(db as any)
+
+		await repo.updateLinkedProductStock('catalog-1', 'product-1', 0)
+
+		expect(db.product.update).not.toHaveBeenCalled()
+		expect(db.productVariant.update).toHaveBeenCalledWith({
+			where: { id: 'variant-1' },
+			data: {
+				stock: 0,
+				status: ProductVariantStatus.ACTIVE,
+				isAvailable: true
+			}
+		})
+	})
+
+	it('hides a matrix product when all integrated variants are out of stock', async () => {
 		const db = {
 			product: {
 				findFirst: jest.fn().mockResolvedValue({
@@ -70,7 +115,7 @@ describe('IntegrationRepository', () => {
 				update: jest.fn()
 			},
 			productVariant: {
-				count: jest.fn()
+				count: jest.fn().mockResolvedValue(0)
 			}
 		}
 		const repo = new IntegrationRepository(db as any)
@@ -80,9 +125,19 @@ describe('IntegrationRepository', () => {
 			'product-1'
 		)
 
-		expect(changed).toBe(false)
-		expect(db.productVariant.count).not.toHaveBeenCalled()
-		expect(db.product.update).not.toHaveBeenCalled()
+		expect(changed).toBe(true)
+		expect(db.productVariant.count).toHaveBeenCalledWith({
+			where: {
+				productId: 'product-1',
+				deleteAt: null,
+				status: ProductVariantStatus.ACTIVE,
+				isAvailable: true
+			}
+		})
+		expect(db.product.update).toHaveBeenCalledWith({
+			where: { id: 'product-1' },
+			data: { status: ProductStatus.HIDDEN }
+		})
 	})
 
 	it('marks product and variant stock links with skipped reasons', async () => {

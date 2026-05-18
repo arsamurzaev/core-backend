@@ -63,6 +63,13 @@ const CUSTOM_SCRIPTS: CustomScript[] = [
 		run: runMoySkladRestoreZeroStockVisibility
 	},
 	{
+		id: 'moysklad-hide-zero-stock-visibility',
+		name: 'Hide MoySklad zero-stock visibility',
+		description:
+			'Set zero-stock MoySklad-linked products to HIDDEN for storefront visibility.',
+		run: runMoySkladHideZeroStockVisibility
+	},
+	{
 		id: 'bump-catalog-cache',
 		name: 'Bump catalog cache versions',
 		description:
@@ -505,6 +512,14 @@ async function runMoySkladRestoreZeroStockVisibility(ctx: AppContext) {
 	await pause()
 }
 
+async function runMoySkladHideZeroStockVisibility(ctx: AppContext) {
+	const lookup = await askText('Catalog slug/name/domain/id', {
+		required: true
+	})
+	await runMoySkladHideZeroStockVisibilityReport(ctx, lookup)
+	await pause()
+}
+
 async function runBumpCatalogCache(ctx: AppContext) {
 	const lookup = await askText('Catalog slug/name/domain/id', {
 		required: true
@@ -541,6 +556,23 @@ export async function runMoySkladRestoreZeroStockVisibilityCommand(
 	}
 
 	await runMoySkladRestoreZeroStockVisibilityReport(ctx, lookup, {
+		apply: Boolean(options.yes),
+		json: Boolean(options.json)
+	})
+}
+
+export async function runMoySkladHideZeroStockVisibilityCommand(
+	ctx: AppContext,
+	options: Record<string, string | boolean>
+) {
+	const lookup = readCatalogLookupOption(options)
+	if (!lookup) {
+		throw new Error(
+			'Catalog lookup is required. Pass --catalog, --slug, --id or --query.'
+		)
+	}
+
+	await runMoySkladHideZeroStockVisibilityReport(ctx, lookup, {
 		apply: Boolean(options.yes),
 		json: Boolean(options.json)
 	})
@@ -774,6 +806,111 @@ async function runMoySkladRestoreZeroStockVisibilityReport(
 	} else {
 		console.log(
 			colors.green(`Restored products: ${result.count}. Backup: ${backupPath}`)
+		)
+		if (bumpedCacheScopes.length) {
+			console.log(
+				colors.green(`Bumped cache scopes: ${bumpedCacheScopes.join(', ')}`)
+			)
+		}
+	}
+}
+
+async function runMoySkladHideZeroStockVisibilityReport(
+	ctx: AppContext,
+	lookup: string,
+	options: { apply?: boolean; json?: boolean } = {}
+) {
+	const catalog = await resolveCatalogForCustomScript(ctx, lookup)
+	const candidates = await loadMoySkladHideVisibilityCandidates(
+		ctx,
+		catalog.id
+	)
+
+	if (ctx.options.json || options.json) {
+		if (!options.apply) {
+			printJson({
+				catalog,
+				matched: candidates.length,
+				previewOnly: true,
+				hint: 'Pass --yes to hide these products.',
+				candidates
+			})
+			return
+		}
+	} else {
+		console.log(
+			colors.cyan(colors.bold(`${catalog.name} / ${catalog.slug}: hide zero stock`))
+		)
+		console.log(colors.yellow(`Matched products: ${candidates.length}`))
+		table(candidates, undefined, candidates.length || ctx.options.limit)
+	}
+
+	if (!candidates.length) {
+		if (ctx.options.json || options.json) {
+			printJson({ catalog, matched: 0, updated: 0 })
+		}
+		return
+	}
+
+	if (!options.apply) {
+		console.log(
+			colors.yellow('Preview only. Pass --yes to set matched products to HIDDEN.')
+		)
+		return
+	}
+
+	assertCanMutate(ctx, 'moyskladHideZeroStockVisibility')
+	const backupPath = await writeBackup(
+		ctx,
+		{ name: 'Product' } as ModelMeta,
+		'moyskladHideZeroStockVisibility',
+		candidates as unknown as Record<string, unknown>[],
+		{
+			catalogId: catalog.id,
+			provider: 'MOYSKLAD',
+			status: ProductStatus.ACTIVE,
+			totalStockLte: 0,
+			activeVariants: 0,
+			archivedNotTrue: true
+		}
+	)
+	const ids = candidates.map(candidate => candidate.id)
+	const result = await runAudited(
+		ctx,
+		{
+			action: 'moyskladHideZeroStockVisibility',
+			model: 'Product',
+			where: { id: { in: ids }, catalogId: catalog.id },
+			data: { status: ProductStatus.HIDDEN },
+			affectedCount: candidates.length,
+			backupPath
+		},
+		async () =>
+			await ctx.prisma.product.updateMany({
+				where: {
+					id: { in: ids },
+					catalogId: catalog.id,
+					status: ProductStatus.ACTIVE,
+					deleteAt: null
+				},
+				data: { status: ProductStatus.HIDDEN }
+			})
+	)
+	const bumpedCacheScopes = result.count
+		? await bumpCatalogRedisCacheVersions(catalog.id)
+		: []
+
+	if (ctx.options.json || options.json) {
+		printJson({
+			catalog,
+			matched: candidates.length,
+			updated: result.count,
+			backupPath,
+			bumpedCacheScopes
+		})
+	} else {
+		console.log(
+			colors.green(`Hidden products: ${result.count}. Backup: ${backupPath}`)
 		)
 		if (bumpedCacheScopes.length) {
 			console.log(
@@ -1292,6 +1429,72 @@ async function loadMoySkladRestoreVisibilityCandidates(
 		where p.catalog_id = '${catalogId}'::uuid
 			and p.delete_at is null
 			and p.status::text = 'HIDDEN'
+			and coalesce(link.raw_meta ->> 'archived', 'false') <> 'true'
+			and coalesce(link.skipped_reason, '') not in (
+				'hidden_after_missing_confirmations',
+				'missing_from_complete_snapshot'
+			)
+		group by
+			p.id,
+			p.name,
+			p.sku,
+			p.status,
+			link.external_id,
+			link.external_code,
+			link.raw_meta,
+			link.skipped_reason,
+			p.updated_at
+		having
+			coalesce(sum(greatest(coalesce(v.stock, 0), 0)), 0) <= 0
+			and count(v.id) filter (
+				where v.status::text = 'ACTIVE'
+					and v.is_available = true
+			) = 0
+		order by p.updated_at desc, p.id asc
+		${limitClause}
+	`)
+}
+
+async function loadMoySkladHideVisibilityCandidates(
+	ctx: AppContext,
+	catalogId: string,
+	limit?: number
+): Promise<MoySkladRestoreVisibilityCandidateRow[]> {
+	const limitClause =
+		typeof limit === 'number' ? `limit ${Math.max(1, Math.trunc(limit))}` : ''
+
+	return ctx.prisma.$queryRawUnsafe<MoySkladRestoreVisibilityCandidateRow[]>(`
+		select
+			p.id::text,
+			p.name,
+			p.sku,
+			p.status::text as status,
+			link.external_id as "externalId",
+			link.external_code as "externalCode",
+			link.raw_meta ->> 'stock' as "rawStock",
+			link.raw_meta ->> 'archived' as archived,
+			coalesce(sum(greatest(coalesce(v.stock, 0), 0)), 0)::int as "totalStock",
+			count(v.id)::int as variants,
+			count(v.id) filter (
+				where v.status::text = 'ACTIVE'
+					and v.is_available = true
+			)::int as "activeVariants",
+			link.skipped_reason as "skippedReason",
+			p.updated_at as "updatedAt"
+		from products p
+		join integration_product_links link on link.product_id = p.id
+		join integrations integration
+			on integration.id = link.integration_id
+			and integration.provider::text = 'MOYSKLAD'
+			and integration.catalog_id = p.catalog_id
+			and integration.delete_at is null
+		left join product_variants v
+			on v.product_id = p.id
+			and v.delete_at is null
+		where p.catalog_id = '${catalogId}'::uuid
+			and p.delete_at is null
+			and p.status::text = 'ACTIVE'
+			and coalesce(link.raw_meta ->> 'type', 'product') <> 'service'
 			and coalesce(link.raw_meta ->> 'archived', 'false') <> 'true'
 			and coalesce(link.skipped_reason, '') not in (
 				'hidden_after_missing_confirmations',

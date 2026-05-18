@@ -3,6 +3,7 @@ import { runCatalogDiagnostics } from './catalog-diagnostics.js'
 import {
 	runBumpCatalogCacheCommand,
 	runMoySkladCatalogVisibilityCommand,
+	runMoySkladHideZeroStockVisibilityCommand,
 	runMoySkladRestoreZeroStockVisibilityCommand
 } from './custom-scripts.js'
 import { colors, printJson, table } from './format.js'
@@ -58,6 +59,18 @@ export async function runCommandMode(ctx: AppContext, models: ModelMeta[]) {
 		].includes(command.action)
 	) {
 		await runMoySkladRestoreZeroStockVisibilityCommand(ctx, command.options)
+		return true
+	}
+
+	if (
+		command.subject === 'catalog' &&
+		[
+			'moysklad-hide-zero-stock',
+			'moysklad-hide-zero-stock-visibility',
+			'moyskladHideZeroStockVisibility'
+		].includes(command.action)
+	) {
+		await runMoySkladHideZeroStockVisibilityCommand(ctx, command.options)
 		return true
 	}
 

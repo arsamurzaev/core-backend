@@ -192,7 +192,7 @@ function resolveProductStatus(
 		return currentStatus ?? ProductStatus.ACTIVE
 	}
 
-	return ProductStatus.ACTIVE
+	return stock > 0 ? ProductStatus.ACTIVE : ProductStatus.HIDDEN
 }
 
 @Injectable()

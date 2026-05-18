@@ -57,6 +57,12 @@ function normalizeNullableNumber(value: unknown): number | null {
 	return Number.isFinite(numberValue) ? numberValue : null
 }
 
+function readRawMetaType(value: unknown): string | null {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+	const type = (value as Record<string, unknown>).type
+	return typeof type === 'string' ? type : null
+}
+
 function emptyVariantStockUpdateResult(): IntegrationVariantStockUpdateResult {
 	return {
 		changed: false,
@@ -2649,20 +2655,48 @@ export class IntegrationRepository {
 			},
 			select: {
 				id: true,
-				status: true
+				status: true,
+				integrationLinks: {
+					where: {
+						integration: {
+							provider: IntegrationProvider.MOYSKLAD,
+							catalogId,
+							deleteAt: null
+						}
+					},
+					select: { rawMeta: true },
+					take: 1
+				}
 			}
 		})
 		if (!product) return emptyVariantStockUpdateResult()
 
+		const isStocklessService = product.integrationLinks.some(
+			link => readRawMetaType(link.rawMeta) === 'service'
+		)
 		const defaultVariantUpdate = await this.updateDefaultVariantStock(
 			db,
 			product.id,
-			stock
+			stock,
+			{ stockControlsAvailability: !isStocklessService }
 		)
+		const nextProductStatus = this.resolveStockProductStatus(
+			product.status,
+			stock,
+			isStocklessService
+		)
+		let productStatusChanged = false
+		if (product.status !== nextProductStatus) {
+			await db.product.update({
+				where: { id: product.id },
+				data: { status: nextProductStatus }
+			})
+			productStatusChanged = true
+		}
 
 		return {
 			...defaultVariantUpdate,
-			changed: defaultVariantUpdate.changed,
+			changed: defaultVariantUpdate.changed || productStatusChanged,
 			productId: product.id
 		}
 	}
@@ -2794,7 +2828,23 @@ export class IntegrationRepository {
 			return false
 		}
 
-		return false
+		const activeVariantCount = await db.productVariant.count({
+			where: {
+				productId: product.id,
+				deleteAt: null,
+				status: ProductVariantStatus.ACTIVE,
+				isAvailable: true
+			}
+		})
+		const nextStatus =
+			activeVariantCount > 0 ? ProductStatus.ACTIVE : ProductStatus.HIDDEN
+		if (product.status === nextStatus) return false
+
+		await db.product.update({
+			where: { id: product.id },
+			data: { status: nextStatus }
+		})
+		return true
 	}
 
 	findProductById(
@@ -3751,7 +3801,8 @@ export class IntegrationRepository {
 	private async updateDefaultVariantStock(
 		db: Prisma.TransactionClient | PrismaService,
 		productId: string,
-		stock: number
+		stock: number,
+		options: { stockControlsAvailability?: boolean } = {}
 	): Promise<IntegrationVariantStockUpdateResult> {
 		const variant = await db.productVariant.findFirst({
 			where: {
@@ -3767,7 +3818,7 @@ export class IntegrationRepository {
 		})
 		if (!variant) return emptyVariantStockUpdateResult()
 
-		return this.updateVariantStockRecord(db, variant, stock)
+		return this.updateVariantStockRecord(db, variant, stock, options)
 	}
 
 	private async resolveDefaultVariantSku(
@@ -3877,9 +3928,13 @@ export class IntegrationRepository {
 	private async updateVariantStockRecord(
 		db: Prisma.TransactionClient | PrismaService,
 		variant: ProductVariantSyncRecord,
-		stock: number
+		stock: number,
+		options: { stockControlsAvailability?: boolean } = {}
 	): Promise<IntegrationVariantStockUpdateResult> {
-		const nextStatus = this.resolveStockVariantStatus(variant.status, stock)
+		const nextStatus =
+			options.stockControlsAvailability === false
+				? this.resolveStocklessVariantStatus(variant.status)
+				: this.resolveStockVariantStatus(variant.status, stock)
 		const nextIsAvailable = nextStatus === ProductVariantStatus.ACTIVE
 		const data: Prisma.ProductVariantUpdateInput = {}
 		const previousStock = variant.stock
@@ -3956,6 +4011,33 @@ export class IntegrationRepository {
 		return stock > 0
 			? ProductVariantStatus.ACTIVE
 			: ProductVariantStatus.OUT_OF_STOCK
+	}
+
+	private resolveStocklessVariantStatus(
+		currentStatus: ProductVariantStatus
+	): ProductVariantStatus {
+		if (currentStatus === ProductVariantStatus.DISABLED) {
+			return currentStatus
+		}
+
+		return ProductVariantStatus.ACTIVE
+	}
+
+	private resolveStockProductStatus(
+		currentStatus: ProductStatus,
+		stock: number,
+		isStocklessService = false
+	): ProductStatus {
+		if (
+			currentStatus === ProductStatus.DRAFT ||
+			currentStatus === ProductStatus.DELETE
+		) {
+			return currentStatus
+		}
+
+		if (isStocklessService) return currentStatus
+
+		return stock > 0 ? ProductStatus.ACTIVE : ProductStatus.HIDDEN
 	}
 
 	private async resolveIntegratedEnumValueId(
