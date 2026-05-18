@@ -78,9 +78,8 @@ import { AdminUpdateCatalogFeatureEntitlementDtoReq } from './dto/requests/admin
 import { AdminUpdateCatalogDtoReq } from './dto/requests/admin-update-catalog.dto.req'
 
 const mediaSelect = buildMediaSelect()
-const PASSWORD_ALPHABET =
-	'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*'
 const LOGIN_SUFFIX_ALPHABET = '23456789abcdefghijkmnopqrstuvwxyz'
+const DEFAULT_CATALOG_OWNER_PASSWORD = '00000000'
 const GLOBAL_YANDEX_METRIKA_COUNTER_ID = '104676804'
 const SOFT_DELETE_RETENTION_DAYS = Number(
 	process.env.SOFT_DELETE_RETENTION_DAYS ?? 30
@@ -250,7 +249,7 @@ export class AdminService {
 				: this.generateCatalogSlug(dto.name),
 			this.generateOwnerLogin(dto.slug)
 		])
-		const password = '00000000'
+		const password = DEFAULT_CATALOG_OWNER_PASSWORD
 		const passwordHash = await hash(password)
 		const ownerName = dto.ownerName ?? dto.name
 		const status = dto.status
@@ -524,7 +523,7 @@ export class AdminService {
 
 		const activityIds = source.activity.map(activity => activity.id)
 		const regionIds = source.region.map(region => region.id)
-		const password = generatePassword()
+		const password = DEFAULT_CATALOG_OWNER_PASSWORD
 		const passwordHash = await hash(password)
 		const login = await this.generateOwnerLogin(dto.slug)
 		const ownerName = dto.name
@@ -1770,7 +1769,7 @@ export class AdminService {
 		targetCatalogId: string,
 		copiedS3Keys: string[]
 	): Promise<DuplicateCatalogCopiedMediaKeys | null> {
-		const key =
+		const rawKey =
 			media.storage === 's3'
 				? await this.copyDuplicatedS3Key(
 						media.key,
@@ -1779,11 +1778,11 @@ export class AdminService {
 						copiedS3Keys
 					)
 				: media.key
-		if (!key) {
+
+		if (!rawKey) {
 			this.logger.warn(
-				`Skipping duplicated media ${media.id}: source S3 object is missing (${media.key})`
+				`Duplicated media ${media.id} raw source S3 object is missing (${media.key}); trying variants`
 			)
-			return null
 		}
 
 		const variantKeys: Array<string | null> = []
@@ -1804,6 +1803,14 @@ export class AdminService {
 				)
 			}
 			variantKeys.push(variantKey)
+		}
+
+		const key = rawKey ?? variantKeys.find(Boolean) ?? null
+		if (!key) {
+			this.logger.warn(
+				`Skipping duplicated media ${media.id}: source S3 objects are missing (${media.key})`
+			)
+			return null
 		}
 
 		return { key, variantKeys }
@@ -2232,14 +2239,6 @@ function readNonNegativeInteger(value: unknown): number | null {
 function readStockApplySource(value: unknown): 'FULL_SYNC' | 'WEBHOOK' | null {
 	if (value === 'FULL_SYNC' || value === 'WEBHOOK') return value
 	return null
-}
-
-function generatePassword(length = 14) {
-	let password = ''
-	for (let index = 0; index < length; index += 1) {
-		password += PASSWORD_ALPHABET[randomInt(0, PASSWORD_ALPHABET.length)]
-	}
-	return password
 }
 
 function randomLoginSuffix(length = 5) {

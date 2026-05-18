@@ -614,12 +614,90 @@ describe('AdminService', () => {
 		})
 	})
 
-	it('skips missing S3 media while duplicating catalog', async () => {
+	it('returns the default owner password when duplicating catalog', async () => {
+		const tx = createDuplicateTransactionMock()
+		const { prisma, service } = createService(tx as any)
+		prisma.catalog.findUnique.mockResolvedValueOnce({
+			...createDuplicateSourceCatalog(),
+			media: []
+		} as any)
+
+		const result = await service.duplicateCatalog('catalog-source', {
+			name: 'Catalog Copy',
+			slug: 'catalog-copy',
+			typeId: 'type-1',
+			status: CatalogStatus.OPERATIONAL
+		})
+
+		expect(result.owner.password).toBe('00000000')
+		expect(tx.user.create).toHaveBeenCalledWith({
+			data: expect.objectContaining({
+				password: expect.any(String)
+			}),
+			select: {
+				id: true,
+				name: true,
+				login: true
+			}
+		})
+	})
+
+	it('duplicates media variants when the raw S3 object is missing', async () => {
 		const tx = createDuplicateTransactionMock()
 		const { prisma, s3, service } = createService(tx as any)
 		prisma.catalog.findUnique.mockResolvedValueOnce(
 			createDuplicateSourceCatalog() as any
 		)
+		s3.copyObjectToCatalog
+			.mockRejectedValueOnce(
+				Object.assign(new Error('source object is missing'), {
+					name: 'NoSuchKey',
+					$metadata: { httpStatusCode: 404 }
+				})
+			)
+			.mockResolvedValueOnce({
+				ok: true,
+				key: 'catalogs/catalog-copy/products/product-source/2026/05/18/photo-copy-thumb.avif',
+				url: 'https://cdn.example.test/photo-copy-thumb.avif'
+			})
+
+		await service.duplicateCatalog('catalog-source', {
+			name: 'Catalog Copy',
+			slug: 'catalog-copy',
+			typeId: 'type-1',
+			status: CatalogStatus.OPERATIONAL
+		})
+
+		expect(s3.copyObjectToCatalog).toHaveBeenCalledTimes(2)
+		expect(tx.media.create).toHaveBeenCalledWith({
+			data: expect.objectContaining({
+				catalogId: 'catalog-copy',
+				key: 'catalogs/catalog-copy/products/product-source/2026/05/18/photo-copy-thumb.avif',
+				variants: {
+					create: [
+						expect.objectContaining({
+							key: 'catalogs/catalog-copy/products/product-source/2026/05/18/photo-copy-thumb.avif'
+						})
+					]
+				}
+			})
+		})
+		expect(tx.productMedia.createMany).toHaveBeenCalledWith({
+			data: [
+				expect.objectContaining({
+					productId: expect.any(String),
+					mediaId: expect.not.stringMatching(/^media-source$/)
+				})
+			]
+		})
+	})
+
+	it('skips missing S3 media while duplicating catalog', async () => {
+		const tx = createDuplicateTransactionMock()
+		const { prisma, s3, service } = createService(tx as any)
+		const source = createDuplicateSourceCatalog()
+		source.media[0].variants = []
+		prisma.catalog.findUnique.mockResolvedValueOnce(source as any)
 		s3.copyObjectToCatalog.mockRejectedValueOnce(
 			Object.assign(new Error('source object is missing'), {
 				name: 'NoSuchKey',
