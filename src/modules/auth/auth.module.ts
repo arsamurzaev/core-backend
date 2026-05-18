@@ -12,6 +12,7 @@ import { SessionGuard } from './guards/session.guard'
 import { HandoffController } from './handoff/handoff.controller'
 import { HandoffService } from './handoff/handoff.service'
 import { SessionService } from './session/session.service'
+import { AUTH_SESSION_ISSUER_PORT } from './contracts'
 
 @Global()
 @Module({
@@ -19,6 +20,7 @@ import { SessionService } from './session/session.service'
 	controllers: [AuthController, CatalogAuthController, HandoffController],
 	providers: [
 		AuthService,
+		{ provide: AUTH_SESSION_ISSUER_PORT, useExisting: AuthService },
 		SessionService,
 		HandoffService,
 		SessionGuard,
@@ -27,6 +29,7 @@ import { SessionService } from './session/session.service'
 	],
 	exports: [
 		AuthService,
+		AUTH_SESSION_ISSUER_PORT,
 		SessionService,
 		HandoffService,
 		SessionGuard,

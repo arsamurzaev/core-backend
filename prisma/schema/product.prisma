@@ -18,8 +18,8 @@ model Product {
   id String @id @default(uuid()) @db.Uuid
 
   // FK на каталог (H&M, KFC) — через каталог определяется тип и атрибуты
-  catalogId String  @map("catalog_id") @db.Uuid
-  brandId   String? @map("brand_id") @db.Uuid
+  catalogId     String  @map("catalog_id") @db.Uuid
+  brandId       String? @map("brand_id") @db.Uuid
   productTypeId String? @map("product_type_id") @db.Uuid
 
   // Артикул товара (уникален глобально)
@@ -120,7 +120,7 @@ model ProductAttribute {
 
   // Для STRING: произвольный текст
   // Пример: "100% полиэстер", "Курица, картофель, специи"
-  valueString String? @map("value_string") @db.VarChar(500)
+  valueString String? @map("value_string")
 
   // Для INTEGER: целое число
   // Пример: 450 (калории), 24 (месяцы гарантии), 6 (штук в упаковке)
@@ -191,10 +191,13 @@ model ProductVariant {
 
   variantKey String @map("variant_key") @db.VarChar(300)
 
+  kind ProductVariantKind @default(MATRIX)
+
   // Остаток на складе
   // Пример: 10, 5, 0
-  // При 0 вариант недоступен для заказа
-  stock Int @default(0)
+  // null = остаток не ведется, ограничение количества не применяется
+  // 0 = товара нет в наличии
+  stock Int?
 
   // Модификатор цены
   // Пример: 0.00, 200.00
@@ -231,13 +234,14 @@ model ProductVariant {
   @@index([productId]) // Быстрое получение вариантов товара
   @@index([isAvailable]) // Фильтр только доступных
   @@index([status]) // Фильтр по статусу
+  @@index([productId, kind])
   @@map("product_variants")
 }
 
 model ProductVariantSaleUnit {
   id String @id @default(uuid()) @db.Uuid
 
-  variantId String @map("variant_id") @db.Uuid
+  variantId         String  @map("variant_id") @db.Uuid
   catalogSaleUnitId String? @map("catalog_sale_unit_id") @db.Uuid
 
   code         String  @db.VarChar(100)
@@ -252,9 +256,9 @@ model ProductVariantSaleUnit {
 
   deleteAt DateTime? @map("delete_at")
 
-  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  variant         ProductVariant   @relation(fields: [variantId], references: [id], onDelete: Cascade)
   catalogSaleUnit CatalogSaleUnit? @relation(fields: [catalogSaleUnitId], references: [id], onDelete: SetNull)
-  cartItems CartItem[]
+  cartItems       CartItem[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

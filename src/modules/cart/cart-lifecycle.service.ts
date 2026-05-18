@@ -2,6 +2,7 @@ import { CartStatus, Prisma } from '@generated/client'
 import { Injectable, NotFoundException } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import type { DomainEvent } from '@/shared/domain-events/domain-events.contract'
 
 import { CartInventoryReservationService } from './cart-inventory-reservation.service'
 import { type CartEntity, cartSelect } from './cart.selects'
@@ -86,7 +87,8 @@ export class CartLifecycleService {
 		})
 
 		await this.inventoryReservation.invalidateProductCaches(
-			releaseResult.affectedCatalogIds
+			releaseResult.affectedCatalogIds,
+			releaseResult.domainEvents
 		)
 
 		return {
@@ -156,7 +158,7 @@ export class CartLifecycleService {
 
 		const staleIds = stale.map(cart => cart.id)
 		const now = new Date()
-		const affectedCatalogIds = await this.prisma.$transaction(async tx => {
+		const releaseEffects = await this.prisma.$transaction(async tx => {
 			await tx.cart.updateMany({
 				where: {
 					id: { in: staleIds },
@@ -169,6 +171,7 @@ export class CartLifecycleService {
 			})
 
 			const releasedCatalogIds = new Set<string>()
+			const inventoryDomainEvents: DomainEvent[] = []
 			for (const cart of stale) {
 				const result = await this.inventoryReservation.releaseCartReservationsTx(
 					tx,
@@ -183,12 +186,19 @@ export class CartLifecycleService {
 				for (const catalogId of result.affectedCatalogIds) {
 					releasedCatalogIds.add(catalogId)
 				}
+				inventoryDomainEvents.push(...(result.domainEvents ?? []))
 			}
 
-			return [...releasedCatalogIds]
+			return {
+				affectedCatalogIds: [...releasedCatalogIds],
+				inventoryDomainEvents
+			}
 		})
 
-		await this.inventoryReservation.invalidateProductCaches(affectedCatalogIds)
+		await this.inventoryReservation.invalidateProductCaches(
+			releaseEffects.affectedCatalogIds,
+			releaseEffects.inventoryDomainEvents
+		)
 
 		return { expiredCount: staleIds.length }
 	}

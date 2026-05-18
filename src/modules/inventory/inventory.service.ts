@@ -3,20 +3,40 @@ import { type CatalogInventoryMode, Role } from '@generated/enums'
 import {
 	BadRequestException,
 	ForbiddenException,
+	Inject,
 	Injectable,
-	NotFoundException
+	NotFoundException,
+	Optional
 } from '@nestjs/common'
 import slugify from 'slugify'
 
-import { AuditService } from '@/modules/audit/audit.service'
-import { CAPABILITY_INVENTORY_INTERNAL } from '@/modules/capability/capability.constants'
-import { CapabilityService } from '@/modules/capability/capability.service'
-import { ObservabilityService } from '@/modules/observability/observability.service'
+import {
+	AUDIT_RECORDER_PORT,
+	type AuditRecorderPort
+} from '@/modules/audit/contracts'
+import { CAPABILITY_INVENTORY_INTERNAL } from '@/modules/capability/public'
+import {
+	CAPABILITY_ASSERT_PORT,
+	type CapabilityAssertPort
+} from '@/modules/capability/contracts'
+import {
+	OBSERVABILITY_RECORDER_PORT,
+	type ObservabilityRecorderPort
+} from '@/modules/observability/contracts'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATEGORY_PRODUCTS_CACHE_VERSION,
 	PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
+import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
+import {
+	DOMAIN_EVENT_DISPATCHER,
+	DOMAIN_EVENT_OUTBOX,
+	type DomainEvent,
+	type DomainEventDispatcher,
+	type DomainEventOutboxWriter,
+	type DomainEventSource
+} from '@/shared/domain-events/domain-events.contract'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
@@ -37,9 +57,11 @@ import {
 	type InventoryCartReservationLine,
 	type InventoryCompletedOrderLine,
 	InventoryRepository,
+	type InventoryVariantStockChange,
 	type InventoryWarehouseRecord,
 	type InventoryWarehouseWriteData
 } from './inventory.repository'
+import type { InventoryTransactionEffects } from './contracts'
 
 const WAREHOUSE_CODE_FALLBACK = 'warehouse'
 const WAREHOUSE_CODE_MAX_ATTEMPTS = 50
@@ -51,10 +73,19 @@ const CART_RESERVATION_TTL_MS =
 export class InventoryService {
 	constructor(
 		private readonly repo: InventoryRepository,
-		private readonly featureEntitlements: CapabilityService,
-		private readonly audit: AuditService,
-		private readonly observability: ObservabilityService,
-		private readonly cache: CacheService
+		@Inject(CAPABILITY_ASSERT_PORT)
+		private readonly featureEntitlements: CapabilityAssertPort,
+		@Inject(AUDIT_RECORDER_PORT)
+		private readonly audit: AuditRecorderPort,
+		@Inject(OBSERVABILITY_RECORDER_PORT)
+		private readonly observability: ObservabilityRecorderPort,
+		private readonly cache: CacheService,
+		@Optional()
+		@Inject(DOMAIN_EVENT_DISPATCHER)
+		private readonly events?: DomainEventDispatcher,
+		@Optional()
+		@Inject(DOMAIN_EVENT_OUTBOX)
+		private readonly outbox?: DomainEventOutboxWriter
 	) {}
 
 	async getWarehouses() {
@@ -210,7 +241,14 @@ export class InventoryService {
 				result,
 				actorOrReq
 			)
-			await this.invalidateProductCachesForCatalogs([catalogId])
+			const eventPublished = await this.publishManualStockChangedEvent(
+				catalogId,
+				result,
+				this.normalizeOptionalText(dto.reason)
+			)
+			if (!eventPublished) {
+				await this.invalidateProductCachesForCatalogs([catalogId])
+			}
 			return result
 		}
 
@@ -237,7 +275,7 @@ export class InventoryService {
 			lines: InventoryCompletedOrderLine[]
 			actorUserId: string | null
 		}
-	): Promise<string[]> {
+	): Promise<InventoryTransactionEffects> {
 		await this.assertInternalInventoryCatalog(params.catalogId)
 
 		const result = await this.repo.consumeCompletedOrderStock(tx, params)
@@ -247,10 +285,23 @@ export class InventoryService {
 				INVENTORY_MOVEMENT_SOURCE.ORDER,
 				result.consumedLines
 			)
-			return result.affectedVariantIds.length ? [params.catalogId] : []
+			const affectedCatalogIds = result.affectedVariantIds.length
+				? [params.catalogId]
+				: []
+			const domainEvents = this.buildStockChangedEvents({
+				catalogId: params.catalogId,
+				changes: result.stockChanges,
+				source: 'order',
+				reason: 'completed_order_stock_consume'
+			})
+			await this.appendDomainEventsTx(tx, domainEvents)
+			return {
+				affectedCatalogIds,
+				domainEvents
+			}
 		}
 
-		if (!('reason' in result)) return []
+		if (!('reason' in result)) return emptyInventoryTransactionEffects()
 
 		if (result.reason === 'WAREHOUSE_NOT_FOUND') {
 			throw new BadRequestException(
@@ -276,7 +327,7 @@ export class InventoryService {
 			lines: InventoryCartReservationLine[]
 			actorUserId: string | null
 		}
-	): Promise<string[]> {
+	): Promise<InventoryTransactionEffects> {
 		await this.assertInternalInventoryCatalog(params.catalogId)
 
 		const expiresAt = new Date(Date.now() + CART_RESERVATION_TTL_MS)
@@ -295,10 +346,23 @@ export class InventoryService {
 				INVENTORY_MOVEMENT_SOURCE.CART,
 				result.releasedReservations
 			)
-			return result.affectedVariantIds.length ? [params.catalogId] : []
+			const affectedCatalogIds = result.affectedVariantIds.length
+				? [params.catalogId]
+				: []
+			const domainEvents = this.buildStockChangedEvents({
+				catalogId: params.catalogId,
+				changes: result.stockChanges,
+				source: 'cart',
+				reason: 'cart_reservation'
+			})
+			await this.appendDomainEventsTx(tx, domainEvents)
+			return {
+				affectedCatalogIds,
+				domainEvents
+			}
 		}
 
-		if (!('reason' in result)) return []
+		if (!('reason' in result)) return emptyInventoryTransactionEffects()
 
 		if (result.reason === 'WAREHOUSE_NOT_FOUND') {
 			throw new BadRequestException(
@@ -337,7 +401,19 @@ export class InventoryService {
 			INVENTORY_MOVEMENT_SOURCE.CART,
 			result.releasedReservations
 		)
-		return result
+		const domainEvents = params.catalogId
+			? this.buildStockChangedEvents({
+					catalogId: params.catalogId,
+					changes: result.stockChanges,
+					source: 'cart',
+					reason: 'cart_reservation_release'
+				})
+			: []
+		await this.appendDomainEventsTx(tx, domainEvents)
+		return {
+			...result,
+			domainEvents
+		}
 	}
 
 	async releaseExpiredReservations(
@@ -349,13 +425,27 @@ export class InventoryService {
 			INVENTORY_MOVEMENT_SOURCE.SYSTEM,
 			result.releasedReservations
 		)
-		await this.invalidateProductCachesForCatalogs(result.affectedCatalogIds)
+		const domainEvents = this.buildStockChangedEventsByCatalog({
+			changes: result.stockChanges,
+			source: 'system',
+			reason: 'expired_reservation_release'
+		})
+		await this.invalidateProductCachesForCatalogs(
+			result.affectedCatalogIds,
+			domainEvents
+		)
 		return result
 	}
 
 	async invalidateProductCachesForCatalogs(
-		catalogIds: Iterable<string | null | undefined>
+		catalogIds: Iterable<string | null | undefined>,
+		domainEvents: DomainEvent[] = []
 	): Promise<void> {
+		if (domainEvents.length && this.events) {
+			await this.events.dispatchMany(domainEvents)
+			return
+		}
+
 		const uniqueCatalogIds = [...new Set([...catalogIds].filter(Boolean))]
 		if (!uniqueCatalogIds.length) return
 
@@ -365,6 +455,82 @@ export class InventoryService {
 				this.cache.bumpVersion(CATEGORY_PRODUCTS_CACHE_VERSION, catalogId)
 			])
 		)
+	}
+
+	private async publishManualStockChangedEvent(
+		catalogId: string,
+		result: Extract<
+			Awaited<ReturnType<InventoryRepository['adjustStock']>>,
+			{ ok: true }
+		>,
+		reason: string | null
+	): Promise<boolean> {
+		if (!this.events || !result.stockChange.changed) return false
+
+		await this.events.dispatch(
+			createDomainEvent({
+				type: 'variant.stock_changed',
+				catalogId,
+				productId: result.stockChange.productId,
+				variantId: result.stockChange.variantId,
+				previousStock: result.stockChange.previousStock,
+				nextStock: result.stockChange.nextStock,
+				source: 'manual',
+				reason
+			})
+		)
+
+		return true
+	}
+
+	private buildStockChangedEvents(params: {
+		catalogId: string
+		changes: InventoryVariantStockChange[]
+		source: DomainEventSource
+		reason: string
+	}): DomainEvent[] {
+		return compactInventoryStockChanges(params.changes ?? []).map(change =>
+			createDomainEvent({
+				type: 'variant.stock_changed',
+				catalogId: params.catalogId,
+				productId: change.productId,
+				variantId: change.variantId,
+				previousStock: change.previousStock,
+				nextStock: change.nextStock,
+				source: params.source,
+				reason: params.reason
+			})
+		)
+	}
+
+	private buildStockChangedEventsByCatalog(params: {
+		changes: InventoryVariantStockChange[]
+		source: DomainEventSource
+		reason: string
+	}): DomainEvent[] {
+		return compactInventoryStockChanges(params.changes ?? []).flatMap(change => {
+			if (!change.catalogId) return []
+			return [
+				createDomainEvent({
+					type: 'variant.stock_changed',
+					catalogId: change.catalogId,
+					productId: change.productId,
+					variantId: change.variantId,
+					previousStock: change.previousStock,
+					nextStock: change.nextStock,
+					source: params.source,
+					reason: params.reason
+				})
+			]
+		})
+	}
+
+	private appendDomainEventsTx(
+		tx: Prisma.TransactionClient,
+		domainEvents: DomainEvent[]
+	): Promise<void> {
+		if (!domainEvents.length || !this.outbox) return Promise.resolve()
+		return this.outbox.appendTx(tx, domainEvents)
 	}
 
 	private recordInventoryMovement(type: string, source: string, count = 1) {
@@ -577,4 +743,29 @@ export class InventoryService {
 			)
 		}
 	}
+}
+
+function emptyInventoryTransactionEffects(): InventoryTransactionEffects {
+	return { affectedCatalogIds: [], domainEvents: [] }
+}
+
+function compactInventoryStockChanges(
+	changes: InventoryVariantStockChange[]
+): InventoryVariantStockChange[] {
+	const byVariant = new Map<string, InventoryVariantStockChange>()
+	for (const change of changes) {
+		if (!change.changed) continue
+		const existing = byVariant.get(change.variantId)
+		if (!existing) {
+			byVariant.set(change.variantId, change)
+			continue
+		}
+		byVariant.set(change.variantId, {
+			...change,
+			previousStock: existing.previousStock,
+			changed: existing.previousStock !== change.nextStock
+		})
+	}
+
+	return [...byVariant.values()].filter(change => change.changed)
 }

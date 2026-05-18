@@ -13,7 +13,10 @@ import { UpdateProductCategoryPositionDtoReq } from './dto/requests/update-produ
 import { UpdateProductDtoReq } from './dto/requests/update-product.dto.req'
 import { ProductTypeCompatibilityPreviewDto } from './dto/responses/product.dto.res'
 import { ProductCommandService } from './product-command.service'
-import { ProductMaintenanceService } from './product-maintenance.service'
+import {
+	ProductMaintenanceService,
+	type ProductDefaultVariantPriceMismatchRepairOptions
+} from './product-maintenance.service'
 import {
 	type ProductReadOptions,
 	ProductReadService
@@ -153,8 +156,44 @@ export class ProductService {
 		)
 	}
 
+	async diagnoseDefaultVariantsForCurrentCatalog(sampleLimit?: number) {
+		return this.maintenance.diagnoseDefaultVariantsForCatalog(
+			mustCatalogId(),
+			sampleLimit
+		)
+	}
+
+	async repairDefaultVariantPriceMismatchesForCurrentCatalog(
+		options?: ProductDefaultVariantPriceMismatchRepairOptions
+	) {
+		return this.maintenance.repairDefaultVariantPriceMismatchesForCatalog(
+			mustCatalogId(),
+			options
+		)
+	}
+
 	async repairMissingDefaultVariantsForCatalog(catalogId: string) {
 		return this.maintenance.repairMissingDefaultVariantsForCatalog(catalogId)
+	}
+
+	async diagnoseDefaultVariantsForCatalog(
+		catalogId: string,
+		sampleLimit?: number
+	) {
+		return this.maintenance.diagnoseDefaultVariantsForCatalog(
+			catalogId,
+			sampleLimit
+		)
+	}
+
+	async repairDefaultVariantPriceMismatchesForCatalog(
+		catalogId: string,
+		options?: ProductDefaultVariantPriceMismatchRepairOptions
+	) {
+		return this.maintenance.repairDefaultVariantPriceMismatchesForCatalog(
+			catalogId,
+			options
+		)
 	}
 
 	async rebuildSeoForCatalog(catalogId: string) {

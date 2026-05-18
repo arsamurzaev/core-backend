@@ -1,8 +1,11 @@
 import type { Prisma } from '@generated/client'
 import { OrderStatus } from '@generated/enums'
-import { Injectable } from '@nestjs/common'
+import { Inject, Injectable } from '@nestjs/common'
 
-import { CapabilityService } from '@/modules/capability/capability.service'
+import {
+	CAPABILITY_ASSERT_PORT,
+	type CapabilityAssertPort
+} from '@/modules/capability/contracts'
 import {
 	normalizeOrderProducts,
 	type OrderExternalLinkSnapshot
@@ -59,7 +62,8 @@ export class MoySkladOrderExportService {
 	constructor(
 		private readonly repo: IntegrationRepository,
 		private readonly metadataCrypto: MoySkladMetadataCryptoService,
-		private readonly featureEntitlements: CapabilityService
+		@Inject(CAPABILITY_ASSERT_PORT)
+		private readonly featureEntitlements: CapabilityAssertPort
 	) {}
 
 	async exportOrder(

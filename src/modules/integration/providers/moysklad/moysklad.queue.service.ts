@@ -5,6 +5,7 @@ import {
 } from '@generated/enums'
 import {
 	ConflictException,
+	Inject,
 	Injectable,
 	InternalServerErrorException,
 	Logger,
@@ -16,8 +17,16 @@ import { SpanStatusCode, trace } from '@opentelemetry/api'
 import { Job, Queue, Worker } from 'bullmq'
 
 import { AllInterfaces } from '@/core/config'
-import { CapabilityService } from '@/modules/capability/capability.service'
-import { ObservabilityService } from '@/modules/observability/observability.service'
+import {
+	CAPABILITY_ASSERT_PORT,
+	CAPABILITY_READER_PORT,
+	type CapabilityAssertPort,
+	type CapabilityReaderPort
+} from '@/modules/capability/contracts'
+import {
+	OBSERVABILITY_RECORDER_PORT,
+	type ObservabilityRecorderPort
+} from '@/modules/observability/contracts'
 import { buildBullMqSafeJobId } from '@/shared/utils/bullmq-job-id'
 
 import {
@@ -32,25 +41,42 @@ import {
 import { MoySkladMetadataCryptoService } from './moysklad.metadata'
 import { MoySkladSyncOrchestratorService } from './moysklad.sync-orchestrator.service'
 import { MoySkladSyncRunRecorderService } from './moysklad.sync-run-recorder.service'
+import type {
+	MoySkladEntityType,
+	MoySkladProductChangeWebhookAction,
+	MoySkladProductFolderWebhookAction
+} from './moysklad.types'
 
 const MOYSKLAD_SYNC_QUEUE_NAME = 'moysklad-sync'
 const MOYSKLAD_SYNC_QUEUE_CONCURRENCY = 1
 const MOYSKLAD_SYNC_SCHEDULER_PREFIX = 'moysklad:catalog'
 const MANUAL_JOB_ID_PREFIX = 'moysklad-manual'
 const WEBHOOK_JOB_ID_PREFIX = 'moysklad-webhook-stock'
+const WEBHOOK_PRODUCT_JOB_ID_PREFIX = 'moysklad-webhook-product'
+const WEBHOOK_PRODUCT_FOLDER_JOB_ID_PREFIX = 'moysklad-webhook-productfolder'
 const FULL_SYNC_JOB_NAME = 'catalog-sync'
 const PRODUCT_SYNC_JOB_NAME = 'product-sync'
 const STOCK_SYNC_JOB_NAME = 'stock-sync'
 const WEBHOOK_STOCK_SYNC_JOB_NAME = 'stock-webhook'
+const WEBHOOK_PRODUCT_SYNC_JOB_NAME = 'product-webhook'
+const WEBHOOK_PRODUCT_FOLDER_SYNC_JOB_NAME = 'productfolder-webhook'
 const WEBHOOK_STOCK_SYNC_DELAY_MS = 5000
+const WEBHOOK_PRODUCT_SYNC_DELAY_MS = 5000
+const WEBHOOK_PRODUCT_FOLDER_SYNC_DELAY_MS = 5000
 
 type MoySkladSyncJob = {
 	runId?: string
 	catalogId: string
+	integrationId?: string
 	mode: IntegrationSyncRunMode
 	trigger: IntegrationSyncRunTrigger
 	productId?: string
 	webhookIntegrationId?: string
+	webhookEntityType?: MoySkladEntityType | 'productfolder'
+	webhookExternalId?: string
+	webhookAction?:
+		| MoySkladProductChangeWebhookAction
+		| MoySkladProductFolderWebhookAction
 }
 
 type QueuedSyncResult = {
@@ -68,6 +94,17 @@ type QueuedWebhookStockResult = {
 	jobId: string
 }
 
+type MoySkladProductWebhookSyncInput = {
+	entityType: MoySkladEntityType
+	externalId: string
+	action: MoySkladProductChangeWebhookAction
+}
+
+type MoySkladProductFolderWebhookSyncInput = {
+	externalId: string
+	action: MoySkladProductFolderWebhookAction
+}
+
 @Injectable()
 export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 	private readonly logger = new Logger(MoySkladQueueService.name)
@@ -81,8 +118,12 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		private readonly moySkladSync: MoySkladSyncOrchestratorService,
 		private readonly syncRuns: MoySkladSyncRunRecorderService,
 		private readonly metadataCrypto: MoySkladMetadataCryptoService,
-		private readonly observability: ObservabilityService,
-		private readonly featureEntitlements: CapabilityService
+		@Inject(OBSERVABILITY_RECORDER_PORT)
+		private readonly observability: ObservabilityRecorderPort,
+		@Inject(CAPABILITY_ASSERT_PORT)
+		private readonly featureAssertions: CapabilityAssertPort,
+		@Inject(CAPABILITY_READER_PORT)
+		private readonly featureReader: CapabilityReaderPort
 	) {
 		const redis = this.configService.get('redis', { infer: true })
 		const connection: Record<string, any> = {
@@ -129,7 +170,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 	}
 
 	async enqueueCatalogSync(catalogId: string): Promise<QueuedSyncResult> {
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		const integration = await this.getActiveIntegrationOrThrow(catalogId)
 		await this.assertNoActiveRun(catalogId)
 		this.logger.log(
@@ -150,6 +191,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 				{
 					runId: run.id,
 					catalogId,
+					integrationId: integration.id,
 					mode: IntegrationSyncRunMode.FULL,
 					trigger: IntegrationSyncRunTrigger.MANUAL
 				},
@@ -186,7 +228,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		catalogId: string,
 		productId: string
 	): Promise<QueuedSyncResult> {
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		const integration = await this.getActiveIntegrationOrThrow(catalogId)
 		await this.assertNoActiveRun(catalogId)
 		this.logger.log(
@@ -208,6 +250,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 				{
 					runId: run.id,
 					catalogId,
+					integrationId: integration.id,
 					mode: IntegrationSyncRunMode.PRODUCT,
 					trigger: IntegrationSyncRunTrigger.MANUAL,
 					productId
@@ -242,7 +285,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 	}
 
 	async enqueueStockSync(catalogId: string): Promise<QueuedSyncResult> {
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		const integration = await this.getActiveIntegrationOrThrow(catalogId)
 		await this.assertNoActiveRun(catalogId)
 		this.logger.log(
@@ -263,6 +306,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 				{
 					runId: run.id,
 					catalogId,
+					integrationId: integration.id,
 					mode: IntegrationSyncRunMode.STOCK,
 					trigger: IntegrationSyncRunTrigger.MANUAL
 				},
@@ -299,7 +343,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		catalogId: string,
 		integrationId: string
 	): Promise<QueuedWebhookStockResult> {
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		const jobId = buildBullMqSafeJobId(WEBHOOK_JOB_ID_PREFIX, integrationId)
 		const job = await this.queue.add(
 			WEBHOOK_STOCK_SYNC_JOB_NAME,
@@ -331,6 +375,96 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		}
 	}
 
+	async enqueueProductWebhookSync(
+		catalogId: string,
+		integrationId: string,
+		event: MoySkladProductWebhookSyncInput
+	): Promise<QueuedWebhookStockResult> {
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
+		const jobId = buildBullMqSafeJobId(
+			WEBHOOK_PRODUCT_JOB_ID_PREFIX,
+			integrationId,
+			event.entityType,
+			event.externalId
+		)
+		const job = await this.queue.add(
+			WEBHOOK_PRODUCT_SYNC_JOB_NAME,
+			{
+				catalogId,
+				webhookIntegrationId: integrationId,
+				webhookEntityType: event.entityType,
+				webhookExternalId: event.externalId,
+				webhookAction: event.action,
+				mode: IntegrationSyncRunMode.PRODUCT,
+				trigger: IntegrationSyncRunTrigger.WEBHOOK
+			},
+			{
+				jobId,
+				delay: WEBHOOK_PRODUCT_SYNC_DELAY_MS,
+				removeOnComplete: true
+			}
+		)
+		const resolvedJobId = String(job.id ?? jobId)
+		this.observability.recordQueueJobEnqueued(
+			MOYSKLAD_SYNC_QUEUE_NAME,
+			WEBHOOK_PRODUCT_SYNC_JOB_NAME
+		)
+		this.logger.log(
+			`Queued MoySklad product webhook sync for catalog ${catalogId}: integration=${integrationId}, entity=${event.entityType}, externalId=${event.externalId}, action=${event.action}, jobId=${resolvedJobId}`
+		)
+
+		return {
+			ok: true,
+			queued: true,
+			jobId: resolvedJobId
+		}
+	}
+
+	async enqueueProductFolderWebhookSync(
+		catalogId: string,
+		integrationId: string,
+		event: MoySkladProductFolderWebhookSyncInput
+	): Promise<QueuedWebhookStockResult> {
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
+		const jobId = buildBullMqSafeJobId(
+			WEBHOOK_PRODUCT_FOLDER_JOB_ID_PREFIX,
+			integrationId,
+			event.action,
+			event.externalId
+		)
+		const job = await this.queue.add(
+			WEBHOOK_PRODUCT_FOLDER_SYNC_JOB_NAME,
+			{
+				catalogId,
+				webhookIntegrationId: integrationId,
+				webhookEntityType: 'productfolder',
+				webhookExternalId: event.externalId,
+				webhookAction: event.action,
+				mode: IntegrationSyncRunMode.PRODUCT,
+				trigger: IntegrationSyncRunTrigger.WEBHOOK
+			},
+			{
+				jobId,
+				delay: WEBHOOK_PRODUCT_FOLDER_SYNC_DELAY_MS,
+				removeOnComplete: true
+			}
+		)
+		const resolvedJobId = String(job.id ?? jobId)
+		this.observability.recordQueueJobEnqueued(
+			MOYSKLAD_SYNC_QUEUE_NAME,
+			WEBHOOK_PRODUCT_FOLDER_SYNC_JOB_NAME
+		)
+		this.logger.log(
+			`Queued MoySklad productfolder webhook sync for catalog ${catalogId}: integration=${integrationId}, externalId=${event.externalId}, action=${event.action}, jobId=${resolvedJobId}`
+		)
+
+		return {
+			ok: true,
+			queued: true,
+			jobId: resolvedJobId
+		}
+	}
+
 	async syncSchedulerForIntegration(
 		integration: IntegrationRecord
 	): Promise<void> {
@@ -338,9 +472,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 
 		try {
 			if (
-				!(await this.featureEntitlements.canUseMoySkladIntegration(
-					integration.catalogId
-				))
+				!(await this.featureReader.canUseMoySkladIntegration(integration.catalogId))
 			) {
 				await this.queue.removeJobScheduler(schedulerId)
 				this.logger.log(
@@ -374,6 +506,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 					name: FULL_SYNC_JOB_NAME,
 					data: {
 						catalogId: integration.catalogId,
+						integrationId: integration.id,
 						mode: IntegrationSyncRunMode.FULL,
 						trigger: IntegrationSyncRunTrigger.SCHEDULED
 					}
@@ -469,9 +602,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 						`Starting MoySklad queue job ${jobId || '<unknown>'}: catalog=${job.data.catalogId}, mode=${job.data.mode}, trigger=${job.data.trigger}, runId=${runId ?? 'pending'}`
 					)
 					if (
-						!(await this.featureEntitlements.canUseMoySkladIntegration(
-							job.data.catalogId
-						))
+						!(await this.featureReader.canUseMoySkladIntegration(job.data.catalogId))
 					) {
 						if (runId) {
 							await this.syncRuns.skipRun(runId, 'feature_disabled')
@@ -490,13 +621,57 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 
 					if (!runId) {
 						if (
+							job.data.mode === IntegrationSyncRunMode.PRODUCT &&
+							job.data.trigger === IntegrationSyncRunTrigger.WEBHOOK &&
+							job.data.webhookEntityType === 'productfolder'
+						) {
+							const result = await this.processWebhookProductFolderJob(job, jobId)
+							const syncSkipped =
+								typeof result === 'object' &&
+								result !== null &&
+								'skipped' in result &&
+								(result as { skipped?: boolean }).skipped === true
+							this.syncRuns.recordOutcome(
+								job.data,
+								syncSkipped ? 'skipped' : 'success',
+								this.elapsedMs(startedAt)
+							)
+							this.recordQueueOutcome(
+								jobName,
+								syncSkipped ? 'skipped' : 'success',
+								startedAt
+							)
+							return result
+						}
+
+						if (
+							job.data.mode === IntegrationSyncRunMode.PRODUCT &&
+							job.data.trigger === IntegrationSyncRunTrigger.WEBHOOK
+						) {
+							const result = await this.processWebhookProductJob(job, jobId)
+							const syncSkipped =
+								typeof result === 'object' &&
+								result !== null &&
+								'skipped' in result &&
+								(result as { skipped?: boolean }).skipped === true
+							this.syncRuns.recordOutcome(
+								job.data,
+								syncSkipped ? 'skipped' : 'success',
+								this.elapsedMs(startedAt)
+							)
+							this.recordQueueOutcome(
+								jobName,
+								syncSkipped ? 'skipped' : 'success',
+								startedAt
+							)
+							return result
+						}
+
+						if (
 							job.data.mode === IntegrationSyncRunMode.STOCK &&
 							job.data.trigger === IntegrationSyncRunTrigger.WEBHOOK
 						) {
-							const result = await this.processWebhookStockJob(
-								job,
-								jobId
-							)
+							const result = await this.processWebhookStockJob(job, jobId)
 							const drainSkipped =
 								typeof result === 'object' &&
 								result !== null &&
@@ -703,6 +878,195 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		return run.id
 	}
 
+	private async processWebhookProductJob(
+		job: Job<MoySkladSyncJob>,
+		jobId: string
+	): Promise<unknown> {
+		const integrationId = job.data.webhookIntegrationId
+		const entityType = job.data.webhookEntityType
+		const externalId = job.data.webhookExternalId
+		const action = job.data.webhookAction
+		if (
+			!integrationId ||
+			!entityType ||
+			entityType === 'productfolder' ||
+			!externalId ||
+			!action ||
+			(action !== 'CREATE' && action !== 'UPDATE')
+		) {
+			throw new InternalServerErrorException(
+				'Р”Р»СЏ webhook-СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёРё С‚РѕРІР°СЂР° MoySklad РЅРµ СѓРєР°Р·Р°РЅС‹ integrationId, entityType, externalId РёР»Рё action'
+			)
+		}
+
+		const integration = await this.repo.findMoySkladById(integrationId)
+		if (!integration || !integration.isActive) {
+			this.logger.warn(
+				`Skipping MoySklad product webhook sync ${jobId || '<unknown>'}: integration ${integrationId} not found or inactive`
+			)
+			return {
+				ok: true,
+				skipped: true,
+				reason: 'integration_inactive'
+			}
+		}
+
+		if (integration.catalogId !== job.data.catalogId) {
+			throw new InternalServerErrorException(
+				`MoySklad product webhook job catalog mismatch: job=${job.data.catalogId}, integration=${integration.catalogId}`
+			)
+		}
+
+		const run = await this.repo.createSyncRun({
+			integrationId,
+			catalogId: integration.catalogId,
+			mode: IntegrationSyncRunMode.PRODUCT,
+			trigger: IntegrationSyncRunTrigger.WEBHOOK,
+			jobId,
+			externalId,
+			metadata: {
+				webhook: {
+					queueJobId: jobId,
+					entityType,
+					action,
+					externalId
+				}
+			}
+		})
+		const runningRun = await this.syncRuns.markRunning(run.id, jobId)
+		if (!runningRun) {
+			throw new InternalServerErrorException(
+				`РќРµ РЅР°Р№РґРµРЅ Р·Р°РїСѓСЃРє webhook-СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёРё С‚РѕРІР°СЂР° MoySklad ${run.id}`
+			)
+		}
+
+		try {
+			const execution = await this.moySkladSync.syncWebhookProduct({
+				catalogId: integration.catalogId,
+				runId: run.id,
+				entityType,
+				externalId
+			})
+			const result = execution.result
+			await this.syncRuns.completeProductSync(
+				run.id,
+				job.data,
+				execution.completion,
+				result
+			)
+			await this.repo.patchMoySkladProductChangeWebhookMetadata(integrationId, {
+				lastProcessedAt: new Date().toISOString(),
+				lastError: null
+			})
+			this.logger.log(
+				`Finished MoySklad product webhook sync ${jobId || '<unknown>'}: catalog=${integration.catalogId}, entity=${entityType}, externalId=${externalId}, action=${action}, productId=${result.productId}, created=${result.created}, updated=${result.updated}, variants=${result.totalVariants}, durationMs=${result.durationMs}`
+			)
+
+			return result
+		} catch (error) {
+			const message = this.renderErrorMessage(error)
+			await this.repo.patchMoySkladProductChangeWebhookMetadata(integrationId, {
+				lastError: message
+			})
+			await this.syncRuns.failRun(run.id, message)
+			this.logger.error(
+				`MoySklad product webhook sync ${jobId || '<unknown>'} failed for catalog ${integration.catalogId}: ${message}`
+			)
+			throw this.toError(error)
+		}
+	}
+
+	private async processWebhookProductFolderJob(
+		job: Job<MoySkladSyncJob>,
+		jobId: string
+	): Promise<unknown> {
+		const integrationId = job.data.webhookIntegrationId
+		const entityType = job.data.webhookEntityType
+		const externalId = job.data.webhookExternalId
+		const action = job.data.webhookAction
+		if (
+			!integrationId ||
+			entityType !== 'productfolder' ||
+			!externalId ||
+			(action !== 'CREATE' && action !== 'UPDATE' && action !== 'DELETE')
+		) {
+			throw new InternalServerErrorException(
+				'Для webhook-синхронизации категории MoySklad не указаны integrationId, externalId или action'
+			)
+		}
+
+		const integration = await this.repo.findMoySkladById(integrationId)
+		if (!integration || !integration.isActive) {
+			this.logger.warn(
+				`Skipping MoySklad productfolder webhook sync ${jobId || '<unknown>'}: integration ${integrationId} not found or inactive`
+			)
+			return {
+				ok: true,
+				skipped: true,
+				reason: 'integration_inactive'
+			}
+		}
+
+		if (integration.catalogId !== job.data.catalogId) {
+			throw new InternalServerErrorException(
+				`MoySklad productfolder webhook job catalog mismatch: job=${job.data.catalogId}, integration=${integration.catalogId}`
+			)
+		}
+
+		const run = await this.repo.createSyncRun({
+			integrationId,
+			catalogId: integration.catalogId,
+			mode: IntegrationSyncRunMode.PRODUCT,
+			trigger: IntegrationSyncRunTrigger.WEBHOOK,
+			jobId,
+			externalId,
+			metadata: {
+				webhook: {
+					queueJobId: jobId,
+					entityType,
+					action,
+					externalId
+				}
+			}
+		})
+		const runningRun = await this.syncRuns.markRunning(run.id, jobId)
+		if (!runningRun) {
+			throw new InternalServerErrorException(
+				`Не найден запуск webhook-синхронизации категории MoySklad ${run.id}`
+			)
+		}
+
+		try {
+			const execution = await this.moySkladSync.syncProductFolder({
+				catalogId: integration.catalogId,
+				runId: run.id,
+				externalId,
+				action
+			})
+			const result = execution.result
+			await this.repo.completeSyncRun(run.id, execution.completion)
+			await this.repo.patchMoySkladProductFolderWebhookMetadata(integrationId, {
+				lastProcessedAt: new Date().toISOString(),
+				lastError: null
+			})
+			this.logger.log(
+				`Finished MoySklad productfolder webhook sync ${jobId || '<unknown>'}: catalog=${integration.catalogId}, externalId=${externalId}, action=${action}, categoryId=${result.categoryId ?? '<none>'}, updated=${result.updated}, deleted=${result.deleted}, durationMs=${result.durationMs}`
+			)
+
+			return result
+		} catch (error) {
+			const message = this.renderErrorMessage(error)
+			await this.repo.patchMoySkladProductFolderWebhookMetadata(integrationId, {
+				lastError: message
+			})
+			await this.syncRuns.failRun(run.id, message)
+			this.logger.error(
+				`MoySklad productfolder webhook sync ${jobId || '<unknown>'} failed for catalog ${integration.catalogId}: ${message}`
+			)
+			throw this.toError(error)
+		}
+	}
+
 	private async processWebhookStockJob(
 		job: Job<MoySkladSyncJob>,
 		jobId: string
@@ -804,9 +1168,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		} catch (error) {
 			const message = this.renderErrorMessage(error)
 			await Promise.all(
-				eventIds.map(eventId =>
-					this.repo.markWebhookEventFailed(eventId, message)
-				)
+				eventIds.map(eventId => this.repo.markWebhookEventFailed(eventId, message))
 			)
 			await this.repo.patchMoySkladStockWebhookMetadata(integrationId, {
 				lastError: message
@@ -858,6 +1220,15 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 			job.data.trigger === IntegrationSyncRunTrigger.WEBHOOK
 		) {
 			return WEBHOOK_STOCK_SYNC_JOB_NAME
+		}
+		if (
+			job.data.mode === IntegrationSyncRunMode.PRODUCT &&
+			job.data.trigger === IntegrationSyncRunTrigger.WEBHOOK
+		) {
+			if (job.data.webhookEntityType === 'productfolder') {
+				return WEBHOOK_PRODUCT_FOLDER_SYNC_JOB_NAME
+			}
+			return WEBHOOK_PRODUCT_SYNC_JOB_NAME
 		}
 
 		switch (job.data.mode) {

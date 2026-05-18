@@ -5,18 +5,33 @@ import type { CatalogInventoryMode } from '@generated/enums'
 import { CatalogCreateInput, CatalogUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
+	Inject,
 	Injectable,
-	NotFoundException
+	NotFoundException,
+	Optional
 } from '@nestjs/common'
 
-import { AuditService } from '@/modules/audit/audit.service'
-import { CapabilityService } from '@/modules/capability/capability.service'
+import {
+	AUDIT_RECORDER_PORT,
+	type AuditRecorderPort
+} from '@/modules/audit/contracts'
+import {
+	CAPABILITY_ASSERT_PORT,
+	CAPABILITY_READER_PORT,
+	type CapabilityAssertPort,
+	type CapabilityReaderPort
+} from '@/modules/capability/contracts'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_CACHE_VERSION,
 	CATALOG_CURRENT_CACHE_TTL_SEC,
 	CATALOG_TYPE_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
+import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
+import {
+	DOMAIN_EVENT_DISPATCHER,
+	type DomainEventDispatcher
+} from '@/shared/domain-events/domain-events.contract'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { ensureMediaInCatalog } from '@/shared/media/media.validation'
@@ -63,8 +78,15 @@ export class CatalogService {
 		private readonly mediaRepo: MediaRepository,
 		private readonly mediaUrl: MediaUrlService,
 		private readonly catalogSeoSync: CatalogSeoSyncService,
-		private readonly featureEntitlements: CapabilityService,
-		private readonly audit: AuditService
+		@Inject(CAPABILITY_ASSERT_PORT)
+		private readonly featureAssertions: CapabilityAssertPort,
+		@Inject(CAPABILITY_READER_PORT)
+		private readonly featureReader: CapabilityReaderPort,
+		@Inject(AUDIT_RECORDER_PORT)
+		private readonly audit: AuditRecorderPort,
+		@Optional()
+		@Inject(DOMAIN_EVENT_DISPATCHER)
+		private readonly events?: DomainEventDispatcher
 	) {}
 
 	async create(dto: CreateCatalogDtoReq) {
@@ -449,7 +471,7 @@ export class CatalogService {
 	): Promise<void> {
 		if (dto.inventoryMode !== CATALOG_INVENTORY_MODE_INTERNAL) return
 
-		await this.featureEntitlements.assertCanUseInternalInventory(catalogId)
+		await this.featureAssertions.assertCanUseInternalInventory(catalogId)
 	}
 
 	private async applyCatalogIdentityUpdates(
@@ -517,7 +539,7 @@ export class CatalogService {
 		inventoryMode?: CatalogInventoryMode | null
 	) {
 		const capabilities =
-			await this.featureEntitlements.getCatalogCapabilities(catalogId)
+			await this.featureReader.getCatalogCapabilities(catalogId)
 		return {
 			inventoryMode: inventoryMode ?? ('NONE' as CatalogInventoryMode),
 			...capabilities.flags,
@@ -675,6 +697,17 @@ export class CatalogService {
 
 	private async invalidateCatalogCache(catalogId: string): Promise<void> {
 		if (!this.cacheTtlSec) return
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'catalog.cache_invalidated',
+					catalogId,
+					scopes: [{ name: 'catalog' }]
+				})
+			)
+			return
+		}
+
 		await this.cache.bumpVersion(CATALOG_CACHE_VERSION, catalogId)
 	}
 }

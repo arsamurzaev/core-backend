@@ -1,6 +1,11 @@
 import { CartCheckoutMethod, type Prisma } from '@generated/client'
-import { Injectable } from '@nestjs/common'
+import { BadRequestException, Inject, Injectable } from '@nestjs/common'
 
+import {
+	PRODUCT_SELLABLE_READER_PORT,
+	type ProductSellableProjection,
+	type ProductSellableReader
+} from '@/modules/product/contracts'
 import {
 	normalizeOrderProducts,
 	type OrderExternalLinkSnapshot
@@ -66,6 +71,7 @@ type SnapshotCartItem = {
 	unitPriceSnapshot?: unknown
 	product: {
 		id: string
+		catalogId?: string | null
 		name: string
 		slug: string
 		price: unknown
@@ -75,38 +81,68 @@ type SnapshotCartItem = {
 	}
 }
 
+type CartOrderSnapshotOptions = CartEntityMapOptions & {
+	enforceStock?: boolean
+}
+
 type DeliveryAddressCart = {
 	checkoutMethod: CartCheckoutMethod | null
 	checkoutData: unknown
 }
 
+type SnapshotSource = SnapshotCartItem & {
+	variantId: string | null
+	saleUnitId: string | null
+	variant: Parameters<typeof mapCartVariant>[0]
+	saleUnit: Parameters<typeof mapCartSaleUnit>[0]
+	variantHidden: boolean
+	saleUnitHidden: boolean
+	unitPriceSnapshot: unknown
+	commercialProjection: ProductSellableProjection
+}
+
 @Injectable()
 export class CartOrderSnapshotService {
+	constructor(
+		@Inject(PRODUCT_SELLABLE_READER_PORT)
+		private readonly sellableReader: ProductSellableReader
+	) {}
+
 	async buildSnapshotItems(
 		tx: Prisma.TransactionClient,
 		catalogId: string,
 		items: SnapshotCartItem[],
-		options: CartEntityMapOptions = {}
+		options: CartOrderSnapshotOptions = {}
 	) {
 		const canUseProductVariants = options.canUseProductVariants ?? true
 		const canUseCatalogSaleUnits = options.canUseCatalogSaleUnits ?? true
 		const canExposeSaleUnits = canUseProductVariants && canUseCatalogSaleUnits
-		const snapshotSources = items.map(item => {
-			const variant = canUseProductVariants ? (item.variant ?? null) : null
-			const saleUnit = canExposeSaleUnits ? (item.saleUnit ?? null) : null
-			const shouldUseSnapshot =
-				(canUseProductVariants || !item.variantId) &&
-				(canExposeSaleUnits || !(item.saleUnitId ?? null))
+		const snapshotSources = await Promise.all(
+			items.map(async item => {
+				const commercialProjection = await this.resolveCommercialProjection(
+					catalogId,
+					item,
+					options
+				)
+				const variantId = item.variantId ?? commercialProjection.variantId
+				const saleUnit = canExposeSaleUnits ? (item.saleUnit ?? null) : null
+				const saleUnitId = canExposeSaleUnits ? (item.saleUnitId ?? null) : null
+				const variantHidden = Boolean(variantId && !canUseProductVariants)
+				const saleUnitHidden = Boolean((item.saleUnitId ?? null) && !saleUnitId)
 
-			return {
-				...item,
-				variantId: canUseProductVariants ? item.variantId : null,
-				saleUnitId: canExposeSaleUnits ? (item.saleUnitId ?? null) : null,
-				variant,
-				saleUnit,
-				unitPriceSnapshot: shouldUseSnapshot ? item.unitPriceSnapshot : null
-			}
-		})
+				return {
+					...item,
+					variantId,
+					saleUnitId,
+					variant: item.variant ?? null,
+					saleUnit,
+					variantHidden,
+					saleUnitHidden,
+					unitPriceSnapshot: null,
+					commercialProjection
+				}
+			})
+		)
 		const externalLinks = await this.loadOrderExternalLinks(
 			tx,
 			catalogId,
@@ -114,21 +150,30 @@ export class CartOrderSnapshotService {
 		)
 
 		return snapshotSources.map(item => {
-			const pricing = resolveCartItemPricing(item)
+			const pricingSource = this.buildPricingSource(item)
+			const pricing = resolveCartItemPricing(pricingSource)
 			return {
 				id: item.id,
 				productId: item.productId,
 				variantId: item.variantId,
 				saleUnitId: item.saleUnitId ?? null,
-				variant: mapCartVariant(item.variant),
-				saleUnit: mapCartSaleUnit(item.saleUnit),
+				variantHidden: item.variantHidden,
+				saleUnitHidden: item.saleUnitHidden,
+				variant: item.variantHidden ? null : mapCartVariant(item.variant),
+				saleUnit: item.saleUnitHidden ? null : mapCartSaleUnit(item.saleUnit),
 				externalProducts:
 					externalLinks.productsByProductId.get(item.productId) ?? [],
 				externalVariants: item.variantId
 					? (externalLinks.variantsByVariantId.get(item.variantId) ?? [])
 					: [],
 				quantity: item.quantity,
-				baseQuantity: resolveCartItemBaseQuantity(item),
+				baseQuantity: this.resolveSnapshotBaseQuantity(item),
+				priceState: item.saleUnit
+					? 'KNOWN'
+					: item.commercialProjection.priceState,
+				displayPrice: item.saleUnit
+					? normalizeMoneyString(item.saleUnit.price)
+					: item.commercialProjection.displayPrice,
 				baseUnitPrice: pricing.baseUnitPrice,
 				unitPrice: pricing.unitPrice,
 				unitPriceSnapshot: pricing.unitPrice,
@@ -171,6 +216,8 @@ export class CartOrderSnapshotService {
 				saleUnitId: item.saleUnitId,
 				quantity: item.quantity,
 				baseQuantity: item.baseQuantity,
+				priceState: item.priceState,
+				displayPrice: item.displayPrice,
 				unitPrice: item.unitPrice,
 				variant: item.variant,
 				saleUnit: item.saleUnit
@@ -266,6 +313,97 @@ export class CartOrderSnapshotService {
 		}
 	}
 
+	private async resolveCommercialProjection(
+		catalogId: string,
+		item: SnapshotCartItem,
+		options: CartOrderSnapshotOptions
+	): Promise<ProductSellableProjection> {
+		const productCatalogId = item.product.catalogId ?? catalogId
+		const canUseProductVariants = options.canUseProductVariants ?? true
+		const canUseCatalogSaleUnits = options.canUseCatalogSaleUnits ?? true
+		const quantity = resolveCartItemBaseQuantity({
+			quantity: item.quantity,
+			baseQuantity:
+				canUseProductVariants && canUseCatalogSaleUnits
+					? item.baseQuantity
+					: null,
+			saleUnit:
+				canUseProductVariants && canUseCatalogSaleUnits
+					? (item.saleUnit ?? null)
+					: null
+		})
+		const resolveOptions = {
+			quantity,
+			enforceStock: options.enforceStock ?? false
+		}
+		const projection = item.variantId
+			? await this.sellableReader.resolveVariantSellable(
+					productCatalogId,
+					item.productId,
+					item.variantId,
+					resolveOptions
+				)
+			: await this.sellableReader.resolveProductSellable(
+					productCatalogId,
+					item.productId,
+					resolveOptions
+				)
+
+		this.ensureProjectionCanBeOrdered(projection)
+		return projection
+	}
+
+	private resolveSnapshotBaseQuantity(item: SnapshotSource): number {
+		return resolveCartItemBaseQuantity({
+			quantity: item.quantity,
+			baseQuantity: item.saleUnit ? item.baseQuantity : null,
+			saleUnit: item.saleUnit
+		})
+	}
+
+	private ensureProjectionCanBeOrdered(projection: ProductSellableProjection) {
+		if (projection.requiresVariantSelection) {
+			throw new BadRequestException('Выберите вариацию товара')
+		}
+
+		if (projection.availabilityState === 'AVAILABLE') return
+
+		if (projection.availabilityState === 'OUT_OF_STOCK') {
+			throw new BadRequestException(
+				`Недостаточно товара на складе. Доступно: ${projection.stock ?? 0}`
+			)
+		}
+
+		throw new BadRequestException('Товар недоступен для заказа')
+	}
+
+	private buildPricingSource(item: SnapshotSource) {
+		const commercialPrice = this.resolveCommercialPrice(
+			item.commercialProjection
+		)
+		const hasVariantPricingSource = Boolean(item.variantId && item.variant)
+		const product = hasVariantPricingSource
+			? item.product
+			: withPrice(item.product, commercialPrice)
+		const variant = hasVariantPricingSource
+			? withPrice(item.variant, commercialPrice)
+			: item.variant
+
+		return {
+			...item,
+			product,
+			variant,
+			unitPriceSnapshot: null
+		}
+	}
+
+	private resolveCommercialPrice(
+		projection: ProductSellableProjection
+	): string | null {
+		if (projection.priceState === 'UNKNOWN') return null
+		return projection.displayPrice
+	}
+
 	private mapOrderExternalLink(
 		link: OrderExternalLinkRecord
 	): OrderExternalLinkSnapshot {
@@ -320,4 +458,36 @@ function readNonEmptyString(value: unknown): string | null {
 	if (typeof value !== 'string') return null
 	const normalized = value.trim()
 	return normalized || null
+}
+
+function withPrice<T extends { price: unknown } | null | undefined>(
+	source: T,
+	price: string | null
+): T {
+	if (!source || price === null) return source
+	return { ...source, price }
+}
+
+function normalizeMoneyString(value: unknown): string | null {
+	const parsed = readFiniteNumber(value)
+	return parsed === null ? null : parsed.toFixed(2)
+}
+
+function readFiniteNumber(value: unknown): number | null {
+	if (typeof value === 'number') return Number.isFinite(value) ? value : null
+	if (typeof value === 'string' && value.trim()) {
+		const parsed = Number(value)
+		return Number.isFinite(parsed) ? parsed : null
+	}
+	if (typeof value === 'bigint') return Number(value)
+	if (typeof value === 'object' && value !== null) {
+		const candidate = value as { toNumber?: unknown }
+		if (typeof candidate.toNumber === 'function') {
+			const parsed = candidate.toNumber()
+			return typeof parsed === 'number' && Number.isFinite(parsed)
+				? parsed
+				: null
+		}
+	}
+	return null
 }

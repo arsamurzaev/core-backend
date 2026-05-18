@@ -1,10 +1,19 @@
 ﻿import { CategoryCreateInput, CategoryUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
+	Inject,
 	Injectable,
-	NotFoundException
+	NotFoundException,
+	Optional
 } from '@nestjs/common'
 
+import {
+	applyProductCommercialFields,
+	PRODUCT_SELLABLE_READER_PORT,
+	type ProductCommercialFields,
+	type ProductSellableReader,
+	toProductCommercialFieldsMap
+} from '@/modules/product/public'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATEGORY_LIST_CACHE_TTL_SEC,
@@ -13,6 +22,11 @@ import {
 	CATEGORY_PRODUCTS_FIRST_PAGE_CACHE_TTL_SEC,
 	CATEGORY_PRODUCTS_NEXT_PAGE_CACHE_TTL_SEC
 } from '@/shared/cache/catalog-cache.constants'
+import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
+import {
+	DOMAIN_EVENT_DISPATCHER,
+	type DomainEventDispatcher
+} from '@/shared/domain-events/domain-events.contract'
 import type { MediaDto } from '@/shared/media/dto/media.dto.res'
 import type { MediaRecord } from '@/shared/media/media-url.service'
 import {
@@ -51,6 +65,9 @@ type CategoryProductsPage = CategoryProductsPagePayload<unknown>
 type CategoryOrderItem = Awaited<
 	ReturnType<CategoryRepository['findAll']>
 >[number]
+type CategoryListOptions = {
+	includeEmpty?: boolean
+}
 
 @Injectable()
 export class CategoryService {
@@ -65,14 +82,20 @@ export class CategoryService {
 		private readonly cache: CacheService,
 		private readonly mediaRepo: MediaRepository,
 		private readonly mediaUrl: MediaUrlService,
-		private readonly productMapper: ProductMediaMapper
+		private readonly productMapper: ProductMediaMapper,
+		@Inject(PRODUCT_SELLABLE_READER_PORT)
+		private readonly sellableReader: ProductSellableReader,
+		@Optional()
+		@Inject(DOMAIN_EVENT_DISPATCHER)
+		private readonly events?: DomainEventDispatcher
 	) {}
 
-	async getAll() {
+	async getAll(options: CategoryListOptions = {}) {
 		const catalogId = effectiveCatalogId()
+		const includeEmpty = options.includeEmpty !== false
 		const cacheKey =
 			this.listCacheTtlSec > 0
-				? await this.buildCategoryListCacheKey(catalogId)
+				? await this.buildCategoryListCacheKey(catalogId, { includeEmpty })
 				: undefined
 
 		if (cacheKey) {
@@ -81,9 +104,9 @@ export class CategoryService {
 		}
 
 		const categories = await this.repo.findAll(catalogId)
-		const mapped = this.normalizeCategoryListForRead(categories).map(category =>
-			this.mapCategory(category)
-		)
+		const mapped = this.normalizeCategoryListForRead(categories)
+			.map(category => this.mapCategory(category))
+			.filter(category => includeEmpty || category.productCount > 0)
 
 		if (cacheKey) {
 			await this.cache.setJson(cacheKey, mapped, this.listCacheTtlSec)
@@ -132,11 +155,15 @@ export class CategoryService {
 			take: limit + 1,
 			includeInactive
 		})
+		const commercialMap = await this.resolveCommercialProjectionMap(
+			catalogId,
+			items.map(item => item.product)
+		)
 
 		const page: CategoryProductsPage = buildCategoryProductsPage(
 			items,
 			limit,
-			product => this.mapProductMedia(product)
+			product => this.mapProductForCategory(commercialMap, product)
 		)
 
 		if (cacheKey) {
@@ -179,11 +206,15 @@ export class CategoryService {
 			take: limit + 1,
 			includeInactive
 		})
+		const commercialMap = await this.resolveCommercialProjectionMap(
+			catalogId,
+			items.map(item => item.product)
+		)
 
 		const page: CategoryProductsPage = buildCategoryProductsPage(
 			items,
 			limit,
-			product => this.mapProductMedia(product)
+			product => this.mapProductForCategory(commercialMap, product)
 		)
 
 		if (cacheKey) {
@@ -434,8 +465,27 @@ export class CategoryService {
 		}
 	}
 
+	private mapProductForCategory<
+		T extends ProductMappableRecord & { id: string; price?: unknown }
+	>(commercialMap: ReadonlyMap<string, ProductCommercialFields>, product: T) {
+		return this.mapProductMedia(
+			applyProductCommercialFields(product, commercialMap.get(product.id))
+		)
+	}
+
 	private mapProductMedia<T extends ProductMappableRecord>(product: T) {
 		return this.productMapper.mapProduct(product, MEDIA_LIST_VARIANT_NAMES)
+	}
+
+	private async resolveCommercialProjectionMap(
+		catalogId: string,
+		products: Array<{ id: string }>
+	): Promise<Map<string, ProductCommercialFields>> {
+		const projections = await this.sellableReader.resolveProductsSellable(
+			catalogId,
+			products.map(product => product.id)
+		)
+		return toProductCommercialFieldsMap(projections)
 	}
 
 	private async prepareCategoryProductsForWrite(
@@ -551,7 +601,10 @@ export class CategoryService {
 		])
 	}
 
-	private async buildCategoryListCacheKey(catalogId: string): Promise<string> {
+	private async buildCategoryListCacheKey(
+		catalogId: string,
+		options: { includeEmpty: boolean }
+	): Promise<string> {
 		const version = await this.cache.getVersion(
 			CATEGORY_LIST_CACHE_VERSION,
 			catalogId
@@ -561,15 +614,40 @@ export class CategoryService {
 			catalogId,
 			'category',
 			'list',
+			options.includeEmpty ? 'include-empty' : 'non-empty',
 			`v${version}`
 		])
 	}
 
 	private async invalidateCategoryListCache(catalogId: string) {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'product.changed',
+					catalogId,
+					productId: '*',
+					changes: ['category_list']
+				})
+			)
+			return
+		}
+
 		await this.cache.bumpVersion(CATEGORY_LIST_CACHE_VERSION, catalogId)
 	}
 
 	private async invalidateCategoryProductsCache(catalogId: string) {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'product.changed',
+					catalogId,
+					productId: '*',
+					changes: ['category_products']
+				})
+			)
+			return
+		}
+
 		await this.cache.bumpVersion(CATEGORY_PRODUCTS_CACHE_VERSION, catalogId)
 	}
 

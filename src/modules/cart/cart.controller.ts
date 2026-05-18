@@ -30,15 +30,15 @@ import {
 import type { Request, Response } from 'express'
 import type { Observable } from 'rxjs'
 
-import {
-	resolveCookieDomain,
-	resolveServerHost
-} from '@/modules/auth/auth-cookie.utils'
 import { Roles } from '@/modules/auth/decorators/roles.decorator'
 import { User } from '@/modules/auth/decorators/user.decorator'
 import { SessionGuard } from '@/modules/auth/guards/session.guard'
 import type { SessionUser } from '@/modules/auth/types/auth-request'
 import { setPrivateNoStoreHeaders } from '@/shared/http/cache-control'
+import {
+	resolveCookieDomain,
+	resolveServerHost
+} from '@/shared/http/cookie.utils'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 

@@ -2,11 +2,12 @@ import {
 	DataType,
 	IntegrationProvider,
 	ProductStatus,
+	ProductVariantKind,
 	ProductVariantStatus
 } from '@generated/enums'
 import { ApiProperty } from '@nestjs/swagger'
 
-import { SeoDto } from '@/modules/seo/dto/responses/seo.dto.res'
+import { SeoDto } from '@/modules/seo/public'
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
 
 export class ProductAttributeEnumValueDto {
@@ -183,8 +184,11 @@ export class ProductVariantDto {
 	@ApiProperty({ type: String })
 	variantKey: string
 
-	@ApiProperty({ type: Number })
-	stock: number
+	@ApiProperty({ enum: ProductVariantKind })
+	kind: ProductVariantKind
+
+	@ApiProperty({ type: Number, nullable: true })
+	stock: number | null
 
 	@ApiProperty({ type: String, example: '0.00', nullable: true })
 	price: string | null
@@ -269,8 +273,8 @@ export class ProductVariantSummaryDto {
 	@ApiProperty({ type: Number })
 	activeCount: number
 
-	@ApiProperty({ type: Number })
-	totalStock: number
+	@ApiProperty({ type: Number, nullable: true })
+	totalStock: number | null
 
 	@ApiProperty({ type: String, nullable: true })
 	singleVariantId: string | null
@@ -286,8 +290,8 @@ export class ProductVariantPickerOptionDto {
 	@ApiProperty({ type: String, example: '999.00', nullable: true })
 	price: string | null
 
-	@ApiProperty({ type: Number })
-	stock: number
+	@ApiProperty({ type: Number, nullable: true })
+	stock: number | null
 
 	@ApiProperty({ enum: ProductVariantStatus })
 	status: ProductVariantStatus
@@ -301,8 +305,8 @@ export class ProductVariantPickerOptionDto {
 	@ApiProperty({ type: String, nullable: true, example: '999.00' })
 	saleUnitPrice: string | null
 
-	@ApiProperty({ type: Number })
-	maxQuantity: number
+	@ApiProperty({ type: Number, nullable: true })
+	maxQuantity: number | null
 }
 
 export class ProductDto {
@@ -320,6 +324,30 @@ export class ProductDto {
 
 	@ApiProperty({ type: String, example: '999.00', nullable: true })
 	price: string | null
+
+	@ApiProperty({ enum: ['UNKNOWN', 'KNOWN', 'RANGE'] })
+	priceState: 'UNKNOWN' | 'KNOWN' | 'RANGE'
+
+	@ApiProperty({ type: String, example: '999.00', nullable: true })
+	displayPrice: string | null
+
+	@ApiProperty({ type: String, example: '999.00', nullable: true })
+	minPrice: string | null
+
+	@ApiProperty({ type: String, example: '1299.00', nullable: true })
+	maxPrice: string | null
+
+	@ApiProperty({ enum: ['AVAILABLE', 'OUT_OF_STOCK', 'UNAVAILABLE'] })
+	availabilityState: 'AVAILABLE' | 'OUT_OF_STOCK' | 'UNAVAILABLE'
+
+	@ApiProperty({ type: Number, nullable: true })
+	stock: number | null
+
+	@ApiProperty({ type: String, nullable: true })
+	defaultVariantId: string | null
+
+	@ApiProperty({ type: Boolean })
+	requiresVariantSelection: boolean
 
 	@ApiProperty({ type: [ProductMediaDto] })
 	media: ProductMediaDto[]
@@ -426,6 +454,134 @@ export class ProductDefaultVariantRepairResponseDto {
 
 	@ApiProperty({ type: Number })
 	affectedCatalogs: number
+}
+
+export class ProductDefaultVariantDiagnosticSampleDto {
+	@ApiProperty({ type: String })
+	productId: string
+
+	@ApiProperty({ type: String })
+	productName: string
+
+	@ApiProperty({ type: String })
+	productSku: string
+
+	@ApiProperty({ type: String, nullable: true })
+	variantId: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	variantKey: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	variantSku: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	details: string | null
+}
+
+export class ProductDefaultVariantDiagnosticCheckDto {
+	@ApiProperty({
+		enum: [
+			'SIMPLE_WITHOUT_DEFAULT_VARIANT',
+			'MULTIPLE_DEFAULT_VARIANTS',
+			'CUSTOM_VARIANT_WITHOUT_ATTRIBUTES',
+			'DEFAULT_VARIANT_WITH_ATTRIBUTES',
+			'DEFAULT_VARIANT_PRICE_MISMATCH'
+		]
+	})
+	code:
+		| 'SIMPLE_WITHOUT_DEFAULT_VARIANT'
+		| 'MULTIPLE_DEFAULT_VARIANTS'
+		| 'CUSTOM_VARIANT_WITHOUT_ATTRIBUTES'
+		| 'DEFAULT_VARIANT_WITH_ATTRIBUTES'
+		| 'DEFAULT_VARIANT_PRICE_MISMATCH'
+
+	@ApiProperty({ enum: ['ok', 'warn', 'fail'] })
+	status: 'ok' | 'warn' | 'fail'
+
+	@ApiProperty({ type: Number })
+	count: number
+
+	@ApiProperty({ type: String })
+	message: string
+
+	@ApiProperty({ type: [ProductDefaultVariantDiagnosticSampleDto] })
+	samples: ProductDefaultVariantDiagnosticSampleDto[]
+}
+
+export class ProductDefaultVariantDiagnosticsResponseDto {
+	@ApiProperty({ type: String })
+	catalogId: string
+
+	@ApiProperty({ type: Number })
+	sampleLimit: number
+
+	@ApiProperty({ type: [ProductDefaultVariantDiagnosticCheckDto] })
+	checks: ProductDefaultVariantDiagnosticCheckDto[]
+
+	@ApiProperty({ type: Number })
+	warnCount: number
+
+	@ApiProperty({ type: Number })
+	failCount: number
+
+	@ApiProperty({ type: Boolean })
+	ok: boolean
+}
+
+export class ProductDefaultVariantPriceMismatchRepairSampleDto {
+	@ApiProperty({ type: String })
+	productId: string
+
+	@ApiProperty({ type: String })
+	productName: string
+
+	@ApiProperty({ type: String })
+	productSku: string
+
+	@ApiProperty({ type: String })
+	variantId: string
+
+	@ApiProperty({ type: String })
+	variantSku: string
+
+	@ApiProperty({ type: String })
+	variantKey: string
+
+	@ApiProperty({ type: String, nullable: true })
+	previousProductPrice: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	nextProductPrice: string | null
+}
+
+export class ProductDefaultVariantPriceMismatchRepairResponseDto {
+	@ApiProperty({ type: String })
+	catalogId: string
+
+	@ApiProperty({ type: Boolean })
+	dryRun: boolean
+
+	@ApiProperty({ type: Number })
+	checkedProducts: number
+
+	@ApiProperty({ type: Number })
+	repairableProducts: number
+
+	@ApiProperty({ type: Number })
+	updatedProducts: number
+
+	@ApiProperty({ type: Number })
+	affectedCatalogs: number
+
+	@ApiProperty({ type: Number })
+	batchSize: number
+
+	@ApiProperty({ type: Number })
+	sampleLimit: number
+
+	@ApiProperty({ type: [ProductDefaultVariantPriceMismatchRepairSampleDto] })
+	samples: ProductDefaultVariantPriceMismatchRepairSampleDto[]
 }
 
 export class ProductTypeCompatibilityIssueDto {

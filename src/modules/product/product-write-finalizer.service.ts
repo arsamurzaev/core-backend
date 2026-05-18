@@ -1,5 +1,5 @@
 import { SeoEntityType } from '@generated/enums'
-import { Injectable } from '@nestjs/common'
+import { Inject, Injectable, Optional } from '@nestjs/common'
 
 import { CacheService } from '@/shared/cache/cache.service'
 import {
@@ -8,6 +8,11 @@ import {
 	CATEGORY_PRODUCTS_CACHE_VERSION,
 	PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
+import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
+import {
+	DOMAIN_EVENT_DISPATCHER,
+	type DomainEventDispatcher
+} from '@/shared/domain-events/domain-events.contract'
 import type { MediaDto } from '@/shared/media/dto/media.dto.res'
 import {
 	MEDIA_DETAIL_VARIANT_NAMES,
@@ -15,7 +20,7 @@ import {
 } from '@/shared/media/media-url.service'
 import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
 
-import { SeoRepository } from '../seo/seo.repository'
+import { SeoRepository } from '@/modules/seo/public'
 
 import { ProductSeoSyncService } from './product-seo-sync.service'
 import type { ProductDetailsItem } from './product.repository'
@@ -43,7 +48,10 @@ export class ProductWriteFinalizer {
 		private readonly mediaUrl: MediaUrlService,
 		private readonly mapper: ProductMediaMapper,
 		private readonly productSeoSync: ProductSeoSyncService,
-		private readonly seoRepo: SeoRepository
+		private readonly seoRepo: SeoRepository,
+		@Optional()
+		@Inject(DOMAIN_EVENT_DISPATCHER)
+		private readonly events?: DomainEventDispatcher
 	) {}
 
 	async finalizeProduct(
@@ -61,7 +69,7 @@ export class ProductWriteFinalizer {
 			await this.invalidateCategoryProductsCache(catalogId)
 		}
 		if (options.bumpCatalogTypeId) {
-			await this.bumpCatalogTypeCache(options.bumpCatalogTypeId)
+			await this.bumpCatalogTypeCache(catalogId, options.bumpCatalogTypeId)
 		}
 
 		return {
@@ -74,10 +82,34 @@ export class ProductWriteFinalizer {
 		product: ProductDetailsItem,
 		catalogId: string
 	): Promise<void> {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'product.changed',
+					catalogId,
+					productId: product.id,
+					changes: ['seo']
+				})
+			)
+			return
+		}
+
 		await this.productSeoSync.syncProduct(product, catalogId)
 	}
 
 	async removeProductSeo(productId: string, catalogId: string): Promise<void> {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'product.changed',
+					catalogId,
+					productId,
+					changes: ['seo_remove']
+				})
+			)
+			return
+		}
+
 		await this.productSeoSync.removeProduct(productId, catalogId)
 	}
 
@@ -94,15 +126,53 @@ export class ProductWriteFinalizer {
 	}
 
 	async invalidateCatalogProductsCache(catalogId: string): Promise<void> {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'product.changed',
+					catalogId,
+					productId: '*',
+					changes: ['catalog_products']
+				})
+			)
+			return
+		}
+
 		await this.cache.bumpVersion(PRODUCTS_CACHE_VERSION, catalogId)
 	}
 
 	async invalidateCategoryProductsCache(catalogId: string): Promise<void> {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'product.changed',
+					catalogId,
+					productId: '*',
+					changes: ['category_products', 'category_list']
+				})
+			)
+			return
+		}
+
 		await this.cache.bumpVersion(CATEGORY_PRODUCTS_CACHE_VERSION, catalogId)
 		await this.cache.bumpVersion(CATEGORY_LIST_CACHE_VERSION, catalogId)
 	}
 
-	async bumpCatalogTypeCache(catalogTypeId: string): Promise<void> {
+	async bumpCatalogTypeCache(
+		catalogId: string,
+		catalogTypeId: string
+	): Promise<void> {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'catalog.cache_invalidated',
+					catalogId,
+					scopes: [{ name: 'catalog_type', key: catalogTypeId }]
+				})
+			)
+			return
+		}
+
 		await this.cache.bumpVersion(CATALOG_TYPE_CACHE_VERSION, catalogTypeId)
 	}
 

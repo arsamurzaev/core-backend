@@ -74,7 +74,7 @@ type CartVariantLike = {
 	sku: string
 	variantKey: string
 	price: unknown
-	stock: number
+	stock: number | null
 	status: string
 	isAvailable: boolean
 	attributes?: CartVariantAttributeLike[] | null
@@ -212,7 +212,7 @@ function buildCartVariantLabel(variant: CartVariantLike): string {
 export const CART_TOKEN_BYTES = 24
 export const PUBLIC_KEY_BYTES = 18
 export const CART_COOKIE_NAME = 'cart_token'
-export const CART_SSE_HEARTBEAT_MS = 20_000
+export const CART_SSE_HEARTBEAT_MS = 200_000
 export const MAX_ITEM_QUANTITY = 999
 export const MAX_CART_ITEMS = 50
 
@@ -338,6 +338,17 @@ export function resolveCartItemBaseQuantity(item: {
 	return Math.max(0, Math.ceil(baseQuantity))
 }
 
+function resolveMappedCartItemBaseQuantity(
+	item: CartItemLike,
+	saleUnit: CartSaleUnitLike | null
+): number {
+	return resolveCartItemBaseQuantity({
+		quantity: item.quantity,
+		baseQuantity: saleUnit ? item.baseQuantity : null,
+		saleUnit
+	})
+}
+
 export function mapCartEntity(
 	cart: CartEntityLike,
 	mapMedia?: (media: MediaRecord) => unknown,
@@ -381,7 +392,7 @@ export function mapCartEntity(
 				variantId: canUseProductVariants ? item.variantId : null,
 				saleUnitId: canExposeSaleUnits ? (item.saleUnitId ?? null) : null,
 				quantity: item.quantity,
-				baseQuantity: resolveCartItemBaseQuantity(item),
+				baseQuantity: resolveMappedCartItemBaseQuantity(item, itemSaleUnit),
 				product: {
 					id: item.product.id,
 					name: item.product.name,

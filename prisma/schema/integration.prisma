@@ -48,6 +48,13 @@ model IntegrationProductLink {
   externalCode      String?   @map("external_code") @db.VarChar(100)
   externalUpdatedAt DateTime? @map("external_updated_at")
   lastSyncedAt      DateTime? @map("last_synced_at")
+  lastSeenAt        DateTime? @map("last_seen_at")
+  lastPriceSyncAt   DateTime? @map("last_price_sync_at")
+  lastStockSyncAt   DateTime? @map("last_stock_sync_at")
+  missingSince      DateTime? @map("missing_since")
+  missingSyncCount  Int       @default(0) @map("missing_sync_count")
+  skippedReason     String?   @map("skipped_reason") @db.VarChar(191)
+  lastExternalError String?   @map("last_external_error") @db.Text
   rawMeta           Json?     @map("raw_meta")
 
   integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
@@ -59,6 +66,7 @@ model IntegrationProductLink {
   @@unique([integrationId, externalId])
   @@unique([integrationId, productId])
   @@index([productId])
+  @@index([integrationId, missingSince])
   @@map("integration_product_links")
 }
 
@@ -72,6 +80,13 @@ model IntegrationVariantLink {
   externalCode      String?   @map("external_code") @db.VarChar(100)
   externalUpdatedAt DateTime? @map("external_updated_at")
   lastSyncedAt      DateTime? @map("last_synced_at")
+  lastSeenAt        DateTime? @map("last_seen_at")
+  lastPriceSyncAt   DateTime? @map("last_price_sync_at")
+  lastStockSyncAt   DateTime? @map("last_stock_sync_at")
+  missingSince      DateTime? @map("missing_since")
+  missingSyncCount  Int       @default(0) @map("missing_sync_count")
+  skippedReason     String?   @map("skipped_reason") @db.VarChar(191)
+  lastExternalError String?   @map("last_external_error") @db.Text
   rawMeta           Json?     @map("raw_meta")
 
   integration Integration    @relation(fields: [integrationId], references: [id], onDelete: Cascade)
@@ -83,6 +98,7 @@ model IntegrationVariantLink {
   @@unique([integrationId, externalId])
   @@unique([integrationId, variantId])
   @@index([variantId])
+  @@index([integrationId, missingSince])
   @@map("integration_variant_links")
 }
 
@@ -119,6 +135,7 @@ model IntegrationSyncRun {
   mode     IntegrationSyncRunMode
   trigger  IntegrationSyncRunTrigger
   status   IntegrationSyncRunStatus  @default(PENDING)
+  snapshotCompleteness IntegrationSyncSnapshotCompleteness @default(PARTIAL) @map("snapshot_completeness")
 
   jobId      String? @unique @map("job_id") @db.VarChar(191)
   productId  String? @map("product_id") @db.Uuid

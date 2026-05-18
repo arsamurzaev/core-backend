@@ -36,6 +36,9 @@ describe('IntegrationController', () => {
 							syncMoySkladProduct: jest.fn(),
 							syncMoySkladStock: jest.fn(),
 							receiveMoySkladStockWebhook: jest.fn(),
+							receiveMoySkladProductDeleteWebhook: jest.fn(),
+							receiveMoySkladProductChangeWebhook: jest.fn(),
+							receiveMoySkladProductFolderWebhook: jest.fn(),
 							retryMoySkladOrderExport: jest.fn(),
 							cancelMoySkladSync: jest.fn()
 						}
@@ -90,8 +93,7 @@ describe('IntegrationController', () => {
 			events: [
 				{
 					accountId: 'account-1',
-					reportUrl:
-						'https://api.moysklad.ru/api/remap/1.2/report/stock/all/current'
+					reportUrl: 'https://api.moysklad.ru/api/remap/1.2/report/stock/all/current'
 				}
 			]
 		}
@@ -107,6 +109,91 @@ describe('IntegrationController', () => {
 			integrationId: 'integration-1',
 			secret: 'secret-1',
 			requestId: 'request-1',
+			payload
+		})
+	})
+
+	it('delegates MoySklad product delete webhook to service', async () => {
+		service.receiveMoySkladProductDeleteWebhook.mockResolvedValue(undefined)
+		const payload = {
+			events: [
+				{
+					accountId: 'account-1',
+					action: 'DELETE',
+					meta: {
+						href: 'https://api.moysklad.ru/api/remap/1.2/entity/product/product-1',
+						type: 'product'
+					}
+				}
+			]
+		}
+
+		await controller.receiveMoySkladProductDeleteWebhook(
+			'integration-1',
+			'secret-1',
+			payload
+		)
+
+		expect(service.receiveMoySkladProductDeleteWebhook).toHaveBeenCalledWith({
+			integrationId: 'integration-1',
+			secret: 'secret-1',
+			payload
+		})
+	})
+
+	it('delegates MoySklad product change webhook to service', async () => {
+		service.receiveMoySkladProductChangeWebhook.mockResolvedValue(undefined)
+		const payload = {
+			events: [
+				{
+					accountId: 'account-1',
+					action: 'UPDATE',
+					meta: {
+						href: 'https://api.moysklad.ru/api/remap/1.2/entity/variant/variant-1',
+						type: 'variant'
+					}
+				}
+			]
+		}
+
+		await controller.receiveMoySkladProductChangeWebhook(
+			'integration-1',
+			'secret-1',
+			payload
+		)
+
+		expect(service.receiveMoySkladProductChangeWebhook).toHaveBeenCalledWith({
+			integrationId: 'integration-1',
+			secret: 'secret-1',
+			payload
+		})
+	})
+
+	it('delegates MoySklad productfolder webhook to service', async () => {
+		service.receiveMoySkladProductFolderWebhook.mockResolvedValue(undefined)
+		const payload = {
+			events: [
+				{
+					accountId: 'account-1',
+					action: 'UPDATE',
+					meta: {
+						href:
+							'https://api.moysklad.ru/api/remap/1.2/entity/productfolder/folder-1',
+						type: 'productfolder'
+					}
+				}
+			]
+		}
+
+		await controller.receiveMoySkladProductFolderWebhook(
+			'integration-1',
+			'secret-1',
+			payload
+		)
+
+		expect(service.receiveMoySkladProductFolderWebhook).toHaveBeenCalledWith({
+			integrationId: 'integration-1',
+			secret: 'secret-1',
 			payload
 		})
 	})

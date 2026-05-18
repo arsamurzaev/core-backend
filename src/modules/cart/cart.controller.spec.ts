@@ -9,8 +9,14 @@ import { CartService } from './cart.service'
 describe('CartController', () => {
 	let controller: CartController
 	let cartService: { getCookieName: jest.Mock }
+	const originalBaseDomains = process.env.CATALOG_BASE_DOMAINS
+	const originalPlatformCookieSubdomains =
+		process.env.PLATFORM_COOKIE_SUBDOMAINS
 
 	beforeEach(async () => {
+		process.env.CATALOG_BASE_DOMAINS = 'myctlg.ru,myctlg-update.ru'
+		process.env.PLATFORM_COOKIE_SUBDOMAINS = 'www,api,admin,app,shtab'
+
 		cartService = {
 			getCookieName: jest.fn().mockReturnValue('cart_token')
 		}
@@ -32,6 +38,11 @@ describe('CartController', () => {
 		const module: TestingModule = await moduleBuilder.compile()
 
 		controller = module.get<CartController>(CartController)
+	})
+
+	afterEach(() => {
+		restoreEnv('CATALOG_BASE_DOMAINS', originalBaseDomains)
+		restoreEnv('PLATFORM_COOKIE_SUBDOMAINS', originalPlatformCookieSubdomains)
 	})
 
 	it('should be defined', () => {
@@ -89,4 +100,13 @@ function createResponse(): Response {
 		cookie: jest.fn(),
 		clearCookie: jest.fn()
 	} as unknown as Response
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+	if (value === undefined) {
+		delete process.env[name]
+		return
+	}
+
+	process.env[name] = value
 }

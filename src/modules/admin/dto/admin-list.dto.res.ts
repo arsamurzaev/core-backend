@@ -1,14 +1,21 @@
-import { CatalogStatus, PaymentKind } from '@generated/enums'
+import {
+	CatalogStatus,
+	IntegrationSyncSnapshotCompleteness,
+	IntegrationSyncRunStatus,
+	IntegrationSyncRunTrigger,
+	PaymentKind
+} from '@generated/enums'
 import type { CatalogInventoryMode } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
 import {
 	CATALOG_CAPABILITIES,
 	type CatalogCapability
-} from '@/modules/capability/capability.constants'
+} from '@/modules/capability/public'
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
 
 const CATALOG_INVENTORY_MODE_VALUES = ['NONE', 'EXTERNAL', 'INTERNAL'] as const
+const MOYSKLAD_STOCK_APPLY_SOURCES = ['FULL_SYNC', 'WEBHOOK'] as const
 
 export class AdminDeleteInfoDto {
 	@ApiProperty({ type: Boolean })
@@ -71,6 +78,165 @@ export class AdminDeleteCatalogContentResultDto {
 
 	@ApiProperty({ type: AdminDeleteCatalogContentCountsDto })
 	counts: AdminDeleteCatalogContentCountsDto
+}
+
+export class AdminMoySkladStockSkippedReasonsDto {
+	@ApiProperty({ type: Number })
+	missingStock: number
+
+	@ApiProperty({ type: Number })
+	productHasVariantLinks: number
+
+	@ApiProperty({ type: Number })
+	variantsCapabilityDisabled: number
+
+	@ApiProperty({ type: Number })
+	stockRowWithoutLocalLink: number
+}
+
+export class AdminMoySkladStockDiagnosticsDto {
+	@ApiProperty({ enum: MOYSKLAD_STOCK_APPLY_SOURCES })
+	source: 'FULL_SYNC' | 'WEBHOOK'
+
+	@ApiProperty({ type: Number })
+	stockRows: number
+
+	@ApiProperty({ type: Number })
+	matchedStockRows: number
+
+	@ApiProperty({ type: Number })
+	unmatchedStockRows: number
+
+	@ApiProperty({ type: Number })
+	productLinks: number
+
+	@ApiProperty({ type: Number })
+	variantLinks: number
+
+	@ApiProperty({ type: Number })
+	ignoredVariantLinks: number
+
+	@ApiProperty({ type: Number })
+	appliedProductLinks: number
+
+	@ApiProperty({ type: Number })
+	appliedVariantLinks: number
+
+	@ApiProperty({ type: AdminMoySkladStockSkippedReasonsDto })
+	skippedReasons: AdminMoySkladStockSkippedReasonsDto
+}
+
+export class AdminMoySkladSkippedReasonCountDto {
+	@ApiProperty({ type: String })
+	reason: string
+
+	@ApiProperty({ type: Number })
+	count: number
+}
+
+export class AdminMoySkladStockLinkCountersDto {
+	@ApiProperty({ type: Number })
+	productLinks: number
+
+	@ApiProperty({ type: Number })
+	variantLinks: number
+
+	@ApiProperty({ type: Number })
+	productLinksWithStockSync: number
+
+	@ApiProperty({ type: Number })
+	variantLinksWithStockSync: number
+
+	@ApiProperty({ type: Number })
+	productLinksMissing: number
+
+	@ApiProperty({ type: Number })
+	variantLinksMissing: number
+
+	@ApiProperty({ type: Number })
+	productLinksWithErrors: number
+
+	@ApiProperty({ type: Number })
+	variantLinksWithErrors: number
+
+	@ApiProperty({ type: [AdminMoySkladSkippedReasonCountDto] })
+	productSkippedReasons: AdminMoySkladSkippedReasonCountDto[]
+
+	@ApiProperty({ type: [AdminMoySkladSkippedReasonCountDto] })
+	variantSkippedReasons: AdminMoySkladSkippedReasonCountDto[]
+}
+
+export class AdminMoySkladStockLatestRunDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ enum: IntegrationSyncRunTrigger })
+	trigger: IntegrationSyncRunTrigger
+
+	@ApiProperty({ enum: IntegrationSyncRunStatus })
+	status: IntegrationSyncRunStatus
+
+	@ApiProperty({ enum: IntegrationSyncSnapshotCompleteness })
+	snapshotCompleteness: IntegrationSyncSnapshotCompleteness
+
+	@ApiProperty({ type: Number })
+	totalRows: number
+
+	@ApiProperty({ type: Number })
+	appliedRows: number
+
+	@ApiProperty({ type: Number })
+	skippedRows: number
+
+	@ApiProperty({ type: AdminMoySkladStockDiagnosticsDto, nullable: true })
+	diagnostics: AdminMoySkladStockDiagnosticsDto | null
+
+	@ApiProperty({ type: String, nullable: true })
+	error: string | null
+
+	@ApiProperty({ type: String, format: 'date-time' })
+	requestedAt: Date
+
+	@ApiProperty({ type: String, format: 'date-time', nullable: true })
+	startedAt: Date | null
+
+	@ApiProperty({ type: String, format: 'date-time', nullable: true })
+	finishedAt: Date | null
+}
+
+export class AdminMoySkladStockDiagnosticsReportDto {
+	@ApiProperty({ type: String })
+	catalogId: string
+
+	@ApiProperty({ type: String, nullable: true })
+	integrationId: string | null
+
+	@ApiProperty({ type: Boolean })
+	hasIntegration: boolean
+
+	@ApiProperty({ type: Boolean })
+	integrationActive: boolean
+
+	@ApiProperty({ type: Boolean })
+	syncStockEnabled: boolean
+
+	@ApiProperty({ type: Boolean })
+	stockFieldOwnedByMoySklad: boolean
+
+	@ApiProperty({ type: Boolean })
+	stockWebhookEnabled: boolean
+
+	@ApiProperty({ type: Boolean })
+	stockWebhookRegistered: boolean
+
+	@ApiProperty({ type: String, format: 'date-time', nullable: true })
+	lastStockSyncedAt: string | null
+
+	@ApiProperty({ type: AdminMoySkladStockLinkCountersDto })
+	links: AdminMoySkladStockLinkCountersDto
+
+	@ApiProperty({ type: AdminMoySkladStockLatestRunDto, nullable: true })
+	latestRun: AdminMoySkladStockLatestRunDto | null
 }
 
 export class AdminTypeListItemDto {

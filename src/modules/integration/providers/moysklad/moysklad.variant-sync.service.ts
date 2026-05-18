@@ -1,8 +1,20 @@
 import type { Prisma } from '@generated/client'
 import { ProductStatus, ProductVariantStatus } from '@generated/enums'
-import { BadGatewayException, Injectable, Logger } from '@nestjs/common'
+import {
+	BadGatewayException,
+	Inject,
+	Injectable,
+	Logger,
+	Optional
+} from '@nestjs/common'
 import { createHash } from 'crypto'
 import slugify from 'slugify'
+
+import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
+import {
+	DOMAIN_EVENT_DISPATCHER,
+	type DomainEventDispatcher
+} from '@/shared/domain-events/domain-events.contract'
 
 import { IntegrationRepository } from '../../integration.repository'
 
@@ -66,6 +78,12 @@ type VariantUpsertResult = {
 	}
 	created: boolean
 	updated: boolean
+	priceChanged: boolean
+	previousPrice: number | null
+	nextPrice: number | null
+	stockChanged: boolean
+	previousStock: number | null
+	nextStock: number | null
 }
 
 type ProductTypeSyncResult = {
@@ -79,6 +97,12 @@ type DefaultVariantResult = {
 	variantId: string | null
 	created: boolean
 	updated: boolean
+	priceChanged: boolean
+	previousPrice: number | null
+	nextPrice: number | null
+	stockChanged: boolean
+	previousStock: number | null
+	nextStock: number | null
 }
 
 @Injectable()
@@ -87,7 +111,10 @@ export class MoySkladVariantSyncService {
 
 	constructor(
 		private readonly repo: IntegrationRepository,
-		private readonly variantAttributes: MoySkladVariantAttributeResolverService
+		private readonly variantAttributes: MoySkladVariantAttributeResolverService,
+		@Optional()
+		@Inject(DOMAIN_EVENT_DISPATCHER)
+		private readonly events?: DomainEventDispatcher
 	) {}
 
 	createEmptyStats(): MoySkladProductVariantSyncStats {
@@ -172,6 +199,8 @@ export class MoySkladVariantSyncService {
 		variants: MoySkladVariant[]
 		priceTypeName: string
 		syncStock: boolean
+		syncPrice: boolean
+		syncContent: boolean
 		parentProductId: string
 		progress?: VariantSyncProgressReporter
 		baseProcessed?: number
@@ -213,6 +242,8 @@ export class MoySkladVariantSyncService {
 					product: variant,
 					priceTypeName: params.priceTypeName,
 					syncStock: params.syncStock,
+					syncPrice: params.syncPrice,
+					syncContent: params.syncContent,
 					parentProductId: params.parentProductId,
 					parentProduct
 				})
@@ -263,6 +294,8 @@ export class MoySkladVariantSyncService {
 		product: MoySkladProduct
 		priceTypeName: string
 		syncStock: boolean
+		syncPrice: boolean
+		syncContent: boolean
 		parentProductId: string
 		parentProduct?: unknown
 		tx?: Prisma.TransactionClient
@@ -298,14 +331,25 @@ export class MoySkladVariantSyncService {
 		const sku = buildVariantSku(params.product, externalId)
 		const parentPrice = readNumberField(params.parentProduct, 'price')
 		const resolvedPrice = resolvePrice(params.product, params.priceTypeName)
-		const price = resolvedPrice > 0 ? resolvedPrice : parentPrice
+		const price = params.syncPrice
+			? resolvedPrice > 0
+				? resolvedPrice
+				: parentPrice
+			: null
 		const status = resolveVariantStatus(params.product, stock, params.syncStock)
-		const productTypeSync = await this.ensureVariantProductType({
-			catalogId: params.catalogId,
-			productId: params.parentProductId,
-			attributes: resolvedAttributes,
-			tx: params.tx
-		})
+		const productTypeSync = params.syncContent
+			? await this.ensureVariantProductType({
+					catalogId: params.catalogId,
+					productId: params.parentProductId,
+					attributes: resolvedAttributes,
+					tx: params.tx
+				})
+			: {
+					productTypeId: null,
+					created: false,
+					assigned: false,
+					changed: false
+				}
 		if (productTypeSync.created) {
 			this.logger.log(
 				`Created MoySklad product type for variants: catalog=${params.catalogId}, productId=${params.parentProductId}, productTypeId=${productTypeSync.productTypeId}`
@@ -328,6 +372,8 @@ export class MoySkladVariantSyncService {
 			sku,
 			variantKey,
 			price,
+			syncPrice: params.syncPrice,
+			syncContent: params.syncContent,
 			stock,
 			status,
 			attributes: resolvedAttributes.map(attribute => ({
@@ -348,6 +394,23 @@ export class MoySkladVariantSyncService {
 			)
 		}
 
+		if (!params.tx) {
+			await this.publishVariantFieldEvents({
+				catalogId: params.catalogId,
+				integrationId: params.integration.id,
+				productId: params.parentProductId,
+				variantId: result.variant.id,
+				externalId,
+				priceChanged: result.priceChanged,
+				previousPrice: result.previousPrice,
+				nextPrice: result.nextPrice,
+				stockChanged: result.stockChanged,
+				previousStock: result.previousStock,
+				nextStock: result.nextStock,
+				reason: 'moysklad_variant_sync'
+			})
+		}
+
 		return {
 			variantId: result.variant.id,
 			externalId,
@@ -363,6 +426,7 @@ export class MoySkladVariantSyncService {
 		productId: string
 		priceTypeName: string
 		syncStock: boolean
+		syncPrice: boolean
 	}): Promise<boolean> {
 		const product = await this.findLocalProduct(
 			params.catalogId,
@@ -377,7 +441,9 @@ export class MoySkladVariantSyncService {
 			Number.isFinite(params.product.stock)
 				? params.product.stock
 				: undefined
-		const price = resolvePrice(params.product, params.priceTypeName)
+		const price = params.syncPrice
+			? resolvePrice(params.product, params.priceTypeName)
+			: null
 
 		return this.ensureDefaultVariantForSyncedProduct({
 			integration: params.integration,
@@ -387,7 +453,8 @@ export class MoySkladVariantSyncService {
 			price,
 			stock,
 			productStatus: product.status,
-			syncStock: params.syncStock
+			syncStock: params.syncStock,
+			syncPrice: params.syncPrice
 		})
 	}
 
@@ -396,10 +463,11 @@ export class MoySkladVariantSyncService {
 		product: MoySkladProduct
 		productId: string
 		sku: string
-		price: number
+		price: number | null
 		stock?: number
 		productStatus: ProductStatus
 		syncStock: boolean
+		syncPrice: boolean
 		tx?: Prisma.TransactionClient
 	}): Promise<boolean> {
 		const rawResult: unknown = await this.repo.ensureDefaultVariantForProduct(
@@ -408,6 +476,7 @@ export class MoySkladVariantSyncService {
 				productId: params.productId,
 				sku: params.sku,
 				price: params.price,
+				syncPrice: params.syncPrice,
 				stock: params.stock ?? 0,
 				status: resolveDefaultVariantStatus(
 					params.product,
@@ -424,6 +493,23 @@ export class MoySkladVariantSyncService {
 			this.logger.log(
 				`Created default product variant from MoySklad product: catalog=${params.integration.catalogId}, productId=${params.productId}, variantId=${result.variantId ?? '<unknown>'}`
 			)
+		}
+
+		if (!params.tx && result.variantId) {
+			await this.publishVariantFieldEvents({
+				catalogId: params.integration.catalogId,
+				integrationId: params.integration.id,
+				productId: params.productId,
+				variantId: result.variantId,
+				externalId: resolveSyncItemExternalId(params.product),
+				priceChanged: result.priceChanged,
+				previousPrice: result.previousPrice,
+				nextPrice: result.nextPrice,
+				stockChanged: result.stockChanged,
+				previousStock: result.previousStock,
+				nextStock: result.nextStock,
+				reason: 'moysklad_default_variant_sync'
+			})
 		}
 
 		return result.created || result.updated
@@ -477,6 +563,68 @@ export class MoySkladVariantSyncService {
 			throw new Error('MoySklad variant upsert did not return a variant')
 		}
 		return result
+	}
+
+	private async publishVariantFieldEvents(params: {
+		catalogId: string
+		integrationId: string
+		productId: string
+		variantId: string
+		externalId: string | null
+		priceChanged: boolean
+		previousPrice: number | null
+		nextPrice: number | null
+		stockChanged: boolean
+		previousStock: number | null
+		nextStock: number | null
+		reason: string
+	}): Promise<void> {
+		if (!this.events) return
+
+		const events = []
+		if (
+			params.priceChanged &&
+			hasNumericFieldChanged(params.previousPrice, params.nextPrice)
+		) {
+			events.push(
+				createDomainEvent({
+					type: 'variant.price_changed',
+					catalogId: params.catalogId,
+					productId: params.productId,
+					variantId: params.variantId,
+					previousPrice: params.previousPrice,
+					nextPrice: params.nextPrice,
+					source: 'integration',
+					reason: params.reason,
+					integrationId: params.integrationId,
+					externalId: params.externalId
+				})
+			)
+		}
+
+		if (
+			params.stockChanged &&
+			hasNumericFieldChanged(params.previousStock, params.nextStock)
+		) {
+			events.push(
+				createDomainEvent({
+					type: 'variant.stock_changed',
+					catalogId: params.catalogId,
+					productId: params.productId,
+					variantId: params.variantId,
+					previousStock: params.previousStock,
+					nextStock: params.nextStock,
+					source: 'integration',
+					reason: params.reason,
+					integrationId: params.integrationId,
+					externalId: params.externalId
+				})
+			)
+		}
+
+		if (events.length) {
+			await this.events.dispatchMany(events)
+		}
 	}
 }
 
@@ -539,7 +687,13 @@ function normalizeVariantUpsertResult(
 	return {
 		variant,
 		created: value.created === true,
-		updated: value.updated === true
+		updated: value.updated === true,
+		priceChanged: value.priceChanged === true,
+		previousPrice: readNullableNumberField(value, 'previousPrice'),
+		nextPrice: readNullableNumberField(value, 'nextPrice'),
+		stockChanged: value.stockChanged === true,
+		previousStock: readNullableNumberField(value, 'previousStock'),
+		nextStock: readNullableNumberField(value, 'nextStock')
 	}
 }
 
@@ -569,7 +723,13 @@ function normalizeDefaultVariantResult(value: unknown): DefaultVariantResult {
 		return {
 			variantId: null,
 			created: false,
-			updated: false
+			updated: false,
+			priceChanged: false,
+			previousPrice: null,
+			nextPrice: null,
+			stockChanged: false,
+			previousStock: null,
+			nextStock: null
 		}
 	}
 
@@ -578,7 +738,13 @@ function normalizeDefaultVariantResult(value: unknown): DefaultVariantResult {
 			? readMoySkladNullableString(value.variant.id)
 			: null,
 		created: value.created === true,
-		updated: value.updated === true
+		updated: value.updated === true,
+		priceChanged: value.priceChanged === true,
+		previousPrice: readNullableNumberField(value, 'previousPrice'),
+		nextPrice: readNullableNumberField(value, 'nextPrice'),
+		stockChanged: value.stockChanged === true,
+		previousStock: readNullableNumberField(value, 'previousStock'),
+		nextStock: readNullableNumberField(value, 'nextStock')
 	}
 }
 
@@ -819,6 +985,24 @@ function readNumberField(value: unknown, key: string): number {
 
 	const numeric = Number(value[key] ?? 0)
 	return Number.isFinite(numeric) ? numeric : 0
+}
+
+function readNullableNumberField(value: unknown, key: string): number | null {
+	if (!isRecord(value)) {
+		return null
+	}
+
+	const raw = value[key]
+	if (raw === null || raw === undefined) return null
+	const numeric = Number(raw)
+	return Number.isFinite(numeric) ? numeric : null
+}
+
+function hasNumericFieldChanged(
+	previous: number | null,
+	next: number | null
+): boolean {
+	return previous !== next
 }
 
 function readMoySkladString(value: unknown): string {

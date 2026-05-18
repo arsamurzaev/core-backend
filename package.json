@@ -26,10 +26,13 @@
 		"db:audit-default-variants": "bun run scripts/audit-default-product-variants.ts",
 		"db:nullify-zero-prices": "bun run scripts/nullify-zero-product-prices.ts",
 		"openapi:export": "bun run scripts/export-openapi.ts",
+		"prod:check": "bun run scripts/prod-quality-gate.ts",
 		"admin:create": "bun run scripts/create-admin.ts",
 		"legacy:migrate": "tsc -p migration/tsconfig.json && node migration/dist/migration/scripts/migrate-legacy.js",
 		"legacy:migrate:all": "tsc -p migration/tsconfig.json && node migration/dist/migration/scripts/migrate-legacy.js --phase=all --apply",
-		"legacy:backfill-media-maps": "tsc -p migration/tsconfig.json && node migration/dist/migration/scripts/backfill-media-maps.js"
+		"legacy:backfill-media-maps": "tsc -p migration/tsconfig.json && node migration/dist/migration/scripts/backfill-media-maps.js",
+		"legacy:backfill-product-descriptions": "tsc -p migration/tsconfig.json && node migration/dist/migration/scripts/backfill-product-descriptions.js",
+		"legacy:rebuild-product-seo": "tsc -p migration/tsconfig.json && node migration/dist/migration/scripts/rebuild-product-seo.js"
 	},
 	"prisma": {
 		"seed": "node --loader ts-node/esm prisma/seed.ts"
@@ -106,9 +109,10 @@
 	},
 	"jest": {
 		"moduleFileExtensions": [
+			"ts",
 			"js",
 			"json",
-			"ts"
+			"node"
 		],
 		"rootDir": "src",
 		"testRegex": ".*\\.spec\\.ts$",

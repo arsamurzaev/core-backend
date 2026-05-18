@@ -104,7 +104,20 @@ export async function collectCatalogDiagnostics(
 		seoMissingProducts,
 		seoMissingCategories,
 		productPositionGaps,
-		categoryPositionGaps
+		categoryPositionGaps,
+		simpleProductsWithoutDefaultVariant,
+		productsWithMultipleDefaultVariants,
+		matrixProductsWithoutActiveVariants,
+		defaultVariantPriceMismatches,
+		internalCartItemsWithoutVariant,
+		internalOrderItemsWithoutVariant,
+		orphanIntegrationProductLinks,
+		orphanIntegrationVariantLinks,
+		integrationVariantLinksToDisabledVariants,
+		integrationProductLinksMissingFromSnapshot,
+		integrationVariantLinksMissingFromSnapshot,
+		integratedSimpleProductsWithoutDefaultVariant,
+		integratedProductsWithVariantLinksButNoCustomVariants
 	] = await Promise.all([
 		(ctx.prisma as any).product.count({
 			where: { catalogId, deleteAt: null }
@@ -143,7 +156,20 @@ export async function collectCatalogDiagnostics(
 		countProductsWithoutSeo(ctx, catalogId),
 		countCategoriesWithoutSeo(ctx, catalogId),
 		countProductPositionGaps(ctx, catalogId),
-		countCategoryPositionGaps(ctx, catalogId)
+		countCategoryPositionGaps(ctx, catalogId),
+		countSimpleProductsWithoutDefaultVariant(ctx, catalogId),
+		countProductsWithMultipleDefaultVariants(ctx, catalogId),
+		countMatrixProductsWithoutActiveVariants(ctx, catalogId),
+		countDefaultVariantPriceMismatches(ctx, catalogId),
+		countInternalCartItemsWithoutVariant(ctx, catalogId),
+		countInternalOrderItemsWithoutVariant(ctx, catalogId),
+		countOrphanIntegrationProductLinks(ctx, catalogId),
+		countOrphanIntegrationVariantLinks(ctx, catalogId),
+		countIntegrationVariantLinksToDisabledVariants(ctx, catalogId),
+		countIntegrationProductLinksMissingFromSnapshot(ctx, catalogId),
+		countIntegrationVariantLinksMissingFromSnapshot(ctx, catalogId),
+		countIntegratedSimpleProductsWithoutDefaultVariant(ctx, catalogId),
+		countIntegratedProductsWithVariantLinksButNoCustomVariants(ctx, catalogId)
 	])
 
 	return [
@@ -164,7 +190,50 @@ export async function collectCatalogDiagnostics(
 		warn('products without SEO', seoMissingProducts),
 		warn('categories without SEO', seoMissingCategories),
 		warn('category-product position gaps', productPositionGaps),
-		warn('category position gaps', categoryPositionGaps)
+		warn('category position gaps', categoryPositionGaps),
+		warn(
+			'simple products without default variant',
+			simpleProductsWithoutDefaultVariant
+		),
+		fail(
+			'products with multiple default variants',
+			productsWithMultipleDefaultVariants
+		),
+		warn(
+			'matrix products without active matrix variants',
+			matrixProductsWithoutActiveVariants
+		),
+		warn('product/default variant price mismatch', defaultVariantPriceMismatches),
+		fail(
+			'internal inventory cart items without variant',
+			internalCartItemsWithoutVariant
+		),
+		fail(
+			'internal inventory order items without variant',
+			internalOrderItemsWithoutVariant
+		),
+		fail('orphan integration product links', orphanIntegrationProductLinks),
+		fail('orphan integration variant links', orphanIntegrationVariantLinks),
+		warn(
+			'integration variant links to disabled variants',
+			integrationVariantLinksToDisabledVariants
+		),
+		warn(
+			'integration product links missing from latest snapshots',
+			integrationProductLinksMissingFromSnapshot
+		),
+		warn(
+			'integration variant links missing from latest snapshots',
+			integrationVariantLinksMissingFromSnapshot
+		),
+		warn(
+			'integrated simple products without default variant',
+			integratedSimpleProductsWithoutDefaultVariant
+		),
+		warn(
+			'integrated products with variant links but no custom variants',
+			integratedProductsWithVariantLinksButNoCustomVariants
+		)
 	] satisfies CatalogDiagnosticRow[]
 }
 
@@ -266,6 +335,302 @@ async function countCategoryPositionGaps(ctx: AppContext, catalogId: string) {
 			where catalog_id = '${catalogId}'::uuid and delete_at is null
 		)
 		select count(*)::int as count from ranked where position <> expected
+	`)
+	return rows[0]?.count ?? 0
+}
+
+async function countSimpleProductsWithoutDefaultVariant(
+	ctx: AppContext,
+	catalogId: string
+) {
+	const rows = await ctx.prisma.$queryRawUnsafe<{ count: number }[]>(`
+		select count(*)::int as count
+		from products p
+		where p.catalog_id = '${catalogId}'::uuid
+			and p.delete_at is null
+			and not exists (
+				select 1
+				from product_variants custom_variant
+				where custom_variant.product_id = p.id
+					and custom_variant.delete_at is null
+					and not (custom_variant.kind::text = 'DEFAULT' or custom_variant.variant_key = 'default')
+			)
+			and not exists (
+				select 1
+				from product_variants default_variant
+				where default_variant.product_id = p.id
+					and default_variant.delete_at is null
+					and (default_variant.kind::text = 'DEFAULT' or default_variant.variant_key = 'default')
+			)
+	`)
+	return rows[0]?.count ?? 0
+}
+
+async function countProductsWithMultipleDefaultVariants(
+	ctx: AppContext,
+	catalogId: string
+) {
+	const rows = await ctx.prisma.$queryRawUnsafe<{ count: number }[]>(`
+		with grouped as (
+			select p.id
+			from products p
+			join product_variants v on v.product_id = p.id
+			where p.catalog_id = '${catalogId}'::uuid
+				and p.delete_at is null
+				and v.delete_at is null
+				and (v.kind::text = 'DEFAULT' or v.variant_key = 'default')
+			group by p.id
+			having count(*) > 1
+		)
+		select count(*)::int as count from grouped
+	`)
+	return rows[0]?.count ?? 0
+}
+
+async function countMatrixProductsWithoutActiveVariants(
+	ctx: AppContext,
+	catalogId: string
+) {
+	const rows = await ctx.prisma.$queryRawUnsafe<{ count: number }[]>(`
+		select count(*)::int as count
+		from products p
+		where p.catalog_id = '${catalogId}'::uuid
+			and p.delete_at is null
+			and exists (
+				select 1
+				from product_variants custom_variant
+				where custom_variant.product_id = p.id
+					and custom_variant.delete_at is null
+					and not (custom_variant.kind::text = 'DEFAULT' or custom_variant.variant_key = 'default')
+			)
+			and not exists (
+				select 1
+				from product_variants active_variant
+				where active_variant.product_id = p.id
+					and active_variant.delete_at is null
+					and not (active_variant.kind::text = 'DEFAULT' or active_variant.variant_key = 'default')
+					and active_variant.status::text = 'ACTIVE'
+					and active_variant.is_available = true
+			)
+	`)
+	return rows[0]?.count ?? 0
+}
+
+async function countDefaultVariantPriceMismatches(
+	ctx: AppContext,
+	catalogId: string
+) {
+	const rows = await ctx.prisma.$queryRawUnsafe<{ count: number }[]>(`
+		select count(*)::int as count
+		from products p
+		join product_variants v on v.product_id = p.id
+		where p.catalog_id = '${catalogId}'::uuid
+			and p.delete_at is null
+			and v.delete_at is null
+			and (v.kind::text = 'DEFAULT' or v.variant_key = 'default')
+			and p.price is distinct from v.price
+	`)
+	return rows[0]?.count ?? 0
+}
+
+async function countInternalCartItemsWithoutVariant(
+	ctx: AppContext,
+	catalogId: string
+) {
+	const rows = await ctx.prisma.$queryRawUnsafe<{ count: number }[]>(`
+		select count(*)::int as count
+		from cart_items item
+		join carts cart on cart.id = item.cart_id
+		join catalog_settings settings on settings.catalog_id = cart.catalog_id
+		where cart.catalog_id = '${catalogId}'::uuid
+			and cart.delete_at is null
+			and item.delete_at is null
+			and settings.inventory_mode::text = 'INTERNAL'
+			and cart.status::text not in ('CONVERTED', 'CANCELLED', 'EXPIRED')
+			and item.variant_id is null
+	`)
+	return rows[0]?.count ?? 0
+}
+
+async function countInternalOrderItemsWithoutVariant(
+	ctx: AppContext,
+	catalogId: string
+) {
+	const rows = await ctx.prisma.$queryRawUnsafe<{ count: number }[]>(`
+		select count(*)::int as count
+		from orders o
+		join catalog_settings settings on settings.catalog_id = o.catalog_id
+		cross join lateral jsonb_array_elements(o.products::jsonb) as item(value)
+		where o.catalog_id = '${catalogId}'::uuid
+			and o.delete_at is null
+			and settings.inventory_mode::text = 'INTERNAL'
+			and nullif(item.value ->> 'variantId', '') is null
+	`)
+	return rows[0]?.count ?? 0
+}
+
+async function countOrphanIntegrationProductLinks(
+	ctx: AppContext,
+	catalogId: string
+) {
+	const rows = await ctx.prisma.$queryRawUnsafe<{ count: number }[]>(`
+		select count(*)::int as count
+		from integration_product_links link
+		join integrations integration on integration.id = link.integration_id
+		left join products product
+			on product.id = link.product_id
+			and product.catalog_id = integration.catalog_id
+			and product.delete_at is null
+		where integration.catalog_id = '${catalogId}'::uuid
+			and integration.delete_at is null
+			and product.id is null
+	`)
+	return rows[0]?.count ?? 0
+}
+
+async function countOrphanIntegrationVariantLinks(
+	ctx: AppContext,
+	catalogId: string
+) {
+	const rows = await ctx.prisma.$queryRawUnsafe<{ count: number }[]>(`
+		select count(*)::int as count
+		from integration_variant_links link
+		join integrations integration on integration.id = link.integration_id
+		left join product_variants variant
+			on variant.id = link.variant_id
+			and variant.delete_at is null
+		left join products product
+			on product.id = variant.product_id
+			and product.catalog_id = integration.catalog_id
+			and product.delete_at is null
+		where integration.catalog_id = '${catalogId}'::uuid
+			and integration.delete_at is null
+			and product.id is null
+	`)
+	return rows[0]?.count ?? 0
+}
+
+async function countIntegrationVariantLinksToDisabledVariants(
+	ctx: AppContext,
+	catalogId: string
+) {
+	const rows = await ctx.prisma.$queryRawUnsafe<{ count: number }[]>(`
+		select count(*)::int as count
+		from integration_variant_links link
+		join integrations integration on integration.id = link.integration_id
+		join product_variants variant on variant.id = link.variant_id
+		join products product on product.id = variant.product_id
+		where integration.catalog_id = '${catalogId}'::uuid
+			and integration.delete_at is null
+			and product.catalog_id = integration.catalog_id
+			and product.delete_at is null
+			and variant.delete_at is null
+			and variant.status::text = 'DISABLED'
+	`)
+	return rows[0]?.count ?? 0
+}
+
+async function countIntegrationProductLinksMissingFromSnapshot(
+	ctx: AppContext,
+	catalogId: string
+) {
+	const rows = await ctx.prisma.$queryRawUnsafe<{ count: number }[]>(`
+		select count(*)::int as count
+		from integration_product_links link
+		join integrations integration on integration.id = link.integration_id
+		join products product
+			on product.id = link.product_id
+			and product.catalog_id = integration.catalog_id
+			and product.delete_at is null
+		where integration.catalog_id = '${catalogId}'::uuid
+			and integration.delete_at is null
+			and link.missing_since is not null
+	`)
+	return rows[0]?.count ?? 0
+}
+
+async function countIntegrationVariantLinksMissingFromSnapshot(
+	ctx: AppContext,
+	catalogId: string
+) {
+	const rows = await ctx.prisma.$queryRawUnsafe<{ count: number }[]>(`
+		select count(*)::int as count
+		from integration_variant_links link
+		join integrations integration on integration.id = link.integration_id
+		join product_variants variant
+			on variant.id = link.variant_id
+		join products product
+			on product.id = variant.product_id
+			and product.catalog_id = integration.catalog_id
+		where integration.catalog_id = '${catalogId}'::uuid
+			and integration.delete_at is null
+			and product.delete_at is null
+			and link.missing_since is not null
+	`)
+	return rows[0]?.count ?? 0
+}
+
+async function countIntegratedSimpleProductsWithoutDefaultVariant(
+	ctx: AppContext,
+	catalogId: string
+) {
+	const rows = await ctx.prisma.$queryRawUnsafe<{ count: number }[]>(`
+		select count(*)::int as count
+		from integration_product_links link
+		join integrations integration on integration.id = link.integration_id
+		join products product
+			on product.id = link.product_id
+			and product.catalog_id = integration.catalog_id
+			and product.delete_at is null
+		where integration.catalog_id = '${catalogId}'::uuid
+			and integration.delete_at is null
+			and not exists (
+				select 1
+				from product_variants custom_variant
+				where custom_variant.product_id = product.id
+					and custom_variant.delete_at is null
+					and not (custom_variant.kind::text = 'DEFAULT' or custom_variant.variant_key = 'default')
+			)
+			and not exists (
+				select 1
+				from product_variants default_variant
+				where default_variant.product_id = product.id
+					and default_variant.delete_at is null
+					and (default_variant.kind::text = 'DEFAULT' or default_variant.variant_key = 'default')
+			)
+	`)
+	return rows[0]?.count ?? 0
+}
+
+async function countIntegratedProductsWithVariantLinksButNoCustomVariants(
+	ctx: AppContext,
+	catalogId: string
+) {
+	const rows = await ctx.prisma.$queryRawUnsafe<{ count: number }[]>(`
+		select count(distinct product.id)::int as count
+		from integration_product_links product_link
+		join integrations integration on integration.id = product_link.integration_id
+		join products product
+			on product.id = product_link.product_id
+			and product.catalog_id = integration.catalog_id
+			and product.delete_at is null
+		where integration.catalog_id = '${catalogId}'::uuid
+			and integration.delete_at is null
+			and exists (
+				select 1
+				from integration_variant_links variant_link
+				join product_variants linked_variant
+					on linked_variant.id = variant_link.variant_id
+				where variant_link.integration_id = product_link.integration_id
+					and linked_variant.product_id = product.id
+			)
+			and not exists (
+				select 1
+				from product_variants custom_variant
+				where custom_variant.product_id = product.id
+					and custom_variant.delete_at is null
+					and not (custom_variant.kind::text = 'DEFAULT' or custom_variant.variant_key = 'default')
+			)
 	`)
 	return rows[0]?.count ?? 0
 }

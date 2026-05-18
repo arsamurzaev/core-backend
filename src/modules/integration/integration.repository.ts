@@ -6,13 +6,15 @@ import {
 	IntegrationSyncRunMode,
 	IntegrationSyncRunStatus,
 	IntegrationSyncRunTrigger,
+	IntegrationSyncSnapshotCompleteness,
 	IntegrationSyncStatus,
 	IntegrationWebhookEventStatus,
 	ProductStatus,
+	ProductVariantKind,
 	ProductVariantStatus
 } from '@generated/enums'
 import type { IntegrationOrderExportStatus } from '@generated/enums'
-import { Injectable } from '@nestjs/common'
+import { BadRequestException, Injectable } from '@nestjs/common'
 import { createHash } from 'node:crypto'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
@@ -27,7 +29,8 @@ const ORDER_EXPORT_STATUS_SKIPPED: IntegrationOrderExportStatus = 'SKIPPED'
 const WEBHOOK_EVENT_STATUS_PENDING: IntegrationWebhookEventStatus = 'PENDING'
 const WEBHOOK_EVENT_STATUS_PROCESSING: IntegrationWebhookEventStatus =
 	'PROCESSING'
-const WEBHOOK_EVENT_STATUS_PROCESSED: IntegrationWebhookEventStatus = 'PROCESSED'
+const WEBHOOK_EVENT_STATUS_PROCESSED: IntegrationWebhookEventStatus =
+	'PROCESSED'
 const WEBHOOK_EVENT_STATUS_FAILED: IntegrationWebhookEventStatus = 'FAILED'
 const WEBHOOK_EVENT_STATUS_SKIPPED: IntegrationWebhookEventStatus = 'SKIPPED'
 const DEFAULT_VARIANT_KEY = 'default'
@@ -38,6 +41,56 @@ const MOYSKLAD_PRODUCT_TYPE_CODE_PREFIX = 'moysklad-'
 const PRODUCT_TYPE_SCOPE_CATALOG = 'CATALOG'
 const PRODUCT_TYPE_CODE_MAX_LENGTH = 100
 const PRODUCT_TYPE_NAME_MAX_LENGTH = 255
+const MISSING_LINK_REASON = 'missing_from_complete_snapshot'
+const HIDDEN_AFTER_MISSING_REASON = 'hidden_after_missing_confirmations'
+
+function priceChanged(current: unknown, next: number | null): boolean {
+	if (next === null) return current !== null
+
+	const currentNumber = Number(current ?? 0)
+	return !Number.isFinite(currentNumber) || currentNumber !== next
+}
+
+function normalizeNullableNumber(value: unknown): number | null {
+	if (value === null || value === undefined) return null
+	const numberValue = Number(value)
+	return Number.isFinite(numberValue) ? numberValue : null
+}
+
+function emptyVariantStockUpdateResult(): IntegrationVariantStockUpdateResult {
+	return {
+		changed: false,
+		productId: null,
+		variantId: null,
+		previousStock: null,
+		nextStock: null
+	}
+}
+
+function emptyVariantFieldChanges(): IntegrationVariantFieldChanges {
+	return {
+		priceChanged: false,
+		previousPrice: null,
+		nextPrice: null,
+		stockChanged: false,
+		previousStock: null,
+		nextStock: null
+	}
+}
+
+function inferInitialSnapshotCompleteness(
+	mode: IntegrationSyncRunMode,
+	trigger: IntegrationSyncRunTrigger
+): IntegrationSyncSnapshotCompleteness {
+	if (
+		mode === IntegrationSyncRunMode.STOCK &&
+		trigger === IntegrationSyncRunTrigger.WEBHOOK
+	) {
+		return IntegrationSyncSnapshotCompleteness.WEBHOOK_DELTA
+	}
+
+	return IntegrationSyncSnapshotCompleteness.PARTIAL
+}
 
 const integrationSelect = {
 	id: true,
@@ -66,6 +119,13 @@ const productLinkSelect = {
 	externalCode: true,
 	externalUpdatedAt: true,
 	lastSyncedAt: true,
+	lastSeenAt: true,
+	lastPriceSyncAt: true,
+	lastStockSyncAt: true,
+	missingSince: true,
+	missingSyncCount: true,
+	skippedReason: true,
+	lastExternalError: true,
 	rawMeta: true,
 	createdAt: true,
 	updatedAt: true
@@ -79,6 +139,13 @@ const variantLinkSelect = {
 	externalCode: true,
 	externalUpdatedAt: true,
 	lastSyncedAt: true,
+	lastSeenAt: true,
+	lastPriceSyncAt: true,
+	lastStockSyncAt: true,
+	missingSince: true,
+	missingSyncCount: true,
+	skippedReason: true,
+	lastExternalError: true,
 	rawMeta: true,
 	createdAt: true,
 	updatedAt: true
@@ -101,6 +168,7 @@ const productVariantSyncSelect = {
 	productId: true,
 	sku: true,
 	variantKey: true,
+	kind: true,
 	stock: true,
 	price: true,
 	status: true,
@@ -143,6 +211,7 @@ function buildMappingPreviewAttributeSelect(catalogId: string) {
 	}
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const mappingPreviewAttributeSelect =
 	buildMappingPreviewAttributeSelect('__catalog__')
 
@@ -185,6 +254,7 @@ const syncRunSelect = {
 	mode: true,
 	trigger: true,
 	status: true,
+	snapshotCompleteness: true,
 	jobId: true,
 	productId: true,
 	externalId: true,
@@ -341,6 +411,30 @@ export type ProductSyncRecord = Prisma.ProductGetPayload<{
 export type ProductVariantSyncRecord = Prisma.ProductVariantGetPayload<{
 	select: typeof productVariantSyncSelect
 }>
+
+export type IntegrationVariantFieldChanges = {
+	priceChanged: boolean
+	previousPrice: number | null
+	nextPrice: number | null
+	stockChanged: boolean
+	previousStock: number | null
+	nextStock: number | null
+}
+
+export type IntegrationVariantUpsertResult = {
+	variant: ProductVariantSyncRecord
+	link: IntegrationVariantLinkRecord
+	created: boolean
+	updated: boolean
+} & IntegrationVariantFieldChanges
+
+export type IntegrationVariantStockUpdateResult = {
+	changed: boolean
+	productId: string | null
+	variantId: string | null
+	previousStock: number | null
+	nextStock: number | null
+}
 
 export type VariantAttributeDefinitionRecord = Prisma.AttributeGetPayload<{
 	select: typeof variantAttributeDefinitionSelect
@@ -541,6 +635,93 @@ export class IntegrationRepository {
 		return this.findMoySkladById(integrationId)
 	}
 
+	async patchMoySkladProductDeleteWebhookMetadata(
+		integrationId: string,
+		patch: Record<string, Prisma.InputJsonValue | null>
+	): Promise<IntegrationRecord | null> {
+		const existing = await this.prisma.integration.findFirst({
+			where: {
+				id: integrationId,
+				provider: IntegrationProvider.MOYSKLAD,
+				deleteAt: null
+			},
+			select: { id: true, metadata: true }
+		})
+		if (!existing) return null
+
+		const metadata = cloneJsonRecord(existing.metadata)
+		const currentWebhook = cloneJsonRecord(metadata.productDeleteWebhook)
+		metadata.productDeleteWebhook = {
+			...currentWebhook,
+			...patch
+		}
+
+		await this.prisma.integration.update({
+			where: { id: existing.id },
+			data: { metadata: metadata as Prisma.InputJsonValue }
+		})
+
+		return this.findMoySkladById(integrationId)
+	}
+
+	async patchMoySkladProductChangeWebhookMetadata(
+		integrationId: string,
+		patch: Record<string, Prisma.InputJsonValue | null>
+	): Promise<IntegrationRecord | null> {
+		const existing = await this.prisma.integration.findFirst({
+			where: {
+				id: integrationId,
+				provider: IntegrationProvider.MOYSKLAD,
+				deleteAt: null
+			},
+			select: { id: true, metadata: true }
+		})
+		if (!existing) return null
+
+		const metadata = cloneJsonRecord(existing.metadata)
+		const currentWebhook = cloneJsonRecord(metadata.productChangeWebhook)
+		metadata.productChangeWebhook = {
+			...currentWebhook,
+			...patch
+		}
+
+		await this.prisma.integration.update({
+			where: { id: existing.id },
+			data: { metadata: metadata as Prisma.InputJsonValue }
+		})
+
+		return this.findMoySkladById(integrationId)
+	}
+
+	async patchMoySkladProductFolderWebhookMetadata(
+		integrationId: string,
+		patch: Record<string, Prisma.InputJsonValue | null>
+	): Promise<IntegrationRecord | null> {
+		const existing = await this.prisma.integration.findFirst({
+			where: {
+				id: integrationId,
+				provider: IntegrationProvider.MOYSKLAD,
+				deleteAt: null
+			},
+			select: { id: true, metadata: true }
+		})
+		if (!existing) return null
+
+		const metadata = cloneJsonRecord(existing.metadata)
+		const currentWebhook = cloneJsonRecord(metadata.productFolderWebhook)
+		metadata.productFolderWebhook = {
+			...currentWebhook,
+			...patch
+		}
+
+		await this.prisma.integration.update({
+			where: { id: existing.id },
+			data: { metadata: metadata as Prisma.InputJsonValue }
+		})
+
+		return this.findMoySkladById(integrationId)
+	}
+
 	async softDeleteMoySklad(
 		catalogId: string
 	): Promise<IntegrationRecord | null> {
@@ -714,6 +895,7 @@ export class IntegrationRepository {
 		mode: IntegrationSyncRunMode
 		trigger: IntegrationSyncRunTrigger
 		status?: IntegrationSyncRunStatus
+		snapshotCompleteness?: IntegrationSyncSnapshotCompleteness
 		jobId?: string | null
 		productId?: string | null
 		externalId?: string | null
@@ -727,6 +909,9 @@ export class IntegrationRepository {
 				mode: params.mode,
 				trigger: params.trigger,
 				status: params.status ?? IntegrationSyncRunStatus.PENDING,
+				snapshotCompleteness:
+					params.snapshotCompleteness ??
+					inferInitialSnapshotCompleteness(params.mode, params.trigger),
 				jobId: params.jobId ?? null,
 				productId: params.productId ?? null,
 				externalId: params.externalId ?? null,
@@ -799,6 +984,7 @@ export class IntegrationRepository {
 			imagesImported: number
 			durationMs: number
 			finishedAt?: Date
+			snapshotCompleteness?: IntegrationSyncSnapshotCompleteness
 			metadata?: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput
 		}
 	): Promise<IntegrationSyncRunRecord | null> {
@@ -815,6 +1001,9 @@ export class IntegrationRepository {
 				deletedProducts: params.deletedProducts,
 				imagesImported: params.imagesImported,
 				durationMs: params.durationMs,
+				...(params.snapshotCompleteness
+					? { snapshotCompleteness: params.snapshotCompleteness }
+					: {}),
 				...(params.metadata !== undefined ? { metadata: params.metadata } : {}),
 				finishedAt
 			}
@@ -828,13 +1017,15 @@ export class IntegrationRepository {
 		runId: string,
 		error: string,
 		finishedAt: Date = new Date(),
-		metadata?: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput
+		metadata?: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput,
+		snapshotCompleteness: IntegrationSyncSnapshotCompleteness = IntegrationSyncSnapshotCompleteness.FAILED_BEFORE_SNAPSHOT
 	): Promise<IntegrationSyncRunRecord | null> {
 		const safeError = renderSafeProviderErrorMessage(error)
 		const updated = await this.prisma.integrationSyncRun.updateMany({
 			where: { id: runId },
 			data: {
 				status: IntegrationSyncRunStatus.ERROR,
+				snapshotCompleteness,
 				error: safeError,
 				...(metadata !== undefined ? { metadata } : {}),
 				finishedAt
@@ -849,13 +1040,15 @@ export class IntegrationRepository {
 		runId: string,
 		error: string,
 		finishedAt: Date = new Date(),
-		metadata?: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput
+		metadata?: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput,
+		snapshotCompleteness: IntegrationSyncSnapshotCompleteness = IntegrationSyncSnapshotCompleteness.PARTIAL
 	): Promise<IntegrationSyncRunRecord | null> {
 		const safeError = renderSafeProviderErrorMessage(error)
 		const updated = await this.prisma.integrationSyncRun.updateMany({
 			where: { id: runId },
 			data: {
 				status: IntegrationSyncRunStatus.SKIPPED,
+				snapshotCompleteness,
 				error: safeError,
 				...(metadata !== undefined ? { metadata } : {}),
 				finishedAt
@@ -957,10 +1150,7 @@ export class IntegrationRepository {
 			where: {
 				id: eventId,
 				status: {
-					in: [
-						WEBHOOK_EVENT_STATUS_PENDING,
-						WEBHOOK_EVENT_STATUS_PROCESSING
-					]
+					in: [WEBHOOK_EVENT_STATUS_PENDING, WEBHOOK_EVENT_STATUS_PROCESSING]
 				}
 			},
 			data: {
@@ -971,18 +1161,12 @@ export class IntegrationRepository {
 		})
 	}
 
-	async markWebhookEventFailed(
-		eventId: string,
-		error: string
-	): Promise<void> {
+	async markWebhookEventFailed(eventId: string, error: string): Promise<void> {
 		await this.prisma.integrationWebhookEvent.updateMany({
 			where: {
 				id: eventId,
 				status: {
-					in: [
-						WEBHOOK_EVENT_STATUS_PENDING,
-						WEBHOOK_EVENT_STATUS_PROCESSING
-					]
+					in: [WEBHOOK_EVENT_STATUS_PENDING, WEBHOOK_EVENT_STATUS_PROCESSING]
 				}
 			},
 			data: {
@@ -1002,10 +1186,7 @@ export class IntegrationRepository {
 			where: {
 				id: { in: eventIds },
 				status: {
-					in: [
-						WEBHOOK_EVENT_STATUS_PENDING,
-						WEBHOOK_EVENT_STATUS_PROCESSING
-					]
+					in: [WEBHOOK_EVENT_STATUS_PENDING, WEBHOOK_EVENT_STATUS_PROCESSING]
 				}
 			},
 			data: {
@@ -1332,6 +1513,37 @@ export class IntegrationRepository {
 		})
 	}
 
+	async markProductLinkMissingFromSnapshot(
+		linkId: string,
+		at: Date = new Date()
+	): Promise<IntegrationProductLinkRecord | null> {
+		const existing = await this.prisma.integrationProductLink.findUnique({
+			where: { id: linkId },
+			select: { id: true, missingSince: true }
+		})
+		if (!existing) return null
+
+		return this.prisma.integrationProductLink.update({
+			where: { id: linkId },
+			data: {
+				missingSince: existing.missingSince ?? at,
+				missingSyncCount: { increment: 1 },
+				skippedReason: MISSING_LINK_REASON
+			},
+			select: productLinkSelect
+		})
+	}
+
+	async markProductLinkHiddenAfterMissing(
+		linkId: string
+	): Promise<IntegrationProductLinkRecord | null> {
+		return this.prisma.integrationProductLink.update({
+			where: { id: linkId },
+			data: { skippedReason: HIDDEN_AFTER_MISSING_REASON },
+			select: productLinkSelect
+		})
+	}
+
 	async upsertProductLink(
 		params: {
 			integrationId: string
@@ -1339,6 +1551,8 @@ export class IntegrationRepository {
 			externalId: string
 			externalCode?: string | null
 			externalUpdatedAt?: Date | null
+			priceSynced?: boolean
+			stockSynced?: boolean
 			rawMeta?: Prisma.InputJsonValue
 		},
 		tx?: Prisma.TransactionClient
@@ -1350,6 +1564,13 @@ export class IntegrationRepository {
 			externalCode: params.externalCode ?? null,
 			externalUpdatedAt: params.externalUpdatedAt ?? null,
 			lastSyncedAt: now,
+			lastSeenAt: now,
+			...(params.priceSynced ? { lastPriceSyncAt: now } : {}),
+			...(params.stockSynced ? { lastStockSyncAt: now } : {}),
+			missingSince: null,
+			missingSyncCount: 0,
+			skippedReason: null,
+			lastExternalError: null,
 			rawMeta: params.rawMeta
 		}
 
@@ -1398,6 +1619,13 @@ export class IntegrationRepository {
 				externalCode: params.externalCode ?? null,
 				externalUpdatedAt: params.externalUpdatedAt ?? null,
 				lastSyncedAt: now,
+				lastSeenAt: now,
+				...(params.priceSynced ? { lastPriceSyncAt: now } : {}),
+				...(params.stockSynced ? { lastStockSyncAt: now } : {}),
+				missingSince: null,
+				missingSyncCount: 0,
+				skippedReason: null,
+				lastExternalError: null,
 				rawMeta: params.rawMeta
 			},
 			select: productLinkSelect
@@ -1445,6 +1673,84 @@ export class IntegrationRepository {
 		})
 	}
 
+	async softDeleteIntegratedVariantByExternalId(params: {
+		integrationId: string
+		catalogId: string
+		externalId: string
+		at?: Date
+	}): Promise<{
+		deleted: boolean
+		productId: string | null
+		variantId: string | null
+	}> {
+		const now = params.at ?? new Date()
+
+		return this.prisma.$transaction(async db => {
+			const link = await db.integrationVariantLink.findUnique({
+				where: {
+					integrationId_externalId: {
+						integrationId: params.integrationId,
+						externalId: params.externalId
+					}
+				},
+				select: {
+					id: true,
+					variantId: true,
+					variant: {
+						select: {
+							id: true,
+							productId: true,
+							deleteAt: true,
+							product: {
+								select: {
+									catalogId: true,
+									deleteAt: true
+								}
+							}
+						}
+					}
+				}
+			})
+
+			if (!link || link.variant.product.catalogId !== params.catalogId) {
+				return { deleted: false, productId: null, variantId: null }
+			}
+
+			await db.integrationVariantLink.update({
+				where: { id: link.id },
+				data: {
+					missingSince: now,
+					missingSyncCount: { increment: 1 },
+					skippedReason: 'deleted_from_moysklad',
+					lastExternalError: null
+				}
+			})
+
+			const result = await db.productVariant.updateMany({
+				where: {
+					id: link.variantId,
+					deleteAt: null,
+					product: {
+						catalogId: params.catalogId,
+						deleteAt: null
+					}
+				},
+				data: {
+					stock: 0,
+					status: ProductVariantStatus.OUT_OF_STOCK,
+					isAvailable: false,
+					deleteAt: now
+				}
+			})
+
+			return {
+				deleted: result.count > 0,
+				productId: link.variant.productId,
+				variantId: link.variantId
+			}
+		})
+	}
+
 	async findProductIdsWithVariantLinks(
 		integrationId: string,
 		tx?: Prisma.TransactionClient
@@ -1467,6 +1773,7 @@ export class IntegrationRepository {
 			integrationId: string
 			productId: string
 			externalIds: string[]
+			requiredMissingSyncs?: number
 		},
 		tx?: Prisma.TransactionClient
 	): Promise<number> {
@@ -1474,28 +1781,64 @@ export class IntegrationRepository {
 		const currentExternalIds = Array.from(
 			new Set(params.externalIds.map(item => item.trim()).filter(Boolean))
 		)
-		const result = await db.productVariant.updateMany({
+		const requiredMissingSyncs = Math.max(
+			1,
+			Math.trunc(params.requiredMissingSyncs ?? 2)
+		)
+		const now = new Date()
+		const links = await db.integrationVariantLink.findMany({
 			where: {
-				productId: params.productId,
-				deleteAt: null,
-				integrationLinks: {
-					some: {
-						integrationId: params.integrationId,
-						...(currentExternalIds.length > 0
-							? { externalId: { notIn: currentExternalIds } }
-							: {})
-					}
+				integrationId: params.integrationId,
+				...(currentExternalIds.length > 0
+					? { externalId: { notIn: currentExternalIds } }
+					: {}),
+				variant: {
+					productId: params.productId,
+					deleteAt: null
 				}
 			},
-			data: {
-				stock: 0,
-				status: ProductVariantStatus.OUT_OF_STOCK,
-				isAvailable: false,
-				deleteAt: new Date()
+			select: {
+				id: true,
+				missingSince: true,
+				missingSyncCount: true,
+				variantId: true
 			}
 		})
 
-		return result.count
+		let archived = 0
+		for (const link of links) {
+			const nextMissingCount = Math.max(0, link.missingSyncCount ?? 0) + 1
+			await db.integrationVariantLink.update({
+				where: { id: link.id },
+				data: {
+					missingSince: link.missingSince ?? now,
+					missingSyncCount: nextMissingCount,
+					skippedReason:
+						nextMissingCount >= requiredMissingSyncs
+							? HIDDEN_AFTER_MISSING_REASON
+							: MISSING_LINK_REASON
+				}
+			})
+
+			if (nextMissingCount < requiredMissingSyncs) continue
+
+			const result = await db.productVariant.updateMany({
+				where: {
+					id: link.variantId,
+					productId: params.productId,
+					deleteAt: null
+				},
+				data: {
+					stock: 0,
+					status: ProductVariantStatus.OUT_OF_STOCK,
+					isAvailable: false,
+					deleteAt: now
+				}
+			})
+			archived += result.count
+		}
+
+		return archived
 	}
 
 	async upsertVariantLink(
@@ -1505,6 +1848,8 @@ export class IntegrationRepository {
 			externalId: string
 			externalCode?: string | null
 			externalUpdatedAt?: Date | null
+			priceSynced?: boolean
+			stockSynced?: boolean
 			rawMeta?: Prisma.InputJsonValue
 		},
 		tx?: Prisma.TransactionClient
@@ -1516,6 +1861,13 @@ export class IntegrationRepository {
 			externalCode: params.externalCode ?? null,
 			externalUpdatedAt: params.externalUpdatedAt ?? null,
 			lastSyncedAt: now,
+			lastSeenAt: now,
+			...(params.priceSynced ? { lastPriceSyncAt: now } : {}),
+			...(params.stockSynced ? { lastStockSyncAt: now } : {}),
+			missingSince: null,
+			missingSyncCount: 0,
+			skippedReason: null,
+			lastExternalError: null,
 			rawMeta: params.rawMeta
 		}
 
@@ -1564,6 +1916,13 @@ export class IntegrationRepository {
 				externalCode: params.externalCode ?? null,
 				externalUpdatedAt: params.externalUpdatedAt ?? null,
 				lastSyncedAt: now,
+				lastSeenAt: now,
+				...(params.priceSynced ? { lastPriceSyncAt: now } : {}),
+				...(params.stockSynced ? { lastStockSyncAt: now } : {}),
+				missingSince: null,
+				missingSyncCount: 0,
+				skippedReason: null,
+				lastExternalError: null,
 				rawMeta: params.rawMeta
 			},
 			select: variantLinkSelect
@@ -2069,26 +2428,18 @@ export class IntegrationRepository {
 			rawMeta?: Prisma.InputJsonValue
 			sku: string
 			variantKey: string
-			price: number
+			price: number | null
+			syncPrice?: boolean
+			syncContent?: boolean
 			stock: number
 			status: ProductVariantStatus
 			attributes: IntegrationVariantAttributeValueInput[]
 		},
 		tx?: Prisma.TransactionClient
-	): Promise<{
-		variant: ProductVariantSyncRecord
-		link: IntegrationVariantLinkRecord
-		created: boolean
-		updated: boolean
-	}> {
+	): Promise<IntegrationVariantUpsertResult> {
 		const run = async (
 			db: Prisma.TransactionClient | PrismaService
-		): Promise<{
-			variant: ProductVariantSyncRecord
-			link: IntegrationVariantLinkRecord
-			created: boolean
-			updated: boolean
-		}> => {
+		): Promise<IntegrationVariantUpsertResult> => {
 			const link = await db.integrationVariantLink.findUnique({
 				where: {
 					integrationId_externalId: {
@@ -2116,6 +2467,12 @@ export class IntegrationRepository {
 			let nextSku = params.sku
 			let created = false
 			let updated = Boolean(staleLinkedVariant)
+			let priceWasChanged = false
+			let stockWasChanged = false
+			let previousPrice: number | null = null
+			let nextPrice: number | null = null
+			let previousStock: number | null = null
+			let nextStock: number | null = null
 
 			if (staleLinkedVariant) {
 				await this.retireMovedIntegratedVariant(db, staleLinkedVariant)
@@ -2134,12 +2491,14 @@ export class IntegrationRepository {
 			}
 
 			if (!variant) {
+				this.assertIntegratedMatrixVariantHasAttributes(params.attributes)
 				variant = await db.productVariant.create({
 					data: {
 						productId: params.productId,
 						sku: nextSku,
 						variantKey: params.variantKey,
-						price: params.price,
+						kind: ProductVariantKind.MATRIX,
+						price: params.syncPrice === false ? null : params.price,
 						stock: params.stock,
 						status: params.status,
 						isAvailable: params.status === ProductVariantStatus.ACTIVE
@@ -2148,12 +2507,16 @@ export class IntegrationRepository {
 				})
 				created = true
 			} else {
+				previousPrice = normalizeNullableNumber(variant.price)
+				nextPrice = params.syncPrice === false ? previousPrice : params.price
+				previousStock = variant.stock
+				nextStock = params.stock
 				const nextStatus =
 					variant.status === ProductVariantStatus.DISABLED
 						? ProductVariantStatus.DISABLED
 						: params.status
 				const data: Prisma.ProductVariantUpdateInput = {}
-				if (variant.sku !== params.sku) {
+				if (params.syncContent !== false && variant.sku !== params.sku) {
 					const skuOwner = await db.productVariant.findUnique({
 						where: { sku: params.sku },
 						select: { id: true }
@@ -2166,14 +2529,31 @@ export class IntegrationRepository {
 						data.sku = resolvedSku
 					}
 				}
-				if (variant.variantKey !== params.variantKey) {
+				if (
+					params.syncContent !== false &&
+					variant.variantKey !== params.variantKey
+				) {
 					data.variantKey = params.variantKey
 				}
-				if (Number(variant.price) !== params.price) {
+				if (
+					params.syncContent !== false &&
+					variant.kind !== ProductVariantKind.MATRIX
+				) {
+					data.kind = ProductVariantKind.MATRIX
+				}
+				if (params.syncContent !== false) {
+					this.assertIntegratedMatrixVariantHasAttributes(params.attributes)
+				}
+				if (
+					params.syncPrice !== false &&
+					priceChanged(variant.price, params.price)
+				) {
 					data.price = params.price
+					priceWasChanged = true
 				}
 				if (variant.stock !== params.stock) {
 					data.stock = params.stock
+					stockWasChanged = true
 				}
 				if (variant.status !== nextStatus) {
 					data.status = nextStatus
@@ -2193,12 +2573,15 @@ export class IntegrationRepository {
 				}
 			}
 
-			const attributesChanged = await this.syncIntegratedVariantAttributes(
-				db,
-				params.catalogId,
-				variant.id,
-				params.attributes
-			)
+			const attributesChanged =
+				params.syncContent !== false || created
+					? await this.syncIntegratedVariantAttributes(
+							db,
+							params.catalogId,
+							variant.id,
+							params.attributes
+						)
+					: false
 			if (attributesChanged) {
 				updated = true
 			}
@@ -2210,17 +2593,21 @@ export class IntegrationRepository {
 					externalId: params.externalId,
 					externalCode: params.externalCode ?? null,
 					externalUpdatedAt: params.externalUpdatedAt ?? null,
+					priceSynced: params.syncPrice !== false,
+					stockSynced: true,
 					rawMeta: params.rawMeta
 				},
 				db
 			)
 
 			const defaultVariantDisabled =
-				await this.disableUnlinkedDefaultVariantForProduct(
-					db,
-					params.productId,
-					variant.id
-				)
+				params.syncContent !== false || created
+					? await this.disableUnlinkedDefaultVariantForProduct(
+							db,
+							params.productId,
+							variant.id
+						)
+					: false
 			if (defaultVariantDisabled) {
 				updated = true
 			}
@@ -2233,7 +2620,13 @@ export class IntegrationRepository {
 				variant,
 				link: variantLink,
 				created,
-				updated: created ? false : updated
+				updated: created ? false : updated,
+				priceChanged: created ? false : priceWasChanged,
+				previousPrice,
+				nextPrice,
+				stockChanged: created ? false : stockWasChanged,
+				previousStock,
+				nextStock
 			}
 		}
 
@@ -2246,7 +2639,7 @@ export class IntegrationRepository {
 		productId: string,
 		stock: number,
 		tx?: Prisma.TransactionClient
-	): Promise<boolean> {
+	): Promise<IntegrationVariantStockUpdateResult> {
 		const db = tx || this.prisma
 		const product = await db.product.findFirst({
 			where: {
@@ -2259,7 +2652,7 @@ export class IntegrationRepository {
 				status: true
 			}
 		})
-		if (!product) return false
+		if (!product) return emptyVariantStockUpdateResult()
 
 		let changed = false
 		const nextProductStatus = this.resolveStockProductStatus(
@@ -2274,20 +2667,66 @@ export class IntegrationRepository {
 			changed = true
 		}
 
-		const defaultVariantChanged = await this.updateDefaultVariantStock(
+		const defaultVariantUpdate = await this.updateDefaultVariantStock(
 			db,
 			product.id,
 			stock
 		)
 
-		return changed || defaultVariantChanged
+		return {
+			...defaultVariantUpdate,
+			changed: changed || defaultVariantUpdate.changed,
+			productId: product.id
+		}
+	}
+
+	async touchProductLinkStockSynced(
+		integrationId: string,
+		productId: string,
+		at: Date = new Date(),
+		tx?: Prisma.TransactionClient
+	): Promise<number> {
+		const db = tx || this.prisma
+		const result = await db.integrationProductLink.updateMany({
+			where: { integrationId, productId },
+			data: {
+				lastSeenAt: at,
+				lastStockSyncAt: at,
+				missingSince: null,
+				missingSyncCount: 0,
+				skippedReason: null,
+				lastExternalError: null
+			}
+		})
+
+		return result.count
+	}
+
+	async markProductLinkStockSkipped(
+		integrationId: string,
+		productId: string,
+		skippedReason: string,
+		at: Date = new Date(),
+		tx?: Prisma.TransactionClient
+	): Promise<number> {
+		const db = tx || this.prisma
+		const result = await db.integrationProductLink.updateMany({
+			where: { integrationId, productId },
+			data: {
+				lastSeenAt: at,
+				skippedReason,
+				lastExternalError: null
+			}
+		})
+
+		return result.count
 	}
 
 	async updateLinkedVariantStock(
 		variantId: string,
 		stock: number,
 		tx?: Prisma.TransactionClient
-	): Promise<{ changed: boolean; productId: string | null }> {
+	): Promise<IntegrationVariantStockUpdateResult> {
 		const db = tx || this.prisma
 		const variant = await db.productVariant.findFirst({
 			where: {
@@ -2296,12 +2735,51 @@ export class IntegrationRepository {
 			},
 			select: productVariantSyncSelect
 		})
-		if (!variant) return { changed: false, productId: null }
+		if (!variant) return emptyVariantStockUpdateResult()
 
-		return {
-			changed: await this.updateVariantStockRecord(db, variant, stock),
-			productId: variant.productId
-		}
+		return this.updateVariantStockRecord(db, variant, stock)
+	}
+
+	async touchVariantLinkStockSynced(
+		integrationId: string,
+		variantId: string,
+		at: Date = new Date(),
+		tx?: Prisma.TransactionClient
+	): Promise<number> {
+		const db = tx || this.prisma
+		const result = await db.integrationVariantLink.updateMany({
+			where: { integrationId, variantId },
+			data: {
+				lastSeenAt: at,
+				lastStockSyncAt: at,
+				missingSince: null,
+				missingSyncCount: 0,
+				skippedReason: null,
+				lastExternalError: null
+			}
+		})
+
+		return result.count
+	}
+
+	async markVariantLinkStockSkipped(
+		integrationId: string,
+		variantId: string,
+		skippedReason: string,
+		at: Date = new Date(),
+		tx?: Prisma.TransactionClient
+	): Promise<number> {
+		const db = tx || this.prisma
+		const result = await db.integrationVariantLink.updateMany({
+			where: { integrationId, variantId },
+			data: {
+				lastSeenAt: at,
+				skippedReason,
+				lastExternalError: null
+			}
+		})
+
+		return result.count
 	}
 
 	async recomputeProductStatusFromVariants(
@@ -2528,6 +3006,74 @@ export class IntegrationRepository {
 		})
 	}
 
+	async softDeleteCategorySubtreeByExternalId(params: {
+		integrationId: string
+		catalogId: string
+		externalId: string
+		at?: Date
+	}): Promise<{ deleted: number; categoryId: string | null }> {
+		const now = params.at ?? new Date()
+
+		return this.prisma.$transaction(async db => {
+			const link = await db.integrationCategoryLink.findUnique({
+				where: {
+					integrationId_externalId: {
+						integrationId: params.integrationId,
+						externalId: params.externalId
+					}
+				},
+				select: {
+					categoryId: true,
+					category: {
+						select: {
+							id: true,
+							catalogId: true,
+							deleteAt: true
+						}
+					}
+				}
+			})
+
+			if (
+				!link ||
+				link.category.catalogId !== params.catalogId ||
+				link.category.deleteAt
+			) {
+				return { deleted: 0, categoryId: null }
+			}
+
+			const categoryIds = new Set<string>([link.categoryId])
+			let frontier = [link.categoryId]
+			while (frontier.length > 0) {
+				const children = await db.category.findMany({
+					where: {
+						catalogId: params.catalogId,
+						parentId: { in: frontier },
+						deleteAt: null
+					},
+					select: { id: true }
+				})
+				frontier = children
+					.map(child => child.id)
+					.filter(id => !categoryIds.has(id))
+				for (const id of frontier) {
+					categoryIds.add(id)
+				}
+			}
+
+			const result = await db.category.updateMany({
+				where: {
+					id: { in: [...categoryIds] },
+					catalogId: params.catalogId,
+					deleteAt: null
+				},
+				data: { deleteAt: now }
+			})
+
+			return { deleted: result.count, categoryId: link.categoryId }
+		})
+	}
+
 	findCategoryLinkByCategoryId(
 		integrationId: string,
 		categoryId: string,
@@ -2715,7 +3261,7 @@ export class IntegrationRepository {
 			name: string
 			sku: string
 			slug: string
-			price: number
+			price: number | null
 			status: ProductStatus
 		},
 		tx?: Prisma.TransactionClient
@@ -2739,25 +3285,30 @@ export class IntegrationRepository {
 			integrationId: string
 			productId: string
 			sku: string
-			price: number
+			price: number | null
+			syncPrice?: boolean
 			stock: number
 			status: ProductVariantStatus
 		},
 		tx?: Prisma.TransactionClient
-	): Promise<{
-		variant: ProductVariantSyncRecord | null
-		created: boolean
-		updated: boolean
-		skipped: boolean
-	}> {
-		const run = async (
-			db: Prisma.TransactionClient | PrismaService
-		): Promise<{
+	): Promise<
+		{
 			variant: ProductVariantSyncRecord | null
 			created: boolean
 			updated: boolean
 			skipped: boolean
-		}> => {
+		} & IntegrationVariantFieldChanges
+	> {
+		const run = async (
+			db: Prisma.TransactionClient | PrismaService
+		): Promise<
+			{
+				variant: ProductVariantSyncRecord | null
+				created: boolean
+				updated: boolean
+				skipped: boolean
+			} & IntegrationVariantFieldChanges
+		> => {
 			const importedVariantCount = await db.productVariant.count({
 				where: {
 					productId: params.productId,
@@ -2767,13 +3318,45 @@ export class IntegrationRepository {
 			})
 
 			if (importedVariantCount > 0) {
-				return { variant: null, created: false, updated: false, skipped: true }
+				return {
+					variant: null,
+					created: false,
+					updated: false,
+					skipped: true,
+					...emptyVariantFieldChanges()
+				}
+			}
+
+			const customVariantCount = await db.productVariant.count({
+				where: {
+					productId: params.productId,
+					deleteAt: null,
+					NOT: {
+						OR: [
+							{ kind: ProductVariantKind.DEFAULT },
+							{ variantKey: DEFAULT_VARIANT_KEY }
+						]
+					}
+				}
+			})
+
+			if (customVariantCount > 0) {
+				return {
+					variant: null,
+					created: false,
+					updated: false,
+					skipped: true,
+					...emptyVariantFieldChanges()
+				}
 			}
 
 			let variant = await db.productVariant.findFirst({
 				where: {
 					productId: params.productId,
-					variantKey: DEFAULT_VARIANT_KEY
+					OR: [
+						{ kind: ProductVariantKind.DEFAULT },
+						{ variantKey: DEFAULT_VARIANT_KEY }
+					]
 				},
 				orderBy: { createdAt: 'asc' },
 				select: productVariantSyncSelect
@@ -2785,7 +3368,8 @@ export class IntegrationRepository {
 						productId: params.productId,
 						sku: await this.resolveDefaultVariantSku(db, params.sku),
 						variantKey: DEFAULT_VARIANT_KEY,
-						price: params.price,
+						kind: ProductVariantKind.DEFAULT,
+						price: params.syncPrice === false ? null : params.price,
 						stock: params.stock,
 						status: params.status,
 						isAvailable: params.status === ProductVariantStatus.ACTIVE
@@ -2793,9 +3377,21 @@ export class IntegrationRepository {
 					select: productVariantSyncSelect
 				})
 
-				return { variant, created: true, updated: false, skipped: false }
+				return {
+					variant,
+					created: true,
+					updated: false,
+					skipped: false,
+					...emptyVariantFieldChanges()
+				}
 			}
 
+			const previousPrice = normalizeNullableNumber(variant.price)
+			const nextPrice = params.syncPrice === false ? previousPrice : params.price
+			const previousStock = variant.stock
+			const nextStock = params.stock
+			let priceWasChanged = false
+			let stockWasChanged = false
 			const nextStatus =
 				variant.status === ProductVariantStatus.DISABLED
 					? ProductVariantStatus.DISABLED
@@ -2803,11 +3399,19 @@ export class IntegrationRepository {
 			const nextIsAvailable = nextStatus === ProductVariantStatus.ACTIVE
 			const data: Prisma.ProductVariantUpdateInput = {}
 
-			if (Number(variant.price) !== params.price) {
+			if (
+				params.syncPrice !== false &&
+				priceChanged(variant.price, params.price)
+			) {
 				data.price = params.price
+				priceWasChanged = true
+			}
+			if (variant.kind !== ProductVariantKind.DEFAULT) {
+				data.kind = ProductVariantKind.DEFAULT
 			}
 			if (variant.stock !== params.stock) {
 				data.stock = params.stock
+				stockWasChanged = true
 			}
 			if (variant.status !== nextStatus) {
 				data.status = nextStatus
@@ -2820,7 +3424,37 @@ export class IntegrationRepository {
 			}
 
 			if (Object.keys(data).length === 0) {
-				return { variant, created: false, updated: false, skipped: false }
+				const removedAttributes = await db.variantAttribute.updateMany({
+					where: { variantId: variant.id, deleteAt: null },
+					data: { deleteAt: new Date() }
+				})
+				if (removedAttributes.count > 0) {
+					return {
+						variant,
+						created: false,
+						updated: true,
+						skipped: false,
+						priceChanged: false,
+						previousPrice,
+						nextPrice,
+						stockChanged: false,
+						previousStock,
+						nextStock
+					}
+				}
+
+				return {
+					variant,
+					created: false,
+					updated: false,
+					skipped: false,
+					priceChanged: false,
+					previousPrice,
+					nextPrice,
+					stockChanged: false,
+					previousStock,
+					nextStock
+				}
 			}
 
 			variant = await db.productVariant.update({
@@ -2828,12 +3462,39 @@ export class IntegrationRepository {
 				data,
 				select: productVariantSyncSelect
 			})
+			await db.variantAttribute.updateMany({
+				where: { variantId: variant.id, deleteAt: null },
+				data: { deleteAt: new Date() }
+			})
 
-			return { variant, created: false, updated: true, skipped: false }
+			return {
+				variant,
+				created: false,
+				updated: true,
+				skipped: false,
+				priceChanged: priceWasChanged,
+				previousPrice,
+				nextPrice,
+				stockChanged: stockWasChanged,
+				previousStock,
+				nextStock
+			}
 		}
 
 		if (tx) return run(tx)
 		return this.prisma.$transaction(run)
+	}
+
+	private assertIntegratedMatrixVariantHasAttributes(
+		attributes: IntegrationVariantAttributeValueInput[]
+	): void {
+		if (attributes.some(attribute => attribute.attributeId && attribute.value)) {
+			return
+		}
+
+		throw new BadRequestException(
+			'MoySklad matrix variant must have at least one variant attribute'
+		)
 	}
 
 	private async syncIntegratedVariantAttributes(
@@ -3122,17 +3783,20 @@ export class IntegrationRepository {
 		db: Prisma.TransactionClient | PrismaService,
 		productId: string,
 		stock: number
-	): Promise<boolean> {
+	): Promise<IntegrationVariantStockUpdateResult> {
 		const variant = await db.productVariant.findFirst({
 			where: {
 				productId,
-				variantKey: 'default',
+				OR: [
+					{ kind: ProductVariantKind.DEFAULT },
+					{ variantKey: DEFAULT_VARIANT_KEY }
+				],
 				deleteAt: null
 			},
 			orderBy: { createdAt: 'asc' },
 			select: productVariantSyncSelect
 		})
-		if (!variant) return false
+		if (!variant) return emptyVariantStockUpdateResult()
 
 		return this.updateVariantStockRecord(db, variant, stock)
 	}
@@ -3245,12 +3909,14 @@ export class IntegrationRepository {
 		db: Prisma.TransactionClient | PrismaService,
 		variant: ProductVariantSyncRecord,
 		stock: number
-	): Promise<boolean> {
+	): Promise<IntegrationVariantStockUpdateResult> {
 		const nextStatus = this.resolveStockVariantStatus(variant.status, stock)
 		const nextIsAvailable = nextStatus === ProductVariantStatus.ACTIVE
 		const data: Prisma.ProductVariantUpdateInput = {}
+		const previousStock = variant.stock
+		const stockWasChanged = previousStock !== stock
 
-		if (variant.stock !== stock) {
+		if (stockWasChanged) {
 			data.stock = stock
 		}
 		if (variant.status !== nextStatus) {
@@ -3261,14 +3927,26 @@ export class IntegrationRepository {
 		}
 
 		if (Object.keys(data).length === 0) {
-			return false
+			return {
+				changed: false,
+				productId: variant.productId,
+				variantId: variant.id,
+				previousStock,
+				nextStock: stock
+			}
 		}
 
 		await db.productVariant.update({
 			where: { id: variant.id },
 			data
 		})
-		return true
+		return {
+			changed: true,
+			productId: variant.productId,
+			variantId: variant.id,
+			previousStock,
+			nextStock: stock
+		}
 	}
 
 	private async disableUnlinkedDefaultVariantForProduct(
@@ -3279,7 +3957,10 @@ export class IntegrationRepository {
 		const result = await db.productVariant.updateMany({
 			where: {
 				productId,
-				variantKey: 'default',
+				OR: [
+					{ kind: ProductVariantKind.DEFAULT },
+					{ variantKey: DEFAULT_VARIANT_KEY }
+				],
 				id: { not: excludeVariantId },
 				deleteAt: null,
 				status: { not: ProductVariantStatus.DISABLED },

@@ -2,6 +2,7 @@ import { Role } from '@generated/client'
 import {
 	Controller,
 	Get,
+	Inject,
 	Logger,
 	Param,
 	ParseUUIDPipe,
@@ -23,13 +24,16 @@ import {
 import type { Response } from 'express'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
-import { ObservabilityService } from '@/modules/observability/observability.service'
+import {
+	OBSERVABILITY_RECORDER_PORT,
+	type ObservabilityRecorderPort
+} from '@/modules/observability/contracts'
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { SessionGuard } from '../auth/guards/session.guard'
-import { HandoffService } from '../auth/handoff/handoff.service'
+import { HandoffService } from '../auth/public'
 import type { AuthRequest } from '../auth/types/auth-request'
 
 @ApiTags('Admin')
@@ -43,7 +47,8 @@ export class AdminSsoController {
 	constructor(
 		private readonly prisma: PrismaService,
 		private readonly handoff: HandoffService,
-		private readonly observability: ObservabilityService
+		@Inject(OBSERVABILITY_RECORDER_PORT)
+		private readonly observability: ObservabilityRecorderPort
 	) {}
 
 	@ApiOperation({

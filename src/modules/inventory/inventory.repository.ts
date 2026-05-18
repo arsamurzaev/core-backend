@@ -2,6 +2,7 @@ import type { Prisma } from '@generated/client'
 import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import type { DomainEvent } from '@/shared/domain-events/domain-events.contract'
 
 import {
 	INVENTORY_MOVEMENT_SOURCE,
@@ -116,12 +117,22 @@ export type InventoryWarehouseWriteData = {
 	address?: string | null
 }
 
+export type InventoryVariantStockChange = {
+	catalogId?: string | null
+	variantId: string
+	productId: string | null
+	previousStock: number | null
+	nextStock: number
+	changed: boolean
+}
+
 export type InventoryStockAdjustmentResult =
 	| {
 			ok: true
 			balance: InventoryStockBalanceRecord
 			movement: InventoryMovementRecord
 			variantStock: number
+			stockChange: InventoryVariantStockChange
 	  }
 	| {
 			ok: false
@@ -147,6 +158,7 @@ export type InventoryCompletedOrderStockResult =
 			warehouseId: string | null
 			consumedLines: number
 			affectedVariantIds: string[]
+			stockChanges: InventoryVariantStockChange[]
 	  }
 	| {
 			ok: false
@@ -165,6 +177,7 @@ export type InventoryCartReservationsResult =
 			reservedLines: number
 			releasedReservations: number
 			affectedVariantIds: string[]
+			stockChanges: InventoryVariantStockChange[]
 	  }
 	| {
 			ok: false
@@ -182,6 +195,8 @@ export type ExpireInventoryReservationsResult = {
 	affectedVariants: number
 	affectedVariantIds: string[]
 	affectedCatalogIds: string[]
+	stockChanges: InventoryVariantStockChange[]
+	domainEvents?: DomainEvent[]
 }
 
 type InventoryReservationForRelease = {
@@ -630,13 +645,14 @@ export class InventoryRepository {
 				select: inventoryMovementSelect
 			})
 
-			const variantStock = await this.syncVariantStockReadModel(tx, variantId)
+			const stockChange = await this.syncVariantStockReadModel(tx, variantId)
 
 			return {
 				ok: true,
 				balance,
 				movement,
-				variantStock
+				variantStock: stockChange.nextStock,
+				stockChange
 			}
 		})
 	}
@@ -657,12 +673,14 @@ export class InventoryRepository {
 				ok: true,
 				warehouseId: null,
 				consumedLines: 0,
-				affectedVariantIds: []
+				affectedVariantIds: [],
+				stockChanges: []
 			}
 		}
 
 		let warehouseId: string | null = null
 		const affectedVariantIds = new Set<string>()
+		const stockChanges: InventoryVariantStockChange[] = []
 		for (const line of lines) {
 			const result = await this.consumeCompletedOrderLine(tx, {
 				...params,
@@ -677,13 +695,17 @@ export class InventoryRepository {
 			}
 			warehouseId ??= result.warehouseId
 			affectedVariantIds.add(line.variantId)
+			if (result.stockChange?.changed) {
+				stockChanges.push(result.stockChange)
+			}
 		}
 
 		return {
 			ok: true,
 			warehouseId,
 			consumedLines: lines.length,
-			affectedVariantIds: [...affectedVariantIds]
+			affectedVariantIds: [...affectedVariantIds],
+			stockChanges: compactStockChanges(stockChanges)
 		}
 	}
 
@@ -710,7 +732,8 @@ export class InventoryRepository {
 				warehouseId: null,
 				reservedLines: 0,
 				releasedReservations: released.releasedReservations,
-				affectedVariantIds: released.affectedVariantIds
+				affectedVariantIds: released.affectedVariantIds,
+				stockChanges: released.stockChanges
 			}
 		}
 
@@ -721,6 +744,7 @@ export class InventoryRepository {
 
 		let releasedReservations = 0
 		const affectedVariantIds = new Set<string>()
+		const stockChanges: InventoryVariantStockChange[] = []
 		const desiredKeys = new Set<string>()
 		for (const line of lines) {
 			if (!line.variantId) {
@@ -771,6 +795,7 @@ export class InventoryRepository {
 			if (released) {
 				releasedReservations++
 				affectedVariantIds.add(reservation.variantId)
+				if (released.changed) stockChanges.push(released)
 			}
 		}
 
@@ -791,6 +816,7 @@ export class InventoryRepository {
 			if (result.stockChanged) {
 				affectedVariantIds.add(line.variantId)
 			}
+			stockChanges.push(...result.stockChanges)
 			reservedLines++
 		}
 
@@ -799,7 +825,8 @@ export class InventoryRepository {
 			warehouseId: warehouse.warehouseId,
 			reservedLines,
 			releasedReservations,
-			affectedVariantIds: [...affectedVariantIds]
+			affectedVariantIds: [...affectedVariantIds],
+			stockChanges: compactStockChanges(stockChanges)
 		}
 	}
 
@@ -833,6 +860,7 @@ export class InventoryRepository {
 		})
 
 		const affectedVariantIds = new Set<string>()
+		const stockChanges: InventoryVariantStockChange[] = []
 		let releasedReservations = 0
 
 		for (const reservation of reservations) {
@@ -846,6 +874,7 @@ export class InventoryRepository {
 			if (released) {
 				releasedReservations++
 				affectedVariantIds.add(reservation.variantId)
+				if (released.changed) stockChanges.push(released)
 			}
 		}
 
@@ -854,7 +883,11 @@ export class InventoryRepository {
 			affectedVariants: affectedVariantIds.size,
 			affectedVariantIds: [...affectedVariantIds],
 			affectedCatalogIds:
-				affectedVariantIds.size > 0 && params.catalogId ? [params.catalogId] : []
+				affectedVariantIds.size > 0 && params.catalogId ? [params.catalogId] : [],
+			stockChanges: compactStockChanges(stockChanges).map(change => ({
+				...change,
+				catalogId: params.catalogId ?? change.catalogId ?? null
+			}))
 		}
 	}
 
@@ -890,6 +923,7 @@ export class InventoryRepository {
 
 		const affectedVariantIds = new Set<string>()
 		const affectedCatalogIds = new Set<string>()
+		const stockChanges: InventoryVariantStockChange[] = []
 		let releasedReservations = 0
 
 		for (const reservation of reservations) {
@@ -900,6 +934,12 @@ export class InventoryRepository {
 				releasedReservations++
 				affectedVariantIds.add(reservation.variantId)
 				affectedCatalogIds.add(reservation.variant.product.catalogId)
+				if (released.changed) {
+					stockChanges.push({
+						...released,
+						catalogId: reservation.variant.product.catalogId
+					})
+				}
 			}
 		}
 
@@ -907,7 +947,8 @@ export class InventoryRepository {
 			releasedReservations,
 			affectedVariants: affectedVariantIds.size,
 			affectedVariantIds: [...affectedVariantIds],
-			affectedCatalogIds: [...affectedCatalogIds]
+			affectedCatalogIds: [...affectedCatalogIds],
+			stockChanges: compactStockChanges(stockChanges)
 		}
 	}
 
@@ -985,7 +1026,11 @@ export class InventoryRepository {
 			actorUserId: string | null
 		}
 	): Promise<
-		| { ok: true; stockChanged: boolean }
+		| {
+				ok: true
+				stockChanged: boolean
+				stockChanges: InventoryVariantStockChange[]
+		  }
 		| {
 				ok: false
 				reason: 'VARIANT_NOT_FOUND' | 'INSUFFICIENT_STOCK'
@@ -994,6 +1039,7 @@ export class InventoryRepository {
 	> {
 		const now = new Date()
 		let stockChanged = false
+		const stockChanges: InventoryVariantStockChange[] = []
 		const variant = await tx.productVariant.findFirst({
 			where: {
 				id: params.line.variantId,
@@ -1037,14 +1083,21 @@ export class InventoryRepository {
 			existing?.status === INVENTORY_RESERVATION_STATUS.ACTIVE ? existing : null
 
 		if (activeExisting && activeExisting.warehouseId !== params.warehouseId) {
-			stockChanged =
-				(await this.releaseActiveReservation(tx, activeExisting, {
+			const releasedChange = await this.releaseActiveReservation(
+				tx,
+				activeExisting,
+				{
 					now,
 					status: INVENTORY_RESERVATION_STATUS.RELEASED,
 					source: INVENTORY_MOVEMENT_SOURCE.CART,
 					reason: 'Cart reservation warehouse changed',
 					actorUserId: params.actorUserId
-				})) || stockChanged
+				}
+			)
+			if (releasedChange) {
+				stockChanged = true
+				if (releasedChange.changed) stockChanges.push(releasedChange)
+			}
 			activeExisting = null
 		}
 
@@ -1142,8 +1195,18 @@ export class InventoryRepository {
 			})
 		}
 
-		await this.syncVariantStockReadModel(tx, params.line.variantId)
-		return { ok: true, stockChanged }
+		if (stockChanged) {
+			const change = await this.syncVariantStockReadModel(
+				tx,
+				params.line.variantId
+			)
+			if (change.changed) stockChanges.push(change)
+		}
+		return {
+			ok: true,
+			stockChanged,
+			stockChanges: compactStockChanges(stockChanges)
+		}
 	}
 
 	private async consumeCompletedOrderLine(
@@ -1156,7 +1219,11 @@ export class InventoryRepository {
 			actorUserId: string | null
 		}
 	): Promise<
-		| { ok: true; warehouseId: string | null }
+		| {
+				ok: true
+				warehouseId: string | null
+				stockChange: InventoryVariantStockChange | null
+		  }
 		| {
 				ok: false
 				reason:
@@ -1175,7 +1242,9 @@ export class InventoryRepository {
 			where: { idempotencyKey },
 			select: { id: true }
 		})
-		if (existingMovement) return { ok: true, warehouseId: null }
+		if (existingMovement) {
+			return { ok: true, warehouseId: null, stockChange: null }
+		}
 
 		const variant = await tx.productVariant.findFirst({
 			where: {
@@ -1412,9 +1481,12 @@ export class InventoryRepository {
 			firstWarehouseId ??= directWarehouseId
 		}
 
-		await this.syncVariantStockReadModel(tx, params.line.variantId)
+		const stockChange = await this.syncVariantStockReadModel(
+			tx,
+			params.line.variantId
+		)
 
-		return { ok: true, warehouseId: firstWarehouseId }
+		return { ok: true, warehouseId: firstWarehouseId, stockChange }
 	}
 
 	private async canConsumeStockBalance(
@@ -1537,7 +1609,7 @@ export class InventoryRepository {
 			actorUserId: string | null
 			movementIdempotencyKey?: string
 		}
-	): Promise<boolean> {
+	): Promise<InventoryVariantStockChange | null> {
 		const claimed = await tx.inventoryReservation.updateMany({
 			where: {
 				id: reservation.id,
@@ -1548,7 +1620,7 @@ export class InventoryRepository {
 				releasedAt: params.now
 			}
 		})
-		if (claimed.count !== 1) return false
+		if (claimed.count !== 1) return null
 
 		const balance = await this.releaseReservedQuantity(tx, {
 			warehouseId: reservation.warehouseId,
@@ -1563,8 +1635,7 @@ export class InventoryRepository {
 				select: { id: true }
 			})
 			if (existingMovement) {
-				await this.syncVariantStockReadModel(tx, reservation.variantId)
-				return true
+				return this.syncVariantStockReadModel(tx, reservation.variantId)
 			}
 		}
 
@@ -1584,9 +1655,7 @@ export class InventoryRepository {
 				idempotencyKey: params.movementIdempotencyKey
 			}
 		})
-		await this.syncVariantStockReadModel(tx, reservation.variantId)
-
-		return true
+		return this.syncVariantStockReadModel(tx, reservation.variantId)
 	}
 
 	private async releaseReservedQuantity(
@@ -1633,7 +1702,7 @@ export class InventoryRepository {
 		tx: Prisma.TransactionClient,
 		reservation: InventoryReservationForRelease,
 		now: Date
-	): Promise<boolean> {
+	): Promise<InventoryVariantStockChange | null> {
 		return this.releaseActiveReservation(tx, reservation, {
 			now,
 			status: INVENTORY_RESERVATION_STATUS.EXPIRED,
@@ -1659,7 +1728,11 @@ export class InventoryRepository {
 	private async syncVariantStockReadModel(
 		tx: Prisma.TransactionClient,
 		variantId: string
-	): Promise<number> {
+	): Promise<InventoryVariantStockChange> {
+		const variant = await tx.productVariant.findFirst({
+			where: { id: variantId },
+			select: { productId: true, stock: true }
+		})
 		const aggregate = await tx.inventoryStockBalance.aggregate({
 			where: {
 				variantId,
@@ -1678,7 +1751,14 @@ export class InventoryRepository {
 			data: { stock: variantStock }
 		})
 
-		return variantStock
+		const previousStock = variant?.stock ?? null
+		return {
+			variantId,
+			productId: variant?.productId ?? null,
+			previousStock,
+			nextStock: variantStock,
+			changed: previousStock !== variantStock
+		}
 	}
 
 	private mapWarehouseCatalog(
@@ -1697,4 +1777,25 @@ function sortWarehouses(
 ): number {
 	if (left.isDefault !== right.isDefault) return left.isDefault ? -1 : 1
 	return left.name.localeCompare(right.name)
+}
+
+function compactStockChanges(
+	changes: InventoryVariantStockChange[]
+): InventoryVariantStockChange[] {
+	const byVariant = new Map<string, InventoryVariantStockChange>()
+	for (const change of changes) {
+		if (!change.changed) continue
+		const existing = byVariant.get(change.variantId)
+		if (!existing) {
+			byVariant.set(change.variantId, change)
+			continue
+		}
+		byVariant.set(change.variantId, {
+			...change,
+			previousStock: existing.previousStock,
+			changed: existing.previousStock !== change.nextStock
+		})
+	}
+
+	return [...byVariant.values()].filter(change => change.changed)
 }

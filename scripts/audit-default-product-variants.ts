@@ -12,6 +12,7 @@ import { colors, printJson, table } from './db-console/format.js'
 import { createPrismaClient, validateDatabaseEnv } from './db-console/prisma.js'
 
 const DEFAULT_VARIANT_KEY = 'default'
+const PRODUCT_VARIANT_KIND_DEFAULT = 'DEFAULT'
 const DEFAULT_BATCH_SIZE = 100
 const DEFAULT_SAMPLE_LIMIT = 20
 const SKU_MAX_LENGTH = 100
@@ -356,8 +357,7 @@ async function countInvalidVariantPrices(prisma: PrismaClient) {
 		from product_variants
 		where delete_at is null
 			and (
-				price is null
-				or price < 0
+				price < 0
 				or price::text = 'NaN'
 			)
 	`)
@@ -379,8 +379,7 @@ async function findInvalidVariantPrices(
 		from product_variants
 		where delete_at is null
 			and (
-				price is null
-				or price < 0
+				price < 0
 				or price::text = 'NaN'
 			)
 		order by product_id asc, variant_key asc, id asc
@@ -450,10 +449,11 @@ async function createDefaultVariantIfMissing(
 				productId: product.id,
 				sku,
 				variantKey: DEFAULT_VARIANT_KEY,
+				kind: PRODUCT_VARIANT_KIND_DEFAULT,
 				price: product.price as Prisma.Decimal,
-				stock: 0,
-				status: ProductVariantStatus.OUT_OF_STOCK,
-				isAvailable: false
+				stock: null,
+				status: ProductVariantStatus.ACTIVE,
+				isAvailable: true
 			}
 		})
 
@@ -496,7 +496,7 @@ async function backfillOpenCartItemVariants(
 						variants: {
 							where: { deleteAt: null },
 							orderBy: [{ variantKey: 'asc' }, { id: 'asc' }],
-							select: { id: true, variantKey: true },
+							select: { id: true, variantKey: true, kind: true },
 							take: 2
 						}
 					}
@@ -511,7 +511,8 @@ async function backfillOpenCartItemVariants(
 			const [variant] = item.product.variants
 			const shouldUpdate =
 				item.product.variants.length === 1 &&
-				variant?.variantKey === DEFAULT_VARIANT_KEY
+				(variant?.kind === PRODUCT_VARIANT_KIND_DEFAULT ||
+					variant?.variantKey === DEFAULT_VARIANT_KEY)
 
 			if (!shouldUpdate) {
 				result.skipped += 1

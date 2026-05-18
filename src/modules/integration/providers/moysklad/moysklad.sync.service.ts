@@ -4,17 +4,30 @@ import {
 	BadGatewayException,
 	ConflictException,
 	HttpException,
+	Inject,
 	Injectable,
 	Logger,
-	NotFoundException
+	NotFoundException,
+	Optional
 } from '@nestjs/common'
 
-import { CapabilityService } from '@/modules/capability/capability.service'
+import {
+	CAPABILITY_ASSERT_PORT,
+	CAPABILITY_READER_PORT,
+	type CapabilityAssertPort,
+	type CapabilityReaderPort
+} from '@/modules/capability/contracts'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
+	CATEGORY_LIST_CACHE_VERSION,
 	CATEGORY_PRODUCTS_CACHE_VERSION,
 	PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
+import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
+import {
+	DOMAIN_EVENT_DISPATCHER,
+	type DomainEventDispatcher
+} from '@/shared/domain-events/domain-events.contract'
 
 import {
 	type IntegrationProductLinkRecord,
@@ -24,16 +37,29 @@ import {
 import { renderSafeProviderErrorMessage } from '../../provider-error-redaction'
 
 import { MoySkladClient } from './moysklad.client'
-import { MoySkladMetadataCryptoService } from './moysklad.metadata'
+import {
+	isMoySkladExternalField,
+	MoySkladMetadataCryptoService
+} from './moysklad.metadata'
 import { MoySkladMissingProductSyncService } from './moysklad.missing-product-sync.service'
+import { MoySkladProductFolderSyncService } from './moysklad.product-folder-sync.service'
 import { MoySkladProductSyncService } from './moysklad.product-sync.service'
-import { MoySkladStockSyncService } from './moysklad.stock-sync.service'
+import { createMoySkladInternalInventorySkippedReasons } from './moysklad.skipped-reasons'
+import {
+	type MoySkladExternalStockApplySource,
+	type MoySkladExternalStockDiagnostics,
+	MoySkladStockSyncService
+} from './moysklad.stock-sync.service'
 import {
 	type MoySkladCatalogSyncResult,
 	MoySkladCatalogSyncStats,
 	type MoySkladSyncItemIssue
 } from './moysklad.sync-stats'
-import type { MoySkladEntityType, MoySkladProduct } from './moysklad.types'
+import type {
+	MoySkladEntityType,
+	MoySkladProduct,
+	MoySkladProductFolderWebhookAction
+} from './moysklad.types'
 import { MoySkladVariantSyncService } from './moysklad.variant-sync.service'
 
 const SYNC_LOCK_TIMEOUT_MS = 10 * 60 * 1000
@@ -59,6 +85,7 @@ type SyncStockResult = {
 	updatedProducts: number
 	updatedVariants: number
 	skipped: number
+	diagnostics?: MoySkladExternalStockDiagnostics
 	durationMs: number
 	syncedAt: Date
 }
@@ -70,6 +97,16 @@ type SyncCatalogOptions = {
 
 type SyncProgressOptions = {
 	runId?: string | null
+}
+
+type SyncExternalProductOptions = SyncProgressOptions & {
+	entityType: MoySkladEntityType
+	externalId: string
+}
+
+type SyncProductFolderOptions = SyncProgressOptions & {
+	externalId: string
+	action: MoySkladProductFolderWebhookAction
 }
 
 type SyncProductResult = {
@@ -87,6 +124,16 @@ type SyncProductResult = {
 	skippedVariants: number
 	warnings: MoySkladSyncItemIssue[]
 	errors: MoySkladSyncItemIssue[]
+	durationMs: number
+}
+
+type SyncProductFolderResult = {
+	ok: true
+	externalId: string
+	action: MoySkladProductFolderWebhookAction
+	categoryId: string | null
+	updated: boolean
+	deleted: number
 	durationMs: number
 }
 
@@ -224,9 +271,16 @@ export class MoySkladSyncService {
 		private readonly metadataCrypto: MoySkladMetadataCryptoService,
 		private readonly missingProducts: MoySkladMissingProductSyncService,
 		private readonly products: MoySkladProductSyncService,
+		private readonly productFolders: MoySkladProductFolderSyncService,
 		private readonly stockSync: MoySkladStockSyncService,
 		private readonly variantSync: MoySkladVariantSyncService,
-		private readonly featureEntitlements: CapabilityService
+		@Inject(CAPABILITY_ASSERT_PORT)
+		private readonly featureAssertions: CapabilityAssertPort,
+		@Inject(CAPABILITY_READER_PORT)
+		private readonly featureReader: CapabilityReaderPort,
+		@Optional()
+		@Inject(DOMAIN_EVENT_DISPATCHER)
+		private readonly events?: DomainEventDispatcher
 	) {}
 
 	async testConnection(token: string): Promise<{ ok: true }> {
@@ -247,7 +301,7 @@ export class MoySkladSyncService {
 	): Promise<MoySkladCatalogSyncResult> {
 		const startedAt = Date.now()
 		const progress = this.createProgressReporter(options.runId)
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		await this.beginSyncOrThrow(catalogId)
 
 		try {
@@ -255,7 +309,13 @@ export class MoySkladSyncService {
 			const metadata = this.metadataCrypto.parseStoredMetadata(
 				integration.metadata
 			)
-			const features = await this.featureEntitlements.getCurrentFeatures(catalogId)
+			const syncPrice = isMoySkladExternalField(metadata, 'price')
+			const syncStock =
+				metadata.syncStock && isMoySkladExternalField(metadata, 'stock')
+			const syncContent = isMoySkladExternalField(metadata, 'content')
+			const importImages =
+				metadata.importImages && isMoySkladExternalField(metadata, 'images')
+			const features = await this.featureReader.getCurrentFeatures(catalogId)
 			const canSyncVariants =
 				features.canUseProductTypes && features.canUseProductVariants
 			const client = new MoySkladClient({ token: metadata.token })
@@ -263,14 +323,13 @@ export class MoySkladSyncService {
 			const isIncrementalSync = Boolean(updatedFrom)
 			await progress.report({
 				phase: 'FETCHING_ASSORTMENT',
-				message:
-					'Получаем товары, услуги, комплекты и модификации из МойСклад',
+				message: 'Получаем товары, услуги, комплекты и модификации из МойСклад',
 				processed: 0,
 				total: null,
 				force: true
 			})
 			this.logger.log(
-				`Starting MoySklad catalog sync for catalog ${catalogId}: integration=${integration.id}, updatedFrom=${updatedFrom?.toISOString() ?? 'full-snapshot'}, importImages=${metadata.importImages}, syncStock=${metadata.syncStock}`
+				`Starting MoySklad catalog sync for catalog ${catalogId}: integration=${integration.id}, updatedFrom=${updatedFrom?.toISOString() ?? 'full-snapshot'}, importImages=${importImages}, syncStock=${syncStock}, syncPrice=${syncPrice}, syncContent=${syncContent}`
 			)
 			const assortment = await client.getAllAssortment(updatedFrom)
 			const supportedItems = assortment.filter(isSupportedAssortmentItem)
@@ -405,8 +464,10 @@ export class MoySkladSyncService {
 						client,
 						product,
 						priceTypeName: metadata.priceTypeName,
-						importImages: metadata.importImages,
-						syncStock: metadata.syncStock,
+						importImages,
+						syncStock,
+						syncPrice,
+						syncContent,
 						ensureDefaultVariant: !parentExternalIdsWithVariants.has(
 							readMoySkladString(product.id)
 						)
@@ -508,7 +569,9 @@ export class MoySkladSyncService {
 						integration,
 						product: variant,
 						priceTypeName: metadata.priceTypeName,
-						syncStock: metadata.syncStock,
+						syncStock,
+						syncPrice,
+						syncContent,
 						parentProductId,
 						parentProduct
 					})
@@ -558,8 +621,7 @@ export class MoySkladSyncService {
 			if (!isIncrementalSync && productItems.length > 0) {
 				await progress.report({
 					phase: 'ARCHIVING_MISSING',
-					message:
-						'Проверяем товары, удаленные или скрытые в МойСклад',
+					message: 'Проверяем товары, удаленные или скрытые в МойСклад',
 					processed: totalSyncItems,
 					total: totalSyncItems,
 					force: true
@@ -638,7 +700,7 @@ export class MoySkladSyncService {
 	): Promise<SyncProductResult> {
 		const startedAt = Date.now()
 		const progress = this.createProgressReporter(options.runId)
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		await this.beginSyncOrThrow(catalogId)
 		this.logger.log(
 			`Starting MoySklad product sync for catalog ${catalogId}, product ${productId}`
@@ -649,7 +711,13 @@ export class MoySkladSyncService {
 			const metadata = this.metadataCrypto.parseStoredMetadata(
 				integration.metadata
 			)
-			const features = await this.featureEntitlements.getCurrentFeatures(catalogId)
+			const syncPrice = isMoySkladExternalField(metadata, 'price')
+			const syncStock =
+				metadata.syncStock && isMoySkladExternalField(metadata, 'stock')
+			const syncContent = isMoySkladExternalField(metadata, 'content')
+			const importImages =
+				metadata.importImages && isMoySkladExternalField(metadata, 'images')
+			const features = await this.featureReader.getCurrentFeatures(catalogId)
 			const canSyncVariants =
 				features.canUseProductTypes && features.canUseProductVariants
 			const client = new MoySkladClient({ token: metadata.token })
@@ -692,7 +760,7 @@ export class MoySkladSyncService {
 				? await this.variantSync.loadProductVariants({
 						client,
 						productExternalId: externalProductRawId,
-						syncStock: metadata.syncStock,
+						syncStock,
 						progress
 					})
 				: []
@@ -714,9 +782,11 @@ export class MoySkladSyncService {
 				client,
 				product: externalProduct,
 				priceTypeName: metadata.priceTypeName,
-				importImages: metadata.importImages,
+				importImages,
 				refreshImagesForExistingProduct: true,
-				syncStock: metadata.syncStock,
+				syncStock,
+				syncPrice,
+				syncContent,
 				ensureDefaultVariant: externalVariants.length === 0,
 				existingProduct: localProduct,
 				existingLinkExternalId: link.externalId
@@ -749,7 +819,8 @@ export class MoySkladSyncService {
 								product: externalProduct,
 								productId: result.productId,
 								priceTypeName: metadata.priceTypeName,
-								syncStock: metadata.syncStock
+								syncStock,
+								syncPrice
 							}
 						)
 					: false
@@ -760,7 +831,9 @@ export class MoySkladSyncService {
 							integration,
 							variants: externalVariants,
 							priceTypeName: metadata.priceTypeName,
-							syncStock: metadata.syncStock,
+							syncStock,
+							syncPrice,
+							syncContent,
 							parentProductId: result.productId,
 							progress,
 							baseProcessed: 1,
@@ -835,13 +908,217 @@ export class MoySkladSyncService {
 		}
 	}
 
+	async syncExternalProduct(
+		catalogId: string,
+		options: SyncExternalProductOptions
+	): Promise<SyncProductResult> {
+		const startedAt = Date.now()
+		const progress = this.createProgressReporter(options.runId)
+		const externalId = readMoySkladString(options.externalId)
+		if (!externalId || !SUPPORTED_ASSORTMENT_TYPES.has(options.entityType)) {
+			throw new BadGatewayException(
+				'MoySklad product webhook entityType and externalId are required'
+			)
+		}
+
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
+		await this.beginSyncOrThrow(catalogId)
+		this.logger.log(
+			`Starting MoySklad product webhook sync for catalog ${catalogId}, entity=${options.entityType}, externalId=${externalId}`
+		)
+
+		try {
+			const integration = await this.getActiveIntegration(catalogId)
+			const metadata = this.metadataCrypto.parseStoredMetadata(
+				integration.metadata
+			)
+			const syncPrice = isMoySkladExternalField(metadata, 'price')
+			const syncStock =
+				metadata.syncStock && isMoySkladExternalField(metadata, 'stock')
+			const syncContent = isMoySkladExternalField(metadata, 'content')
+			const importImages =
+				metadata.importImages && isMoySkladExternalField(metadata, 'images')
+			const features = await this.featureReader.getCurrentFeatures(catalogId)
+			const canSyncVariants =
+				features.canUseProductTypes && features.canUseProductVariants
+			const client = new MoySkladClient({ token: metadata.token })
+
+			const result =
+				options.entityType === 'variant'
+					? await this.syncExternalVariantWebhookItem({
+							catalogId,
+							integration,
+							client,
+							externalId,
+							priceTypeName: metadata.priceTypeName,
+							importImages,
+							syncStock,
+							syncPrice,
+							syncContent,
+							progress,
+							startedAt
+						})
+					: await this.syncExternalProductWebhookItem({
+							catalogId,
+							integration,
+							client,
+							entityType: options.entityType,
+							externalId,
+							priceTypeName: metadata.priceTypeName,
+							importImages,
+							syncStock,
+							syncPrice,
+							syncContent,
+							canSyncVariants,
+							progress,
+							startedAt
+						})
+
+			this.logger.log(
+				`Completed MoySklad product webhook sync for catalog ${catalogId}, entity=${options.entityType}, externalId=${externalId}: productId=${result.productId}, created=${result.created}, updated=${result.updated}, variants=${result.totalVariants}, durationMs=${result.durationMs}`
+			)
+			return result
+		} catch (error) {
+			await progress.report({
+				phase: 'FAILED',
+				message: this.renderErrorMessage(error),
+				force: true
+			})
+			this.logger.error(
+				`MoySklad product webhook sync failed for catalog ${catalogId}, entity=${options.entityType}, externalId=${externalId}: ${this.renderErrorMessage(error)}`
+			)
+			await this.repo.failMoySkladSync(catalogId, this.renderErrorMessage(error))
+			throw this.wrapSyncError(error)
+		}
+	}
+
+	async syncProductFolder(
+		catalogId: string,
+		options: SyncProductFolderOptions
+	): Promise<SyncProductFolderResult> {
+		const startedAt = Date.now()
+		const progress = this.createProgressReporter(options.runId)
+		const externalId = readMoySkladString(options.externalId)
+		if (!externalId) {
+			throw new BadGatewayException(
+				'MoySklad productfolder webhook externalId is required'
+			)
+		}
+
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
+		await this.beginSyncOrThrow(catalogId)
+		this.logger.log(
+			`Starting MoySklad productfolder webhook sync for catalog ${catalogId}, action=${options.action}, externalId=${externalId}`
+		)
+
+		try {
+			const integration = await this.getActiveIntegration(catalogId)
+			const metadata = this.metadataCrypto.parseStoredMetadata(
+				integration.metadata
+			)
+			let categoryId: string | null = null
+			let updated = false
+			let deleted = 0
+
+			if (options.action === 'DELETE') {
+				await progress.report({
+					phase: 'ARCHIVING_MISSING',
+					message: 'РЈРґР°Р»СЏРµРј РєР°С‚РµРіРѕСЂРёСЋ MoySklad',
+					processed: 0,
+					total: 1,
+					force: true
+				})
+				const result = await this.repo.softDeleteCategorySubtreeByExternalId({
+					integrationId: integration.id,
+					catalogId,
+					externalId
+				})
+				categoryId = result.categoryId
+				deleted = result.deleted
+			} else {
+				await progress.report({
+					phase: 'FETCHING_PRODUCT',
+					message: 'РџРѕР»СѓС‡Р°РµРј РєР°С‚РµРіРѕСЂРёСЋ MoySklad',
+					processed: 0,
+					total: 1,
+					force: true
+				})
+				const client = new MoySkladClient({ token: metadata.token })
+				const folder = await client.getProductFolder({
+					id: externalId,
+					meta: {
+						href: '',
+						type: 'productfolder',
+						mediaType: 'application/json'
+					}
+				})
+				if (!folder) {
+					throw new BadGatewayException(
+						'MoySklad productfolder was not found for webhook sync'
+					)
+				}
+
+				const result = await this.productFolders.syncProductFolder({
+					catalogId,
+					integrationId: integration.id,
+					client,
+					folder
+				})
+				categoryId = result.categoryId
+				updated = Boolean(result.categoryId)
+			}
+
+			const syncedAt = new Date()
+			await this.repo.finishMoySkladSync(catalogId, {
+				totalProducts: 0,
+				createdProducts: 0,
+				updatedProducts: updated ? 1 : 0,
+				deletedProducts: deleted,
+				syncedAt
+			})
+			if (updated || deleted > 0) {
+				await this.invalidateCategoryCaches(catalogId)
+			}
+			const durationMs = Date.now() - startedAt
+			await progress.report({
+				phase: 'COMPLETED',
+				message:
+					'РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ РєР°С‚РµРіРѕСЂРёРё MoySklad Р·Р°РІРµСЂС€РµРЅР°',
+				processed: 1,
+				total: 1,
+				force: true
+			})
+
+			return {
+				ok: true,
+				externalId,
+				action: options.action,
+				categoryId,
+				updated,
+				deleted,
+				durationMs
+			}
+		} catch (error) {
+			await progress.report({
+				phase: 'FAILED',
+				message: this.renderErrorMessage(error),
+				force: true
+			})
+			this.logger.error(
+				`MoySklad productfolder webhook sync failed for catalog ${catalogId}, action=${options.action}, externalId=${externalId}: ${this.renderErrorMessage(error)}`
+			)
+			await this.repo.failMoySkladSync(catalogId, this.renderErrorMessage(error))
+			throw this.wrapSyncError(error)
+		}
+	}
+
 	async syncStock(
 		catalogId: string,
 		options: SyncProgressOptions = {}
 	): Promise<SyncStockResult> {
 		const startedAt = Date.now()
 		const progress = this.createProgressReporter(options.runId)
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		await this.beginSyncOrThrow(catalogId)
 		this.logger.log(`Starting MoySklad stock sync for catalog ${catalogId}`)
 
@@ -850,7 +1127,7 @@ export class MoySkladSyncService {
 			const metadata = this.metadataCrypto.parseStoredMetadata(
 				integration.metadata
 			)
-			if (!metadata.syncStock) {
+			if (!metadata.syncStock || !isMoySkladExternalField(metadata, 'stock')) {
 				throw new ConflictException(
 					'MoySklad stock sync is disabled in integration settings'
 				)
@@ -870,8 +1147,7 @@ export class MoySkladSyncService {
 				const durationMs = Date.now() - startedAt
 				await progress.report({
 					phase: 'COMPLETED',
-					message:
-						'Синхронизация остатков не требуется для внутреннего склада',
+					message: 'Синхронизация остатков не требуется для внутреннего склада',
 					processed: 0,
 					total: 0,
 					force: true
@@ -887,12 +1163,13 @@ export class MoySkladSyncService {
 					updatedProducts: 0,
 					updatedVariants: 0,
 					skipped: 0,
+					diagnostics: buildSkippedInternalInventoryStockDiagnostics('FULL_SYNC'),
 					durationMs,
 					syncedAt
 				}
 			}
 			const client = new MoySkladClient({ token: metadata.token })
-			const features = await this.featureEntitlements.getCurrentFeatures(catalogId)
+			const features = await this.featureReader.getCurrentFeatures(catalogId)
 			const canSyncVariants =
 				features.canUseProductTypes && features.canUseProductVariants
 			const stockResult = await this.stockSync.syncExternalStock({
@@ -935,6 +1212,7 @@ export class MoySkladSyncService {
 				updatedProducts: stockResult.updatedProducts,
 				updatedVariants: stockResult.updatedVariants,
 				skipped: stockResult.skipped,
+				diagnostics: stockResult.diagnostics,
 				durationMs,
 				syncedAt
 			}
@@ -958,7 +1236,7 @@ export class MoySkladSyncService {
 	): Promise<SyncStockResult> {
 		const startedAt = Date.now()
 		const progress = this.createProgressReporter(options.runId)
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		await this.beginSyncOrThrow(catalogId)
 		this.logger.log(
 			`Starting MoySklad webhook stock sync for catalog ${catalogId}: reportUrls=${options.reportUrls.length}`
@@ -969,7 +1247,7 @@ export class MoySkladSyncService {
 			const metadata = this.metadataCrypto.parseStoredMetadata(
 				integration.metadata
 			)
-			if (!metadata.syncStock) {
+			if (!metadata.syncStock || !isMoySkladExternalField(metadata, 'stock')) {
 				throw new ConflictException(
 					'MoySklad stock sync is disabled in integration settings'
 				)
@@ -1003,6 +1281,7 @@ export class MoySkladSyncService {
 					updatedProducts: 0,
 					updatedVariants: 0,
 					skipped: 0,
+					diagnostics: buildSkippedInternalInventoryStockDiagnostics('WEBHOOK'),
 					durationMs,
 					syncedAt
 				}
@@ -1025,13 +1304,14 @@ export class MoySkladSyncService {
 				}
 			}
 
-			const features = await this.featureEntitlements.getCurrentFeatures(catalogId)
+			const features = await this.featureReader.getCurrentFeatures(catalogId)
 			const canSyncVariants =
 				features.canUseProductTypes && features.canUseProductVariants
 			const stockResult = await this.stockSync.applyExternalStockMap({
 				catalogId,
 				integrationId: integration.id,
 				stockMap,
+				source: 'WEBHOOK',
 				canSyncVariants,
 				progress
 			})
@@ -1068,6 +1348,7 @@ export class MoySkladSyncService {
 				updatedProducts: stockResult.updatedProducts,
 				updatedVariants: stockResult.updatedVariants,
 				skipped: stockResult.skipped,
+				diagnostics: stockResult.diagnostics,
 				durationMs,
 				syncedAt
 			}
@@ -1082,6 +1363,342 @@ export class MoySkladSyncService {
 			)
 			await this.repo.failMoySkladSync(catalogId, this.renderErrorMessage(error))
 			throw this.wrapSyncError(error)
+		}
+	}
+
+	private async syncExternalProductWebhookItem(params: {
+		catalogId: string
+		integration: IntegrationRecord
+		client: MoySkladClient
+		entityType: Exclude<MoySkladEntityType, 'variant'>
+		externalId: string
+		priceTypeName: string
+		importImages: boolean
+		syncStock: boolean
+		syncPrice: boolean
+		syncContent: boolean
+		canSyncVariants: boolean
+		progress: SyncProgressReporter
+		startedAt: number
+	}): Promise<SyncProductResult> {
+		await params.progress.report({
+			phase: 'FETCHING_PRODUCT',
+			message: 'РџРѕР»СѓС‡Р°РµРј С‚РѕРІР°СЂ РёР· MoySklad',
+			processed: 0,
+			total: null,
+			force: true
+		})
+		const externalProduct = await params.client.getEntity(
+			params.entityType,
+			params.externalId
+		)
+		if (!isSyncableProductAssortmentItem(externalProduct)) {
+			throw new BadGatewayException(
+				'MoySklad product webhook item is not syncable: productFolder and externalCode are required'
+			)
+		}
+
+		const externalProductRawId = readMoySkladString(externalProduct.id)
+		const shouldSyncExternalVariants =
+			resolveExternalEntityType(externalProduct) === 'product' &&
+			Boolean(externalProductRawId) &&
+			params.canSyncVariants
+		const externalVariants = shouldSyncExternalVariants
+			? await this.variantSync.loadProductVariants({
+					client: params.client,
+					productExternalId: externalProductRawId,
+					syncStock: params.syncStock,
+					progress: params.progress
+				})
+			: []
+		const totalSyncItems = 1 + externalVariants.length
+		await params.progress.report({
+			phase: 'SYNCING_PRODUCTS',
+			message: 'РЎРёРЅС…СЂРѕРЅРёР·РёСЂСѓРµРј РєР°СЂС‚РѕС‡РєСѓ С‚РѕРІР°СЂР°',
+			processed: 0,
+			total: totalSyncItems,
+			force: true
+		})
+		const externalVariantIds = externalVariants
+			.map(resolveExternalVariantKey)
+			.filter((id): id is string => Boolean(id))
+
+		const productResult = await this.products.syncExternalProduct({
+			catalogId: params.catalogId,
+			integration: params.integration,
+			client: params.client,
+			product: externalProduct,
+			priceTypeName: params.priceTypeName,
+			importImages: params.importImages,
+			refreshImagesForExistingProduct: true,
+			syncStock: params.syncStock,
+			syncPrice: params.syncPrice,
+			syncContent: params.syncContent,
+			ensureDefaultVariant: externalVariants.length === 0
+		})
+		await params.progress.report({
+			phase: 'SYNCING_PRODUCTS',
+			message: 'РљР°СЂС‚РѕС‡РєР° С‚РѕРІР°СЂР° СЃРёРЅС…СЂРѕРЅРёР·РёСЂРѕРІР°РЅР°',
+			processed: 1,
+			total: totalSyncItems,
+			force: true
+		})
+
+		const archivedMissingVariants = shouldSyncExternalVariants
+			? await this.repo.archiveMissingIntegratedProductVariants({
+					integrationId: params.integration.id,
+					productId: productResult.productId,
+					externalIds: externalVariantIds
+				})
+			: 0
+		if (archivedMissingVariants > 0) {
+			this.logger.log(
+				`Archived ${archivedMissingVariants} missing MoySklad variants during product webhook sync: catalog=${params.catalogId}, productId=${productResult.productId}, externalProductId=${externalProductRawId}`
+			)
+		}
+		const defaultVariantRecovered =
+			externalVariants.length === 0 && archivedMissingVariants > 0
+				? await this.variantSync.recoverDefaultVariantAfterMissingExternalVariants({
+						catalogId: params.catalogId,
+						integration: params.integration,
+						product: externalProduct,
+						productId: productResult.productId,
+						priceTypeName: params.priceTypeName,
+						syncStock: params.syncStock,
+						syncPrice: params.syncPrice
+					})
+				: false
+		const variantStats =
+			externalVariants.length > 0
+				? await this.variantSync.syncProductVariants({
+						catalogId: params.catalogId,
+						integration: params.integration,
+						variants: externalVariants,
+						priceTypeName: params.priceTypeName,
+						syncStock: params.syncStock,
+						syncPrice: params.syncPrice,
+						syncContent: params.syncContent,
+						parentProductId: productResult.productId,
+						progress: params.progress,
+						baseProcessed: 1,
+						total: totalSyncItems
+					})
+				: this.variantSync.createEmptyStats()
+		variantStats.deleted += archivedMissingVariants
+		const variantsChanged =
+			variantStats.created > 0 ||
+			variantStats.updated > 0 ||
+			variantStats.deleted > 0 ||
+			variantStats.productStatusUpdated ||
+			defaultVariantRecovered
+
+		const syncedAt = new Date()
+		await this.repo.finishMoySkladSync(params.catalogId, {
+			totalProducts: 1 + variantStats.total,
+			createdProducts: (productResult.created ? 1 : 0) + variantStats.created,
+			updatedProducts:
+				(productResult.updated ||
+				variantStats.productStatusUpdated ||
+				defaultVariantRecovered
+					? 1
+					: 0) + variantStats.updated,
+			deletedProducts: variantStats.deleted,
+			syncedAt
+		})
+		await this.invalidateProductCaches(params.catalogId)
+		const durationMs = Date.now() - params.startedAt
+		await params.progress.report({
+			phase: 'COMPLETED',
+			message: 'РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ С‚РѕРІР°СЂР° Р·Р°РІРµСЂС€РµРЅР°',
+			processed: totalSyncItems,
+			total: totalSyncItems,
+			force: true
+		})
+
+		return {
+			ok: true,
+			productId: productResult.productId,
+			externalId: productResult.externalId,
+			created: productResult.created,
+			updated: productResult.updated || variantsChanged,
+			productUpdated:
+				productResult.updated ||
+				variantStats.productStatusUpdated ||
+				defaultVariantRecovered,
+			imagesImported: productResult.imagesImported,
+			totalVariants: variantStats.total,
+			createdVariants: variantStats.created,
+			updatedVariants: variantStats.updated,
+			deletedVariants: variantStats.deleted,
+			skippedVariants: variantStats.skipped,
+			warnings: variantStats.warnings,
+			errors: variantStats.errors,
+			durationMs
+		}
+	}
+
+	private async syncExternalVariantWebhookItem(params: {
+		catalogId: string
+		integration: IntegrationRecord
+		client: MoySkladClient
+		externalId: string
+		priceTypeName: string
+		importImages: boolean
+		syncStock: boolean
+		syncPrice: boolean
+		syncContent: boolean
+		progress: SyncProgressReporter
+		startedAt: number
+	}): Promise<SyncProductResult> {
+		await params.progress.report({
+			phase: 'FETCHING_PRODUCT',
+			message: 'РџРѕР»СѓС‡Р°РµРј РјРѕРґРёС„РёРєР°С†РёСЋ РёР· MoySklad',
+			processed: 0,
+			total: null,
+			force: true
+		})
+		const externalVariant = await params.client.getVariant(params.externalId)
+		if (!isSyncableVariantAssortmentItem(externalVariant)) {
+			throw new BadGatewayException(
+				'MoySklad variant webhook item is not syncable: variant id and parent product are required'
+			)
+		}
+
+		const parentExternalId =
+			resolveVariantParentProductExternalId(externalVariant)
+		if (!parentExternalId) {
+			throw new BadGatewayException(
+				'MoySklad variant parent product is required for webhook sync'
+			)
+		}
+
+		let parentProductId = await this.findLocalProductIdByMoySkladIdentity(
+			params.integration.id,
+			parentExternalId
+		)
+		let parentProduct = parentProductId
+			? await this.repo.findProductById(params.catalogId, parentProductId)
+			: null
+		let productCreated = false
+		let productUpdated = false
+		let imagesImported = 0
+		const needsParentSync = !parentProductId || !parentProduct
+		const totalSyncItems = needsParentSync ? 2 : 1
+
+		if (needsParentSync) {
+			await params.progress.report({
+				phase: 'FETCHING_PRODUCT',
+				message:
+					'РџРѕР»СѓС‡Р°РµРј СЂРѕРґРёС‚РµР»СЊСЃРєРёР№ С‚РѕРІР°СЂ РёР· MoySklad',
+				processed: 0,
+				total: totalSyncItems,
+				force: true
+			})
+			const parentExternalProduct = await params.client.getEntity(
+				'product',
+				parentExternalId
+			)
+			if (!isSyncableProductAssortmentItem(parentExternalProduct)) {
+				throw new BadGatewayException(
+					'MoySklad variant parent product is not syncable: productFolder and externalCode are required'
+				)
+			}
+			const parentResult = await this.products.syncExternalProduct({
+				catalogId: params.catalogId,
+				integration: params.integration,
+				client: params.client,
+				product: parentExternalProduct,
+				priceTypeName: params.priceTypeName,
+				importImages: params.importImages,
+				refreshImagesForExistingProduct: true,
+				syncStock: params.syncStock,
+				syncPrice: params.syncPrice,
+				syncContent: params.syncContent,
+				ensureDefaultVariant: false
+			})
+			parentProductId = parentResult.productId
+			productCreated = parentResult.created
+			productUpdated = parentResult.updated
+			imagesImported = parentResult.imagesImported
+			parentProduct = await this.repo.findProductById(
+				params.catalogId,
+				parentProductId
+			)
+			await params.progress.report({
+				phase: 'SYNCING_PRODUCTS',
+				message:
+					'Р РѕРґРёС‚РµР»СЊСЃРєРёР№ С‚РѕРІР°СЂ СЃРёРЅС…СЂРѕРЅРёР·РёСЂРѕРІР°РЅ',
+				processed: 1,
+				total: totalSyncItems,
+				force: true
+			})
+		}
+
+		if (!parentProductId) {
+			throw new BadGatewayException(
+				'MoySklad variant parent local product was not resolved'
+			)
+		}
+
+		await params.progress.report({
+			phase: 'SYNCING_VARIANTS',
+			message: 'РЎРёРЅС…СЂРѕРЅРёР·РёСЂСѓРµРј РјРѕРґРёС„РёРєР°С†РёСЋ',
+			processed: needsParentSync ? 1 : 0,
+			total: totalSyncItems,
+			force: true
+		})
+		const variantResult = await this.variantSync.syncExternalVariant({
+			catalogId: params.catalogId,
+			integration: params.integration,
+			product: externalVariant,
+			priceTypeName: params.priceTypeName,
+			syncStock: params.syncStock,
+			syncPrice: params.syncPrice,
+			syncContent: params.syncContent,
+			parentProductId,
+			parentProduct
+		})
+		const productStatusUpdated =
+			await this.repo.recomputeProductStatusFromVariants(
+				params.catalogId,
+				parentProductId
+			)
+		productUpdated = productUpdated || productStatusUpdated
+		const syncedAt = new Date()
+		await this.repo.finishMoySkladSync(params.catalogId, {
+			totalProducts: 2,
+			createdProducts: (productCreated ? 1 : 0) + (variantResult.created ? 1 : 0),
+			updatedProducts: (productUpdated ? 1 : 0) + (variantResult.updated ? 1 : 0),
+			deletedProducts: 0,
+			syncedAt
+		})
+		await this.invalidateProductCaches(params.catalogId)
+		const durationMs = Date.now() - params.startedAt
+		await params.progress.report({
+			phase: 'COMPLETED',
+			message:
+				'РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ РјРѕРґРёС„РёРєР°С†РёРё Р·Р°РІРµСЂС€РµРЅР°',
+			processed: totalSyncItems,
+			total: totalSyncItems,
+			force: true
+		})
+
+		return {
+			ok: true,
+			productId: parentProductId,
+			externalId: variantResult.externalId,
+			created: productCreated,
+			updated: productUpdated || variantResult.updated,
+			productUpdated,
+			imagesImported,
+			totalVariants: 1,
+			createdVariants: variantResult.created ? 1 : 0,
+			updatedVariants: variantResult.updated ? 1 : 0,
+			deletedVariants: 0,
+			skippedVariants: 0,
+			warnings: [],
+			errors: [],
+			durationMs
 		}
 	}
 
@@ -1148,19 +1765,13 @@ export class MoySkladSyncService {
 
 		const integration = await this.repo.findMoySklad(catalogId)
 		if (!integration) {
-			throw new NotFoundException(
-				'Интеграция MoySklad не настроена'
-			)
+			throw new NotFoundException('Интеграция MoySklad не настроена')
 		}
 		if (!integration.isActive) {
-			throw new ConflictException(
-				'Интеграция MoySklad отключена'
-			)
+			throw new ConflictException('Интеграция MoySklad отключена')
 		}
 
-		throw new ConflictException(
-			'Синхронизация MoySklad уже выполняется'
-		)
+		throw new ConflictException('Синхронизация MoySklad уже выполняется')
 	}
 
 	private async getActiveIntegration(
@@ -1168,16 +1779,33 @@ export class MoySkladSyncService {
 	): Promise<IntegrationRecord> {
 		const integration = await this.repo.findMoySklad(catalogId)
 		if (!integration) {
-			throw new NotFoundException(
-				'Интеграция MoySklad не настроена'
-			)
+			throw new NotFoundException('Интеграция MoySklad не настроена')
 		}
 		if (!integration.isActive) {
-			throw new ConflictException(
-				'Интеграция MoySklad отключена'
-			)
+			throw new ConflictException('Интеграция MoySklad отключена')
 		}
 		return integration
+	}
+
+	private async findLocalProductIdByMoySkladIdentity(
+		integrationId: string,
+		externalId: string
+	): Promise<string | null> {
+		const normalizedExternalId = externalId.trim()
+		if (!normalizedExternalId) return null
+
+		const links = await this.repo.findProductLinksByIntegration(integrationId)
+		for (const link of links) {
+			if (
+				link.externalId === normalizedExternalId ||
+				link.externalCode === normalizedExternalId ||
+				this.readRawMetaString(link.rawMeta, 'id') === normalizedExternalId
+			) {
+				return link.productId
+			}
+		}
+
+		return null
 	}
 
 	private readRawMetaString(
@@ -1217,7 +1845,36 @@ export class MoySkladSyncService {
 	}
 
 	private async invalidateProductCaches(catalogId: string): Promise<void> {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'product.changed',
+					catalogId,
+					productId: '*',
+					changes: ['catalog_products', 'category_products']
+				})
+			)
+			return
+		}
+
 		await this.cache.bumpVersion(PRODUCTS_CACHE_VERSION, catalogId)
+		await this.cache.bumpVersion(CATEGORY_PRODUCTS_CACHE_VERSION, catalogId)
+	}
+
+	private async invalidateCategoryCaches(catalogId: string): Promise<void> {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'product.changed',
+					catalogId,
+					productId: '*',
+					changes: ['category_list', 'category_products']
+				})
+			)
+			return
+		}
+
+		await this.cache.bumpVersion(CATEGORY_LIST_CACHE_VERSION, catalogId)
 		await this.cache.bumpVersion(CATEGORY_PRODUCTS_CACHE_VERSION, catalogId)
 	}
 
@@ -1231,5 +1888,22 @@ export class MoySkladSyncService {
 		}
 
 		return new BadGatewayException(this.renderErrorMessage(error))
+	}
+}
+
+function buildSkippedInternalInventoryStockDiagnostics(
+	source: MoySkladExternalStockApplySource
+): MoySkladExternalStockDiagnostics {
+	return {
+		source,
+		stockRows: 0,
+		matchedStockRows: 0,
+		unmatchedStockRows: 0,
+		productLinks: 0,
+		variantLinks: 0,
+		ignoredVariantLinks: 0,
+		appliedProductLinks: 0,
+		appliedVariantLinks: 0,
+		skippedReasons: createMoySkladInternalInventorySkippedReasons()
 	}
 }

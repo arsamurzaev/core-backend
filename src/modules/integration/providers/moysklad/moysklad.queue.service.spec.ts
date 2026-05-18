@@ -10,6 +10,11 @@ import { Test, TestingModule } from '@nestjs/testing'
 import { Queue, Worker } from 'bullmq'
 
 import { CapabilityService } from '@/modules/capability/capability.service'
+import {
+	CAPABILITY_ASSERT_PORT,
+	CAPABILITY_READER_PORT
+} from '@/modules/capability/contracts'
+import { OBSERVABILITY_RECORDER_PORT } from '@/modules/observability/contracts'
 import { ObservabilityService } from '@/modules/observability/observability.service'
 
 import { IntegrationRepository } from '../../integration.repository'
@@ -58,6 +63,8 @@ describe('MoySkladQueueService', () => {
 		incrementQueueJobActive: jest.Mock
 		decrementQueueJobActive: jest.Mock
 		recordQueueJob: jest.Mock
+		recordIntegrationSyncRun: jest.Mock
+		recordIntegrationSyncItems: jest.Mock
 		recordIntegrationStockFreshness: jest.Mock
 	}
 
@@ -169,6 +176,7 @@ describe('MoySkladQueueService', () => {
 					provide: IntegrationRepository,
 					useValue: {
 						findMoySklad: jest.fn(),
+						findMoySkladById: jest.fn(),
 						findAllMoySklad: jest.fn().mockResolvedValue([]),
 						findLatestActiveSyncRun: jest.fn(),
 						createSyncRun: jest.fn(),
@@ -176,7 +184,9 @@ describe('MoySkladQueueService', () => {
 						markSyncRunRunning: jest.fn(),
 						completeSyncRun: jest.fn(),
 						failSyncRun: jest.fn(),
-						skipSyncRun: jest.fn()
+						skipSyncRun: jest.fn(),
+						patchMoySkladProductChangeWebhookMetadata: jest.fn(),
+						patchMoySkladProductFolderWebhookMetadata: jest.fn()
 					}
 				},
 				{
@@ -184,6 +194,8 @@ describe('MoySkladQueueService', () => {
 					useValue: {
 						syncCatalog: jest.fn(),
 						syncProduct: jest.fn(),
+						syncExternalProduct: jest.fn(),
+						syncProductFolder: jest.fn(),
 						syncStock: jest.fn()
 					}
 				},
@@ -206,11 +218,23 @@ describe('MoySkladQueueService', () => {
 					}
 				},
 				{
+					provide: OBSERVABILITY_RECORDER_PORT,
+					useExisting: ObservabilityService
+				},
+				{
 					provide: CapabilityService,
 					useValue: {
 						assertCanUseMoySkladIntegration: jest.fn().mockResolvedValue(undefined),
 						canUseMoySkladIntegration: jest.fn().mockResolvedValue(true)
 					}
+				},
+				{
+					provide: CAPABILITY_ASSERT_PORT,
+					useExisting: CapabilityService
+				},
+				{
+					provide: CAPABILITY_READER_PORT,
+					useExisting: CapabilityService
 				}
 			]
 		}).compile()
@@ -337,6 +361,79 @@ describe('MoySkladQueueService', () => {
 			'stock-sync'
 		)
 		expect(result.mode).toBe(IntegrationSyncRunMode.STOCK)
+	})
+
+	it('queues MoySklad product webhook sync with entity debounce id', async () => {
+		queueMock().add.mockResolvedValue({ id: 'product-webhook-job-1' })
+
+		const result = await service.enqueueProductWebhookSync(
+			'catalog-1',
+			'integration-1',
+			{
+				entityType: 'variant',
+				externalId: 'variant-1',
+				action: 'UPDATE'
+			}
+		)
+
+		expect(queueMock().add).toHaveBeenCalledWith(
+			'product-webhook',
+			expect.objectContaining({
+				catalogId: 'catalog-1',
+				webhookIntegrationId: 'integration-1',
+				webhookEntityType: 'variant',
+				webhookExternalId: 'variant-1',
+				webhookAction: 'UPDATE',
+				mode: IntegrationSyncRunMode.PRODUCT,
+				trigger: IntegrationSyncRunTrigger.WEBHOOK
+			}),
+			expect.objectContaining({
+				jobId: 'moysklad-webhook-product--integration-1--variant--variant-1',
+				delay: 5000,
+				removeOnComplete: true
+			})
+		)
+		expect(observability.recordQueueJobEnqueued).toHaveBeenCalledWith(
+			'moysklad-sync',
+			'product-webhook'
+		)
+		expect(result.jobId).toBe('product-webhook-job-1')
+	})
+
+	it('queues MoySklad productfolder webhook sync with action debounce id', async () => {
+		queueMock().add.mockResolvedValue({ id: 'folder-webhook-job-1' })
+
+		const result = await service.enqueueProductFolderWebhookSync(
+			'catalog-1',
+			'integration-1',
+			{
+				externalId: 'folder-1',
+				action: 'DELETE'
+			}
+		)
+
+		expect(queueMock().add).toHaveBeenCalledWith(
+			'productfolder-webhook',
+			expect.objectContaining({
+				catalogId: 'catalog-1',
+				webhookIntegrationId: 'integration-1',
+				webhookEntityType: 'productfolder',
+				webhookExternalId: 'folder-1',
+				webhookAction: 'DELETE',
+				mode: IntegrationSyncRunMode.PRODUCT,
+				trigger: IntegrationSyncRunTrigger.WEBHOOK
+			}),
+			expect.objectContaining({
+				jobId: 'moysklad-webhook-productfolder--integration-1--DELETE--folder-1',
+				delay: 5000,
+				removeOnComplete: true
+			})
+		)
+		expect(observability.recordQueueJobEnqueued).toHaveBeenCalledWith(
+			'moysklad-sync',
+			'productfolder-webhook'
+		)
+		expect(result.jobId).toBe('folder-webhook-job-1')
 	})
 
 	it('upserts scheduler for enabled integration', async () => {
@@ -488,6 +585,208 @@ describe('MoySkladQueueService', () => {
 		expect(observability.decrementQueueJobActive).toHaveBeenCalledWith(
 			'moysklad-sync',
 			'catalog-sync'
+		)
+	})
+
+	it('processes MoySklad product webhook sync run', async () => {
+		repo.findMoySkladById.mockResolvedValue(integrationRecord as any)
+		repo.createSyncRun.mockResolvedValue({
+			...syncRunRecord,
+			mode: IntegrationSyncRunMode.PRODUCT,
+			trigger: IntegrationSyncRunTrigger.WEBHOOK,
+			externalId: 'variant-1'
+		} as any)
+		repo.markSyncRunRunning.mockResolvedValue({
+			...syncRunRecord,
+			mode: IntegrationSyncRunMode.PRODUCT,
+			trigger: IntegrationSyncRunTrigger.WEBHOOK,
+			status: IntegrationSyncRunStatus.RUNNING,
+			jobId: 'product-webhook-job-1',
+			externalId: 'variant-1',
+			startedAt: new Date('2026-03-23T12:10:05.000Z')
+		} as any)
+		repo.patchMoySkladProductChangeWebhookMetadata.mockResolvedValue(
+			integrationRecord as any
+		)
+		sync.syncExternalProduct.mockResolvedValue({
+			ok: true,
+			productId: 'product-1',
+			externalId: 'variant-1',
+			created: false,
+			updated: true,
+			productUpdated: false,
+			imagesImported: 0,
+			totalVariants: 1,
+			createdVariants: 0,
+			updatedVariants: 1,
+			deletedVariants: 0,
+			skippedVariants: 0,
+			warnings: [],
+			errors: [],
+			durationMs: 120
+		})
+
+		await workerProcessor?.({
+			id: 'product-webhook-job-1',
+			data: {
+				catalogId: 'catalog-1',
+				webhookIntegrationId: 'integration-1',
+				webhookEntityType: 'variant',
+				webhookExternalId: 'variant-1',
+				webhookAction: 'UPDATE',
+				mode: IntegrationSyncRunMode.PRODUCT,
+				trigger: IntegrationSyncRunTrigger.WEBHOOK
+			}
+		})
+
+		expect(repo.createSyncRun).toHaveBeenCalledWith(
+			expect.objectContaining({
+				integrationId: 'integration-1',
+				catalogId: 'catalog-1',
+				mode: IntegrationSyncRunMode.PRODUCT,
+				trigger: IntegrationSyncRunTrigger.WEBHOOK,
+				jobId: 'product-webhook-job-1',
+				externalId: 'variant-1'
+			})
+		)
+		expect(sync.syncExternalProduct).toHaveBeenCalledWith('catalog-1', {
+			entityType: 'variant',
+			externalId: 'variant-1',
+			runId: 'run-1'
+		})
+		expect(repo.completeSyncRun).toHaveBeenCalledWith(
+			'run-1',
+			expect.objectContaining({
+				externalId: 'variant-1',
+				totalProducts: 2,
+				createdProducts: 0,
+				updatedProducts: 1,
+				deletedProducts: 0,
+				snapshotCompleteness: 'WEBHOOK_DELTA',
+				metadata: expect.objectContaining({
+					webhook: {
+						entityType: 'variant',
+						externalId: 'variant-1'
+					}
+				})
+			})
+		)
+		expect(repo.patchMoySkladProductChangeWebhookMetadata).toHaveBeenCalledWith(
+			'integration-1',
+			expect.objectContaining({
+				lastProcessedAt: expect.any(String),
+				lastError: null
+			})
+		)
+		expect(observability.incrementQueueJobActive).toHaveBeenCalledWith(
+			'moysklad-sync',
+			'product-webhook'
+		)
+		expect(observability.recordQueueJob).toHaveBeenCalledWith(
+			'moysklad-sync',
+			'product-webhook',
+			'success',
+			expect.any(Number)
+		)
+	})
+
+	it('processes MoySklad productfolder webhook sync run', async () => {
+		repo.findMoySkladById.mockResolvedValue(integrationRecord as any)
+		repo.createSyncRun.mockResolvedValue({
+			...syncRunRecord,
+			mode: IntegrationSyncRunMode.PRODUCT,
+			trigger: IntegrationSyncRunTrigger.WEBHOOK,
+			externalId: 'folder-1'
+		} as any)
+		repo.markSyncRunRunning.mockResolvedValue({
+			...syncRunRecord,
+			mode: IntegrationSyncRunMode.PRODUCT,
+			trigger: IntegrationSyncRunTrigger.WEBHOOK,
+			status: IntegrationSyncRunStatus.RUNNING,
+			jobId: 'folder-webhook-job-1',
+			externalId: 'folder-1',
+			startedAt: new Date('2026-03-23T12:10:05.000Z')
+		} as any)
+		repo.patchMoySkladProductFolderWebhookMetadata.mockResolvedValue(
+			integrationRecord as any
+		)
+		sync.syncProductFolder.mockResolvedValue({
+			ok: true,
+			externalId: 'folder-1',
+			action: 'DELETE',
+			categoryId: 'category-1',
+			updated: false,
+			deleted: 2,
+			durationMs: 90
+		})
+
+		await workerProcessor?.({
+			id: 'folder-webhook-job-1',
+			data: {
+				catalogId: 'catalog-1',
+				webhookIntegrationId: 'integration-1',
+				webhookEntityType: 'productfolder',
+				webhookExternalId: 'folder-1',
+				webhookAction: 'DELETE',
+				mode: IntegrationSyncRunMode.PRODUCT,
+				trigger: IntegrationSyncRunTrigger.WEBHOOK
+			}
+		})
+
+		expect(repo.createSyncRun).toHaveBeenCalledWith(
+			expect.objectContaining({
+				integrationId: 'integration-1',
+				catalogId: 'catalog-1',
+				mode: IntegrationSyncRunMode.PRODUCT,
+				trigger: IntegrationSyncRunTrigger.WEBHOOK,
+				jobId: 'folder-webhook-job-1',
+				externalId: 'folder-1'
+			})
+		)
+		expect(sync.syncProductFolder).toHaveBeenCalledWith('catalog-1', {
+			externalId: 'folder-1',
+			action: 'DELETE',
+			runId: 'run-1'
+		})
+		expect(repo.completeSyncRun).toHaveBeenCalledWith(
+			'run-1',
+			expect.objectContaining({
+				externalId: 'folder-1',
+				totalProducts: 0,
+				createdProducts: 0,
+				updatedProducts: 0,
+				deletedProducts: 2,
+				snapshotCompleteness: 'WEBHOOK_DELTA',
+				metadata: expect.objectContaining({
+					categories: {
+						total: 1,
+						updated: 0,
+						deleted: 2
+					},
+					webhook: {
+						entityType: 'productfolder',
+						externalId: 'folder-1',
+						action: 'DELETE'
+					}
+				})
+			})
+		)
+		expect(repo.patchMoySkladProductFolderWebhookMetadata).toHaveBeenCalledWith(
+			'integration-1',
+			expect.objectContaining({
+				lastProcessedAt: expect.any(String),
+				lastError: null
+			})
+		)
+		expect(observability.incrementQueueJobActive).toHaveBeenCalledWith(
+			'moysklad-sync',
+			'productfolder-webhook'
+		)
+		expect(observability.recordQueueJob).toHaveBeenCalledWith(
+			'moysklad-sync',
+			'productfolder-webhook',
+			'success',
+			expect.any(Number)
 		)
 	})
 

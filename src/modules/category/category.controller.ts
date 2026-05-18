@@ -28,15 +28,13 @@ import type { Response } from 'express'
 
 import {
 	PUBLIC_CACHE_CONTROL_SHORT,
-	PUBLIC_CACHE_CONTROL_STANDARD,
 	setPrivateNoStoreHeaders,
-	setPublicCacheHeaders,
 	setUserAwarePublicCacheHeaders
 } from '@/shared/http/cache-control'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
+import { canReadInactiveCatalogProducts } from '@/shared/tenancy/catalog-visibility.utils'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
-import { canReadInactiveCatalogProducts } from '../auth/catalog-visibility.utils'
 import { Roles } from '../auth/decorators/roles.decorator'
 import { CatalogAccessGuard } from '../auth/guards/catalog-access.guard'
 import { OptionalSessionGuard } from '../auth/guards/optional-session.guard'
@@ -62,14 +60,26 @@ export class CategoryController {
 
 	@Get()
 	@ApiOperation({ summary: 'List categories' })
+	@ApiQuery({
+		name: 'includeEmpty',
+		required: false,
+		type: Boolean,
+		description:
+			'Если false, вернет только категории с активными товарами. По умолчанию true.'
+	})
 	@ApiOkResponse({
 		description: 'Список категорий',
 		type: CategoryDto,
 		isArray: true
 	})
-	async getAll(@Res({ passthrough: true }) res: Response) {
+	async getAll(
+		@Res({ passthrough: true }) res: Response,
+		@Query('includeEmpty') includeEmpty?: string
+	) {
 		setPrivateNoStoreHeaders(res)
-		return this.categoryService.getAll()
+		return this.categoryService.getAll({
+			includeEmpty: parseBooleanQuery(includeEmpty, true)
+		})
 	}
 
 	@Get('/:id')
@@ -284,4 +294,12 @@ export class CategoryController {
 	async remove(@Param('id') id: string) {
 		return this.categoryService.remove(id)
 	}
+}
+
+function parseBooleanQuery(
+	value: string | undefined,
+	defaultValue: boolean
+): boolean {
+	if (value === undefined) return defaultValue
+	return !['false', '0', 'no', 'off'].includes(value.trim().toLowerCase())
 }

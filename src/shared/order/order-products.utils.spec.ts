@@ -90,4 +90,48 @@ describe('order-products utils', () => {
 		expect(item.externalProducts).toEqual([])
 		expect(item.externalVariants).toEqual([])
 	})
+
+	it('normalizes hidden technical variant flags', () => {
+		const [item] = normalizeOrderProducts([
+			{
+				id: 'line-1',
+				productId: 'product-1',
+				variantId: 'variant-hidden',
+				variantHidden: true,
+				saleUnitHidden: true,
+				quantity: 1,
+				unitPriceSnapshot: 2499,
+				product: {
+					id: 'product-1',
+					name: 'Product',
+					slug: 'product'
+				}
+			}
+		])
+
+		expect(item.variantId).toBe('variant-hidden')
+		expect(item.variantHidden).toBe(true)
+		expect(item.saleUnitHidden).toBe(true)
+	})
+
+	it('normalizes commercial price diagnostics', () => {
+		const [item] = normalizeOrderProducts([
+			{
+				id: 'line-1',
+				productId: 'product-1',
+				quantity: 1,
+				priceState: 'UNKNOWN',
+				displayPrice: null,
+				unitPriceSnapshot: 0,
+				product: {
+					id: 'product-1',
+					name: 'Product',
+					slug: 'product'
+				}
+			}
+		])
+
+		expect(item.priceState).toBe('UNKNOWN')
+		expect(item.displayPrice).toBeNull()
+	})
 })

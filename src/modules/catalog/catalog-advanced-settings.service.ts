@@ -6,17 +6,15 @@ import {
 } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
-import { AuthService } from '@/modules/auth/auth.service'
-import { ChangePasswordDtoReq } from '@/modules/auth/dto/requests/change-password.dto.req'
 import {
 	AuthSessionDto,
-	AuthSessionsResponseDto
-} from '@/modules/auth/dto/responses/session.dto.res'
-import {
+	AuthSessionsResponseDto,
+	AuthService,
+	ChangePasswordDtoReq,
 	type ActiveSessionEntry,
 	SessionService
-} from '@/modules/auth/session/session.service'
-import { IntegrationService } from '@/modules/integration/integration.service'
+} from '@/modules/auth/public'
+import { IntegrationService } from '@/modules/integration/public'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 

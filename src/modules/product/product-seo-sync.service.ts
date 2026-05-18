@@ -1,9 +1,9 @@
-﻿import { ProductStatus, SeoChangeFreq, SeoEntityType } from '@generated/enums'
+import { ProductStatus, SeoChangeFreq, SeoEntityType } from '@generated/enums'
 import { SeoSettingCreateInput, SeoSettingUpdateInput } from '@generated/models'
 import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
-import { SeoRepository } from '@/modules/seo/seo.repository'
+import { SeoRepository } from '@/modules/seo/public'
 import {
 	MEDIA_DETAIL_VARIANT_NAMES,
 	MediaUrlService
@@ -365,8 +365,7 @@ export class ProductSeoSyncService {
 			variant =>
 				variant.isAvailable &&
 				variant.status === 'ACTIVE' &&
-				typeof variant.stock === 'number' &&
-				variant.stock > 0
+				(variant.stock === null || variant.stock > 0)
 		)
 
 		return hasAvailableVariant

@@ -1,5 +1,7 @@
 import { Prisma } from '@generated/client'
 import {
+	IntegrationProvider,
+	IntegrationSyncRunMode,
 	Metric,
 	MetricScope,
 	PaymentKind,
@@ -8,13 +10,19 @@ import {
 } from '@generated/enums'
 import {
 	BadRequestException,
+	Inject,
 	Injectable,
-	NotFoundException
+	NotFoundException,
+	Optional
 } from '@nestjs/common'
 import { hash } from 'argon2'
 import { randomInt, randomUUID } from 'node:crypto'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import {
+	CAPABILITY_READER_PORT,
+	type CapabilityReaderPort
+} from '@/modules/capability/contracts'
 import {
 	CAPABILITY_CATALOG_SALE_UNITS,
 	CAPABILITY_INTEGRATION_MOYSKLAD,
@@ -23,9 +31,12 @@ import {
 	CAPABILITY_PRODUCT_VARIANTS,
 	CATALOG_CAPABILITIES,
 	type CatalogCapability
-} from '@/modules/capability/capability.constants'
-import { CapabilityService } from '@/modules/capability/capability.service'
-import { S3Service } from '@/modules/s3/s3.service'
+} from '@/modules/capability/public'
+import {
+	PRODUCT_MAINTENANCE_PORT,
+	type ProductMaintenancePort
+} from '@/modules/product/public'
+import { S3Service } from '@/modules/s3/public'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_CACHE_VERSION,
@@ -34,6 +45,11 @@ import {
 	CATEGORY_PRODUCTS_CACHE_VERSION,
 	PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
+import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
+import {
+	DOMAIN_EVENT_DISPATCHER,
+	type DomainEventDispatcher
+} from '@/shared/domain-events/domain-events.contract'
 import { buildMediaSelect } from '@/shared/media/media-select'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 
@@ -43,7 +59,8 @@ import {
 	ensureCatalogSlugAllowed,
 	normalizeCatalogSlug,
 	slugifyCatalogValue
-} from '../catalog/catalog.utils'
+} from '../catalog/public'
+import { renderSafeProviderErrorMessage } from '../integration/public'
 
 import {
 	type AdminCatalogSortField,
@@ -75,6 +92,15 @@ const ALLOWED_PAYMENT_PROOF_MIME = new Set([
 	'image/png',
 	'image/webp'
 ])
+
+type DuplicateCatalogMediaRecord = {
+	storage: string
+	key: string
+	path: string | null
+	entityId: string | null
+	variants: { storage: string; key: string }[]
+}
+
 const adminCatalogSelect = {
 	id: true,
 	slug: true,
@@ -193,7 +219,13 @@ export class AdminService {
 		private readonly mediaUrl: MediaUrlService,
 		private readonly s3: S3Service,
 		private readonly cache: CacheService,
-		private readonly capabilities: CapabilityService
+		@Inject(CAPABILITY_READER_PORT)
+		private readonly capabilities: CapabilityReaderPort,
+		@Inject(PRODUCT_MAINTENANCE_PORT)
+		private readonly productMaintenance: ProductMaintenancePort,
+		@Optional()
+		@Inject(DOMAIN_EVENT_DISPATCHER)
+		private readonly events?: DomainEventDispatcher
 	) {}
 
 	async createCatalog(dto: AdminCreateCatalogDtoReq) {
@@ -487,335 +519,350 @@ export class AdminService {
 		const passwordHash = await hash(password)
 		const login = await this.generateOwnerLogin(dto.slug)
 		const ownerName = dto.name
+		const copiedS3Keys: string[] = []
 
-		const created = await this.prisma.$transaction(async tx => {
-			const owner = await tx.user.create({
-				data: {
-					name: ownerName,
-					login,
-					password: passwordHash,
-					role: Role.CATALOG,
-					isEmailConfirmed: true
-				},
-				select: {
-					id: true,
-					name: true,
-					login: true
-				}
-			})
+		let created!: {
+			owner: { id: string; name: string; login: string }
+			catalog: AdminCatalogRecord
+		}
+		try {
+			created = await this.prisma.$transaction(async tx => {
+				const owner = await tx.user.create({
+					data: {
+						name: ownerName,
+						login,
+						password: passwordHash,
+						role: Role.CATALOG,
+						isEmailConfirmed: true
+					},
+					select: {
+						id: true,
+						name: true,
+						login: true
+					}
+				})
 
-			const catalog = await tx.catalog.create({
-				data: {
-					name: dto.name,
-					slug,
-					type: { connect: { id: dto.typeId } },
-					user: { connect: { id: owner.id } },
-					...(source.parentId
-						? { parent: { connect: { id: source.parentId } } }
-						: {}),
-					...(activityIds.length
-						? { activity: { connect: activityIds.map(id => ({ id })) } }
-						: {}),
-					...(regionIds.length
-						? { region: { connect: regionIds.map(id => ({ id })) } }
-						: {}),
-					config: { create: { status: dto.status } },
-					settings: { create: {} },
-					metrics: {
-						connectOrCreate: [
-							{
-								where: { counterId: GLOBAL_YANDEX_METRIKA_COUNTER_ID },
-								create: {
-									provider: Metric.YANDEX,
-									scope: MetricScope.GLOBAL,
-									counterId: GLOBAL_YANDEX_METRIKA_COUNTER_ID
+				const catalog = await tx.catalog.create({
+					data: {
+						name: dto.name,
+						slug,
+						type: { connect: { id: dto.typeId } },
+						user: { connect: { id: owner.id } },
+						...(source.parentId
+							? { parent: { connect: { id: source.parentId } } }
+							: {}),
+						...(activityIds.length
+							? { activity: { connect: activityIds.map(id => ({ id })) } }
+							: {}),
+						...(regionIds.length
+							? { region: { connect: regionIds.map(id => ({ id })) } }
+							: {}),
+						config: { create: { status: dto.status } },
+						settings: { create: {} },
+						metrics: {
+							connectOrCreate: [
+								{
+									where: { counterId: GLOBAL_YANDEX_METRIKA_COUNTER_ID },
+									create: {
+										provider: Metric.YANDEX,
+										scope: MetricScope.GLOBAL,
+										counterId: GLOBAL_YANDEX_METRIKA_COUNTER_ID
+									}
 								}
-							}
-						]
-					}
-				},
-				select: { id: true }
-			})
-
-			const mediaIdMap = new Map<string, string>()
-			for (const media of source.media) {
-				const nextMediaId = randomUUID()
-				mediaIdMap.set(media.id, nextMediaId)
-				await tx.media.create({
-					data: {
-						id: nextMediaId,
-						catalogId: catalog.id,
-						originalName: media.originalName,
-						mimeType: media.mimeType,
-						size: media.size,
-						width: media.width,
-						height: media.height,
-						path: media.path,
-						entityId: media.entityId,
-						storage: media.storage,
-						key: media.key,
-						checksum: media.checksum,
-						status: media.status,
-						variants: {
-							create: media.variants.map(variant => ({
-								kind: variant.kind,
-								mimeType: variant.mimeType,
-								size: variant.size,
-								width: variant.width,
-								height: variant.height,
-								storage: variant.storage,
-								key: variant.key
-							}))
+							]
 						}
-					}
+					},
+					select: { id: true }
 				})
-			}
 
-			if (source.config) {
-				await tx.catalogConfig.update({
-					where: { catalogId: catalog.id },
-					data: {
-						about: source.config.about,
-						description: source.config.description,
-						currency: source.config.currency,
-						logoMediaId: mapNullableId(source.config.logoMediaId, mediaIdMap),
-						bgMediaId: mapNullableId(source.config.bgMediaId, mediaIdMap),
-						note: source.config.note,
-						deleteAt: source.config.deleteAt
-					}
-				})
-			}
-
-			if (source.settings) {
-				await tx.catalogSettings.update({
-					where: { catalogId: catalog.id },
-					data: {
-						isActive: source.settings.isActive,
-						defaultMode: source.settings.defaultMode,
-						allowedModes: source.settings.allowedModes,
-						googleVerification: source.settings.googleVerification,
-						yandexVerification: source.settings.yandexVerification,
-						deleteAt: source.settings.deleteAt
-					}
-				})
-			}
-
-			if (source.contacts.length) {
-				await tx.catalogContact.createMany({
-					data: source.contacts.map(contact => ({
-						catalogId: catalog.id,
-						type: contact.type,
-						position: contact.position,
-						value: contact.value,
-						deleteAt: contact.deleteAt
-					}))
-				})
-			}
-
-			const brandIdMap = new Map<string, string>()
-			for (const brand of source.brands) {
-				const nextBrandId = randomUUID()
-				brandIdMap.set(brand.id, nextBrandId)
-				await tx.brand.create({
-					data: {
-						id: nextBrandId,
-						catalogId: catalog.id,
-						name: brand.name,
-						slug: brand.slug,
-						deleteAt: brand.deleteAt
-					}
-				})
-			}
-
-			const categoryIdMap = new Map<string, string>()
-			const pendingCategories = [...source.category]
-			while (pendingCategories.length) {
-				let createdInPass = 0
-				for (let index = pendingCategories.length - 1; index >= 0; index -= 1) {
-					const category = pendingCategories[index]
-					if (category.parentId && !categoryIdMap.has(category.parentId)) {
-						continue
-					}
-
-					const nextCategoryId = randomUUID()
-					categoryIdMap.set(category.id, nextCategoryId)
-					await tx.category.create({
+				const mediaIdMap = new Map<string, string>()
+				for (const media of source.media) {
+					const nextMediaId = randomUUID()
+					const copiedKeys = await this.copyDuplicatedMediaKeys(
+						media,
+						catalog.id,
+						copiedS3Keys
+					)
+					mediaIdMap.set(media.id, nextMediaId)
+					await tx.media.create({
 						data: {
-							id: nextCategoryId,
+							id: nextMediaId,
 							catalogId: catalog.id,
-							parentId: category.parentId
-								? categoryIdMap.get(category.parentId)
-								: null,
-							position: category.position,
-							name: category.name,
-							imageMediaId: mapNullableId(category.imageMediaId, mediaIdMap),
-							descriptor: category.descriptor,
-							discount: category.discount,
-							deleteAt: category.deleteAt
+							originalName: media.originalName,
+							mimeType: media.mimeType,
+							size: media.size,
+							width: media.width,
+							height: media.height,
+							path: media.path,
+							entityId: media.entityId,
+							storage: media.storage,
+							key: copiedKeys.key,
+							checksum: media.checksum,
+							status: media.status,
+							variants: {
+								create: media.variants.map((variant, index) => ({
+									kind: variant.kind,
+									mimeType: variant.mimeType,
+									size: variant.size,
+									width: variant.width,
+									height: variant.height,
+									storage: variant.storage,
+									key: copiedKeys.variantKeys[index] ?? variant.key
+								}))
+							}
 						}
 					})
-					pendingCategories.splice(index, 1)
-					createdInPass += 1
 				}
 
-				if (!createdInPass) {
-					throw new BadRequestException('Unable to duplicate category tree')
+				if (source.config) {
+					await tx.catalogConfig.update({
+						where: { catalogId: catalog.id },
+						data: {
+							about: source.config.about,
+							description: source.config.description,
+							currency: source.config.currency,
+							logoMediaId: mapNullableId(source.config.logoMediaId, mediaIdMap),
+							bgMediaId: mapNullableId(source.config.bgMediaId, mediaIdMap),
+							note: source.config.note,
+							deleteAt: source.config.deleteAt
+						}
+					})
 				}
-			}
 
-			const productIdMap = new Map<string, string>()
-			for (const product of source.products) {
-				const nextProductId = randomUUID()
-				productIdMap.set(product.id, nextProductId)
-				await tx.product.create({
-					data: {
-						id: nextProductId,
-						catalogId: catalog.id,
-						brandId: product.brandId
-							? (brandIdMap.get(product.brandId) ?? null)
-							: null,
-						sku: buildDuplicatedSku(product.sku, slug),
-						name: product.name,
-						slug: product.slug,
-						price: product.price,
-						isPopular: product.isPopular,
-						status: product.status,
-						position: product.position,
-						deleteAt: product.deleteAt
-					}
-				})
+				if (source.settings) {
+					await tx.catalogSettings.update({
+						where: { catalogId: catalog.id },
+						data: {
+							isActive: source.settings.isActive,
+							defaultMode: source.settings.defaultMode,
+							allowedModes: source.settings.allowedModes,
+							googleVerification: source.settings.googleVerification,
+							yandexVerification: source.settings.yandexVerification,
+							deleteAt: source.settings.deleteAt
+						}
+					})
+				}
 
-				if (product.productAttributes.length) {
-					await tx.productAttribute.createMany({
-						data: product.productAttributes.map(attribute => ({
-							productId: nextProductId,
-							attributeId: attribute.attributeId,
-							enumValueId: attribute.enumValueId,
-							valueString: attribute.valueString,
-							valueInteger: attribute.valueInteger,
-							valueDecimal: attribute.valueDecimal,
-							valueBoolean: attribute.valueBoolean,
-							valueDateTime: attribute.valueDateTime,
-							deleteAt: attribute.deleteAt
+				if (source.contacts.length) {
+					await tx.catalogContact.createMany({
+						data: source.contacts.map(contact => ({
+							catalogId: catalog.id,
+							type: contact.type,
+							position: contact.position,
+							value: contact.value,
+							deleteAt: contact.deleteAt
 						}))
 					})
 				}
 
-				for (const variant of product.variants) {
-					const nextVariantId = randomUUID()
-					await tx.productVariant.create({
+				const brandIdMap = new Map<string, string>()
+				for (const brand of source.brands) {
+					const nextBrandId = randomUUID()
+					brandIdMap.set(brand.id, nextBrandId)
+					await tx.brand.create({
 						data: {
-							id: nextVariantId,
-							productId: nextProductId,
-							sku: buildDuplicatedSku(variant.sku, slug),
-							variantKey: variant.variantKey,
-							stock: variant.stock,
-							price: variant.price,
-							status: variant.status,
-							isAvailable: variant.isAvailable,
-							deleteAt: variant.deleteAt
+							id: nextBrandId,
+							catalogId: catalog.id,
+							name: brand.name,
+							slug: brand.slug,
+							deleteAt: brand.deleteAt
+						}
+					})
+				}
+
+				const categoryIdMap = new Map<string, string>()
+				const pendingCategories = [...source.category]
+				while (pendingCategories.length) {
+					let createdInPass = 0
+					for (let index = pendingCategories.length - 1; index >= 0; index -= 1) {
+						const category = pendingCategories[index]
+						if (category.parentId && !categoryIdMap.has(category.parentId)) {
+							continue
+						}
+
+						const nextCategoryId = randomUUID()
+						categoryIdMap.set(category.id, nextCategoryId)
+						await tx.category.create({
+							data: {
+								id: nextCategoryId,
+								catalogId: catalog.id,
+								parentId: category.parentId
+									? categoryIdMap.get(category.parentId)
+									: null,
+								position: category.position,
+								name: category.name,
+								imageMediaId: mapNullableId(category.imageMediaId, mediaIdMap),
+								descriptor: category.descriptor,
+								discount: category.discount,
+								deleteAt: category.deleteAt
+							}
+						})
+						pendingCategories.splice(index, 1)
+						createdInPass += 1
+					}
+
+					if (!createdInPass) {
+						throw new BadRequestException('Unable to duplicate category tree')
+					}
+				}
+
+				const productIdMap = new Map<string, string>()
+				for (const product of source.products) {
+					const nextProductId = randomUUID()
+					productIdMap.set(product.id, nextProductId)
+					await tx.product.create({
+						data: {
+							id: nextProductId,
+							catalogId: catalog.id,
+							brandId: product.brandId
+								? (brandIdMap.get(product.brandId) ?? null)
+								: null,
+							sku: buildDuplicatedSku(product.sku, slug),
+							name: product.name,
+							slug: product.slug,
+							price: product.price,
+							isPopular: product.isPopular,
+							status: product.status,
+							position: product.position,
+							deleteAt: product.deleteAt
 						}
 					})
 
-					if (variant.attributes.length) {
-						await tx.variantAttribute.createMany({
-							data: variant.attributes.map(attribute => ({
-								variantId: nextVariantId,
+					if (product.productAttributes.length) {
+						await tx.productAttribute.createMany({
+							data: product.productAttributes.map(attribute => ({
+								productId: nextProductId,
 								attributeId: attribute.attributeId,
 								enumValueId: attribute.enumValueId,
+								valueString: attribute.valueString,
+								valueInteger: attribute.valueInteger,
+								valueDecimal: attribute.valueDecimal,
+								valueBoolean: attribute.valueBoolean,
+								valueDateTime: attribute.valueDateTime,
 								deleteAt: attribute.deleteAt
 							}))
 						})
 					}
-				}
 
-				const productMedia = product.media
-					.map(item => {
-						const mediaId = mediaIdMap.get(item.mediaId)
-						return mediaId
-							? {
-									productId: nextProductId,
-									mediaId,
-									position: item.position,
-									kind: item.kind
-								}
-							: null
-					})
-					.filter((item): item is NonNullable<typeof item> => item !== null)
-				if (productMedia.length) {
-					await tx.productMedia.createMany({ data: productMedia })
-				}
+					for (const variant of product.variants) {
+						const nextVariantId = randomUUID()
+						await tx.productVariant.create({
+							data: {
+								id: nextVariantId,
+								productId: nextProductId,
+								sku: buildDuplicatedSku(variant.sku, slug),
+								variantKey: variant.variantKey,
+								stock: variant.stock,
+								price: variant.price,
+								status: variant.status,
+								isAvailable: variant.isAvailable,
+								deleteAt: variant.deleteAt
+							}
+						})
 
-				const categoryProducts = product.categoryProducts
-					.map(item => {
-						const categoryId = categoryIdMap.get(item.categoryId)
-						return categoryId
-							? {
-									productId: nextProductId,
-									categoryId,
-									position: item.position
-								}
-							: null
-					})
-					.filter((item): item is NonNullable<typeof item> => item !== null)
-				if (categoryProducts.length) {
-					await tx.categoryProduct.createMany({ data: categoryProducts })
-				}
-			}
-
-			for (const setting of source.seoSettings) {
-				await tx.seoSetting.create({
-					data: {
-						catalogId: catalog.id,
-						entityType: setting.entityType,
-						entityId: mapSeoEntityId(setting.entityType, setting.entityId, {
-							sourceCatalogId: source.id,
-							nextCatalogId: catalog.id,
-							categoryIdMap,
-							productIdMap,
-							brandIdMap
-						}),
-						urlPath: setting.urlPath,
-						canonicalUrl: setting.canonicalUrl,
-						title: setting.title,
-						description: setting.description,
-						keywords: setting.keywords,
-						h1: setting.h1,
-						seoText: setting.seoText,
-						robots: setting.robots,
-						isIndexable: setting.isIndexable,
-						isFollowable: setting.isFollowable,
-						ogTitle: setting.ogTitle,
-						ogDescription: setting.ogDescription,
-						ogMediaId: mapNullableId(setting.ogMediaId, mediaIdMap),
-						ogType: setting.ogType,
-						ogUrl: setting.ogUrl,
-						ogSiteName: setting.ogSiteName,
-						ogLocale: setting.ogLocale,
-						twitterCard: setting.twitterCard,
-						twitterTitle: setting.twitterTitle,
-						twitterDescription: setting.twitterDescription,
-						twitterMediaId: mapNullableId(setting.twitterMediaId, mediaIdMap),
-						faviconMediaId: mapNullableId(setting.faviconMediaId, mediaIdMap),
-						twitterSite: setting.twitterSite,
-						twitterCreator: setting.twitterCreator,
-						hreflang: setting.hreflang ?? undefined,
-						structuredData: setting.structuredData ?? undefined,
-						extras: setting.extras ?? undefined,
-						sitemapPriority: setting.sitemapPriority,
-						sitemapChangeFreq: setting.sitemapChangeFreq,
-						deleteAt: setting.deleteAt
+						if (variant.attributes.length) {
+							await tx.variantAttribute.createMany({
+								data: variant.attributes.map(attribute => ({
+									variantId: nextVariantId,
+									attributeId: attribute.attributeId,
+									enumValueId: attribute.enumValueId,
+									deleteAt: attribute.deleteAt
+								}))
+							})
+						}
 					}
+
+					const productMedia = product.media
+						.map(item => {
+							const mediaId = mediaIdMap.get(item.mediaId)
+							return mediaId
+								? {
+										productId: nextProductId,
+										mediaId,
+										position: item.position,
+										kind: item.kind
+									}
+								: null
+						})
+						.filter((item): item is NonNullable<typeof item> => item !== null)
+					if (productMedia.length) {
+						await tx.productMedia.createMany({ data: productMedia })
+					}
+
+					const categoryProducts = product.categoryProducts
+						.map(item => {
+							const categoryId = categoryIdMap.get(item.categoryId)
+							return categoryId
+								? {
+										productId: nextProductId,
+										categoryId,
+										position: item.position
+									}
+								: null
+						})
+						.filter((item): item is NonNullable<typeof item> => item !== null)
+					if (categoryProducts.length) {
+						await tx.categoryProduct.createMany({ data: categoryProducts })
+					}
+				}
+
+				for (const setting of source.seoSettings) {
+					await tx.seoSetting.create({
+						data: {
+							catalogId: catalog.id,
+							entityType: setting.entityType,
+							entityId: mapSeoEntityId(setting.entityType, setting.entityId, {
+								sourceCatalogId: source.id,
+								nextCatalogId: catalog.id,
+								categoryIdMap,
+								productIdMap,
+								brandIdMap
+							}),
+							urlPath: setting.urlPath,
+							canonicalUrl: setting.canonicalUrl,
+							title: setting.title,
+							description: setting.description,
+							keywords: setting.keywords,
+							h1: setting.h1,
+							seoText: setting.seoText,
+							robots: setting.robots,
+							isIndexable: setting.isIndexable,
+							isFollowable: setting.isFollowable,
+							ogTitle: setting.ogTitle,
+							ogDescription: setting.ogDescription,
+							ogMediaId: mapNullableId(setting.ogMediaId, mediaIdMap),
+							ogType: setting.ogType,
+							ogUrl: setting.ogUrl,
+							ogSiteName: setting.ogSiteName,
+							ogLocale: setting.ogLocale,
+							twitterCard: setting.twitterCard,
+							twitterTitle: setting.twitterTitle,
+							twitterDescription: setting.twitterDescription,
+							twitterMediaId: mapNullableId(setting.twitterMediaId, mediaIdMap),
+							faviconMediaId: mapNullableId(setting.faviconMediaId, mediaIdMap),
+							twitterSite: setting.twitterSite,
+							twitterCreator: setting.twitterCreator,
+							hreflang: setting.hreflang ?? undefined,
+							structuredData: setting.structuredData ?? undefined,
+							extras: setting.extras ?? undefined,
+							sitemapPriority: setting.sitemapPriority,
+							sitemapChangeFreq: setting.sitemapChangeFreq,
+							deleteAt: setting.deleteAt
+						}
+					})
+				}
+
+				const catalogWithRelations = await tx.catalog.findUniqueOrThrow({
+					where: { id: catalog.id },
+					select: adminCatalogSelect
 				})
-			}
 
-			const catalogWithRelations = await tx.catalog.findUniqueOrThrow({
-				where: { id: catalog.id },
-				select: adminCatalogSelect
+				return { owner, catalog: catalogWithRelations }
 			})
-
-			return { owner, catalog: catalogWithRelations }
-		})
+		} catch (error) {
+			await this.s3.deleteObjectsByKeys(copiedS3Keys).catch(() => undefined)
+			throw error
+		}
 
 		return {
 			catalog: this.mapAdminCatalog(created.catalog),
@@ -931,7 +978,7 @@ export class AdminService {
 		await this.invalidateCatalogCaches(id)
 
 		if (dto.typeId && dto.typeId !== current.typeId) {
-			await this.invalidateCatalogTypeCaches(current.typeId, dto.typeId)
+			await this.invalidateCatalogTypeCaches(id, current.typeId, dto.typeId)
 		}
 
 		return this.mapAdminCatalog(catalog)
@@ -940,6 +987,175 @@ export class AdminService {
 	async getCatalogFeatureEntitlements(id: string) {
 		await this.ensureCatalogExists(id)
 		return this.buildCatalogFeatureEntitlementDto(id)
+	}
+
+	async diagnoseCatalogDefaultVariants(catalogId: string, sampleLimit?: number) {
+		await this.ensureCatalogExists(catalogId)
+		return this.productMaintenance.diagnoseDefaultVariantsForCatalog(
+			catalogId,
+			sampleLimit
+		)
+	}
+
+	async repairCatalogMissingDefaultVariants(catalogId: string) {
+		await this.ensureCatalogExists(catalogId)
+		return this.productMaintenance.repairMissingDefaultVariantsForCatalog(
+			catalogId
+		)
+	}
+
+	async repairCatalogDefaultVariantPriceMismatches(
+		catalogId: string,
+		options?: {
+			apply?: boolean
+			batchSize?: number
+			sampleLimit?: number
+		}
+	) {
+		await this.ensureCatalogExists(catalogId)
+		return this.productMaintenance.repairDefaultVariantPriceMismatchesForCatalog(
+			catalogId,
+			options
+		)
+	}
+
+	async getCatalogMoySkladStockDiagnostics(catalogId: string) {
+		await this.ensureCatalogExists(catalogId)
+
+		const integration = await this.prisma.integration.findUnique({
+			where: {
+				catalogId_provider: {
+					catalogId,
+					provider: IntegrationProvider.MOYSKLAD
+				}
+			},
+			select: {
+				id: true,
+				isActive: true,
+				metadata: true
+			}
+		})
+
+		if (!integration) {
+			return {
+				catalogId,
+				integrationId: null,
+				hasIntegration: false,
+				integrationActive: false,
+				syncStockEnabled: false,
+				stockFieldOwnedByMoySklad: false,
+				stockWebhookEnabled: false,
+				stockWebhookRegistered: false,
+				lastStockSyncedAt: null,
+				links: buildEmptyMoySkladStockLinkCounters(),
+				latestRun: null
+			}
+		}
+
+		const [
+			latestRun,
+			productLinks,
+			variantLinks,
+			productLinksWithStockSync,
+			variantLinksWithStockSync,
+			productLinksMissing,
+			variantLinksMissing,
+			productLinksWithErrors,
+			variantLinksWithErrors,
+			productSkippedReasonRows,
+			variantSkippedReasonRows
+		] = await Promise.all([
+			this.prisma.integrationSyncRun.findFirst({
+				where: {
+					catalogId,
+					provider: IntegrationProvider.MOYSKLAD,
+					mode: IntegrationSyncRunMode.STOCK
+				},
+				orderBy: [{ requestedAt: 'desc' }, { createdAt: 'desc' }],
+				select: {
+					id: true,
+					trigger: true,
+					status: true,
+					snapshotCompleteness: true,
+					error: true,
+					metadata: true,
+					totalProducts: true,
+					updatedProducts: true,
+					requestedAt: true,
+					startedAt: true,
+					finishedAt: true
+				}
+			}),
+			this.prisma.integrationProductLink.count({
+				where: { integrationId: integration.id }
+			}),
+			this.prisma.integrationVariantLink.count({
+				where: { integrationId: integration.id }
+			}),
+			this.prisma.integrationProductLink.count({
+				where: { integrationId: integration.id, lastStockSyncAt: { not: null } }
+			}),
+			this.prisma.integrationVariantLink.count({
+				where: { integrationId: integration.id, lastStockSyncAt: { not: null } }
+			}),
+			this.prisma.integrationProductLink.count({
+				where: { integrationId: integration.id, missingSince: { not: null } }
+			}),
+			this.prisma.integrationVariantLink.count({
+				where: { integrationId: integration.id, missingSince: { not: null } }
+			}),
+			this.prisma.integrationProductLink.count({
+				where: { integrationId: integration.id, lastExternalError: { not: null } }
+			}),
+			this.prisma.integrationVariantLink.count({
+				where: { integrationId: integration.id, lastExternalError: { not: null } }
+			}),
+			this.prisma.integrationProductLink.groupBy({
+				by: ['skippedReason'],
+				where: {
+					integrationId: integration.id,
+					skippedReason: { not: null }
+				},
+				_count: { skippedReason: true }
+			}),
+			this.prisma.integrationVariantLink.groupBy({
+				by: ['skippedReason'],
+				where: {
+					integrationId: integration.id,
+					skippedReason: { not: null }
+				},
+				_count: { skippedReason: true }
+			})
+		])
+
+		const metadata = readJsonRecord(integration.metadata)
+		const stockWebhook = readJsonRecord(metadata.stockWebhook)
+		const fieldOwnership = readJsonRecord(metadata.fieldOwnership)
+
+		return {
+			catalogId,
+			integrationId: integration.id,
+			hasIntegration: true,
+			integrationActive: integration.isActive,
+			syncStockEnabled: metadata.syncStock !== false,
+			stockFieldOwnedByMoySklad: fieldOwnership.stock !== 'local',
+			stockWebhookEnabled: metadata.stockWebhookEnabled === true,
+			stockWebhookRegistered: readNonEmptyString(stockWebhook.externalId) !== null,
+			lastStockSyncedAt: readNonEmptyString(metadata.lastStockSyncedAt),
+			links: {
+				productLinks,
+				variantLinks,
+				productLinksWithStockSync,
+				variantLinksWithStockSync,
+				productLinksMissing,
+				variantLinksMissing,
+				productLinksWithErrors,
+				variantLinksWithErrors,
+				productSkippedReasons: mapSkippedReasonCounts(productSkippedReasonRows),
+				variantSkippedReasons: mapSkippedReasonCounts(variantSkippedReasonRows)
+			},
+			latestRun: latestRun ? mapMoySkladStockRunDiagnostics(latestRun) : null
+		}
 	}
 
 	async updateCatalogFeatureEntitlement(
@@ -1532,6 +1748,54 @@ export class AdminService {
 		return uploaded.url
 	}
 
+	private async copyDuplicatedMediaKeys(
+		media: DuplicateCatalogMediaRecord,
+		targetCatalogId: string,
+		copiedS3Keys: string[]
+	): Promise<{ key: string; variantKeys: string[] }> {
+		const key =
+			media.storage === 's3'
+				? await this.copyDuplicatedS3Key(
+						media.key,
+						media,
+						targetCatalogId,
+						copiedS3Keys
+					)
+				: media.key
+		const variantKeys: string[] = []
+
+		for (const variant of media.variants) {
+			const variantKey =
+				variant.storage === 's3'
+					? await this.copyDuplicatedS3Key(
+							variant.key,
+							media,
+							targetCatalogId,
+							copiedS3Keys
+						)
+					: variant.key
+			variantKeys.push(variantKey)
+		}
+
+		return { key, variantKeys }
+	}
+
+	private async copyDuplicatedS3Key(
+		sourceKey: string,
+		media: Pick<DuplicateCatalogMediaRecord, 'path' | 'entityId'>,
+		targetCatalogId: string,
+		copiedS3Keys: string[]
+	): Promise<string> {
+		const result = await this.s3.copyObjectToCatalog({
+			sourceKey,
+			targetCatalogId,
+			path: media.path,
+			entityId: media.entityId
+		})
+		copiedS3Keys.push(result.key)
+		return result.key
+	}
+
 	private async invalidateCatalogTypeChangeCaches(
 		catalogId: string,
 		previousTypeId: string,
@@ -1539,14 +1803,29 @@ export class AdminService {
 	) {
 		await Promise.all([
 			this.invalidateCatalogCaches(catalogId),
-			this.invalidateCatalogTypeCaches(previousTypeId, nextTypeId)
+			this.invalidateCatalogTypeCaches(catalogId, previousTypeId, nextTypeId)
 		])
 	}
 
 	private async invalidateCatalogTypeCaches(
+		catalogId: string,
 		previousTypeId: string,
 		nextTypeId: string
 	) {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'catalog.cache_invalidated',
+					catalogId,
+					scopes: [
+						{ name: 'catalog_type', key: previousTypeId },
+						{ name: 'catalog_type', key: nextTypeId }
+					]
+				})
+			)
+			return
+		}
+
 		await Promise.all([
 			this.cache.bumpVersion(CATALOG_TYPE_CACHE_VERSION, previousTypeId),
 			this.cache.bumpVersion(CATALOG_TYPE_CACHE_VERSION, nextTypeId)
@@ -1554,6 +1833,21 @@ export class AdminService {
 	}
 
 	private async invalidateCatalogCaches(catalogId: string) {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'catalog.cache_invalidated',
+					catalogId,
+					scopes: [
+						{ name: 'catalog' },
+						{ name: 'catalog_products' },
+						{ name: 'category_products' }
+					]
+				})
+			)
+			return
+		}
+
 		await Promise.all([
 			this.cache.bumpVersion(CATALOG_CACHE_VERSION, catalogId),
 			this.cache.bumpVersion(PRODUCTS_CACHE_VERSION, catalogId),
@@ -1562,6 +1856,22 @@ export class AdminService {
 	}
 
 	private async invalidateCatalogContentCaches(catalogId: string) {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'catalog.cache_invalidated',
+					catalogId,
+					scopes: [
+						{ name: 'catalog' },
+						{ name: 'catalog_products' },
+						{ name: 'category_products' },
+						{ name: 'category_list' }
+					]
+				})
+			)
+			return
+		}
+
 		await Promise.all([
 			this.cache.bumpVersion(CATALOG_CACHE_VERSION, catalogId),
 			this.cache.bumpVersion(PRODUCTS_CACHE_VERSION, catalogId),
@@ -1761,6 +2071,133 @@ export class AdminService {
 
 		throw new BadRequestException('Unable to generate owner login')
 	}
+}
+
+function buildEmptyMoySkladStockLinkCounters() {
+	return {
+		productLinks: 0,
+		variantLinks: 0,
+		productLinksWithStockSync: 0,
+		variantLinksWithStockSync: 0,
+		productLinksMissing: 0,
+		variantLinksMissing: 0,
+		productLinksWithErrors: 0,
+		variantLinksWithErrors: 0,
+		productSkippedReasons: [],
+		variantSkippedReasons: []
+	}
+}
+
+function mapSkippedReasonCounts(rows: unknown) {
+	if (!Array.isArray(rows)) return []
+
+	return rows
+		.flatMap(row => {
+			if (!isJsonRecord(row)) return []
+			const reason = readNonEmptyString(row.skippedReason)
+			if (!reason) return []
+			const countSource = isJsonRecord(row._count) ? row._count : {}
+			const count = readNonNegativeInteger(countSource.skippedReason) ?? 0
+			if (count <= 0) return []
+
+			return [{ reason, count }]
+		})
+		.sort((left, right) => {
+			if (left.count !== right.count) return right.count - left.count
+			return left.reason.localeCompare(right.reason, 'ru')
+		})
+}
+
+function mapMoySkladStockRunDiagnostics(run: {
+	id: string
+	trigger: unknown
+	status: unknown
+	snapshotCompleteness: unknown
+	error: string | null
+	metadata: unknown
+	totalProducts: number
+	updatedProducts: number
+	requestedAt: Date
+	startedAt: Date | null
+	finishedAt: Date | null
+}) {
+	const metadata = readJsonRecord(run.metadata)
+	const stockRows = readJsonRecord(metadata.stockRows)
+
+	return {
+		id: run.id,
+		trigger: run.trigger,
+		status: run.status,
+		snapshotCompleteness: run.snapshotCompleteness,
+		totalRows: readNonNegativeInteger(stockRows.total) ?? run.totalProducts,
+		appliedRows: readNonNegativeInteger(stockRows.applied) ?? run.updatedProducts,
+		skippedRows: readNonNegativeInteger(stockRows.skipped) ?? 0,
+		diagnostics: normalizeMoySkladStockDiagnostics(stockRows.diagnostics),
+		error: run.error ? renderSafeProviderErrorMessage(run.error) : null,
+		requestedAt: run.requestedAt,
+		startedAt: run.startedAt,
+		finishedAt: run.finishedAt
+	}
+}
+
+function normalizeMoySkladStockDiagnostics(value: unknown) {
+	if (!isJsonRecord(value)) return null
+
+	const source = readStockApplySource(value.source)
+	if (!source) return null
+	const skippedReasons = readJsonRecord(value.skippedReasons)
+
+	return {
+		source,
+		stockRows: readNonNegativeInteger(value.stockRows) ?? 0,
+		matchedStockRows: readNonNegativeInteger(value.matchedStockRows) ?? 0,
+		unmatchedStockRows: readNonNegativeInteger(value.unmatchedStockRows) ?? 0,
+		productLinks: readNonNegativeInteger(value.productLinks) ?? 0,
+		variantLinks: readNonNegativeInteger(value.variantLinks) ?? 0,
+		ignoredVariantLinks: readNonNegativeInteger(value.ignoredVariantLinks) ?? 0,
+		appliedProductLinks: readNonNegativeInteger(value.appliedProductLinks) ?? 0,
+		appliedVariantLinks: readNonNegativeInteger(value.appliedVariantLinks) ?? 0,
+		skippedReasons: {
+			missingStock: readNonNegativeInteger(skippedReasons.missingStock) ?? 0,
+			productHasVariantLinks:
+				readNonNegativeInteger(skippedReasons.productHasVariantLinks) ?? 0,
+			variantsCapabilityDisabled:
+				readNonNegativeInteger(skippedReasons.variantsCapabilityDisabled) ?? 0,
+			stockRowWithoutLocalLink:
+				readNonNegativeInteger(skippedReasons.stockRowWithoutLocalLink) ?? 0
+		}
+	}
+}
+
+function readJsonRecord(value: unknown): Record<string, unknown> {
+	return isJsonRecord(value) ? value : {}
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function readNonEmptyString(value: unknown): string | null {
+	if (typeof value !== 'string') return null
+	const normalized = value.trim()
+	return normalized || null
+}
+
+function readNonNegativeInteger(value: unknown): number | null {
+	const parsed =
+		typeof value === 'number'
+			? value
+			: typeof value === 'string'
+				? Number(value)
+				: Number.NaN
+
+	if (!Number.isInteger(parsed) || parsed < 0) return null
+	return parsed
+}
+
+function readStockApplySource(value: unknown): 'FULL_SYNC' | 'WEBHOOK' | null {
+	if (value === 'FULL_SYNC' || value === 'WEBHOOK') return value
+	return null
 }
 
 function generatePassword(length = 14) {

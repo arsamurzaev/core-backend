@@ -1,7 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing'
 
 import { AuditService } from '@/modules/audit/audit.service'
+import { AUDIT_RECORDER_PORT } from '@/modules/audit/contracts'
 import { CapabilityService } from '@/modules/capability/capability.service'
+import {
+	CAPABILITY_ASSERT_PORT,
+	CAPABILITY_READER_PORT
+} from '@/modules/capability/contracts'
 import { CacheService } from '@/shared/cache/cache.service'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
@@ -126,10 +131,22 @@ describe('CatalogService', () => {
 					}
 				},
 				{
+					provide: CAPABILITY_ASSERT_PORT,
+					useExisting: CapabilityService
+				},
+				{
+					provide: CAPABILITY_READER_PORT,
+					useExisting: CapabilityService
+				},
+				{
 					provide: AuditService,
 					useValue: {
 						record: jest.fn()
 					}
+				},
+				{
+					provide: AUDIT_RECORDER_PORT,
+					useExisting: AuditService
 				}
 			]
 		}).compile()

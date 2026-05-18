@@ -1,13 +1,18 @@
-import { ProductVariantStatus } from '@generated/client'
+import { NotFoundException } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 
 import { CAPABILITY_READER_PORT } from '@/modules/capability/contracts'
+import { PRODUCT_SELLABLE_READER_PORT } from '@/modules/product/contracts'
 
 import { CartVariantSelectionService } from './cart-variant-selection.service'
 
 describe('CartVariantSelectionService', () => {
 	let service: CartVariantSelectionService
 	let capabilities: { canUseProductVariants: jest.Mock }
+	let sellableReader: {
+		resolveProductSellable: jest.Mock
+		resolveVariantSellable: jest.Mock
+	}
 	let tx: {
 		productVariantSaleUnit: { findFirst: jest.Mock }
 		productVariant: { findMany: jest.Mock; findFirst: jest.Mock }
@@ -16,6 +21,19 @@ describe('CartVariantSelectionService', () => {
 	beforeEach(async () => {
 		capabilities = {
 			canUseProductVariants: jest.fn().mockResolvedValue(true)
+		}
+		sellableReader = {
+			resolveProductSellable: jest.fn().mockResolvedValue({
+				mode: 'SIMPLE',
+				variantId: null,
+				requiresVariantSelection: false,
+				availabilityState: 'AVAILABLE'
+			}),
+			resolveVariantSellable: jest.fn().mockResolvedValue({
+				variantId: 'variant-1',
+				availabilityState: 'AVAILABLE',
+				stock: 5
+			})
 		}
 		tx = {
 			productVariantSaleUnit: {
@@ -33,6 +51,10 @@ describe('CartVariantSelectionService', () => {
 				{
 					provide: CAPABILITY_READER_PORT,
 					useValue: capabilities
+				},
+				{
+					provide: PRODUCT_SELLABLE_READER_PORT,
+					useValue: sellableReader
 				}
 			]
 		}).compile()
@@ -58,26 +80,16 @@ describe('CartVariantSelectionService', () => {
 				'NONE'
 			)
 		).resolves.toBe('variant-from-sale-unit')
+		expect(sellableReader.resolveProductSellable).not.toHaveBeenCalled()
 	})
 
-	it('does not resolve hidden variants when product variants are disabled', async () => {
-		capabilities.canUseProductVariants.mockResolvedValue(false)
-		tx.productVariant.findMany.mockResolvedValue([
-			{
-				id: 'variant-with-attribute',
-				stock: 5,
-				status: ProductVariantStatus.ACTIVE,
-				isAvailable: true,
-				attributes: [{ id: 'attribute-link' }]
-			},
-			{
-				id: 'default-variant',
-				stock: 5,
-				status: ProductVariantStatus.ACTIVE,
-				isAvailable: true,
-				attributes: []
-			}
-		])
+	it('resolves simple default variant through sellable projection', async () => {
+		sellableReader.resolveProductSellable.mockResolvedValue({
+			mode: 'SIMPLE',
+			variantId: 'default-variant',
+			requiresVariantSelection: false,
+			availabilityState: 'AVAILABLE'
+		})
 
 		await expect(
 			service.resolveCartVariantId(
@@ -91,27 +103,102 @@ describe('CartVariantSelectionService', () => {
 				},
 				'NONE'
 			)
+		).resolves.toBe('default-variant')
+		expect(tx.productVariant.findMany).not.toHaveBeenCalled()
+		expect(sellableReader.resolveProductSellable).toHaveBeenCalledWith(
+			'catalog-1',
+			'product-1',
+			{ quantity: 1, enforceStock: false }
+		)
+	})
+
+	it('resolves hidden default variant when product variants are disabled', async () => {
+		capabilities.canUseProductVariants.mockResolvedValue(false)
+		sellableReader.resolveProductSellable.mockResolvedValue({
+			mode: 'SIMPLE',
+			variantId: 'default-variant',
+			requiresVariantSelection: false,
+			availabilityState: 'AVAILABLE'
+		})
+
+		await expect(
+			service.resolveCartVariantId(
+				tx as never,
+				'catalog-1',
+				{
+					productId: 'product-1',
+					variantId: null,
+					saleUnitId: null,
+					quantity: 1
+				},
+				'NONE'
+			)
+		).resolves.toBe('default-variant')
+		expect(tx.productVariant.findMany).not.toHaveBeenCalled()
+		expect(sellableReader.resolveProductSellable).toHaveBeenCalledWith(
+			'catalog-1',
+			'product-1',
+			{ quantity: 1, enforceStock: false }
+		)
+	})
+
+	it('does not auto-select matrix variants when product variants are disabled', async () => {
+		capabilities.canUseProductVariants.mockResolvedValue(false)
+		sellableReader.resolveProductSellable.mockResolvedValue({
+			mode: 'MATRIX',
+			variantId: null,
+			requiresVariantSelection: true,
+			availabilityState: 'AVAILABLE'
+		})
+
+		await expect(
+			service.resolveCartVariantId(
+				tx as never,
+				'catalog-1',
+				{
+					productId: 'product-1',
+					variantId: null,
+					saleUnitId: null,
+					quantity: 1
+				},
+				'EXTERNAL'
+			)
 		).resolves.toBeNull()
+		expect(tx.productVariant.findMany).not.toHaveBeenCalled()
+		expect(sellableReader.resolveProductSellable).toHaveBeenCalledWith(
+			'catalog-1',
+			'product-1',
+			{ quantity: 1, enforceStock: true }
+		)
+	})
+
+	it('does not resolve hidden default variant when removing a line', async () => {
+		capabilities.canUseProductVariants.mockResolvedValue(false)
+
+		await expect(
+			service.resolveCartVariantId(
+				tx as never,
+				'catalog-1',
+				{
+					productId: 'product-1',
+					variantId: null,
+					saleUnitId: null,
+					quantity: 0
+				},
+				'EXTERNAL'
+			)
+		).resolves.toBeNull()
+		expect(sellableReader.resolveProductSellable).not.toHaveBeenCalled()
 		expect(tx.productVariant.findMany).not.toHaveBeenCalled()
 	})
 
-	it('requires explicit selection when variants are enabled', async () => {
-		tx.productVariant.findMany.mockResolvedValue([
-			{
-				id: 'variant-1',
-				stock: 5,
-				status: ProductVariantStatus.ACTIVE,
-				isAvailable: true,
-				attributes: [{ id: 'attribute-link-1' }]
-			},
-			{
-				id: 'variant-2',
-				stock: 5,
-				status: ProductVariantStatus.ACTIVE,
-				isAvailable: true,
-				attributes: [{ id: 'attribute-link-2' }]
-			}
-		])
+	it('requires explicit selection for matrix products', async () => {
+		sellableReader.resolveProductSellable.mockResolvedValue({
+			mode: 'MATRIX',
+			variantId: null,
+			requiresVariantSelection: true,
+			availabilityState: 'AVAILABLE'
+		})
 
 		await expect(
 			service.resolveCartVariantId(
@@ -126,23 +213,58 @@ describe('CartVariantSelectionService', () => {
 				'NONE'
 			)
 		).rejects.toThrow('Выберите вариацию товара')
+		expect(tx.productVariant.findMany).not.toHaveBeenCalled()
+	})
+
+	it('checks selected variant through sellable projection', async () => {
+		await expect(
+			service.ensureVariantPurchasable({
+				catalogId: 'catalog-1',
+				productId: 'product-1',
+				variantId: 'variant-1',
+				quantity: 1,
+				inventoryMode: 'NONE'
+			})
+		).resolves.toBeUndefined()
+		expect(sellableReader.resolveVariantSellable).toHaveBeenCalledWith(
+			'catalog-1',
+			'product-1',
+			'variant-1',
+			{ quantity: 1, enforceStock: false }
+		)
 	})
 
 	it('keeps stock enforcement in external inventory mode', async () => {
-		tx.productVariant.findFirst.mockResolvedValue({
-			stock: 0,
-			status: ProductVariantStatus.ACTIVE,
-			isAvailable: true
+		sellableReader.resolveVariantSellable.mockResolvedValue({
+			variantId: 'variant-1',
+			availabilityState: 'OUT_OF_STOCK',
+			stock: 0
 		})
 
 		await expect(
-			service.ensureVariantPurchasable(
-				tx as never,
-				'variant-1',
-				1,
-				'product-1',
-				'EXTERNAL'
-			)
+			service.ensureVariantPurchasable({
+				catalogId: 'catalog-1',
+				productId: 'product-1',
+				variantId: 'variant-1',
+				quantity: 1,
+				inventoryMode: 'EXTERNAL'
+			})
 		).rejects.toThrow('Недостаточно товара')
+	})
+
+	it('maps missing selected variant to a cart validation error', async () => {
+		sellableReader.resolveVariantSellable.mockRejectedValue(
+			new NotFoundException('missing')
+		)
+
+		await expect(
+			service.ensureVariantPurchasable({
+				catalogId: 'catalog-1',
+				productId: 'product-1',
+				variantId: 'missing-variant',
+				quantity: 1,
+				inventoryMode: 'NONE'
+			})
+		).rejects.toThrow('Вариация товара недоступна')
 	})
 })

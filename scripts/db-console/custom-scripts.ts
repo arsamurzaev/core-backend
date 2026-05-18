@@ -14,6 +14,8 @@ type CustomScript = {
 }
 
 const ZERO_PRICE = new Prisma.Decimal(0)
+const PRODUCT_VARIANT_KIND_DEFAULT = 'DEFAULT'
+const PRODUCT_VARIANT_KIND_MATRIX = 'MATRIX'
 
 const CUSTOM_SCRIPTS: CustomScript[] = [
 	{
@@ -22,6 +24,13 @@ const CUSTOM_SCRIPTS: CustomScript[] = [
 		description:
 			'Set Product.price = NULL where price = 0. Can also include ProductVariant.price.',
 		run: runNullifyZeroPrices
+	},
+	{
+		id: 'backfill-product-variant-kind',
+		name: 'Backfill product variant kind',
+		description:
+			'Set ProductVariant.kind from legacy variantKey: default => DEFAULT, all others => MATRIX.',
+		run: runBackfillProductVariantKind
 	}
 ]
 
@@ -30,6 +39,12 @@ type ZeroPriceSummary = {
 	productSamples: Record<string, unknown>[]
 	variantCount: number
 	variantSamples: Record<string, unknown>[]
+}
+
+type VariantKindBackfillSummary = {
+	defaultToFix: number
+	matrixToFix: number
+	samples: Record<string, unknown>[]
 }
 
 export async function runCustomScriptsMenu(
@@ -52,6 +67,154 @@ export async function runCustomScriptsMenu(
 		if (!script) continue
 
 		await script.run(ctx, models)
+	}
+}
+
+async function runBackfillProductVariantKind(
+	ctx: AppContext,
+	models: ModelMeta[]
+) {
+	const summary = await loadVariantKindBackfillSummary(ctx)
+	printVariantKindBackfillSummary(summary, ctx.options.limit)
+
+	const total = summary.defaultToFix + summary.matrixToFix
+	if (!total) {
+		await pause()
+		return
+	}
+
+	assertCanMutate(ctx, 'custom script: backfill product variant kind')
+	const confirmation = `backfill ${total} product variant kinds`
+	const typed = await askText(`Type "${confirmation}" to apply`, {
+		required: true
+	})
+	if (typed !== confirmation) {
+		console.log(colors.yellow('Cancelled'))
+		return
+	}
+
+	const variantModel = findModel(models, 'ProductVariant')
+	const rows = await ctx.prisma.productVariant.findMany({
+		where: {
+			OR: [
+				{ variantKey: 'default', kind: { not: PRODUCT_VARIANT_KIND_DEFAULT } },
+				{ variantKey: { not: 'default' }, kind: { not: PRODUCT_VARIANT_KIND_MATRIX } }
+			]
+		},
+		select: {
+			id: true,
+			productId: true,
+			sku: true,
+			variantKey: true,
+			kind: true,
+			updatedAt: true
+		}
+	})
+	const backupPath = rows.length
+		? await writeBackup(ctx, variantModel, 'custom-backfill-product-variant-kind', rows, {
+				defaultToFix: summary.defaultToFix,
+				matrixToFix: summary.matrixToFix
+			})
+		: undefined
+
+	const result = await runAudited(
+		ctx,
+		{
+			action: 'custom:backfillProductVariantKind',
+			data: {
+				backupPath,
+				defaultToFix: summary.defaultToFix,
+				matrixToFix: summary.matrixToFix
+			},
+			affectedCount: total
+		},
+		async () =>
+			await ctx.prisma.$transaction(async tx => {
+				const defaults = await tx.productVariant.updateMany({
+					where: {
+						variantKey: 'default',
+						kind: { not: PRODUCT_VARIANT_KIND_DEFAULT }
+					},
+					data: { kind: PRODUCT_VARIANT_KIND_DEFAULT }
+				})
+				const matrix = await tx.productVariant.updateMany({
+					where: {
+						variantKey: { not: 'default' },
+						kind: { not: PRODUCT_VARIANT_KIND_MATRIX }
+					},
+					data: { kind: PRODUCT_VARIANT_KIND_MATRIX }
+				})
+
+				return { defaults, matrix }
+			})
+	)
+
+	console.log(colors.green(`Updated default variants: ${result.defaults.count}`))
+	console.log(colors.green(`Updated matrix variants: ${result.matrix.count}`))
+	await pause()
+}
+
+async function loadVariantKindBackfillSummary(
+	ctx: AppContext
+): Promise<VariantKindBackfillSummary> {
+	const sampleLimit = Math.max(0, ctx.options.limit)
+	const [defaultToFix, matrixToFix, samples] = await Promise.all([
+		ctx.prisma.productVariant.count({
+			where: {
+				variantKey: 'default',
+				kind: { not: PRODUCT_VARIANT_KIND_DEFAULT }
+			}
+		}),
+		ctx.prisma.productVariant.count({
+			where: {
+				variantKey: { not: 'default' },
+				kind: { not: PRODUCT_VARIANT_KIND_MATRIX }
+			}
+		}),
+		sampleLimit
+			? ctx.prisma.productVariant.findMany({
+					where: {
+						OR: [
+							{
+								variantKey: 'default',
+								kind: { not: PRODUCT_VARIANT_KIND_DEFAULT }
+							},
+							{
+								variantKey: { not: 'default' },
+								kind: { not: PRODUCT_VARIANT_KIND_MATRIX }
+							}
+						]
+					},
+					select: {
+						id: true,
+						productId: true,
+						sku: true,
+						variantKey: true,
+						kind: true,
+						updatedAt: true
+					},
+					orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+					take: sampleLimit
+				})
+			: Promise.resolve([])
+	])
+
+	return {
+		defaultToFix,
+		matrixToFix,
+		samples: samples as Record<string, unknown>[]
+	}
+}
+
+function printVariantKindBackfillSummary(
+	summary: VariantKindBackfillSummary,
+	limit: number
+) {
+	console.log(colors.cyan('Dry-run: product variant kind backfill'))
+	console.log(`Default variants to fix: ${summary.defaultToFix}`)
+	console.log(`Matrix variants to fix: ${summary.matrixToFix}`)
+	if (summary.samples.length) {
+		table(summary.samples, undefined, limit)
 	}
 }
 

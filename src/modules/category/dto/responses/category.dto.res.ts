@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger'
 
-import { ProductWithAttributesDto } from '@/modules/product/dto/responses/product.dto.res'
+import { ProductWithAttributesDto } from '@/modules/product/public'
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
 
 export class CategoryDto {

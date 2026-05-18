@@ -1,14 +1,15 @@
 import { Module } from '@nestjs/common'
 
-import { CapabilityModule } from '@/modules/capability/capability.module'
-import { IntegrationModule } from '@/modules/integration/integration.module'
-import { S3Module } from '@/modules/s3/s3.module'
-import { SeoRepository } from '@/modules/seo/seo.repository'
+import { CapabilityModule } from '@/modules/capability/public'
+import { IntegrationModule } from '@/modules/integration/public'
+import { S3Module } from '@/modules/s3/public'
+import { SeoRepository } from '@/modules/seo/public'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 
 import { CatalogAdvancedSettingsController } from './catalog-advanced-settings.controller'
 import { CatalogAdvancedSettingsService } from './catalog-advanced-settings.service'
+import { CATALOG_DOMAIN_MAINTENANCE_PORT } from './contracts'
 import { CatalogDomainController } from './catalog-domain.controller'
 import { CatalogDomainRepository } from './catalog-domain.repository'
 import { CatalogDomainService } from './catalog-domain.service'
@@ -39,10 +40,15 @@ import { InternalTlsController } from './internal-tls.controller'
 		CatalogRepository,
 		SeoRepository,
 		MediaRepository,
-		MediaUrlService
+		MediaUrlService,
+		{
+			provide: CATALOG_DOMAIN_MAINTENANCE_PORT,
+			useExisting: CatalogDomainService
+		}
 	],
 	exports: [
 		CatalogDomainService,
+		CATALOG_DOMAIN_MAINTENANCE_PORT,
 		CatalogFeatureEntitlementService,
 		CatalogFeatureEntitlementGuard
 	]

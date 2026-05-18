@@ -31,6 +31,7 @@ import { SeoModule } from '@/modules/seo/seo.module'
 import { TypeModule } from '@/modules/type/type.module'
 import { UserModule } from '@/modules/user/user.module'
 import { CacheModule } from '@/shared/cache/cache.module'
+import { DomainEventsModule } from '@/shared/domain-events/domain-events.module'
 import { readCookieValue } from '@/shared/http/cookie.utils'
 import { GlobalExceptionFilter } from '@/shared/http/filters/global-exception.filter'
 import { CatalogGuard } from '@/shared/tenancy/catalog.guard'
@@ -145,6 +146,7 @@ function shouldSkipAuthThrottler(context: ExecutionContext): boolean {
 		}),
 		ObservabilityModule,
 		CacheModule,
+		DomainEventsModule,
 		PrismaModule,
 		AuditModule,
 		TypeModule,

@@ -2,9 +2,17 @@ import {
 	IntegrationSyncRunMode,
 	IntegrationSyncRunTrigger
 } from '@generated/enums'
-import { Injectable } from '@nestjs/common'
+import { Inject, Injectable, Optional } from '@nestjs/common'
 
-import { ObservabilityService } from '@/modules/observability/observability.service'
+import {
+	OBSERVABILITY_RECORDER_PORT,
+	type ObservabilityRecorderPort
+} from '@/modules/observability/contracts'
+import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
+import {
+	DOMAIN_EVENT_DISPATCHER,
+	type DomainEventDispatcher
+} from '@/shared/domain-events/domain-events.contract'
 
 import { IntegrationRepository } from '../../integration.repository'
 
@@ -17,6 +25,8 @@ const MOYSKLAD_PROVIDER_LABEL = 'MOYSKLAD'
 
 type SyncJobContext = {
 	catalogId: string
+	integrationId?: string
+	webhookIntegrationId?: string
 	mode: IntegrationSyncRunMode
 	trigger: IntegrationSyncRunTrigger
 	productId?: string
@@ -59,7 +69,11 @@ type StockSyncMetricsResult = {
 export class MoySkladSyncRunRecorderService {
 	constructor(
 		private readonly repo: IntegrationRepository,
-		private readonly observability: ObservabilityService
+		@Inject(OBSERVABILITY_RECORDER_PORT)
+		private readonly observability: ObservabilityRecorderPort,
+		@Optional()
+		@Inject(DOMAIN_EVENT_DISPATCHER)
+		private readonly events?: DomainEventDispatcher
 	) {}
 
 	async markRunning(runId: string, jobId: string): Promise<boolean> {
@@ -91,6 +105,7 @@ export class MoySkladSyncRunRecorderService {
 		result: CatalogSyncMetricsResult
 	): Promise<void> {
 		await this.repo.completeSyncRun(runId, completion)
+		await this.publishSyncCompleted(runId, job)
 		this.recordCatalogSyncMetrics(job, result)
 	}
 
@@ -101,6 +116,7 @@ export class MoySkladSyncRunRecorderService {
 		result: ProductSyncMetricsResult
 	): Promise<void> {
 		await this.repo.completeSyncRun(runId, completion)
+		await this.publishSyncCompleted(runId, job)
 		this.recordProductSyncMetrics(job, result)
 	}
 
@@ -111,11 +127,31 @@ export class MoySkladSyncRunRecorderService {
 		result: StockSyncMetricsResult
 	): Promise<void> {
 		await this.repo.completeSyncRun(runId, completion)
+		await this.publishSyncCompleted(runId, job)
 		this.recordStockSyncMetrics(job, result)
 		this.observability.recordIntegrationStockFreshness(
 			MOYSKLAD_PROVIDER_LABEL,
 			job.catalogId,
 			result.syncedAt
+		)
+	}
+
+	private async publishSyncCompleted(
+		runId: string,
+		job: SyncJobContext
+	): Promise<void> {
+		const integrationId = job.integrationId ?? job.webhookIntegrationId
+		if (!this.events || !integrationId) return
+
+		await this.events.dispatch(
+			createDomainEvent({
+				type: 'integration.sync_completed',
+				catalogId: job.catalogId,
+				integrationId,
+				runId,
+				mode: job.mode,
+				trigger: job.trigger
+			})
 		)
 	}
 

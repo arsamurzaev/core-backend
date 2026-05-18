@@ -21,6 +21,10 @@ describe('ProductController', () => {
 						useValue: {
 							create: jest.fn(),
 							duplicate: jest.fn(),
+							diagnoseDefaultVariantsForCurrentCatalog: jest.fn(),
+							repairMissingDefaultVariantsForCurrentCatalog: jest.fn(),
+							repairDefaultVariantPriceMismatchesForCurrentCatalog:
+								jest.fn(),
 							previewProductTypeCompatibility: jest.fn(),
 							applyProductTypeChange: jest.fn(),
 							update: jest.fn(),
@@ -97,6 +101,50 @@ describe('ProductController', () => {
 			response
 		)
 		expect(productService.setVariantMatrix).toHaveBeenCalledWith('product-1', dto)
+	})
+
+	it('delegates default variant diagnostics to product service', async () => {
+		const response = {
+			catalogId: 'catalog-1',
+			sampleLimit: 5,
+			checks: [],
+			warnCount: 0,
+			failCount: 0,
+			ok: true
+		}
+		productService.diagnoseDefaultVariantsForCurrentCatalog.mockResolvedValue(
+			response as any
+		)
+
+		await expect(controller.diagnoseDefaultVariants('5')).resolves.toBe(response)
+		expect(
+			productService.diagnoseDefaultVariantsForCurrentCatalog
+		).toHaveBeenCalledWith(5)
+	})
+
+	it('delegates default variant price mismatch repair to product service', async () => {
+		const dto = { apply: true, batchSize: 10, sampleLimit: 2 }
+		const response = {
+			catalogId: 'catalog-1',
+			dryRun: false,
+			checkedProducts: 1,
+			repairableProducts: 1,
+			updatedProducts: 1,
+			affectedCatalogs: 1,
+			batchSize: 10,
+			sampleLimit: 2,
+			samples: []
+		}
+		productService.repairDefaultVariantPriceMismatchesForCurrentCatalog.mockResolvedValue(
+			response as any
+		)
+
+		await expect(
+			controller.repairDefaultVariantPriceMismatches(dto)
+		).resolves.toBe(response)
+		expect(
+			productService.repairDefaultVariantPriceMismatchesForCurrentCatalog
+		).toHaveBeenCalledWith(dto)
 	})
 
 	it('delegates product type compatibility preview to product service', async () => {

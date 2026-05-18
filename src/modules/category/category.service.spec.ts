@@ -1,6 +1,10 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 
+import {
+	PRODUCT_SELLABLE_READER_PORT,
+	type ProductSellableReader
+} from '@/modules/product/public'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATEGORY_LIST_CACHE_VERSION,
@@ -24,6 +28,7 @@ describe('CategoryService', () => {
 	}
 	let repo: jest.Mocked<CategoryRepository>
 	let cache: jest.Mocked<CacheService>
+	let sellableReader: jest.Mocked<ProductSellableReader>
 
 	const runWithCatalog = <T>(fn: () => Promise<T>) =>
 		RequestContext.run(
@@ -78,6 +83,46 @@ describe('CategoryService', () => {
 					useValue: {
 						mapMedia: jest.fn()
 					}
+				},
+				{
+					provide: PRODUCT_SELLABLE_READER_PORT,
+					useValue: {
+						resolveProductSellable: jest
+							.fn()
+							.mockImplementation((catalogId: string, productId: string) => ({
+								catalogId,
+								productId,
+								mode: 'SIMPLE',
+								variantId: null,
+								defaultVariantId: null,
+								requiresVariantSelection: false,
+								priceState: 'UNKNOWN',
+								displayPrice: null,
+								minPrice: null,
+								maxPrice: null,
+								availabilityState: 'AVAILABLE',
+								stock: null
+							})),
+						resolveProductsSellable: jest.fn(
+							async (_catalogId: string, productIds: string[]) =>
+								new Map(
+									productIds.map(productId => [
+										productId,
+										{
+											priceState: 'UNKNOWN',
+											displayPrice: null,
+											minPrice: null,
+											maxPrice: null,
+											availabilityState: 'AVAILABLE',
+											stock: null,
+											defaultVariantId: null,
+											requiresVariantSelection: false
+										}
+									])
+								)
+						),
+						resolveVariantSellable: jest.fn()
+					}
 				}
 			]
 		}).compile()
@@ -90,6 +135,7 @@ describe('CategoryService', () => {
 		}
 		repo = module.get(CategoryRepository)
 		cache = module.get(CacheService)
+		sellableReader = module.get(PRODUCT_SELLABLE_READER_PORT)
 
 		cache.buildKey.mockImplementation(parts =>
 			parts
@@ -124,6 +170,41 @@ describe('CategoryService', () => {
 			['cat-2', 1],
 			['cat-3', 2]
 		])
+	})
+
+	it('can return only categories with active products for storefront lists', async () => {
+		repo.findAll.mockResolvedValue([
+			{
+				id: 'parent-empty',
+				parentId: null,
+				position: 0,
+				name: 'Shoes',
+				_count: { categoryProducts: 0 },
+				imageMedia: null
+			},
+			{
+				id: 'child-filled',
+				parentId: 'parent-empty',
+				position: 1,
+				name: 'Sneakers',
+				_count: { categoryProducts: 3 },
+				imageMedia: null
+			},
+			{
+				id: 'child-empty',
+				parentId: 'parent-empty',
+				position: 2,
+				name: 'Boots',
+				_count: { categoryProducts: 0 },
+				imageMedia: null
+			}
+		] as any)
+
+		const result = await runWithCatalog(() =>
+			service.getAll({ includeEmpty: false })
+		)
+
+		expect(result.map(category => category.id)).toEqual(['child-filled'])
 	})
 
 	it('returns cached categories list when cache is warm', async () => {
@@ -236,6 +317,68 @@ describe('CategoryService', () => {
 		expect(repo.findCategoryProductsPage).not.toHaveBeenCalled()
 		expect(result.items[0]?.product).toHaveProperty('productAttributes', [])
 		expect(result.items[0]?.product).not.toHaveProperty('variants')
+	})
+
+	it('adds commercial projection fields to category product cards', async () => {
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
+		repo.findCategoryProductCardsPage.mockResolvedValue([
+			{
+				productId: 'p1',
+				position: 0,
+				product: {
+					id: 'p1',
+					price: null,
+					media: [],
+					integrationLinks: [],
+					productAttributes: []
+				}
+			}
+		] as any)
+		sellableReader.resolveProductsSellable.mockResolvedValueOnce(
+			new Map([
+				[
+					'p1',
+					{
+						catalogId: 'catalog-1',
+						productId: 'p1',
+						mode: 'SIMPLE',
+						variantId: 'variant-1',
+						defaultVariantId: 'variant-1',
+						requiresVariantSelection: false,
+						priceState: 'KNOWN',
+						displayPrice: '1500.00',
+						minPrice: '1500.00',
+						maxPrice: '1500.00',
+						availabilityState: 'AVAILABLE',
+						stock: 7
+					}
+				]
+			])
+		)
+
+		const result = await runWithCatalog(() =>
+			service.getProductCardsByCategory('cat-1', { limit: 2 })
+		)
+
+		expect(sellableReader.resolveProductsSellable).toHaveBeenCalledWith(
+			'catalog-1',
+			['p1']
+		)
+		expect(result.items[0]?.product).toMatchObject({
+			id: 'p1',
+			price: '1500.00',
+			priceState: 'KNOWN',
+			displayPrice: '1500.00',
+			minPrice: '1500.00',
+			maxPrice: '1500.00',
+			availabilityState: 'AVAILABLE',
+			stock: 7,
+			defaultVariantId: 'variant-1',
+			requiresVariantSelection: false
+		})
 	})
 
 	it('returns page and nextCursor when more items exist', async () => {

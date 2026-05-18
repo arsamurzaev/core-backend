@@ -3,6 +3,7 @@ import {
 	Body,
 	Controller,
 	Get,
+	Inject,
 	Logger,
 	Post,
 	Req,
@@ -19,7 +20,10 @@ import {
 import { SkipThrottle } from '@nestjs/throttler'
 import type { Request, Response } from 'express'
 
-import { ObservabilityService } from '@/modules/observability/observability.service'
+import {
+	OBSERVABILITY_RECORDER_PORT,
+	type ObservabilityRecorderPort
+} from '@/modules/observability/contracts'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
@@ -49,7 +53,8 @@ export class AuthController {
 	constructor(
 		private readonly sessions: SessionService,
 		private readonly auth: AuthService,
-		private readonly observability: ObservabilityService
+		@Inject(OBSERVABILITY_RECORDER_PORT)
+		private readonly observability: ObservabilityRecorderPort
 	) {}
 
 	@Post('/login')

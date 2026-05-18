@@ -4,6 +4,7 @@ import {
 	DataType,
 	ProductStatus,
 	ProductTypeScope,
+	ProductVariantKind,
 	ProductVariantStatus
 } from '@generated/enums'
 import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
@@ -28,7 +29,7 @@ import type {
 export type ProductVariantUpdateData = {
 	variantKey: string
 	price?: number | null
-	stock?: number
+	stock?: number | null
 	status?: ProductVariantStatus
 	saleUnits?: ProductVariantSaleUnitInput[]
 }
@@ -117,7 +118,58 @@ export type ProductSeededPageCursor = {
 	id: string
 }
 
+export type ProductDefaultVariantDiagnosticCode =
+	| 'SIMPLE_WITHOUT_DEFAULT_VARIANT'
+	| 'MULTIPLE_DEFAULT_VARIANTS'
+	| 'CUSTOM_VARIANT_WITHOUT_ATTRIBUTES'
+	| 'DEFAULT_VARIANT_WITH_ATTRIBUTES'
+	| 'DEFAULT_VARIANT_PRICE_MISMATCH'
+
+export type ProductDefaultVariantDiagnosticStatus = 'ok' | 'warn' | 'fail'
+
+export type ProductDefaultVariantDiagnosticSample = {
+	productId: string
+	productName: string
+	productSku: string
+	variantId: string | null
+	variantKey: string | null
+	variantSku: string | null
+	details: string | null
+}
+
+export type ProductDefaultVariantDiagnosticCheck = {
+	code: ProductDefaultVariantDiagnosticCode
+	status: ProductDefaultVariantDiagnosticStatus
+	count: number
+	message: string
+	samples: ProductDefaultVariantDiagnosticSample[]
+}
+
 const DEFAULT_VARIANT_KEY = 'default'
+const DEFAULT_VARIANT_DIAGNOSTIC_SAMPLE_LIMIT = 10
+const PRODUCT_DESCRIPTION_ATTRIBUTE_KEY = 'description'
+
+function isDefaultVariantRow(variant: {
+	variantKey: string
+	kind?: ProductVariantKind | null
+}): boolean {
+	return (
+		variant.kind === ProductVariantKind.DEFAULT ||
+		variant.variantKey === DEFAULT_VARIANT_KEY
+	)
+}
+
+function normalizeDiagnosticSampleLimit(value: number): number {
+	if (!Number.isInteger(value) || value <= 0) {
+		return DEFAULT_VARIANT_DIAGNOSTIC_SAMPLE_LIMIT
+	}
+	return Math.min(value, 100)
+}
+
+function normalizeExternalDescription(value?: string | null): string | null {
+	const normalized = typeof value === 'string' ? value.trim() : ''
+	return normalized || null
+}
 
 const productIdSelect = {
 	id: true
@@ -125,6 +177,9 @@ const productIdSelect = {
 
 const productValidationRefSelect = {
 	id: true,
+	sku: true,
+	price: true,
+	status: true,
 	productTypeId: true,
 	productAttributes: {
 		where: { deleteAt: null },
@@ -134,6 +189,7 @@ const productValidationRefSelect = {
 		where: { deleteAt: null },
 		select: {
 			variantKey: true,
+			kind: true,
 			attributes: {
 				where: { deleteAt: null },
 				select: {
@@ -176,6 +232,7 @@ const productTypeCompatibilityPreviewSelect = {
 		where: { deleteAt: null },
 		select: {
 			variantKey: true,
+			kind: true,
 			attributes: {
 				where: { deleteAt: null },
 				select: {
@@ -366,6 +423,7 @@ const productVariantSelect = {
 	id: true,
 	sku: true,
 	variantKey: true,
+	kind: true,
 	stock: true,
 	price: true,
 	status: true,
@@ -393,6 +451,7 @@ const productVariantPickerOptionSelect = {
 	productId: true,
 	sku: true,
 	variantKey: true,
+	kind: true,
 	stock: true,
 	price: true,
 	status: true,
@@ -421,6 +480,18 @@ const productVariantPickerOptionSelect = {
 			{ createdAt: 'asc' as const }
 		]
 	}
+}
+
+const productExternalSyncSelect = {
+	id: true,
+	catalogId: true,
+	productTypeId: true,
+	name: true,
+	sku: true,
+	slug: true,
+	price: true,
+	status: true,
+	deleteAt: true
 }
 
 const productVariantSelectWithIntegration = {
@@ -491,6 +562,10 @@ export type ProductPublicDetailsItem = Prisma.ProductGetPayload<{
 	select: typeof productPublicDetailSelectWithDetails
 }>
 
+export type ProductExternalSyncRecord = Prisma.ProductGetPayload<{
+	select: typeof productExternalSyncSelect
+}>
+
 export type ProductValidationRef = Prisma.ProductGetPayload<{
 	select: typeof productValidationRefSelect
 }>
@@ -508,7 +583,7 @@ export type ProductVariantSummaryRecord = {
 	minPrice: string | null
 	maxPrice: string | null
 	activeCount: number
-	totalStock: number
+	totalStock: number | null
 	singleVariantId: string | null
 }
 
@@ -528,6 +603,25 @@ export type ProductDefaultVariantRepairCandidate = {
 	status: ProductStatus
 }
 
+export type ProductDefaultVariantPriceMismatchRepairCandidate = {
+	productId: string
+	productName: string
+	productSku: string
+	variantId: string
+	variantKey: string
+	variantSku: string
+	previousProductPrice: string | null
+	nextProductPrice: string | null
+}
+
+type ProductVariantInvariantRow = {
+	id: string
+	sku: string
+	variantKey: string
+	kind: ProductVariantKind
+	attributes: Array<{ id: string }>
+}
+
 type ProductReadExecutor =
 	| Pick<PrismaService, 'product'>
 	| Pick<Prisma.TransactionClient, 'product'>
@@ -543,6 +637,7 @@ type ProductUpdateChanges = {
 	hasRemovedAttributeChanges: boolean
 	hasRemovedVariantAttributeChanges: boolean
 	hasVariantChanges: boolean
+	hasVariantMatrixChanges: boolean
 	hasMediaChanges: boolean
 }
 
@@ -734,7 +829,7 @@ export class ProductRepository {
 				minPrice: string | null
 				maxPrice: string | null
 				activeCount: number
-				totalStock: number
+				totalStock: number | null
 				singleVariantId: string | null
 			}>
 		>(PrismaSql.sql`
@@ -743,7 +838,10 @@ export class ProductRepository {
 				MIN(price)::text as "minPrice",
 				MAX(price)::text as "maxPrice",
 				COUNT(*)::int as "activeCount",
-				COALESCE(SUM(stock), 0)::int as "totalStock",
+				CASE
+					WHEN BOOL_OR(stock IS NULL) THEN NULL
+					ELSE COALESCE(SUM(stock), 0)::int
+				END as "totalStock",
 				CASE
 					WHEN COUNT(*) = 1 THEN (ARRAY_AGG(id::text ORDER BY id::text))[1]
 					ELSE NULL
@@ -751,6 +849,7 @@ export class ProductRepository {
 			FROM product_variants
 			WHERE delete_at IS NULL
 				AND status::text <> ${ProductVariantStatus.DISABLED}
+				AND NOT (kind::text = ${ProductVariantKind.DEFAULT} OR variant_key = ${DEFAULT_VARIANT_KEY})
 				AND product_id IN (${PrismaSql.join(ids.map(id => PrismaSql.sql`${id}::uuid`))})
 			GROUP BY product_id
 		`)
@@ -760,7 +859,10 @@ export class ProductRepository {
 			minPrice: row.minPrice,
 			maxPrice: row.maxPrice,
 			activeCount: Number(row.activeCount),
-			totalStock: Number(row.totalStock),
+			totalStock:
+				row.totalStock === null || row.totalStock === undefined
+					? null
+					: Number(row.totalStock),
 			singleVariantId: row.singleVariantId
 		}))
 	}
@@ -776,7 +878,13 @@ export class ProductRepository {
 			where: {
 				productId: { in: ids },
 				deleteAt: null,
-				status: { not: ProductVariantStatus.DISABLED }
+				status: { not: ProductVariantStatus.DISABLED },
+				NOT: {
+					OR: [
+						{ kind: ProductVariantKind.DEFAULT },
+						{ variantKey: DEFAULT_VARIANT_KEY }
+					]
+				}
 			},
 			select: productVariantPickerOptionSelect,
 			orderBy: [
@@ -856,7 +964,10 @@ export class ProductRepository {
 										isAvailable: true
 									},
 									{
-										variantKey: DEFAULT_VARIANT_KEY,
+										OR: [
+											{ kind: ProductVariantKind.DEFAULT },
+											{ variantKey: DEFAULT_VARIANT_KEY }
+										],
 										status: { not: ProductVariantStatus.DISABLED }
 									}
 								]
@@ -867,7 +978,12 @@ export class ProductRepository {
 						variants: {
 							none: {
 								deleteAt: null,
-								variantKey: { not: DEFAULT_VARIANT_KEY }
+								NOT: {
+									OR: [
+										{ kind: ProductVariantKind.DEFAULT },
+										{ variantKey: DEFAULT_VARIANT_KEY }
+									]
+								}
 							}
 						}
 					}
@@ -883,6 +999,191 @@ export class ProductRepository {
 			take,
 			...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {})
 		})
+	}
+
+	async findDefaultVariantDiagnostics(
+		catalogId: string,
+		sampleLimit = DEFAULT_VARIANT_DIAGNOSTIC_SAMPLE_LIMIT
+	): Promise<ProductDefaultVariantDiagnosticCheck[]> {
+		const limit = normalizeDiagnosticSampleLimit(sampleLimit)
+		const [
+			simpleWithoutDefault,
+			multipleDefaults,
+			customWithoutAttributes,
+			defaultWithAttributes,
+			priceMismatches
+		] = await Promise.all([
+			this.buildDefaultVariantDiagnosticCheck(
+				'SIMPLE_WITHOUT_DEFAULT_VARIANT',
+				'warn',
+				'Simple products without a technical default variant',
+				this.countSimpleProductsWithoutDefaultVariant(catalogId),
+				this.findSimpleProductsWithoutDefaultVariant(catalogId, limit)
+			),
+			this.buildDefaultVariantDiagnosticCheck(
+				'MULTIPLE_DEFAULT_VARIANTS',
+				'fail',
+				'Products with more than one technical default variant',
+				this.countProductsWithMultipleDefaultVariants(catalogId),
+				this.findProductsWithMultipleDefaultVariants(catalogId, limit)
+			),
+			this.buildDefaultVariantDiagnosticCheck(
+				'CUSTOM_VARIANT_WITHOUT_ATTRIBUTES',
+				'fail',
+				'Custom matrix variants without variant attributes',
+				this.countCustomVariantsWithoutAttributes(catalogId),
+				this.findCustomVariantsWithoutAttributes(catalogId, limit)
+			),
+			this.buildDefaultVariantDiagnosticCheck(
+				'DEFAULT_VARIANT_WITH_ATTRIBUTES',
+				'fail',
+				'Technical default variants with variant attributes',
+				this.countDefaultVariantsWithAttributes(catalogId),
+				this.findDefaultVariantsWithAttributes(catalogId, limit)
+			),
+			this.buildDefaultVariantDiagnosticCheck(
+				'DEFAULT_VARIANT_PRICE_MISMATCH',
+				'warn',
+				'Legacy product price differs from technical default variant price',
+				this.countDefaultVariantPriceMismatches(catalogId),
+				this.findDefaultVariantPriceMismatches(catalogId, limit)
+			)
+		])
+
+		return [
+			simpleWithoutDefault,
+			multipleDefaults,
+			customWithoutAttributes,
+			defaultWithAttributes,
+			priceMismatches
+		]
+	}
+
+	findDefaultVariantPriceMismatchRepairCandidates(
+		catalogId: string,
+		take: number,
+		cursorProductId?: string
+	): Promise<ProductDefaultVariantPriceMismatchRepairCandidate[]> {
+		const cursorClause = cursorProductId
+			? PrismaSql.sql`AND p.id > ${cursorProductId}::uuid`
+			: PrismaSql.sql``
+
+		return this.prisma.$queryRaw<
+			ProductDefaultVariantPriceMismatchRepairCandidate[]
+		>(PrismaSql.sql`
+			SELECT
+				p.id::text AS "productId",
+				p.name AS "productName",
+				p.sku AS "productSku",
+				v.id::text AS "variantId",
+				v.variant_key AS "variantKey",
+				v.sku AS "variantSku",
+				p.price::text AS "previousProductPrice",
+				v.price::text AS "nextProductPrice"
+			FROM products p
+			JOIN product_variants v ON v.product_id = p.id
+			WHERE p.catalog_id = ${catalogId}::uuid
+				AND p.delete_at IS NULL
+				AND v.delete_at IS NULL
+				AND (
+					v.kind::text = ${ProductVariantKind.DEFAULT}
+					OR v.variant_key = ${DEFAULT_VARIANT_KEY}
+				)
+				AND p.price IS DISTINCT FROM v.price
+				AND NOT EXISTS (
+					SELECT 1
+					FROM product_variants other_default
+					WHERE other_default.product_id = p.id
+						AND other_default.delete_at IS NULL
+						AND other_default.id <> v.id
+						AND (
+							other_default.kind::text = ${ProductVariantKind.DEFAULT}
+							OR other_default.variant_key = ${DEFAULT_VARIANT_KEY}
+						)
+				)
+				AND NOT EXISTS (
+					SELECT 1
+					FROM product_variants custom_variant
+					WHERE custom_variant.product_id = p.id
+						AND custom_variant.delete_at IS NULL
+						AND NOT (
+							custom_variant.kind::text = ${ProductVariantKind.DEFAULT}
+							OR custom_variant.variant_key = ${DEFAULT_VARIANT_KEY}
+						)
+				)
+				AND NOT EXISTS (
+					SELECT 1
+					FROM variant_attributes attribute
+					WHERE attribute.variant_id = v.id
+						AND attribute.delete_at IS NULL
+				)
+				${cursorClause}
+			ORDER BY p.id ASC
+			LIMIT ${take}
+		`)
+	}
+
+	async applyDefaultVariantPriceMismatchRepairs(
+		catalogId: string,
+		productIds: string[]
+	): Promise<string[]> {
+		if (!productIds.length) return []
+
+		const rows = await this.prisma.$queryRaw<Array<{ productId: string }>>(
+			PrismaSql.sql`
+				WITH safe_candidates AS (
+					SELECT p.id AS product_id, v.price AS next_price
+					FROM products p
+					JOIN product_variants v ON v.product_id = p.id
+					WHERE p.catalog_id = ${catalogId}::uuid
+						AND p.delete_at IS NULL
+						AND p.id IN (${PrismaSql.join(
+							productIds.map(id => PrismaSql.sql`${id}::uuid`)
+						)})
+						AND v.delete_at IS NULL
+						AND (
+							v.kind::text = ${ProductVariantKind.DEFAULT}
+							OR v.variant_key = ${DEFAULT_VARIANT_KEY}
+						)
+						AND p.price IS DISTINCT FROM v.price
+						AND NOT EXISTS (
+							SELECT 1
+							FROM product_variants other_default
+							WHERE other_default.product_id = p.id
+								AND other_default.delete_at IS NULL
+								AND other_default.id <> v.id
+								AND (
+									other_default.kind::text = ${ProductVariantKind.DEFAULT}
+									OR other_default.variant_key = ${DEFAULT_VARIANT_KEY}
+								)
+						)
+						AND NOT EXISTS (
+							SELECT 1
+							FROM product_variants custom_variant
+							WHERE custom_variant.product_id = p.id
+								AND custom_variant.delete_at IS NULL
+								AND NOT (
+									custom_variant.kind::text = ${ProductVariantKind.DEFAULT}
+									OR custom_variant.variant_key = ${DEFAULT_VARIANT_KEY}
+								)
+						)
+						AND NOT EXISTS (
+							SELECT 1
+							FROM variant_attributes attribute
+							WHERE attribute.variant_id = v.id
+								AND attribute.delete_at IS NULL
+						)
+				)
+				UPDATE products p
+				SET price = safe_candidates.next_price,
+					updated_at = NOW()
+				FROM safe_candidates
+				WHERE p.id = safe_candidates.product_id
+				RETURNING p.id::text AS "productId"
+			`
+		)
+
+		return rows.map(row => row.productId)
 	}
 
 	findUncategorizedPage(
@@ -1021,7 +1322,13 @@ export class ProductRepository {
 	findSkuById(id: string, catalogId: string) {
 		return this.prisma.product.findFirst({
 			where: { id, catalogId, deleteAt: null },
-			select: { id: true, sku: true, price: true, productTypeId: true }
+			select: {
+				id: true,
+				sku: true,
+				price: true,
+				status: true,
+				productTypeId: true
+			}
 		})
 	}
 
@@ -1147,6 +1454,204 @@ export class ProductRepository {
 		return product.id !== excludeId
 	}
 
+	findExternalSyncById(
+		catalogId: string,
+		productId: string,
+		tx?: Prisma.TransactionClient
+	): Promise<ProductExternalSyncRecord | null> {
+		const db = tx || this.prisma
+		return db.product.findFirst({
+			where: {
+				id: productId,
+				catalogId,
+				deleteAt: null
+			},
+			select: productExternalSyncSelect
+		})
+	}
+
+	findExternalSyncBySku(
+		catalogId: string,
+		sku: string,
+		tx?: Prisma.TransactionClient
+	): Promise<ProductExternalSyncRecord | null> {
+		const db = tx || this.prisma
+		return db.product.findFirst({
+			where: {
+				catalogId,
+				sku,
+				deleteAt: null
+			},
+			select: productExternalSyncSelect
+		})
+	}
+
+	async existsExternalSyncSlug(
+		catalogId: string,
+		slug: string,
+		excludeId?: string,
+		tx?: Prisma.TransactionClient
+	): Promise<boolean> {
+		const db = tx || this.prisma
+		const product = await db.product.findFirst({
+			where: {
+				catalogId,
+				slug,
+				...(excludeId ? { id: { not: excludeId } } : {})
+			},
+			select: { id: true }
+		})
+
+		return Boolean(product)
+	}
+
+	async existsExternalSyncSku(
+		sku: string,
+		excludeId?: string,
+		tx?: Prisma.TransactionClient
+	): Promise<boolean> {
+		const db = tx || this.prisma
+		const product = await db.product.findUnique({
+			where: { sku },
+			select: { id: true }
+		})
+
+		if (!product) return false
+		if (!excludeId) return true
+		return product.id !== excludeId
+	}
+
+	createExternalSync(
+		params: {
+			catalogId: string
+			name: string
+			sku: string
+			slug: string
+			price: number | string | null
+			status: ProductStatus
+		},
+		tx?: Prisma.TransactionClient
+	): Promise<ProductExternalSyncRecord> {
+		const db = tx || this.prisma
+		return db.product.create({
+			data: {
+				catalog: { connect: { id: params.catalogId } },
+				name: params.name,
+				sku: params.sku,
+				slug: params.slug,
+				price: params.price,
+				status: params.status
+			},
+			select: productExternalSyncSelect
+		})
+	}
+
+	async updateExternalSync(
+		params: {
+			productId: string
+			catalogId: string
+			data: Prisma.ProductUpdateManyMutationInput
+		},
+		tx?: Prisma.TransactionClient
+	): Promise<ProductExternalSyncRecord | null> {
+		const db = tx || this.prisma
+		const result = await db.product.updateMany({
+			where: {
+				id: params.productId,
+				catalogId: params.catalogId,
+				deleteAt: null
+			},
+			data: params.data
+		})
+
+		if (!result.count) return null
+		return this.findExternalSyncById(params.catalogId, params.productId, tx)
+	}
+
+	async syncExternalDescription(
+		params: {
+			catalogId: string
+			productId: string
+			description?: string | null
+		},
+		tx?: Prisma.TransactionClient
+	): Promise<boolean> {
+		const db = tx || this.prisma
+		const attribute = await db.attribute.findFirst({
+			where: {
+				key: PRODUCT_DESCRIPTION_ATTRIBUTE_KEY,
+				dataType: DataType.STRING,
+				isVariantAttribute: false,
+				deleteAt: null,
+				types: {
+					some: {
+						catalogs: {
+							some: { id: params.catalogId }
+						}
+					}
+				}
+			},
+			select: { id: true }
+		})
+		if (!attribute) return false
+
+		const value = normalizeExternalDescription(params.description)
+		const where = {
+			productId_attributeId: {
+				productId: params.productId,
+				attributeId: attribute.id
+			}
+		}
+		const existing = await db.productAttribute.findUnique({
+			where,
+			select: {
+				id: true,
+				valueString: true,
+				deleteAt: true
+			}
+		})
+
+		if (!value) {
+			if (!existing || existing.deleteAt) return false
+
+			const result = await db.productAttribute.updateMany({
+				where: {
+					id: existing.id,
+					deleteAt: null
+				},
+				data: { deleteAt: new Date() }
+			})
+			return result.count > 0
+		}
+
+		if (existing?.valueString === value && !existing.deleteAt) {
+			return false
+		}
+
+		const data = {
+			enumValueId: null,
+			valueString: value,
+			valueInteger: null,
+			valueDecimal: null,
+			valueBoolean: null,
+			valueDateTime: null
+		}
+
+		await db.productAttribute.upsert({
+			where,
+			create: {
+				productId: params.productId,
+				attributeId: attribute.id,
+				...data
+			},
+			update: {
+				...data,
+				deleteAt: null
+			}
+		})
+		return true
+	}
+
 	async existsVariantSku(sku: string, excludeId?: string): Promise<boolean> {
 		const variant = await this.prisma.productVariant.findUnique({
 			where: { sku },
@@ -1176,7 +1681,8 @@ export class ProductRepository {
 		removeAttributeIds?: string[],
 		variantUpdates?: ProductVariantUpdateData[],
 		mediaIds?: string[],
-		removeVariantAttributeIds?: string[]
+		removeVariantAttributeIds?: string[],
+		variantMatrix?: ProductVariantData[]
 	) {
 		const changes = this.describeUpdateChanges(
 			data,
@@ -1184,7 +1690,8 @@ export class ProductRepository {
 			removeAttributeIds,
 			variantUpdates,
 			mediaIds,
-			removeVariantAttributeIds
+			removeVariantAttributeIds,
+			variantMatrix
 		)
 
 		if (this.canUpdateDirectly(changes)) {
@@ -1196,7 +1703,7 @@ export class ProductRepository {
 			if (!existing) return null
 
 			await this.applyProductDataUpdate(tx, id, data, changes.hasData)
-			if (variantUpdates === undefined) {
+			if (variantUpdates === undefined && variantMatrix === undefined) {
 				await this.syncSingleDefaultVariantPrice(tx, id, data)
 			}
 			await this.removeProductAttributes(tx, id, removeAttributeIds)
@@ -1206,6 +1713,12 @@ export class ProductRepository {
 
 			if (variantUpdates?.length) {
 				await this.applyVariantUpdates(tx, catalogId, id, variantUpdates)
+			}
+			if (variantMatrix !== undefined) {
+				await this.applyVariants(tx, catalogId, id, variantMatrix)
+			}
+			if (removeVariantAttributeIds !== undefined || variantMatrix !== undefined) {
+				await this.assertProductVariantStructuralInvariants(tx, id)
 			}
 			await this.assertActiveProductHasValidVariant(tx, id)
 
@@ -1229,6 +1742,7 @@ export class ProductRepository {
 			if (customVariant) return false
 
 			await this.restoreOrCreateDefaultVariant(tx, catalogId, id, variant)
+			await this.assertProductVariantStructuralInvariants(tx, id)
 			return true
 		})
 	}
@@ -1449,6 +1963,7 @@ export class ProductRepository {
 			if (!existing) return null
 
 			await this.applyVariants(tx, catalogId, id, variants)
+			await this.assertProductVariantStructuralInvariants(tx, id)
 			await this.assertActiveProductHasValidVariant(tx, id)
 
 			return this.findProductWithDetails(tx, id, catalogId)
@@ -1472,6 +1987,7 @@ export class ProductRepository {
 			await this.upsertProductAttributes(tx, id, attributes)
 			if (variants !== undefined) {
 				await this.applyVariants(tx, catalogId, id, variants)
+				await this.assertProductVariantStructuralInvariants(tx, id)
 			}
 			await this.assertActiveProductHasValidVariant(tx, id)
 
@@ -1485,7 +2001,8 @@ export class ProductRepository {
 		removeAttributeIds?: string[],
 		variantUpdates?: ProductVariantUpdateData[],
 		mediaIds?: string[],
-		removeVariantAttributeIds?: string[]
+		removeVariantAttributeIds?: string[],
+		variantMatrix?: ProductVariantData[]
 	): ProductUpdateChanges {
 		return {
 			hasData: Object.keys(data).length > 0,
@@ -1494,6 +2011,7 @@ export class ProductRepository {
 			hasRemovedAttributeChanges: removeAttributeIds !== undefined,
 			hasRemovedVariantAttributeChanges: removeVariantAttributeIds !== undefined,
 			hasVariantChanges: variantUpdates !== undefined,
+			hasVariantMatrixChanges: variantMatrix !== undefined,
 			hasMediaChanges: mediaIds !== undefined
 		}
 	}
@@ -1504,6 +2022,7 @@ export class ProductRepository {
 			!changes.hasRemovedAttributeChanges &&
 			!changes.hasRemovedVariantAttributeChanges &&
 			!changes.hasVariantChanges &&
+			!changes.hasVariantMatrixChanges &&
 			!changes.hasMediaChanges &&
 			!changes.hasBrandChanges
 		)
@@ -1525,6 +2044,7 @@ export class ProductRepository {
 
 		if (variants?.length) {
 			await this.applyVariants(tx, catalogId, product.id, variants)
+			await this.assertProductVariantStructuralInvariants(tx, product.id)
 		}
 		await this.assertActiveProductHasValidVariant(tx, product.id)
 
@@ -1595,6 +2115,109 @@ export class ProductRepository {
 		}
 	}
 
+	private assertVariantDataInvariants(variants: ProductVariantData[]): void {
+		let defaultCount = 0
+
+		for (const variant of variants) {
+			const isDefaultByKind = variant.kind === ProductVariantKind.DEFAULT
+			const isDefaultByKey = variant.variantKey === DEFAULT_VARIANT_KEY
+			const isDefault = isDefaultByKind || isDefaultByKey
+
+			if (isDefault) {
+				defaultCount += 1
+				this.assertDefaultVariantData(variant)
+				continue
+			}
+
+			if (!variant.attributes.length) {
+				throw new BadRequestException(
+					`Matrix variant ${variant.variantKey} must have variant attributes`
+				)
+			}
+		}
+
+		if (defaultCount > 1) {
+			throw new BadRequestException(
+				'Product can have only one technical default variant'
+			)
+		}
+	}
+
+	private assertDefaultVariantData(variant: ProductVariantData): void {
+		if (
+			variant.kind !== undefined &&
+			variant.kind !== ProductVariantKind.DEFAULT
+		) {
+			throw new BadRequestException(
+				'Technical default variant must have kind DEFAULT'
+			)
+		}
+		if (variant.variantKey !== DEFAULT_VARIANT_KEY) {
+			throw new BadRequestException(
+				'Technical default variant must use variantKey default'
+			)
+		}
+		if (variant.attributes.length > 0) {
+			throw new BadRequestException(
+				'Technical default variant must not have variant attributes'
+			)
+		}
+	}
+
+	private async assertProductVariantStructuralInvariants(
+		db: ProductVariantInvariantExecutor,
+		productId: string
+	): Promise<void> {
+		const variants = await db.productVariant.findMany({
+			where: { productId, deleteAt: null },
+			select: {
+				id: true,
+				sku: true,
+				variantKey: true,
+				kind: true,
+				attributes: {
+					where: { deleteAt: null },
+					select: { id: true },
+					take: 1
+				}
+			}
+		})
+
+		let defaultCount = 0
+		for (const variant of variants as ProductVariantInvariantRow[]) {
+			const isDefaultByKind = variant.kind === ProductVariantKind.DEFAULT
+			const isDefaultByKey = variant.variantKey === DEFAULT_VARIANT_KEY
+
+			if (isDefaultByKind !== isDefaultByKey) {
+				throw new BadRequestException(
+					`Variant ${variant.sku} has inconsistent default markers`
+				)
+			}
+
+			if (isDefaultByKind) {
+				defaultCount += 1
+				if (variant.attributes.length > 0) {
+					throw new BadRequestException(
+						`Technical default variant ${variant.sku} must not have variant attributes`
+					)
+				}
+				continue
+			}
+
+			if (variant.attributes.length === 0) {
+				throw new BadRequestException(
+					`Matrix variant ${variant.sku} must have variant attributes`
+				)
+			}
+		}
+
+		if (defaultCount > 1) {
+			throw new BadRequestException(
+				'Product can have only one technical default variant'
+			)
+		}
+	}
+
 	private findActiveOrDefaultProductVariant(
 		db: ProductVariantInvariantExecutor,
 		productId: string
@@ -1609,7 +2232,10 @@ export class ProductRepository {
 						isAvailable: true
 					},
 					{
-						variantKey: DEFAULT_VARIANT_KEY,
+						OR: [
+							{ kind: ProductVariantKind.DEFAULT },
+							{ variantKey: DEFAULT_VARIANT_KEY }
+						],
 						status: { not: ProductVariantStatus.DISABLED }
 					}
 				]
@@ -1626,7 +2252,12 @@ export class ProductRepository {
 			where: {
 				productId,
 				deleteAt: null,
-				variantKey: { not: DEFAULT_VARIANT_KEY }
+				NOT: {
+					OR: [
+						{ kind: ProductVariantKind.DEFAULT },
+						{ variantKey: DEFAULT_VARIANT_KEY }
+					]
+				}
 			},
 			select: { id: true }
 		})
@@ -1638,8 +2269,16 @@ export class ProductRepository {
 		productId: string,
 		variant: ProductVariantData
 	): Promise<void> {
+		this.assertDefaultVariantData(variant)
+
 		const existingDefault = await tx.productVariant.findFirst({
-			where: { productId, variantKey: DEFAULT_VARIANT_KEY },
+			where: {
+				productId,
+				OR: [
+					{ kind: ProductVariantKind.DEFAULT },
+					{ variantKey: DEFAULT_VARIANT_KEY }
+				]
+			},
 			orderBy: { createdAt: 'asc' },
 			select: { id: true }
 		})
@@ -1653,6 +2292,7 @@ export class ProductRepository {
 		await tx.productVariant.update({
 			where: { id: existingDefault.id },
 			data: {
+				kind: ProductVariantKind.DEFAULT,
 				stock: variant.stock,
 				price: variant.price,
 				status: variant.status,
@@ -1690,6 +2330,7 @@ export class ProductRepository {
 			select: {
 				id: true,
 				variantKey: true,
+				kind: true,
 				price: true,
 				attributes: {
 					where: { deleteAt: null },
@@ -1706,7 +2347,7 @@ export class ProductRepository {
 
 		const [variant] = variants
 		if (
-			variant.variantKey !== DEFAULT_VARIANT_KEY ||
+			!isDefaultVariantRow(variant) ||
 			variant.attributes.length > 0 ||
 			variant.integrationLinks.length > 0 ||
 			(price === null ? variant.price === null : Number(variant.price) === price)
@@ -2542,14 +3183,83 @@ export class ProductRepository {
 		minPrice?: number,
 		maxPrice?: number
 	): Prisma.Sql[] {
-		const clauses: Prisma.Sql[] = []
+		const priceClauses: Prisma.Sql[] = []
 		if (minPrice !== undefined) {
-			clauses.push(PrismaSql.sql`p.price >= ${minPrice}`)
+			priceClauses.push(PrismaSql.sql`commercial_price.price >= ${minPrice}`)
 		}
 		if (maxPrice !== undefined) {
-			clauses.push(PrismaSql.sql`p.price <= ${maxPrice}`)
+			priceClauses.push(PrismaSql.sql`commercial_price.price <= ${maxPrice}`)
 		}
-		return clauses
+		if (!priceClauses.length) return []
+
+		return [
+			PrismaSql.sql`
+				EXISTS (
+					SELECT 1
+					FROM (
+						SELECT pv.price
+						FROM product_variants pv
+						WHERE pv.product_id = p.id
+							AND pv.delete_at IS NULL
+							AND pv.status::text <> ${ProductVariantStatus.DISABLED}
+							AND pv.price IS NOT NULL
+							AND (
+								(
+									EXISTS (
+										SELECT 1
+										FROM product_variants matrix_pv
+										WHERE matrix_pv.product_id = p.id
+											AND matrix_pv.delete_at IS NULL
+											AND matrix_pv.status::text <> ${ProductVariantStatus.DISABLED}
+											AND NOT (
+												matrix_pv.kind::text = ${ProductVariantKind.DEFAULT}
+												OR matrix_pv.variant_key = ${DEFAULT_VARIANT_KEY}
+											)
+									)
+									AND NOT (
+										pv.kind::text = ${ProductVariantKind.DEFAULT}
+										OR pv.variant_key = ${DEFAULT_VARIANT_KEY}
+									)
+								)
+								OR NOT EXISTS (
+									SELECT 1
+									FROM product_variants matrix_pv
+									WHERE matrix_pv.product_id = p.id
+										AND matrix_pv.delete_at IS NULL
+										AND matrix_pv.status::text <> ${ProductVariantStatus.DISABLED}
+										AND NOT (
+											matrix_pv.kind::text = ${ProductVariantKind.DEFAULT}
+											OR matrix_pv.variant_key = ${DEFAULT_VARIANT_KEY}
+										)
+								)
+							)
+						UNION ALL
+						SELECT p.price
+						WHERE p.price IS NOT NULL
+							AND NOT EXISTS (
+								SELECT 1
+								FROM product_variants matrix_pv
+								WHERE matrix_pv.product_id = p.id
+									AND matrix_pv.delete_at IS NULL
+									AND matrix_pv.status::text <> ${ProductVariantStatus.DISABLED}
+									AND NOT (
+										matrix_pv.kind::text = ${ProductVariantKind.DEFAULT}
+										OR matrix_pv.variant_key = ${DEFAULT_VARIANT_KEY}
+									)
+							)
+							AND NOT EXISTS (
+								SELECT 1
+								FROM product_variants fallback_pv
+								WHERE fallback_pv.product_id = p.id
+									AND fallback_pv.delete_at IS NULL
+									AND fallback_pv.status::text <> ${ProductVariantStatus.DISABLED}
+									AND fallback_pv.price IS NOT NULL
+							)
+					) commercial_price
+					WHERE ${PrismaSql.join(priceClauses, ' AND ')}
+				)
+			`
+		]
 	}
 
 	private buildProductTypeFilterClause(
@@ -2700,6 +3410,7 @@ export class ProductRepository {
 			await this.archiveAllProductVariants(tx, productId, now)
 			return
 		}
+		this.assertVariantDataInvariants(variants)
 
 		const skus = variants.map(variant => variant.sku)
 		await this.archiveMissingVariants(tx, productId, skus, now)
@@ -2979,6 +3690,7 @@ export class ProductRepository {
 			where: { id: variantId },
 			data: {
 				variantKey: variant.variantKey,
+				kind: this.resolveVariantKind(variant),
 				stock: variant.stock,
 				price: variant.price,
 				status: variant.status,
@@ -3294,6 +4006,319 @@ export class ProductRepository {
 		return Number.isFinite(quantity) && quantity > 0 ? quantity : 1
 	}
 
+	private async buildDefaultVariantDiagnosticCheck(
+		code: ProductDefaultVariantDiagnosticCode,
+		nonOkStatus: Exclude<ProductDefaultVariantDiagnosticStatus, 'ok'>,
+		message: string,
+		countPromise: Promise<number>,
+		samplesPromise: Promise<ProductDefaultVariantDiagnosticSample[]>
+	): Promise<ProductDefaultVariantDiagnosticCheck> {
+		const [count, samples] = await Promise.all([countPromise, samplesPromise])
+		return {
+			code,
+			status: count > 0 ? nonOkStatus : 'ok',
+			count,
+			message,
+			samples
+		}
+	}
+
+	private async countSimpleProductsWithoutDefaultVariant(catalogId: string) {
+		const rows = await this.prisma.$queryRaw<Array<{ count: number }>>(
+			PrismaSql.sql`
+				SELECT COUNT(*)::int AS count
+				FROM products p
+				WHERE p.catalog_id = ${catalogId}::uuid
+					AND p.delete_at IS NULL
+					AND NOT EXISTS (
+						SELECT 1
+						FROM product_variants custom_variant
+						WHERE custom_variant.product_id = p.id
+							AND custom_variant.delete_at IS NULL
+							AND NOT (
+								custom_variant.kind::text = ${ProductVariantKind.DEFAULT}
+								OR custom_variant.variant_key = ${DEFAULT_VARIANT_KEY}
+							)
+					)
+					AND NOT EXISTS (
+						SELECT 1
+						FROM product_variants default_variant
+						WHERE default_variant.product_id = p.id
+							AND default_variant.delete_at IS NULL
+							AND (
+								default_variant.kind::text = ${ProductVariantKind.DEFAULT}
+								OR default_variant.variant_key = ${DEFAULT_VARIANT_KEY}
+							)
+					)
+			`
+		)
+		return this.readDiagnosticCount(rows)
+	}
+
+	private findSimpleProductsWithoutDefaultVariant(
+		catalogId: string,
+		limit: number
+	) {
+		return this.prisma.$queryRaw<ProductDefaultVariantDiagnosticSample[]>(
+			PrismaSql.sql`
+				SELECT
+					p.id::text AS "productId",
+					p.name AS "productName",
+					p.sku AS "productSku",
+					NULL::text AS "variantId",
+					NULL::text AS "variantKey",
+					NULL::text AS "variantSku",
+					'No custom variants and no technical default variant' AS details
+				FROM products p
+				WHERE p.catalog_id = ${catalogId}::uuid
+					AND p.delete_at IS NULL
+					AND NOT EXISTS (
+						SELECT 1
+						FROM product_variants custom_variant
+						WHERE custom_variant.product_id = p.id
+							AND custom_variant.delete_at IS NULL
+							AND NOT (
+								custom_variant.kind::text = ${ProductVariantKind.DEFAULT}
+								OR custom_variant.variant_key = ${DEFAULT_VARIANT_KEY}
+							)
+					)
+					AND NOT EXISTS (
+						SELECT 1
+						FROM product_variants default_variant
+						WHERE default_variant.product_id = p.id
+							AND default_variant.delete_at IS NULL
+							AND (
+								default_variant.kind::text = ${ProductVariantKind.DEFAULT}
+								OR default_variant.variant_key = ${DEFAULT_VARIANT_KEY}
+							)
+					)
+				ORDER BY p.updated_at DESC, p.id ASC
+				LIMIT ${limit}
+			`
+		)
+	}
+
+	private async countProductsWithMultipleDefaultVariants(catalogId: string) {
+		const rows = await this.prisma.$queryRaw<Array<{ count: number }>>(
+			PrismaSql.sql`
+				WITH grouped AS (
+					SELECT p.id
+					FROM products p
+					JOIN product_variants v ON v.product_id = p.id
+					WHERE p.catalog_id = ${catalogId}::uuid
+						AND p.delete_at IS NULL
+						AND v.delete_at IS NULL
+						AND (
+							v.kind::text = ${ProductVariantKind.DEFAULT}
+							OR v.variant_key = ${DEFAULT_VARIANT_KEY}
+						)
+					GROUP BY p.id
+					HAVING COUNT(*) > 1
+				)
+				SELECT COUNT(*)::int AS count FROM grouped
+			`
+		)
+		return this.readDiagnosticCount(rows)
+	}
+
+	private findProductsWithMultipleDefaultVariants(
+		catalogId: string,
+		limit: number
+	) {
+		return this.prisma.$queryRaw<ProductDefaultVariantDiagnosticSample[]>(
+			PrismaSql.sql`
+				SELECT
+					p.id::text AS "productId",
+					p.name AS "productName",
+					p.sku AS "productSku",
+					NULL::text AS "variantId",
+					NULL::text AS "variantKey",
+					NULL::text AS "variantSku",
+					CONCAT('defaultVariants=', COUNT(v.id)::text) AS details
+				FROM products p
+				JOIN product_variants v ON v.product_id = p.id
+				WHERE p.catalog_id = ${catalogId}::uuid
+					AND p.delete_at IS NULL
+					AND v.delete_at IS NULL
+					AND (
+						v.kind::text = ${ProductVariantKind.DEFAULT}
+						OR v.variant_key = ${DEFAULT_VARIANT_KEY}
+					)
+				GROUP BY p.id, p.name, p.sku
+				HAVING COUNT(*) > 1
+				ORDER BY COUNT(v.id) DESC, p.id ASC
+				LIMIT ${limit}
+			`
+		)
+	}
+
+	private async countCustomVariantsWithoutAttributes(catalogId: string) {
+		const rows = await this.prisma.$queryRaw<Array<{ count: number }>>(
+			PrismaSql.sql`
+				SELECT COUNT(*)::int AS count
+				FROM product_variants v
+				JOIN products p ON p.id = v.product_id
+				WHERE p.catalog_id = ${catalogId}::uuid
+					AND p.delete_at IS NULL
+					AND v.delete_at IS NULL
+					AND NOT (
+						v.kind::text = ${ProductVariantKind.DEFAULT}
+						OR v.variant_key = ${DEFAULT_VARIANT_KEY}
+					)
+					AND NOT EXISTS (
+						SELECT 1
+						FROM variant_attributes attribute
+						WHERE attribute.variant_id = v.id
+							AND attribute.delete_at IS NULL
+					)
+			`
+		)
+		return this.readDiagnosticCount(rows)
+	}
+
+	private findCustomVariantsWithoutAttributes(catalogId: string, limit: number) {
+		return this.prisma.$queryRaw<ProductDefaultVariantDiagnosticSample[]>(
+			PrismaSql.sql`
+				SELECT
+					p.id::text AS "productId",
+					p.name AS "productName",
+					p.sku AS "productSku",
+					v.id::text AS "variantId",
+					v.variant_key AS "variantKey",
+					v.sku AS "variantSku",
+					'Custom variant has no variant attributes' AS details
+				FROM product_variants v
+				JOIN products p ON p.id = v.product_id
+				WHERE p.catalog_id = ${catalogId}::uuid
+					AND p.delete_at IS NULL
+					AND v.delete_at IS NULL
+					AND NOT (
+						v.kind::text = ${ProductVariantKind.DEFAULT}
+						OR v.variant_key = ${DEFAULT_VARIANT_KEY}
+					)
+					AND NOT EXISTS (
+						SELECT 1
+						FROM variant_attributes attribute
+						WHERE attribute.variant_id = v.id
+							AND attribute.delete_at IS NULL
+					)
+				ORDER BY p.updated_at DESC, v.created_at ASC, v.id ASC
+				LIMIT ${limit}
+			`
+		)
+	}
+
+	private async countDefaultVariantsWithAttributes(catalogId: string) {
+		const rows = await this.prisma.$queryRaw<Array<{ count: number }>>(
+			PrismaSql.sql`
+				SELECT COUNT(*)::int AS count
+				FROM product_variants v
+				JOIN products p ON p.id = v.product_id
+				WHERE p.catalog_id = ${catalogId}::uuid
+					AND p.delete_at IS NULL
+					AND v.delete_at IS NULL
+					AND (
+						v.kind::text = ${ProductVariantKind.DEFAULT}
+						OR v.variant_key = ${DEFAULT_VARIANT_KEY}
+					)
+					AND EXISTS (
+						SELECT 1
+						FROM variant_attributes attribute
+						WHERE attribute.variant_id = v.id
+							AND attribute.delete_at IS NULL
+					)
+			`
+		)
+		return this.readDiagnosticCount(rows)
+	}
+
+	private findDefaultVariantsWithAttributes(catalogId: string, limit: number) {
+		return this.prisma.$queryRaw<ProductDefaultVariantDiagnosticSample[]>(
+			PrismaSql.sql`
+				SELECT
+					p.id::text AS "productId",
+					p.name AS "productName",
+					p.sku AS "productSku",
+					v.id::text AS "variantId",
+					v.variant_key AS "variantKey",
+					v.sku AS "variantSku",
+					'Technical default variant should not carry variant attributes' AS details
+				FROM product_variants v
+				JOIN products p ON p.id = v.product_id
+				WHERE p.catalog_id = ${catalogId}::uuid
+					AND p.delete_at IS NULL
+					AND v.delete_at IS NULL
+					AND (
+						v.kind::text = ${ProductVariantKind.DEFAULT}
+						OR v.variant_key = ${DEFAULT_VARIANT_KEY}
+					)
+					AND EXISTS (
+						SELECT 1
+						FROM variant_attributes attribute
+						WHERE attribute.variant_id = v.id
+							AND attribute.delete_at IS NULL
+					)
+				ORDER BY p.updated_at DESC, v.created_at ASC, v.id ASC
+				LIMIT ${limit}
+			`
+		)
+	}
+
+	private async countDefaultVariantPriceMismatches(catalogId: string) {
+		const rows = await this.prisma.$queryRaw<Array<{ count: number }>>(
+			PrismaSql.sql`
+				SELECT COUNT(*)::int AS count
+				FROM product_variants v
+				JOIN products p ON p.id = v.product_id
+				WHERE p.catalog_id = ${catalogId}::uuid
+					AND p.delete_at IS NULL
+					AND v.delete_at IS NULL
+					AND (
+						v.kind::text = ${ProductVariantKind.DEFAULT}
+						OR v.variant_key = ${DEFAULT_VARIANT_KEY}
+					)
+					AND p.price IS DISTINCT FROM v.price
+			`
+		)
+		return this.readDiagnosticCount(rows)
+	}
+
+	private findDefaultVariantPriceMismatches(catalogId: string, limit: number) {
+		return this.prisma.$queryRaw<ProductDefaultVariantDiagnosticSample[]>(
+			PrismaSql.sql`
+				SELECT
+					p.id::text AS "productId",
+					p.name AS "productName",
+					p.sku AS "productSku",
+					v.id::text AS "variantId",
+					v.variant_key AS "variantKey",
+					v.sku AS "variantSku",
+					CONCAT(
+						'productPrice=',
+						COALESCE(p.price::text, 'null'),
+						'; variantPrice=',
+						COALESCE(v.price::text, 'null')
+					) AS details
+				FROM product_variants v
+				JOIN products p ON p.id = v.product_id
+				WHERE p.catalog_id = ${catalogId}::uuid
+					AND p.delete_at IS NULL
+					AND v.delete_at IS NULL
+					AND (
+						v.kind::text = ${ProductVariantKind.DEFAULT}
+						OR v.variant_key = ${DEFAULT_VARIANT_KEY}
+					)
+					AND p.price IS DISTINCT FROM v.price
+				ORDER BY p.updated_at DESC, v.created_at ASC, v.id ASC
+				LIMIT ${limit}
+			`
+		)
+	}
+
+	private readDiagnosticCount(rows: Array<{ count?: number | string }>): number {
+		return Number(rows[0]?.count ?? 0)
+	}
+
 	private normalizeSaleUnitCode(
 		code: string | undefined,
 		name: string,
@@ -3331,6 +4356,7 @@ export class ProductRepository {
 				productId,
 				sku: variant.sku,
 				variantKey: variant.variantKey,
+				kind: this.resolveVariantKind(variant),
 				stock: variant.stock,
 				price: variant.price,
 				status: variant.status,
@@ -3349,6 +4375,13 @@ export class ProductRepository {
 				}))
 			})
 		}
+	}
+
+	private resolveVariantKind(variant: ProductVariantData): ProductVariantKind {
+		if (variant.kind) return variant.kind
+		return variant.variantKey === DEFAULT_VARIANT_KEY
+			? ProductVariantKind.DEFAULT
+			: ProductVariantKind.MATRIX
 	}
 
 	private async loadExistingVariantsForUpdate(
@@ -3391,9 +4424,9 @@ export class ProductRepository {
 			(variant.stock !== undefined
 				? currentStatus === ProductVariantStatus.DISABLED
 					? ProductVariantStatus.DISABLED
-					: variant.stock > 0
-						? ProductVariantStatus.ACTIVE
-						: ProductVariantStatus.OUT_OF_STOCK
+					: variant.stock === 0
+						? ProductVariantStatus.OUT_OF_STOCK
+						: ProductVariantStatus.ACTIVE
 				: undefined)
 		if (nextStatus !== undefined) {
 			data.status = nextStatus

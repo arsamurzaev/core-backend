@@ -1,6 +1,7 @@
 import {
 	type IntegrationOrderExportStatus,
 	IntegrationProvider,
+	IntegrationSyncSnapshotCompleteness,
 	IntegrationSyncRunMode,
 	IntegrationSyncRunStatus,
 	IntegrationSyncRunTrigger,
@@ -15,6 +16,8 @@ const INTEGRATION_ORDER_EXPORT_STATUSES = [
 	'ERROR',
 	'SKIPPED'
 ] as const
+const MOYSKLAD_FIELD_OWNERSHIP_VALUES = ['external', 'local'] as const
+const MOYSKLAD_STOCK_APPLY_SOURCES = ['FULL_SYNC', 'WEBHOOK'] as const
 
 export class MoySkladSyncEntityStatsDto {
 	@ApiProperty({ type: Number })
@@ -33,6 +36,52 @@ export class MoySkladSyncEntityStatsDto {
 	skipped: number
 }
 
+export class MoySkladSyncStockSkippedReasonsDto {
+	@ApiProperty({ type: Number })
+	missingStock: number
+
+	@ApiProperty({ type: Number })
+	productHasVariantLinks: number
+
+	@ApiProperty({ type: Number })
+	variantsCapabilityDisabled: number
+
+	@ApiProperty({ type: Number })
+	stockRowWithoutLocalLink: number
+}
+
+export class MoySkladSyncStockDiagnosticsDto {
+	@ApiProperty({ enum: MOYSKLAD_STOCK_APPLY_SOURCES })
+	source: 'FULL_SYNC' | 'WEBHOOK'
+
+	@ApiProperty({ type: Number })
+	stockRows: number
+
+	@ApiProperty({ type: Number })
+	matchedStockRows: number
+
+	@ApiProperty({ type: Number })
+	unmatchedStockRows: number
+
+	@ApiProperty({ type: Number })
+	productLinks: number
+
+	@ApiProperty({ type: Number })
+	variantLinks: number
+
+	@ApiProperty({ type: Number })
+	ignoredVariantLinks: number
+
+	@ApiProperty({ type: Number })
+	appliedProductLinks: number
+
+	@ApiProperty({ type: Number })
+	appliedVariantLinks: number
+
+	@ApiProperty({ type: MoySkladSyncStockSkippedReasonsDto })
+	skippedReasons: MoySkladSyncStockSkippedReasonsDto
+}
+
 export class MoySkladSyncStockStatsDto {
 	@ApiProperty({ type: Number })
 	total: number
@@ -42,6 +91,9 @@ export class MoySkladSyncStockStatsDto {
 
 	@ApiProperty({ type: Number })
 	skipped: number
+
+	@ApiProperty({ type: MoySkladSyncStockDiagnosticsDto, nullable: true })
+	diagnostics: MoySkladSyncStockDiagnosticsDto | null
 }
 
 export class MoySkladSyncIssueDto {
@@ -136,6 +188,20 @@ export class MoySkladStockWebhookDto {
 	lastError: string | null
 }
 
+export class MoySkladFieldOwnershipDto {
+	@ApiProperty({ enum: MOYSKLAD_FIELD_OWNERSHIP_VALUES })
+	price: 'external' | 'local'
+
+	@ApiProperty({ enum: MOYSKLAD_FIELD_OWNERSHIP_VALUES })
+	stock: 'external' | 'local'
+
+	@ApiProperty({ enum: MOYSKLAD_FIELD_OWNERSHIP_VALUES })
+	content: 'external' | 'local'
+
+	@ApiProperty({ enum: MOYSKLAD_FIELD_OWNERSHIP_VALUES })
+	images: 'external' | 'local'
+}
+
 export class MoySkladIntegrationDto {
 	@ApiProperty({ enum: IntegrationProvider })
 	provider: IntegrationProvider
@@ -160,6 +226,9 @@ export class MoySkladIntegrationDto {
 
 	@ApiProperty({ type: Boolean })
 	syncStock: boolean
+
+	@ApiProperty({ type: MoySkladFieldOwnershipDto })
+	fieldOwnership: MoySkladFieldOwnershipDto
 
 	@ApiProperty({ type: MoySkladStockWebhookDto })
 	stockWebhook: MoySkladStockWebhookDto
@@ -234,6 +303,9 @@ export class MoySkladSyncRunDto {
 
 	@ApiProperty({ enum: IntegrationSyncRunStatus })
 	status: IntegrationSyncRunStatus
+
+	@ApiProperty({ enum: IntegrationSyncSnapshotCompleteness })
+	snapshotCompleteness: IntegrationSyncSnapshotCompleteness
 
 	@ApiProperty({ type: String, nullable: true })
 	jobId: string | null

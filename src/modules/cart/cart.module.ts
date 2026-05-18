@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common'
 
+import { CapabilityModule } from '@/modules/capability/public'
+import { IntegrationModule } from '@/modules/integration/public'
+import { InventoryModule } from '@/modules/inventory/public'
+import { ProductModule } from '@/modules/product/public'
 import { MediaUrlService } from '@/shared/media/media-url.service'
-
-import { CapabilityModule } from '../capability/capability.module'
-import { IntegrationModule } from '../integration/integration.module'
-import { InventoryModule } from '../inventory/inventory.module'
 
 import { CartCurrentService } from './cart-current.service'
 import { CartInventoryReservationService } from './cart-inventory-reservation.service'
@@ -23,7 +23,7 @@ import { CartService } from './cart.service'
 import { OrderCheckoutService } from './order-checkout.service'
 
 @Module({
-	imports: [CapabilityModule, IntegrationModule, InventoryModule],
+	imports: [CapabilityModule, IntegrationModule, InventoryModule, ProductModule],
 	controllers: [CartController],
 	providers: [
 		CartService,

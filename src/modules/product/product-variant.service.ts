@@ -1,17 +1,25 @@
-import { ProductStatus, ProductVariantStatus } from '@generated/enums'
+import {
+	ProductStatus,
+	ProductVariantKind,
+	ProductVariantStatus
+} from '@generated/enums'
 import {
 	BadRequestException,
+	Inject,
 	Injectable,
 	NotFoundException
 } from '@nestjs/common'
 
-import { CapabilityService } from '@/modules/capability/capability.service'
+import {
+	CAPABILITY_ASSERT_PORT,
+	type CapabilityAssertPort
+} from '@/modules/capability/contracts'
 import { normalizeRequiredString } from '@/shared/utils'
 
 import {
 	assertProductTypeVariantCombinations,
 	type ProductTypeVariantCombinationInput
-} from '../product-type/product-type-variant-combinations.utils'
+} from '@/modules/product-type/public'
 
 import { ProductVariantUpdateDtoReq } from './dto/requests/product-variant-update.dto.req'
 import { ProductVariantDtoReq } from './dto/requests/product-variant.dto.req'
@@ -62,7 +70,8 @@ export class ProductVariantService {
 	constructor(
 		private readonly repo: ProductRepository,
 		private readonly variantBuilder: ProductVariantBuilder,
-		private readonly featureEntitlements: CapabilityService
+		@Inject(CAPABILITY_ASSERT_PORT)
+		private readonly featureEntitlements: CapabilityAssertPort
 	) {}
 
 	async setVariants(
@@ -145,13 +154,13 @@ export class ProductVariantService {
 		sku: string,
 		price: unknown,
 		options: {
-			stock?: number
+			stock?: number | null
 			status?: ProductVariantStatus
 			productStatus?: ProductStatus | null
 			saleUnits?: ProductVariantDtoReq['saleUnits']
 		} = {}
 	): Promise<ProductVariantData> {
-		const stock = options.stock ?? 0
+		const stock = options.stock ?? null
 		const status =
 			options.status ??
 			this.resolveDefaultVariantStatus(options.productStatus, stock)
@@ -159,6 +168,7 @@ export class ProductVariantService {
 		return {
 			sku: await this.ensureUniqueDefaultVariantSku(sku),
 			variantKey: DEFAULT_VARIANT_KEY,
+			kind: ProductVariantKind.DEFAULT,
 			stock,
 			price: this.normalizeVariantPrice(price),
 			status,
@@ -240,7 +250,7 @@ export class ProductVariantService {
 
 		const sourceDefaultVariant =
 			source.variants.find(
-				variant => variant.variantKey === DEFAULT_VARIANT_KEY
+				variant => isDefaultVariant(variant)
 			) ?? source.variants[0]
 
 		return [
@@ -248,7 +258,7 @@ export class ProductVariantService {
 				sku,
 				sourceDefaultVariant?.price ?? source.price,
 				{
-					stock: sourceDefaultVariant?.stock ?? 0,
+					stock: sourceDefaultVariant?.stock ?? null,
 					status: sourceDefaultVariant?.status
 				}
 			)
@@ -265,17 +275,6 @@ export class ProductVariantService {
 		const product = await this.repo.findSkuById(id, catalogId)
 		if (!product) throw new NotFoundException('Товар не найден')
 
-		const productType = product.productTypeId
-			? await this.loadExistingProductTypeValidationSchema(
-					product.productTypeId,
-					catalogId
-				)
-			: null
-		const validationScope = this.buildValidationScope(
-			typeId,
-			catalogId,
-			productType?.id ?? null
-		)
 		const productPrice =
 			product.price === null
 				? null
@@ -288,11 +287,33 @@ export class ProductVariantService {
 				? productPrice
 				: undefined)
 
-		if (!productType && this.hasVariantAttributeInputs(inputs)) {
-			throw new BadRequestException(
-				'Product type is required to manage product variants'
+		if (!inputs.length) {
+			const defaultVariant = await this.buildDefaultVariantData(
+				product.sku,
+				defaultPrice,
+				{ productStatus: product.status }
 			)
+			const updated = await this.repo.setVariants(id, catalogId, [defaultVariant])
+			if (!updated) throw new NotFoundException('Товар не найден')
+
+			return {
+				hasCustomVariantValues: false,
+				product: updated
+			}
 		}
+
+		const productType = product.productTypeId
+			? await this.loadExistingProductTypeValidationSchema(
+					product.productTypeId,
+					catalogId
+				)
+			: null
+		const validationScope = this.buildValidationScope(
+			typeId,
+			catalogId,
+			productType?.id ?? null
+		)
+
 		this.assertProductTypeVariantInputs(productType, inputs)
 
 		const variants = await this.variantBuilder.build(
@@ -396,15 +417,15 @@ export class ProductVariantService {
 
 	private resolveDefaultVariantStatus(
 		productStatus?: ProductStatus | null,
-		stock = 0
+		stock: number | null = null
 	): ProductVariantStatus {
 		if (productStatus && productStatus !== ProductStatus.ACTIVE) {
 			return ProductVariantStatus.OUT_OF_STOCK
 		}
 
-		return stock > 0
-			? ProductVariantStatus.ACTIVE
-			: ProductVariantStatus.OUT_OF_STOCK
+		return stock === 0
+			? ProductVariantStatus.OUT_OF_STOCK
+			: ProductVariantStatus.ACTIVE
 	}
 
 	private async ensureUniqueDefaultVariantSku(base: string): Promise<string> {
@@ -467,4 +488,14 @@ export class ProductVariantService {
 				}))
 			}))
 	}
+}
+
+function isDefaultVariant(variant: {
+	variantKey: string
+	kind?: ProductVariantKind | null
+}): boolean {
+	return (
+		variant.kind === ProductVariantKind.DEFAULT ||
+		variant.variantKey === DEFAULT_VARIANT_KEY
+	)
 }

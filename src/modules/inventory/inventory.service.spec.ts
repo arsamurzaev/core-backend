@@ -6,7 +6,10 @@ import {
 import { Test, TestingModule } from '@nestjs/testing'
 
 import { AuditService } from '@/modules/audit/audit.service'
+import { AUDIT_RECORDER_PORT } from '@/modules/audit/contracts'
 import { CapabilityService } from '@/modules/capability/capability.service'
+import { CAPABILITY_ASSERT_PORT } from '@/modules/capability/contracts'
+import { OBSERVABILITY_RECORDER_PORT } from '@/modules/observability/contracts'
 import { ObservabilityService } from '@/modules/observability/observability.service'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
@@ -86,16 +89,28 @@ describe('InventoryService', () => {
 					}
 				},
 				{
+					provide: CAPABILITY_ASSERT_PORT,
+					useExisting: CapabilityService
+				},
+				{
 					provide: AuditService,
 					useValue: {
 						record: jest.fn()
 					}
 				},
 				{
+					provide: AUDIT_RECORDER_PORT,
+					useExisting: AuditService
+				},
+				{
 					provide: ObservabilityService,
 					useValue: {
 						recordInventoryMovement: jest.fn()
 					}
+				},
+				{
+					provide: OBSERVABILITY_RECORDER_PORT,
+					useExisting: ObservabilityService
 				},
 				{
 					provide: CacheService,
@@ -143,25 +158,29 @@ describe('InventoryService', () => {
 			warehouseId: WAREHOUSE_ID,
 			reservedLines: 1,
 			releasedReservations: 0,
-			affectedVariantIds: ['variant-1']
+			affectedVariantIds: ['variant-1'],
+			stockChanges: []
 		} as any)
 		repo.releaseCartReservations.mockResolvedValue({
 			releasedReservations: 1,
 			affectedVariants: 1,
 			affectedVariantIds: ['variant-1'],
-			affectedCatalogIds: [CATALOG_ID]
+			affectedCatalogIds: [CATALOG_ID],
+			stockChanges: []
 		})
 		repo.consumeCompletedOrderStock.mockResolvedValue({
 			ok: true,
 			warehouseId: WAREHOUSE_ID,
 			consumedLines: 1,
-			affectedVariantIds: ['variant-1']
+			affectedVariantIds: ['variant-1'],
+			stockChanges: []
 		} as any)
 		repo.releaseExpiredReservations.mockResolvedValue({
 			releasedReservations: 1,
 			affectedVariants: 1,
 			affectedVariantIds: ['variant-1'],
-			affectedCatalogIds: [CATALOG_ID]
+			affectedCatalogIds: [CATALOG_ID],
+			stockChanges: []
 		})
 	})
 
@@ -318,6 +337,62 @@ describe('InventoryService', () => {
 		)
 	})
 
+	it('dispatches manual stock changed event when event dispatcher is available', async () => {
+		const events = { dispatch: jest.fn().mockResolvedValue(undefined) }
+		const eventedService = new InventoryService(
+			repo,
+			entitlements,
+			audit,
+			observability,
+			cache,
+			events as any
+		)
+		repo.adjustStock.mockResolvedValue({
+			ok: true,
+			balance: { id: 'balance-1' },
+			movement: {
+				id: 'movement-1',
+				type: 'RECEIPT',
+				source: 'MANUAL',
+				quantityAfter: 5
+			},
+			variantStock: 5,
+			stockChange: {
+				variantId: 'variant-1',
+				productId: 'product-1',
+				previousStock: 0,
+				nextStock: 5,
+				changed: true
+			}
+		} as any)
+
+		await runWithCatalog(() =>
+			eventedService.adjustWarehouseStock(
+				WAREHOUSE_ID,
+				{
+					variantId: 'variant-1',
+					quantityDelta: 5,
+					reason: 'Manual receipt'
+				},
+				'user-1'
+			)
+		)
+
+		expect(events.dispatch).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: 'variant.stock_changed',
+				catalogId: CATALOG_ID,
+				productId: 'product-1',
+				variantId: 'variant-1',
+				previousStock: 0,
+				nextStock: 5,
+				source: 'manual',
+				reason: 'Manual receipt'
+			})
+		)
+		expect(cache.bumpVersion).not.toHaveBeenCalled()
+	})
+
 	it('lists warehouse reservations with normalized limit', async () => {
 		await expect(
 			runWithCatalog(() => service.getWarehouseReservations(WAREHOUSE_ID, '500'))
@@ -389,7 +464,10 @@ describe('InventoryService', () => {
 					}
 				]
 			})
-		).resolves.toEqual([CATALOG_ID])
+		).resolves.toEqual({
+			affectedCatalogIds: [CATALOG_ID],
+			domainEvents: []
+		})
 
 		expect(entitlements.assertCanUseInternalInventory).toHaveBeenCalledWith(
 			CATALOG_ID
@@ -417,6 +495,82 @@ describe('InventoryService', () => {
 			'success',
 			1
 		)
+	})
+
+	it('returns deferred cart reservation stock event without dispatching inside transaction', async () => {
+		const events = {
+			dispatch: jest.fn(),
+			dispatchMany: jest.fn().mockResolvedValue(undefined)
+		}
+		const outbox = {
+			appendTx: jest.fn().mockResolvedValue(undefined)
+		}
+		const eventedService = new InventoryService(
+			repo,
+			entitlements,
+			audit,
+			observability,
+			cache,
+			events as any,
+			outbox as any
+		)
+		repo.reserveCartStock.mockResolvedValue({
+			ok: true,
+			warehouseId: WAREHOUSE_ID,
+			reservedLines: 1,
+			releasedReservations: 0,
+			affectedVariantIds: ['variant-1'],
+			stockChanges: [
+				{
+					variantId: 'variant-1',
+					productId: 'product-1',
+					previousStock: 5,
+					nextStock: 3,
+					changed: true
+				}
+			]
+		} as any)
+
+		const tx = {} as any
+		const result = await eventedService.reserveCartStockTx(tx, {
+			catalogId: CATALOG_ID,
+			cartId: 'cart-1',
+			actorUserId: 'manager-1',
+			lines: [
+				{
+					cartItemId: 'cart-item-1',
+					productId: 'product-1',
+					variantId: 'variant-1',
+					quantity: 2
+				}
+			]
+		})
+
+		expect(events.dispatchMany).not.toHaveBeenCalled()
+		expect(outbox.appendTx).toHaveBeenCalledWith(tx, result.domainEvents)
+		expect(result).toEqual({
+			affectedCatalogIds: [CATALOG_ID],
+			domainEvents: [
+				expect.objectContaining({
+					type: 'variant.stock_changed',
+					catalogId: CATALOG_ID,
+					productId: 'product-1',
+					variantId: 'variant-1',
+					previousStock: 5,
+					nextStock: 3,
+					source: 'cart',
+					reason: 'cart_reservation'
+				})
+			]
+		})
+
+		await eventedService.invalidateProductCachesForCatalogs(
+			result.affectedCatalogIds,
+			result.domainEvents
+		)
+
+		expect(events.dispatchMany).toHaveBeenCalledWith(result.domainEvents)
+		expect(cache.bumpVersion).not.toHaveBeenCalled()
 	})
 
 	it('maps cart reservation stock failures to business exceptions', async () => {
@@ -485,7 +639,10 @@ describe('InventoryService', () => {
 					}
 				]
 			})
-		).resolves.toEqual([CATALOG_ID])
+		).resolves.toEqual({
+			affectedCatalogIds: [CATALOG_ID],
+			domainEvents: []
+		})
 
 		expect(entitlements.assertCanUseInternalInventory).toHaveBeenCalledWith(
 			CATALOG_ID
@@ -510,6 +667,69 @@ describe('InventoryService', () => {
 			'success',
 			1
 		)
+	})
+
+	it('returns deferred completed order stock event with previous and next stock', async () => {
+		const outbox = {
+			appendTx: jest.fn().mockResolvedValue(undefined)
+		}
+		const eventedService = new InventoryService(
+			repo,
+			entitlements,
+			audit,
+			observability,
+			cache,
+			undefined,
+			outbox as any
+		)
+		repo.consumeCompletedOrderStock.mockResolvedValue({
+			ok: true,
+			warehouseId: WAREHOUSE_ID,
+			consumedLines: 1,
+			affectedVariantIds: ['variant-1'],
+			stockChanges: [
+				{
+					variantId: 'variant-1',
+					productId: 'product-1',
+					previousStock: 3,
+					nextStock: 1,
+					changed: true
+				}
+			]
+		} as any)
+
+		const tx = {} as any
+		const result = await eventedService.consumeCompletedOrderStockTx(tx, {
+			catalogId: CATALOG_ID,
+			cartId: 'cart-1',
+			orderId: 'order-1',
+			actorUserId: 'manager-1',
+			lines: [
+				{
+					cartItemId: 'cart-item-1',
+					productId: 'product-1',
+					variantId: 'variant-1',
+					quantity: 2
+				}
+			]
+		})
+
+		expect(result).toEqual({
+			affectedCatalogIds: [CATALOG_ID],
+			domainEvents: [
+				expect.objectContaining({
+					type: 'variant.stock_changed',
+					catalogId: CATALOG_ID,
+					productId: 'product-1',
+					variantId: 'variant-1',
+					previousStock: 3,
+					nextStock: 1,
+					source: 'order',
+					reason: 'completed_order_stock_consume'
+				})
+			]
+		})
+		expect(outbox.appendTx).toHaveBeenCalledWith(tx, result.domainEvents)
 	})
 
 	it('blocks completed order stock consumption when internal inventory entitlement expired', async () => {
@@ -553,7 +773,9 @@ describe('InventoryService', () => {
 			releasedReservations: 1,
 			affectedVariants: 1,
 			affectedVariantIds: ['variant-1'],
-			affectedCatalogIds: [CATALOG_ID]
+			affectedCatalogIds: [CATALOG_ID],
+			stockChanges: [],
+			domainEvents: []
 		})
 		expect(repo.releaseCartReservations).toHaveBeenCalledWith(tx, {
 			catalogId: CATALOG_ID,
@@ -577,7 +799,8 @@ describe('InventoryService', () => {
 			releasedReservations: 1,
 			affectedVariants: 1,
 			affectedVariantIds: ['variant-1'],
-			affectedCatalogIds: [CATALOG_ID]
+			affectedCatalogIds: [CATALOG_ID],
+			stockChanges: []
 		})
 		expect(repo.releaseExpiredReservations).toHaveBeenCalledWith(now)
 		expect(observability.recordInventoryMovement).toHaveBeenCalledWith(
@@ -594,5 +817,54 @@ describe('InventoryService', () => {
 			CATEGORY_PRODUCTS_CACHE_VERSION,
 			CATALOG_ID
 		)
+	})
+
+	it('dispatches expired reservation stock events after repository transactions', async () => {
+		const events = {
+			dispatch: jest.fn(),
+			dispatchMany: jest.fn().mockResolvedValue(undefined)
+		}
+		const eventedService = new InventoryService(
+			repo,
+			entitlements,
+			audit,
+			observability,
+			cache,
+			events as any
+		)
+		repo.releaseExpiredReservations.mockResolvedValue({
+			releasedReservations: 1,
+			affectedVariants: 1,
+			affectedVariantIds: ['variant-1'],
+			affectedCatalogIds: [CATALOG_ID],
+			stockChanges: [
+				{
+					catalogId: CATALOG_ID,
+					variantId: 'variant-1',
+					productId: 'product-1',
+					previousStock: 1,
+					nextStock: 2,
+					changed: true
+				}
+			]
+		})
+
+		await eventedService.releaseExpiredReservations(
+			new Date('2026-05-11T00:00:00.000Z')
+		)
+
+		expect(events.dispatchMany).toHaveBeenCalledWith([
+			expect.objectContaining({
+				type: 'variant.stock_changed',
+				catalogId: CATALOG_ID,
+				productId: 'product-1',
+				variantId: 'variant-1',
+				previousStock: 1,
+				nextStock: 2,
+				source: 'system',
+				reason: 'expired_reservation_release'
+			})
+		])
+		expect(cache.bumpVersion).not.toHaveBeenCalled()
 	})
 })

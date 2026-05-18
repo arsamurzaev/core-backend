@@ -32,12 +32,22 @@ export class ProductVariantItemDtoReq {
 	@Min(0)
 	price?: number | null
 
-	@ApiPropertyOptional({ type: Number, example: 10 })
+	@ApiPropertyOptional({
+		type: Number,
+		example: 10,
+		nullable: true,
+		description: 'null означает, что остаток не ведется'
+	})
 	@IsOptional()
-	@Type(() => Number)
+	@Transform(({ value }: { value: unknown }) => {
+		if (value === undefined) return undefined
+		if (value === null) return null
+		if (typeof value === 'string' && value.trim().length === 0) return null
+		return Number(value)
+	})
 	@IsInt()
 	@Min(0)
-	stock?: number
+	stock?: number | null
 
 	@ApiPropertyOptional({ enum: ProductVariantStatus, example: 'ACTIVE' })
 	@IsOptional()

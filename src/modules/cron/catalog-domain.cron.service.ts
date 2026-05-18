@@ -1,7 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
 
-import { CatalogDomainService } from '@/modules/catalog/catalog-domain.service'
+import {
+	CATALOG_DOMAIN_MAINTENANCE_PORT,
+	type CatalogDomainMaintenancePort
+} from '@/modules/catalog/contracts'
 
 const DEFAULT_DOMAIN_CHECK_CRON = '*/5 * * * *'
 
@@ -9,7 +12,10 @@ const DEFAULT_DOMAIN_CHECK_CRON = '*/5 * * * *'
 export class CatalogDomainCronService {
 	private readonly logger = new Logger(CatalogDomainCronService.name)
 
-	constructor(private readonly domains: CatalogDomainService) {}
+	constructor(
+		@Inject(CATALOG_DOMAIN_MAINTENANCE_PORT)
+		private readonly domains: CatalogDomainMaintenancePort
+	) {}
 
 	@Cron(process.env.CATALOG_DOMAIN_CHECK_CRON ?? DEFAULT_DOMAIN_CHECK_CRON, {
 		name: 'catalog-domain-check'

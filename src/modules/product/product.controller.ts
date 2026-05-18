@@ -28,9 +28,9 @@ import {
 	setUserAwarePublicCacheHeaders
 } from '@/shared/http/cache-control'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
+import { canReadInactiveCatalogProducts } from '@/shared/tenancy/catalog-visibility.utils'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
-import { canReadInactiveCatalogProducts } from '../auth/catalog-visibility.utils'
 import { Roles } from '../auth/decorators/roles.decorator'
 import { CatalogAccessGuard } from '../auth/guards/catalog-access.guard'
 import { OptionalSessionGuard } from '../auth/guards/optional-session.guard'
@@ -40,6 +40,7 @@ import type { AuthRequest } from '../auth/types/auth-request'
 import { ApplyProductTypeChangeDtoReq } from './dto/requests/apply-product-type-change.dto.req'
 import { CreateProductDtoReq } from './dto/requests/create-product.dto.req'
 import { ProductTypeCompatibilityPreviewDtoReq } from './dto/requests/product-type-compatibility-preview.dto.req'
+import { RepairDefaultVariantPriceMismatchDtoReq } from './dto/requests/repair-default-variant-price-mismatch.dto.req'
 import {
 	SetProductVariantMatrixDtoReq,
 	SetProductVariantsDtoReq
@@ -51,6 +52,8 @@ import {
 	ProductCreateResponseDto,
 	ProductCursorCardPageDto,
 	ProductCursorPageDto,
+	ProductDefaultVariantDiagnosticsResponseDto,
+	ProductDefaultVariantPriceMismatchRepairResponseDto,
 	ProductDefaultVariantRepairResponseDto,
 	ProductInfinitePageDto,
 	ProductTypeCompatibilityPreviewDto,
@@ -512,6 +515,30 @@ export class ProductController {
 		})
 	}
 
+	@Get('/maintenance/default-variants/diagnostics')
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({
+		summary: 'Diagnose technical default variant consistency for current catalog',
+		description:
+			'Read-only diagnostics for missing default variants, multiple defaults, malformed matrix variants and legacy price mismatches.'
+	})
+	@ApiQuery({
+		name: 'sampleLimit',
+		required: false,
+		type: Number,
+		description: 'Max samples per diagnostic check, default 10, max 100.'
+	})
+	@ApiOkResponse({ type: ProductDefaultVariantDiagnosticsResponseDto })
+	async diagnoseDefaultVariants(
+		@Query('sampleLimit') sampleLimit?: string
+	): Promise<ProductDefaultVariantDiagnosticsResponseDto> {
+		return this.productService.diagnoseDefaultVariantsForCurrentCatalog(
+			sampleLimit === undefined ? undefined : Number(sampleLimit)
+		)
+	}
+
 	@Get('/slug/:slug')
 	@UseGuards(OptionalSessionGuard)
 	@ApiOperation({
@@ -606,6 +633,24 @@ export class ProductController {
 	@ApiOkResponse({ type: ProductDefaultVariantRepairResponseDto })
 	async repairMissingDefaultVariants(): Promise<ProductDefaultVariantRepairResponseDto> {
 		return this.productService.repairMissingDefaultVariantsForCurrentCatalog()
+	}
+
+	@Post('/maintenance/default-variants/price-mismatches/repair')
+	@ApiSecurity('csrf')
+	@UseGuards(SessionGuard, CatalogAccessGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({
+		summary: 'Repair legacy product price mirror from technical default variants',
+		description:
+			'Dry-run by default. With apply=true copies the technical default variant price into legacy Product.price only for safe simple products with exactly one clean default variant and no custom variants.'
+	})
+	@ApiOkResponse({ type: ProductDefaultVariantPriceMismatchRepairResponseDto })
+	async repairDefaultVariantPriceMismatches(
+		@Body() dto: RepairDefaultVariantPriceMismatchDtoReq
+	): Promise<ProductDefaultVariantPriceMismatchRepairResponseDto> {
+		return this.productService.repairDefaultVariantPriceMismatchesForCurrentCatalog(
+			dto
+		)
 	}
 
 	@Post('/:id/product-type/compatibility-preview')

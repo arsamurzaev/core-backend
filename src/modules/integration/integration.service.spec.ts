@@ -8,11 +8,20 @@ import {
 } from '@generated/enums'
 import { BadRequestException, NotFoundException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { createHash } from 'crypto'
 import { Test, TestingModule } from '@nestjs/testing'
+import { createHash } from 'crypto'
 
 import { AuditService } from '@/modules/audit/audit.service'
+import { AUDIT_RECORDER_PORT } from '@/modules/audit/contracts'
 import { CapabilityService } from '@/modules/capability/capability.service'
+import {
+	CAPABILITY_ASSERT_PORT,
+	CAPABILITY_READER_PORT
+} from '@/modules/capability/contracts'
+import {
+	PRODUCT_EXTERNAL_SYNC_PORT,
+	type ProductExternalSyncPort
+} from '@/modules/product/public'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
 import { IntegrationRepository } from './integration.repository'
@@ -41,6 +50,10 @@ function buildEncryptedMetadata(input: {
 	lastStockSyncedAt?: string | null
 	stockWebhookEnabled?: boolean
 	stockWebhook?: any
+	productDeleteWebhook?: any
+	productChangeWebhook?: any
+	productFolderWebhook?: any
+	fieldOwnership?: any
 }) {
 	const normalized = buildMoySkladMetadata(input)
 
@@ -56,8 +69,12 @@ function buildEncryptedMetadata(input: {
 		schedulePattern: normalized.schedulePattern,
 		scheduleTimezone: normalized.scheduleTimezone,
 		lastStockSyncedAt: normalized.lastStockSyncedAt,
+		fieldOwnership: normalized.fieldOwnership,
 		stockWebhookEnabled: normalized.stockWebhookEnabled,
 		stockWebhook: normalized.stockWebhook,
+		productDeleteWebhook: normalized.productDeleteWebhook,
+		productChangeWebhook: normalized.productChangeWebhook,
+		productFolderWebhook: normalized.productFolderWebhook,
 		tokenEncrypted: {
 			format: 'enc-v1' as const,
 			alg: 'aes-256-gcm' as const,
@@ -81,6 +98,7 @@ describe('IntegrationService', () => {
 	let orderExportQueue: jest.Mocked<MoySkladOrderExportQueueService>
 	let metadataCrypto: jest.Mocked<MoySkladMetadataCryptoService>
 	let audit: jest.Mocked<AuditService>
+	let products: jest.Mocked<ProductExternalSyncPort>
 
 	const runWithCatalog = <T>(fn: () => Promise<T>) =>
 		RequestContext.run(
@@ -202,6 +220,12 @@ describe('IntegrationService', () => {
 						findMoySkladById: jest.fn(),
 						updateMoySkladMetadataById: jest.fn(),
 						patchMoySkladStockWebhookMetadata: jest.fn(),
+						patchMoySkladProductDeleteWebhookMetadata: jest.fn(),
+						patchMoySkladProductChangeWebhookMetadata: jest.fn(),
+						patchMoySkladProductFolderWebhookMetadata: jest.fn(),
+						findProductLinksByIntegration: jest.fn(),
+						softDeleteIntegratedVariantByExternalId: jest.fn(),
+						recomputeProductStatusFromVariants: jest.fn(),
 						createWebhookEventIfNew: jest.fn(),
 						softDeleteMoySklad: jest.fn(),
 						failMoySkladSync: jest.fn()
@@ -222,13 +246,22 @@ describe('IntegrationService', () => {
 						enqueueCatalogSync: jest.fn(),
 						enqueueProductSync: jest.fn(),
 						enqueueStockSync: jest.fn(),
-						enqueueStockWebhookDrain: jest.fn()
+						enqueueStockWebhookDrain: jest.fn(),
+						enqueueProductWebhookSync: jest.fn(),
+						enqueueProductFolderWebhookSync: jest.fn()
 					}
 				},
 				{
 					provide: MoySkladOrderExportQueueService,
 					useValue: {
 						retryOrderExport: jest.fn()
+					}
+				},
+				{
+					provide: PRODUCT_EXTERNAL_SYNC_PORT,
+					useValue: {
+						softDeleteExternalProduct: jest.fn(),
+						recomputeProductCommercialState: jest.fn()
 					}
 				},
 				{
@@ -296,7 +329,26 @@ describe('IntegrationService', () => {
 								stockWebhook:
 									metadata?.stockWebhook && typeof metadata.stockWebhook === 'object'
 										? metadata.stockWebhook
-										: decryptedMetadata.stockWebhook
+										: decryptedMetadata.stockWebhook,
+								productDeleteWebhook:
+									metadata?.productDeleteWebhook &&
+									typeof metadata.productDeleteWebhook === 'object'
+										? metadata.productDeleteWebhook
+										: decryptedMetadata.productDeleteWebhook,
+								productChangeWebhook:
+									metadata?.productChangeWebhook &&
+									typeof metadata.productChangeWebhook === 'object'
+										? metadata.productChangeWebhook
+										: decryptedMetadata.productChangeWebhook,
+								productFolderWebhook:
+									metadata?.productFolderWebhook &&
+									typeof metadata.productFolderWebhook === 'object'
+										? metadata.productFolderWebhook
+										: decryptedMetadata.productFolderWebhook,
+								fieldOwnership:
+									metadata?.fieldOwnership && typeof metadata.fieldOwnership === 'object'
+										? metadata.fieldOwnership
+										: decryptedMetadata.fieldOwnership
 							})
 						)
 					}
@@ -321,6 +373,10 @@ describe('IntegrationService', () => {
 					}
 				},
 				{
+					provide: AUDIT_RECORDER_PORT,
+					useExisting: AuditService
+				},
+				{
 					provide: CapabilityService,
 					useValue: {
 						assertCanUseMoySkladIntegration: jest.fn().mockResolvedValue(undefined),
@@ -328,6 +384,14 @@ describe('IntegrationService', () => {
 						assertCanUseProductVariants: jest.fn().mockResolvedValue(undefined),
 						canUseMoySkladIntegration: jest.fn().mockResolvedValue(true)
 					}
+				},
+				{
+					provide: CAPABILITY_ASSERT_PORT,
+					useExisting: CapabilityService
+				},
+				{
+					provide: CAPABILITY_READER_PORT,
+					useExisting: CapabilityService
 				}
 			]
 		}).compile()
@@ -339,6 +403,32 @@ describe('IntegrationService', () => {
 		orderExportQueue = module.get(MoySkladOrderExportQueueService)
 		metadataCrypto = module.get(MoySkladMetadataCryptoService)
 		audit = module.get(AuditService)
+		products = module.get(PRODUCT_EXTERNAL_SYNC_PORT)
+		jest.spyOn(MoySkladClient.prototype, 'createWebhook').mockResolvedValue({
+			id: 'product-delete-webhook-1',
+			accountId: 'account-1',
+			enabled: true,
+			action: 'DELETE',
+			entityType: 'product',
+			url: 'https://api.example.test/integration/webhooks/moysklad/product-delete/integration-1/secret'
+		})
+		jest.spyOn(MoySkladClient.prototype, 'updateWebhook').mockResolvedValue({
+			id: 'product-delete-webhook-1',
+			accountId: 'account-1',
+			enabled: true,
+			action: 'DELETE',
+			entityType: 'product',
+			url: 'https://api.example.test/integration/webhooks/moysklad/product-delete/integration-1/secret'
+		})
+		jest.spyOn(MoySkladClient.prototype, 'disableWebhook').mockResolvedValue({
+			id: 'product-delete-webhook-1',
+			accountId: 'account-1',
+			enabled: false,
+			action: 'DELETE',
+			entityType: 'product',
+			url: 'https://api.example.test/integration/webhooks/moysklad/product-delete/integration-1/secret'
+		})
+		jest.spyOn(MoySkladClient.prototype, 'deleteWebhook').mockResolvedValue()
 		queue.enqueueCatalogSync.mockResolvedValue({
 			ok: true,
 			queued: true,
@@ -461,7 +551,24 @@ describe('IntegrationService', () => {
 					stockRows: {
 						total: 5,
 						applied: 4,
-						skipped: 1
+						skipped: 1,
+						diagnostics: {
+							source: 'WEBHOOK',
+							stockRows: 5,
+							matchedStockRows: 4,
+							unmatchedStockRows: 1,
+							productLinks: 2,
+							variantLinks: 3,
+							ignoredVariantLinks: 0,
+							appliedProductLinks: 1,
+							appliedVariantLinks: 3,
+							skippedReasons: {
+								missingStock: 0,
+								productHasVariantLinks: 1,
+								variantsCapabilityDisabled: 0,
+								stockRowWithoutLocalLink: 1
+							}
+						}
 					},
 					warnings: [
 						{
@@ -501,7 +608,24 @@ describe('IntegrationService', () => {
 		expect(result[0]?.stockRows).toEqual({
 			total: 5,
 			applied: 4,
-			skipped: 1
+			skipped: 1,
+			diagnostics: {
+				source: 'WEBHOOK',
+				stockRows: 5,
+				matchedStockRows: 4,
+				unmatchedStockRows: 1,
+				productLinks: 2,
+				variantLinks: 3,
+				ignoredVariantLinks: 0,
+				appliedProductLinks: 1,
+				appliedVariantLinks: 3,
+				skippedReasons: {
+					missingStock: 0,
+					productHasVariantLinks: 1,
+					variantsCapabilityDisabled: 0,
+					stockRowWithoutLocalLink: 1
+				}
+			}
 		})
 		expect(result[0]?.warnings).toEqual([
 			expect.objectContaining({
@@ -1348,12 +1472,294 @@ describe('IntegrationService', () => {
 			requestId: 'request-1',
 			payload: {
 				accountId: 'account-1',
-				reportUrl:
-					'https://api.moysklad.ru/api/remap/1.2/report/stock/all/current'
+				reportUrl: 'https://api.moysklad.ru/api/remap/1.2/report/stock/all/current'
 			}
 		})
 
 		expect(queue.enqueueStockWebhookDrain).not.toHaveBeenCalled()
+	})
+
+	it('soft deletes a linked product from MoySklad delete webhook', async () => {
+		const secret = 'delete-webhook-secret'
+		repo.findMoySkladById.mockResolvedValue({
+			...integrationRecord,
+			metadata: buildEncryptedMetadata({
+				token: 'token-12345678',
+				productDeleteWebhook: {
+					enabled: true,
+					externalIds: {
+						product: 'delete-webhook-product',
+						service: 'delete-webhook-service',
+						bundle: 'delete-webhook-bundle'
+					},
+					accountId: 'account-1',
+					secretHash: hashWebhookSecret(secret),
+					lastReceivedAt: null,
+					lastProcessedAt: null,
+					lastError: null
+				}
+			})
+		} as any)
+		repo.findProductLinksByIntegration.mockResolvedValue([
+			{
+				id: 'link-1',
+				integrationId: 'integration-1',
+				productId: 'product-1',
+				externalId: 'external-code-1',
+				externalCode: 'code-1',
+				rawMeta: { id: 'moysklad-product-1' }
+			}
+		] as any)
+		products.softDeleteExternalProduct.mockResolvedValue(true)
+		repo.patchMoySkladProductDeleteWebhookMetadata.mockResolvedValue(
+			integrationRecord as any
+		)
+
+		await service.receiveMoySkladProductDeleteWebhook({
+			integrationId: 'integration-1',
+			secret,
+			payload: {
+				events: [
+					{
+						accountId: 'account-1',
+						action: 'DELETE',
+						meta: {
+							href:
+								'https://api.moysklad.ru/api/remap/1.2/entity/product/moysklad-product-1',
+							type: 'product',
+							mediaType: 'application/json'
+						}
+					}
+				]
+			}
+		})
+
+		expect(products.softDeleteExternalProduct).toHaveBeenCalledWith({
+			catalogId: 'catalog-1',
+			productId: 'product-1'
+		})
+		expect(repo.patchMoySkladProductDeleteWebhookMetadata).toHaveBeenCalledWith(
+			'integration-1',
+			expect.objectContaining({
+				lastReceivedAt: expect.any(String),
+				lastProcessedAt: expect.any(String),
+				lastError: null
+			})
+		)
+	})
+
+	it('soft deletes a linked variant from MoySklad delete webhook', async () => {
+		const secret = 'delete-webhook-secret'
+		repo.findMoySkladById.mockResolvedValue({
+			...integrationRecord,
+			metadata: buildEncryptedMetadata({
+				token: 'token-12345678',
+				productDeleteWebhook: {
+					enabled: true,
+					externalIds: {
+						product: 'delete-webhook-product',
+						service: 'delete-webhook-service',
+						bundle: 'delete-webhook-bundle',
+						variant: 'delete-webhook-variant'
+					},
+					accountId: 'account-1',
+					secretHash: hashWebhookSecret(secret),
+					lastReceivedAt: null,
+					lastProcessedAt: null,
+					lastError: null
+				}
+			})
+		} as any)
+		repo.softDeleteIntegratedVariantByExternalId.mockResolvedValue({
+			deleted: true,
+			productId: 'product-1',
+			variantId: 'variant-1'
+		})
+		repo.recomputeProductStatusFromVariants.mockResolvedValue(true)
+		products.recomputeProductCommercialState.mockResolvedValue(true)
+		repo.patchMoySkladProductDeleteWebhookMetadata.mockResolvedValue(
+			integrationRecord as any
+		)
+
+		await service.receiveMoySkladProductDeleteWebhook({
+			integrationId: 'integration-1',
+			secret,
+			payload: {
+				events: [
+					{
+						accountId: 'account-1',
+						action: 'DELETE',
+						meta: {
+							href:
+								'https://api.moysklad.ru/api/remap/1.2/entity/variant/moysklad-variant-1',
+							type: 'variant',
+							mediaType: 'application/json'
+						}
+					}
+				]
+			}
+		})
+
+		expect(repo.softDeleteIntegratedVariantByExternalId).toHaveBeenCalledWith({
+			integrationId: 'integration-1',
+			catalogId: 'catalog-1',
+			externalId: 'moysklad-variant-1'
+		})
+		expect(products.softDeleteExternalProduct).not.toHaveBeenCalled()
+		expect(repo.recomputeProductStatusFromVariants).toHaveBeenCalledWith(
+			'catalog-1',
+			'product-1'
+		)
+		expect(products.recomputeProductCommercialState).toHaveBeenCalledWith({
+			catalogId: 'catalog-1',
+			productId: 'product-1'
+		})
+	})
+
+	it('queues product sync from MoySklad product change webhook', async () => {
+		const secret = 'change-webhook-secret'
+		repo.findMoySkladById.mockResolvedValue({
+			...integrationRecord,
+			metadata: buildEncryptedMetadata({
+				token: 'token-12345678',
+				productChangeWebhook: {
+					enabled: true,
+					externalIds: {
+						product: {
+							CREATE: 'change-webhook-product-create',
+							UPDATE: 'change-webhook-product-update'
+						},
+						service: {
+							CREATE: 'change-webhook-service-create',
+							UPDATE: 'change-webhook-service-update'
+						},
+						bundle: {
+							CREATE: 'change-webhook-bundle-create',
+							UPDATE: 'change-webhook-bundle-update'
+						},
+						variant: {
+							CREATE: 'change-webhook-variant-create',
+							UPDATE: 'change-webhook-variant-update'
+						}
+					},
+					accountId: 'account-1',
+					secretHash: hashWebhookSecret(secret),
+					lastReceivedAt: null,
+					lastProcessedAt: null,
+					lastError: null
+				}
+			})
+		} as any)
+		queue.enqueueProductWebhookSync.mockResolvedValue({
+			ok: true,
+			queued: true,
+			jobId: 'product-webhook-job-1'
+		})
+		repo.patchMoySkladProductChangeWebhookMetadata.mockResolvedValue(
+			integrationRecord as any
+		)
+
+		await service.receiveMoySkladProductChangeWebhook({
+			integrationId: 'integration-1',
+			secret,
+			payload: {
+				events: [
+					{
+						accountId: 'account-1',
+						action: 'UPDATE',
+						meta: {
+							href:
+								'https://api.moysklad.ru/api/remap/1.2/entity/variant/moysklad-variant-1',
+							type: 'variant',
+							mediaType: 'application/json'
+						}
+					}
+				]
+			}
+		})
+
+		expect(queue.enqueueProductWebhookSync).toHaveBeenCalledWith(
+			'catalog-1',
+			'integration-1',
+			{
+				entityType: 'variant',
+				externalId: 'moysklad-variant-1',
+				action: 'UPDATE'
+			}
+		)
+		expect(repo.patchMoySkladProductChangeWebhookMetadata).toHaveBeenCalledWith(
+			'integration-1',
+			expect.objectContaining({
+				lastReceivedAt: expect.any(String),
+				lastError: null
+			})
+		)
+	})
+
+	it('queues category sync from MoySklad productfolder webhook', async () => {
+		const secret = 'folder-webhook-secret'
+		repo.findMoySkladById.mockResolvedValue({
+			...integrationRecord,
+			metadata: buildEncryptedMetadata({
+				token: 'token-12345678',
+				productFolderWebhook: {
+					enabled: true,
+					externalIds: {
+						CREATE: 'folder-webhook-create',
+						UPDATE: 'folder-webhook-update',
+						DELETE: 'folder-webhook-delete'
+					},
+					accountId: 'account-1',
+					secretHash: hashWebhookSecret(secret),
+					lastReceivedAt: null,
+					lastProcessedAt: null,
+					lastError: null
+				}
+			})
+		} as any)
+		queue.enqueueProductFolderWebhookSync.mockResolvedValue({
+			ok: true,
+			queued: true,
+			jobId: 'folder-webhook-job-1'
+		})
+		repo.patchMoySkladProductFolderWebhookMetadata.mockResolvedValue(
+			integrationRecord as any
+		)
+
+		await service.receiveMoySkladProductFolderWebhook({
+			integrationId: 'integration-1',
+			secret,
+			payload: {
+				events: [
+					{
+						accountId: 'account-1',
+						action: 'UPDATE',
+						meta: {
+							href:
+								'https://api.moysklad.ru/api/remap/1.2/entity/productfolder/folder-1',
+							type: 'productfolder',
+							mediaType: 'application/json'
+						}
+					}
+				]
+			}
+		})
+
+		expect(queue.enqueueProductFolderWebhookSync).toHaveBeenCalledWith(
+			'catalog-1',
+			'integration-1',
+			{
+				externalId: 'folder-1',
+				action: 'UPDATE'
+			}
+		)
+		expect(repo.patchMoySkladProductFolderWebhookMetadata).toHaveBeenCalledWith(
+			'integration-1',
+			expect.objectContaining({
+				lastReceivedAt: expect.any(String),
+				lastError: null
+			})
+		)
 	})
 
 	it('marks active MoySklad sync as cancelled', async () => {

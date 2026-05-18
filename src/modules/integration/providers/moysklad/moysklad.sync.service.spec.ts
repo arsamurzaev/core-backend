@@ -2,6 +2,14 @@ import { ProductStatus } from '@generated/enums'
 import { Test, TestingModule } from '@nestjs/testing'
 
 import { CapabilityService } from '@/modules/capability/capability.service'
+import {
+	CAPABILITY_ASSERT_PORT,
+	CAPABILITY_READER_PORT
+} from '@/modules/capability/contracts'
+import {
+	PRODUCT_EXTERNAL_SYNC_PORT,
+	type ProductExternalSyncPort
+} from '@/modules/product/public'
 import { S3Service } from '@/modules/s3/s3.service'
 import { CacheService } from '@/shared/cache/cache.service'
 import { MediaRepository } from '@/shared/media/media.repository'
@@ -27,6 +35,7 @@ describe('MoySkladSyncService', () => {
 	let mediaRepo: jest.Mocked<MediaRepository>
 	let metadataCrypto: jest.Mocked<MoySkladMetadataCryptoService>
 	let productSync: MoySkladProductSyncService
+	let products: jest.Mocked<ProductExternalSyncPort>
 	const testProductFolder = {
 		id: 'folder-1',
 		meta: {
@@ -64,6 +73,10 @@ describe('MoySkladSyncService', () => {
 						findProductIdsWithVariantLinks: jest.fn(),
 						updateLinkedProductStock: jest.fn(),
 						updateLinkedVariantStock: jest.fn(),
+						touchProductLinkStockSynced: jest.fn(),
+						touchVariantLinkStockSynced: jest.fn(),
+						markProductLinkStockSkipped: jest.fn(),
+						markVariantLinkStockSkipped: jest.fn(),
 						recomputeProductStatusFromVariants: jest.fn(),
 						existsProductSlug: jest.fn(),
 						existsProductSku: jest.fn(),
@@ -73,6 +86,8 @@ describe('MoySkladSyncService', () => {
 						replaceProductMedia: jest.fn(),
 						upsertProductLink: jest.fn(),
 						findProductLinksByIntegration: jest.fn(),
+						markProductLinkMissingFromSnapshot: jest.fn(),
+						markProductLinkHiddenAfterMissing: jest.fn(),
 						findCategoryByName: jest.fn(),
 						findCategoriesByName: jest.fn(),
 						createCategory: jest.fn(),
@@ -84,6 +99,21 @@ describe('MoySkladSyncService', () => {
 						updateSyncRunProgress: jest.fn(),
 						finishMoySkladSync: jest.fn(),
 						failMoySkladSync: jest.fn()
+					}
+				},
+				{
+					provide: PRODUCT_EXTERNAL_SYNC_PORT,
+					useValue: {
+						findExternalProductById: jest.fn(),
+						findExternalProductBySku: jest.fn(),
+						existsExternalProductSlug: jest.fn(),
+						existsExternalProductSku: jest.fn(),
+						createExternalProduct: jest.fn(),
+						updateExternalProduct: jest.fn(),
+						syncExternalProductDescription: jest.fn(),
+						softDeleteExternalProduct: jest.fn(),
+						ensureDefaultVariant: jest.fn(),
+						recomputeProductCommercialState: jest.fn()
 					}
 				},
 				{
@@ -129,6 +159,14 @@ describe('MoySkladSyncService', () => {
 							canUseMoySkladIntegration: true
 						})
 					}
+				},
+				{
+					provide: CAPABILITY_ASSERT_PORT,
+					useExisting: CapabilityService
+				},
+				{
+					provide: CAPABILITY_READER_PORT,
+					useExisting: CapabilityService
 				}
 			]
 		}).compile()
@@ -140,6 +178,48 @@ describe('MoySkladSyncService', () => {
 		mediaRepo = module.get(MediaRepository)
 		metadataCrypto = module.get(MoySkladMetadataCryptoService)
 		productSync = module.get(MoySkladProductSyncService)
+		products = module.get(PRODUCT_EXTERNAL_SYNC_PORT)
+		products.findExternalProductById.mockImplementation(input =>
+			repo.findProductById(input.catalogId, input.productId, input.tx as any)
+		)
+		products.findExternalProductBySku.mockImplementation(input =>
+			repo.findProductByCatalogAndSku(input.catalogId, input.sku, input.tx as any)
+		)
+		products.existsExternalProductSlug.mockImplementation(input =>
+			repo.existsProductSlug(
+				input.catalogId,
+				input.slug,
+				input.excludeId,
+				input.tx as any
+			)
+		)
+		products.existsExternalProductSku.mockImplementation(input =>
+			repo.existsProductSku(input.sku, input.excludeId, input.tx as any)
+		)
+		products.createExternalProduct.mockImplementation(input =>
+			repo.createProduct(
+				{
+					catalogId: input.catalogId,
+					name: input.name,
+					sku: input.sku,
+					slug: input.slug,
+					price: input.price === null ? null : Number(input.price),
+					status: input.status as ProductStatus
+				},
+				input.tx as any
+			)
+		)
+		products.updateExternalProduct.mockImplementation(input =>
+			repo.updateProduct(
+				{
+					productId: input.productId,
+					catalogId: input.catalogId,
+					data: input.data as any
+				},
+				input.tx as any
+			)
+		)
+		products.syncExternalProductDescription.mockResolvedValue(false)
 		repo.findCategoriesByName.mockResolvedValue([])
 		repo.findCategoryLinkByExternalId.mockResolvedValue(null)
 		repo.findCategoryLinkByCategoryId.mockResolvedValue(null)
@@ -192,6 +272,7 @@ describe('MoySkladSyncService', () => {
 			externalCode: 'external-key-1',
 			meta: { type: 'product' },
 			name: 'Product 1',
+			description: 'Product description from MoySklad',
 			code: 'MSK-1',
 			updated: '2026-03-23 14:00:00',
 			archived: false,
@@ -292,6 +373,12 @@ describe('MoySkladSyncService', () => {
 			['media-1'],
 			undefined
 		)
+		expect(products.syncExternalProductDescription).toHaveBeenCalledWith({
+			catalogId,
+			productId: 'local-1',
+			description: 'Product description from MoySklad',
+			tx: undefined
+		})
 		expect(repo.upsertProductLink).toHaveBeenCalledWith(
 			expect.objectContaining({
 				integrationId: integration.id,
@@ -799,8 +886,10 @@ describe('MoySkladSyncService', () => {
 			changed: true,
 			productId: 'product-with-variants'
 		})
+		repo.touchVariantLinkStockSynced.mockResolvedValue(1)
 		repo.recomputeProductStatusFromVariants.mockResolvedValue(true)
 		repo.updateLinkedProductStock.mockResolvedValue(true)
+		repo.touchProductLinkStockSynced.mockResolvedValue(1)
 		repo.finishMoySkladSync.mockResolvedValue(integration as any)
 
 		jest.spyOn(MoySkladClient.prototype, 'getStockAll').mockResolvedValue(
@@ -820,10 +909,37 @@ describe('MoySkladSyncService', () => {
 				updated: 3,
 				updatedProducts: 2,
 				updatedVariants: 1,
-				skipped: 1
+				skipped: 1,
+				diagnostics: {
+					source: 'FULL_SYNC',
+					stockRows: 3,
+					matchedStockRows: 3,
+					unmatchedStockRows: 0,
+					productLinks: 2,
+					variantLinks: 1,
+					ignoredVariantLinks: 0,
+					appliedProductLinks: 1,
+					appliedVariantLinks: 1,
+					skippedReasons: {
+						missingStock: 0,
+						productHasVariantLinks: 1,
+						variantsCapabilityDisabled: 0,
+						stockRowWithoutLocalLink: 0,
+						capabilityDisabled: 0,
+						internalInventory: 0,
+						missingMapping: 0,
+						snapshotIncomplete: 0,
+						priceUnknown: 0,
+						stockNotTracked: 0
+					}
+				}
 			})
 		)
 		expect(repo.updateLinkedVariantStock).toHaveBeenCalledWith('variant-1', 3)
+		expect(repo.touchVariantLinkStockSynced).toHaveBeenCalledWith(
+			integration.id,
+			'variant-1'
+		)
 		expect(repo.recomputeProductStatusFromVariants).toHaveBeenCalledWith(
 			catalogId,
 			'product-with-variants'
@@ -833,10 +949,19 @@ describe('MoySkladSyncService', () => {
 			'product-simple',
 			5
 		)
+		expect(repo.touchProductLinkStockSynced).toHaveBeenCalledWith(
+			integration.id,
+			'product-simple'
+		)
 		expect(repo.updateLinkedProductStock).not.toHaveBeenCalledWith(
 			catalogId,
 			'product-with-variants',
 			expect.any(Number)
+		)
+		expect(repo.markProductLinkStockSkipped).toHaveBeenCalledWith(
+			integration.id,
+			'product-with-variants',
+			'stock_owned_by_variant_links'
 		)
 		expect(repo.finishMoySkladSync).toHaveBeenCalledWith(
 			catalogId,
@@ -1182,7 +1307,7 @@ describe('MoySkladSyncService', () => {
 		)
 	})
 
-	it('hides missing products on full sync instead of archiving them', async () => {
+	it('hides missing products after confirmed full snapshots instead of archiving them', async () => {
 		const catalogId = 'catalog-1'
 		const integration = {
 			id: 'integration-1',
@@ -1209,10 +1334,15 @@ describe('MoySkladSyncService', () => {
 		repo.findMoySklad.mockResolvedValue(integration as any)
 		repo.findProductLinksByIntegration.mockResolvedValue([
 			{
+				id: 'link-missing',
 				externalId: 'external-missing',
 				productId: 'local-1'
 			}
 		] as any)
+		repo.markProductLinkMissingFromSnapshot.mockResolvedValue({
+			id: 'link-missing',
+			missingSyncCount: 2
+		} as any)
 		repo.findProductById.mockResolvedValue({
 			id: 'local-1',
 			catalogId,
@@ -1249,17 +1379,86 @@ describe('MoySkladSyncService', () => {
 		const result = await service.syncCatalog(catalogId)
 
 		expect(result.ok).toBe(true)
-		expect(repo.updateProduct).toHaveBeenCalledWith({
+		expect(repo.markProductLinkMissingFromSnapshot).toHaveBeenCalledWith(
+			'link-missing'
+		)
+		expect(products.updateExternalProduct).toHaveBeenCalledWith({
 			productId: 'local-1',
 			catalogId,
 			data: { status: ProductStatus.HIDDEN }
 		})
+		expect(repo.markProductLinkHiddenAfterMissing).toHaveBeenCalledWith(
+			'link-missing'
+		)
 		expect(repo.finishMoySkladSync).toHaveBeenCalledWith(
 			catalogId,
 			expect.objectContaining({
 				deletedProducts: 1
 			})
 		)
+	})
+
+	it('quarantines missing products on first full snapshot confirmation', async () => {
+		const catalogId = 'catalog-1'
+		const integration = {
+			id: 'integration-1',
+			catalogId,
+			metadata: {},
+			isActive: true,
+			lastSyncAt: null
+		}
+		const presentProduct = {
+			id: 'external-present-id',
+			externalCode: 'external-present',
+			meta: { type: 'product' },
+			name: 'Present Product',
+			code: 'MSK-PRESENT',
+			updated: '2026-03-23 14:00:00',
+			archived: false,
+			stock: 5,
+			productFolder: testProductFolder,
+			salePrices: [],
+			images: { rows: [] }
+		}
+
+		repo.beginMoySkladSync.mockResolvedValue(integration as any)
+		repo.findMoySklad.mockResolvedValue(integration as any)
+		repo.findProductLinksByIntegration.mockResolvedValue([
+			{
+				id: 'link-missing',
+				externalId: 'external-missing',
+				productId: 'local-1'
+			}
+		] as any)
+		repo.markProductLinkMissingFromSnapshot.mockResolvedValue({
+			id: 'link-missing',
+			missingSyncCount: 1
+		} as any)
+		repo.finishMoySkladSync.mockResolvedValue(integration as any)
+		jest.spyOn(productSync, 'syncExternalProduct').mockResolvedValue({
+			productId: 'local-present',
+			externalId: 'external-present',
+			created: false,
+			updated: false,
+			imagesImported: 0
+		} as any)
+		jest
+			.spyOn(MoySkladClient.prototype, 'getAllAssortment')
+			.mockResolvedValue([presentProduct] as any)
+
+		const result = await service.syncCatalog(catalogId)
+
+		expect(result.deleted).toBe(0)
+		expect(repo.markProductLinkMissingFromSnapshot).toHaveBeenCalledWith(
+			'link-missing'
+		)
+		expect(repo.updateProduct).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				productId: 'local-1',
+				data: { status: ProductStatus.HIDDEN }
+			})
+		)
+		expect(repo.markProductLinkHiddenAfterMissing).not.toHaveBeenCalled()
 	})
 
 	it('does not hide missing products when MoySklad returns an empty product snapshot', async () => {

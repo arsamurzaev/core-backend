@@ -6,8 +6,8 @@ import sharp from 'sharp'
 import {
 	S3Service,
 	type UploadGeneratedAssetResult
-} from '@/modules/s3/s3.service'
-import { SeoRepository } from '@/modules/seo/seo.repository'
+} from '@/modules/s3/public'
+import { SeoRepository } from '@/modules/seo/public'
 import {
 	MEDIA_VARIANT_NAMES,
 	MediaUrlService,

@@ -25,6 +25,13 @@ import {
 } from '@nestjs/swagger'
 
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
+import { DomainEventOutboxDiagnosticsService } from '@/shared/domain-events/domain-event-outbox-diagnostics.service'
+import {
+	ProductDefaultVariantDiagnosticsResponseDto,
+	ProductDefaultVariantPriceMismatchRepairResponseDto,
+	ProductDefaultVariantRepairResponseDto,
+	RepairDefaultVariantPriceMismatchDtoReq
+} from '@/modules/product/public'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { SessionGuard } from '../auth/guards/session.guard'
@@ -36,16 +43,30 @@ import {
 	AdminCatalogListItemDto,
 	AdminCreateCatalogResponseDto,
 	AdminDeleteCatalogContentResultDto,
+	AdminMoySkladStockDiagnosticsReportDto,
 	AdminPaymentDto,
 	AdminPromoCodeListItemDto,
 	AdminTypeListItemDto
 } from './dto/admin-list.dto.res'
+import {
+	AdminDomainEventOutboxActionResultDto,
+	AdminDomainEventOutboxCleanupResultDto,
+	AdminDomainEventOutboxListDto,
+	AdminDomainEventOutboxStatsDto
+} from './dto/responses/admin-domain-event-outbox.dto.res'
 import { AdminCatalogsQueryDtoReq } from './dto/requests/admin-catalogs-query.dto.req'
 import { AdminCreateActivityDtoReq } from './dto/requests/admin-create-activity.dto.req'
 import { AdminCreateCatalogDtoReq } from './dto/requests/admin-create-catalog.dto.req'
 import { AdminCreatePromoCodeDtoReq } from './dto/requests/admin-create-promo-code.dto.req'
 import { AdminCreatePromoPaymentDtoReq } from './dto/requests/admin-create-promo-payment.dto.req'
 import { AdminCreateSubscriptionPaymentDtoReq } from './dto/requests/admin-create-subscription-payment.dto.req'
+import {
+	AdminCleanupDomainEventOutboxDtoReq,
+	AdminDomainEventOutboxQueryDtoReq,
+	AdminDrainDomainEventOutboxDtoReq,
+	AdminRetryFailedDomainEventsDtoReq
+} from './dto/requests/admin-domain-event-outbox-query.dto.req'
+import { AdminDefaultVariantDiagnosticsQueryDtoReq } from './dto/requests/admin-default-variant-maintenance.dto.req'
 import { AdminDuplicateCatalogDtoReq } from './dto/requests/admin-duplicate-catalog.dto.req'
 import { AdminUpdateCatalogFeatureEntitlementDtoReq } from './dto/requests/admin-update-catalog-feature-entitlement.dto.req'
 import { AdminUpdateCatalogDtoReq } from './dto/requests/admin-update-catalog.dto.req'
@@ -59,7 +80,62 @@ const MAX_PAYMENT_PROOF_FILE_BYTES = 10 * 1024 * 1024
 @Roles(Role.ADMIN)
 @Controller('/admin')
 export class AdminController {
-	constructor(private readonly adminService: AdminService) {}
+	constructor(
+		private readonly adminService: AdminService,
+		private readonly domainEventOutbox: DomainEventOutboxDiagnosticsService
+	) {}
+
+	@Get('/domain-events/outbox')
+	@ApiOperation({ summary: 'List domain event outbox rows' })
+	@ApiOkResponse({ type: AdminDomainEventOutboxListDto })
+	async getDomainEventOutbox(
+		@Query() query: AdminDomainEventOutboxQueryDtoReq
+	): Promise<AdminDomainEventOutboxListDto> {
+		return this.domainEventOutbox.list(query)
+	}
+
+	@Get('/domain-events/outbox/stats')
+	@ApiOperation({ summary: 'Get domain event outbox status counters' })
+	@ApiOkResponse({ type: AdminDomainEventOutboxStatsDto })
+	async getDomainEventOutboxStats(): Promise<AdminDomainEventOutboxStatsDto> {
+		return this.domainEventOutbox.stats()
+	}
+
+	@Post('/domain-events/outbox/:id/retry')
+	@ApiOperation({ summary: 'Retry one pending or failed domain event' })
+	@ApiOkResponse({ type: AdminDomainEventOutboxActionResultDto })
+	async retryDomainEventOutboxItem(
+		@Param('id', ParseUUIDPipe) id: string
+	): Promise<AdminDomainEventOutboxActionResultDto> {
+		return this.domainEventOutbox.retryOne(id)
+	}
+
+	@Post('/domain-events/outbox/retry-failed')
+	@ApiOperation({ summary: 'Retry failed domain events by optional filters' })
+	@ApiOkResponse({ type: AdminDomainEventOutboxActionResultDto })
+	async retryFailedDomainEvents(
+		@Body() dto: AdminRetryFailedDomainEventsDtoReq
+	): Promise<AdminDomainEventOutboxActionResultDto> {
+		return this.domainEventOutbox.retryFailed(dto)
+	}
+
+	@Post('/domain-events/outbox/drain')
+	@ApiOperation({ summary: 'Manually drain pending/failed domain events' })
+	@ApiOkResponse({ type: AdminDomainEventOutboxActionResultDto })
+	async drainDomainEventOutbox(
+		@Body() dto: AdminDrainDomainEventOutboxDtoReq
+	): Promise<AdminDomainEventOutboxActionResultDto> {
+		return this.domainEventOutbox.drainPending(dto)
+	}
+
+	@Post('/domain-events/outbox/cleanup')
+	@ApiOperation({ summary: 'Delete old processed domain events' })
+	@ApiOkResponse({ type: AdminDomainEventOutboxCleanupResultDto })
+	async cleanupDomainEventOutbox(
+		@Body() dto: AdminCleanupDomainEventOutboxDtoReq
+	): Promise<AdminDomainEventOutboxCleanupResultDto> {
+		return this.domainEventOutbox.cleanupProcessed(dto)
+	}
 
 	@Get('/catalogs')
 	@ApiOperation({ summary: 'Получить список каталогов для админки' })
@@ -118,6 +194,60 @@ export class AdminController {
 		@Param('id', ParseUUIDPipe) id: string
 	): Promise<AdminCatalogFeatureEntitlementsDto> {
 		return this.adminService.getCatalogFeatureEntitlements(id)
+	}
+
+	@Get('/catalogs/:id/maintenance/default-variants/diagnostics')
+	@ApiOperation({
+		summary: 'Diagnose legacy default variant consistency for catalog'
+	})
+	@ApiOkResponse({ type: ProductDefaultVariantDiagnosticsResponseDto })
+	async diagnoseCatalogDefaultVariants(
+		@Param('id', ParseUUIDPipe) id: string,
+		@Query() query: AdminDefaultVariantDiagnosticsQueryDtoReq
+	): Promise<ProductDefaultVariantDiagnosticsResponseDto> {
+		return this.adminService.diagnoseCatalogDefaultVariants(
+			id,
+			query.sampleLimit
+		) as Promise<ProductDefaultVariantDiagnosticsResponseDto>
+	}
+
+	@Post('/catalogs/:id/maintenance/default-variants/repair')
+	@ApiOperation({
+		summary: 'Repair missing technical default variants for catalog'
+	})
+	@ApiOkResponse({ type: ProductDefaultVariantRepairResponseDto })
+	async repairCatalogMissingDefaultVariants(
+		@Param('id', ParseUUIDPipe) id: string
+	): Promise<ProductDefaultVariantRepairResponseDto> {
+		return this.adminService.repairCatalogMissingDefaultVariants(
+			id
+		) as Promise<ProductDefaultVariantRepairResponseDto>
+	}
+
+	@Post('/catalogs/:id/maintenance/default-variants/price-mismatches/repair')
+	@ApiOperation({
+		summary: 'Dry-run or repair legacy product price mirror mismatches'
+	})
+	@ApiOkResponse({ type: ProductDefaultVariantPriceMismatchRepairResponseDto })
+	async repairCatalogDefaultVariantPriceMismatches(
+		@Param('id', ParseUUIDPipe) id: string,
+		@Body() dto: RepairDefaultVariantPriceMismatchDtoReq
+	): Promise<ProductDefaultVariantPriceMismatchRepairResponseDto> {
+		return this.adminService.repairCatalogDefaultVariantPriceMismatches(
+			id,
+			dto
+		) as Promise<ProductDefaultVariantPriceMismatchRepairResponseDto>
+	}
+
+	@Get('/catalogs/:id/integrations/moysklad/stock-diagnostics')
+	@ApiOperation({ summary: 'Get MoySklad stock sync diagnostics for catalog' })
+	@ApiOkResponse({ type: AdminMoySkladStockDiagnosticsReportDto })
+	async getCatalogMoySkladStockDiagnostics(
+		@Param('id', ParseUUIDPipe) id: string
+	): Promise<AdminMoySkladStockDiagnosticsReportDto> {
+		return this.adminService.getCatalogMoySkladStockDiagnostics(
+			id
+		) as Promise<AdminMoySkladStockDiagnosticsReportDto>
 	}
 
 	@Patch('/catalogs/:id/features')

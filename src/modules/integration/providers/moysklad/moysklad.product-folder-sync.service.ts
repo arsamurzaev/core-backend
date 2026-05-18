@@ -43,6 +43,28 @@ export class MoySkladProductFolderSyncService {
 
 	constructor(private readonly repo: IntegrationRepository) {}
 
+	async syncProductFolder(params: {
+		catalogId: string
+		integrationId: string
+		client: MoySkladClient
+		folder: MoySkladProductFolderRef
+		tx?: RepositoryTransaction
+	}): Promise<{ categoryId: string | null; path: string[] }> {
+		const categories = await this.syncProductFolderChain(params)
+		const leafCategory = categories.at(-1) ?? null
+
+		if (categories.length > 0) {
+			this.logger.log(
+				`Synced MoySklad product folder path: ${categories.map(category => category.name).join(' > ')}`
+			)
+		}
+
+		return {
+			categoryId: leafCategory?.id ?? null,
+			path: categories.map(category => category.name)
+		}
+	}
+
 	async syncProductCategories(params: {
 		catalogId: string
 		integrationId: string

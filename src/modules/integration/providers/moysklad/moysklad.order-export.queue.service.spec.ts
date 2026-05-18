@@ -4,6 +4,8 @@ import { Test, TestingModule } from '@nestjs/testing'
 import { Queue, Worker } from 'bullmq'
 
 import { CapabilityService } from '@/modules/capability/capability.service'
+import { CAPABILITY_READER_PORT } from '@/modules/capability/contracts'
+import { OBSERVABILITY_RECORDER_PORT } from '@/modules/observability/contracts'
 import { ObservabilityService } from '@/modules/observability/observability.service'
 
 import { IntegrationRepository } from '../../integration.repository'
@@ -43,7 +45,7 @@ jest.mock('bullmq', () => ({
 describe('MoySkladOrderExportQueueService', () => {
 	let service: MoySkladOrderExportQueueService
 	let repo: jest.Mocked<IntegrationRepository>
-	let metadataCrypto: jest.Mocked<MoySkladMetadataCryptoService>
+	let metadataCrypto: any
 	let orderExportService: jest.Mocked<MoySkladOrderExportService>
 	let observability: jest.Mocked<ObservabilityService>
 
@@ -151,10 +153,18 @@ describe('MoySkladOrderExportQueueService', () => {
 					}
 				},
 				{
+					provide: OBSERVABILITY_RECORDER_PORT,
+					useExisting: ObservabilityService
+				},
+				{
 					provide: CapabilityService,
 					useValue: {
 						canUseMoySkladIntegration: jest.fn().mockResolvedValue(true)
 					}
+				},
+				{
+					provide: CAPABILITY_READER_PORT,
+					useExisting: CapabilityService
 				}
 			]
 		}).compile()

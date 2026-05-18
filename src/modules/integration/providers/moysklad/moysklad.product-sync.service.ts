@@ -2,6 +2,7 @@ import type { Prisma } from '@generated/client'
 import { ProductStatus } from '@generated/enums'
 import {
 	BadGatewayException,
+	Inject,
 	Injectable,
 	Logger,
 	NotFoundException
@@ -10,10 +11,16 @@ import { createHash } from 'crypto'
 import slugify from 'slugify'
 
 import {
+	PRODUCT_EXTERNAL_SYNC_PORT,
+	type ProductExternalProductUpdateInput,
+	type ProductExternalSyncPort,
+	type ProductExternalSyncProductRecord
+} from '@/modules/product/public'
+
+import {
 	type IntegrationProductLinkRecord,
 	type IntegrationRecord,
-	IntegrationRepository,
-	type ProductSyncRecord
+	IntegrationRepository
 } from '../../integration.repository'
 
 import { MoySkladClient } from './moysklad.client'
@@ -45,8 +52,10 @@ type SyncExternalProductParams = {
 	importImages: boolean
 	refreshImagesForExistingProduct?: boolean
 	syncStock: boolean
+	syncPrice: boolean
+	syncContent: boolean
 	ensureDefaultVariant?: boolean
-	existingProduct?: ProductSyncRecord | null
+	existingProduct?: ProductExternalSyncProductRecord | null
 	existingLinkExternalId?: string | null
 	tx?: Prisma.TransactionClient
 }
@@ -192,6 +201,8 @@ export class MoySkladProductSyncService {
 
 	constructor(
 		private readonly repo: IntegrationRepository,
+		@Inject(PRODUCT_EXTERNAL_SYNC_PORT)
+		private readonly products: ProductExternalSyncPort,
 		private readonly images: MoySkladImageImportService,
 		private readonly productFolders: MoySkladProductFolderSyncService,
 		private readonly variantSync: MoySkladVariantSyncService
@@ -220,6 +231,7 @@ export class MoySkladProductSyncService {
 				? params.product.stock
 				: undefined
 		const name = normalizeProductName(params.product.name || externalCode)
+		const description = readMoySkladNullableString(params.product.description)
 
 		const linkExternalIds = [
 			params.existingLinkExternalId,
@@ -241,20 +253,20 @@ export class MoySkladProductSyncService {
 		let product = params.existingProduct ?? null
 
 		if (!product && link) {
-			product = await this.repo.findProductById(
-				params.catalogId,
-				link.productId,
-				params.tx
-			)
+			product = await this.products.findExternalProductById({
+				catalogId: params.catalogId,
+				productId: link.productId,
+				tx: params.tx
+			})
 		}
 
 		if (!product && externalCode) {
 			const fallbackSku = buildSkuBase(externalCode) || PRODUCT_SKU_FALLBACK
-			product = await this.repo.findProductByCatalogAndSku(
-				params.catalogId,
-				fallbackSku,
-				params.tx
-			)
+			product = await this.products.findExternalProductBySku({
+				catalogId: params.catalogId,
+				sku: fallbackSku,
+				tx: params.tx
+			})
 		}
 
 		const status = resolveProductStatus(
@@ -263,7 +275,9 @@ export class MoySkladProductSyncService {
 			params.syncStock,
 			product?.status
 		)
-		const price = resolvePrice(params.product, params.priceTypeName)
+		const price = params.syncPrice
+			? resolvePrice(params.product, params.priceTypeName)
+			: null
 
 		if (!product) {
 			return this.createLinkedProduct({
@@ -274,7 +288,8 @@ export class MoySkladProductSyncService {
 				name,
 				price,
 				status,
-				stock
+				stock,
+				description
 			})
 		}
 
@@ -288,7 +303,8 @@ export class MoySkladProductSyncService {
 			name,
 			price,
 			status,
-			stock
+			stock,
+			description
 		})
 	}
 
@@ -298,9 +314,10 @@ export class MoySkladProductSyncService {
 			externalCode: string
 			externalUpdatedAt: Date | null
 			name: string
-			price: number
+			price: number | null
 			status: ProductStatus
 			stock: number | undefined
+			description: string | null
 		}
 	): Promise<MoySkladProductSyncOutcome> {
 		const slug = await this.buildUniqueSlug(
@@ -314,17 +331,15 @@ export class MoySkladProductSyncService {
 			undefined,
 			params.tx
 		)
-		const createdProduct = await this.repo.createProduct(
-			{
-				catalogId: params.catalogId,
-				name: params.name,
-				sku,
-				slug,
-				price: params.price,
-				status: params.status
-			},
-			params.tx
-		)
+		const createdProduct = await this.products.createExternalProduct({
+			catalogId: params.catalogId,
+			name: params.name,
+			sku,
+			slug,
+			price: params.price,
+			status: params.status,
+			tx: params.tx
+		})
 
 		const imagesImported = params.importImages
 			? await this.images.refreshProductImages({
@@ -337,6 +352,11 @@ export class MoySkladProductSyncService {
 				})
 			: 0
 
+		const descriptionChanged = await this.syncProductDescription({
+			...params,
+			productId: createdProduct.id
+		})
+
 		await this.repo.upsertProductLink(
 			{
 				integrationId: params.integration.id,
@@ -344,6 +364,8 @@ export class MoySkladProductSyncService {
 				externalId: params.externalId,
 				externalCode: params.externalCode || null,
 				externalUpdatedAt: params.externalUpdatedAt,
+				priceSynced: params.syncPrice,
+				stockSynced: params.syncStock && params.stock !== undefined,
 				rawMeta: this.buildRawMeta(params.product)
 			},
 			params.tx
@@ -370,6 +392,7 @@ export class MoySkladProductSyncService {
 						stock: params.stock,
 						productStatus: params.status,
 						syncStock: params.syncStock,
+						syncPrice: params.syncPrice,
 						tx: params.tx
 					})
 
@@ -386,7 +409,7 @@ export class MoySkladProductSyncService {
 			productId: createdProduct.id,
 			externalId: params.externalId,
 			created: true,
-			updated: categorySyncChanged || defaultVariantChanged,
+			updated: categorySyncChanged || defaultVariantChanged || descriptionChanged,
 			imagesImported
 		}
 	}
@@ -397,11 +420,12 @@ export class MoySkladProductSyncService {
 			externalCode: string
 			externalUpdatedAt: Date | null
 			link: IntegrationProductLinkRecord | null
-			localProduct: ProductSyncRecord
+			localProduct: ProductExternalSyncProductRecord
 			name: string
-			price: number
+			price: number | null
 			status: ProductStatus
 			stock: number | undefined
+			description: string | null
 		}
 	): Promise<MoySkladProductSyncOutcome> {
 		let product = params.localProduct
@@ -412,14 +436,14 @@ export class MoySkladProductSyncService {
 				? await this.buildUniqueSku(params.externalCode, product.id, params.tx)
 				: product.sku
 
-		const data: Prisma.ProductUpdateManyMutationInput = {}
-		if (product.name !== params.name) {
+		const data: ProductExternalProductUpdateInput['data'] = {}
+		if (params.syncContent && product.name !== params.name) {
 			data.name = params.name
 		}
-		if (nextSku !== product.sku) {
+		if (params.syncContent && nextSku !== product.sku) {
 			data.sku = nextSku
 		}
-		if (Number(product.price) !== params.price) {
+		if (params.syncPrice && Number(product.price) !== params.price) {
 			data.price = params.price
 		}
 		if (product.status !== params.status) {
@@ -428,14 +452,12 @@ export class MoySkladProductSyncService {
 
 		let updated = false
 		if (Object.keys(data).length > 0) {
-			const updatedProduct = await this.repo.updateProduct(
-				{
-					productId: product.id,
-					catalogId: params.catalogId,
-					data
-				},
-				params.tx
-			)
+			const updatedProduct = await this.products.updateExternalProduct({
+				productId: product.id,
+				catalogId: params.catalogId,
+				data,
+				tx: params.tx
+			})
 			if (!updatedProduct) {
 				throw new NotFoundException('Product not found')
 			}
@@ -458,6 +480,13 @@ export class MoySkladProductSyncService {
 					})
 				: 0
 
+		const descriptionChanged = params.syncContent
+			? await this.syncProductDescription({
+					...params,
+					productId: product.id
+				})
+			: false
+
 		await this.repo.upsertProductLink(
 			{
 				integrationId: params.integration.id,
@@ -465,19 +494,23 @@ export class MoySkladProductSyncService {
 				externalId: params.externalId,
 				externalCode: params.externalCode || null,
 				externalUpdatedAt: params.externalUpdatedAt,
+				priceSynced: params.syncPrice,
+				stockSynced: params.syncStock && params.stock !== undefined,
 				rawMeta: this.buildRawMeta(params.product)
 			},
 			params.tx
 		)
-		const categorySyncChanged = await this.productFolders.syncProductCategories({
-			catalogId: params.catalogId,
-			integrationId: params.integration.id,
-			productId: product.id,
-			productName: params.name,
-			client: params.client,
-			folder: params.product.productFolder,
-			tx: params.tx
-		})
+		const categorySyncChanged = params.syncContent
+			? await this.productFolders.syncProductCategories({
+					catalogId: params.catalogId,
+					integrationId: params.integration.id,
+					productId: product.id,
+					productName: params.name,
+					client: params.client,
+					folder: params.product.productFolder,
+					tx: params.tx
+				})
+			: false
 		const defaultVariantChanged =
 			params.ensureDefaultVariant === false
 				? false
@@ -490,6 +523,7 @@ export class MoySkladProductSyncService {
 						stock: params.stock,
 						productStatus: product.status,
 						syncStock: params.syncStock,
+						syncPrice: params.syncPrice,
 						tx: params.tx
 					})
 
@@ -503,6 +537,7 @@ export class MoySkladProductSyncService {
 			imagesImported === 0 &&
 			!categorySyncChanged &&
 			!defaultVariantChanged &&
+			!descriptionChanged &&
 			params.link
 		) {
 			this.logger.log(
@@ -519,9 +554,24 @@ export class MoySkladProductSyncService {
 				imagesImported > 0 ||
 				!params.link ||
 				categorySyncChanged ||
-				defaultVariantChanged,
+				defaultVariantChanged ||
+				descriptionChanged,
 			imagesImported
 		}
+	}
+
+	private syncProductDescription(params: {
+		catalogId: string
+		productId: string
+		description: string | null
+		tx?: Prisma.TransactionClient
+	}): Promise<boolean> {
+		return this.products.syncExternalProductDescription({
+			catalogId: params.catalogId,
+			productId: params.productId,
+			description: params.description,
+			tx: params.tx
+		})
 	}
 
 	private async buildUniqueSlug(
@@ -534,12 +584,12 @@ export class MoySkladProductSyncService {
 
 		for (let suffix = 0; suffix < 10; suffix += 1) {
 			const candidate = applySuffix(base, suffix, PRODUCT_SLUG_MAX_LENGTH)
-			const exists = await this.repo.existsProductSlug(
+			const exists = await this.products.existsExternalProductSlug({
 				catalogId,
-				candidate,
+				slug: candidate,
 				excludeId,
 				tx
-			)
+			})
 			if (!exists) return candidate
 		}
 
@@ -555,7 +605,11 @@ export class MoySkladProductSyncService {
 
 		for (let suffix = 0; suffix < 10; suffix += 1) {
 			const candidate = applySuffix(base, suffix, PRODUCT_SKU_MAX_LENGTH)
-			const exists = await this.repo.existsProductSku(candidate, excludeId, tx)
+			const exists = await this.products.existsExternalProductSku({
+				sku: candidate,
+				excludeId,
+				tx
+			})
 			if (!exists) return candidate
 		}
 

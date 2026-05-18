@@ -1,13 +1,20 @@
 import type { ProductCreateInput, ProductUpdateInput } from '@generated/models'
+import type { ProductStatus } from '@generated/enums'
 import {
 	BadRequestException,
+	Inject,
 	Injectable,
 	NotFoundException
 } from '@nestjs/common'
 import { createHash } from 'crypto'
 import slugify from 'slugify'
 
-import { CapabilityService } from '@/modules/capability/capability.service'
+import {
+	CAPABILITY_ASSERT_PORT,
+	CAPABILITY_READER_PORT,
+	type CapabilityAssertPort,
+	type CapabilityReaderPort
+} from '@/modules/capability/contracts'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { mustCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
 import {
@@ -16,7 +23,7 @@ import {
 	normalizeRequiredString
 } from '@/shared/utils'
 
-import { S3Service } from '../s3/s3.service'
+import { S3Service } from '@/modules/s3/public'
 
 import { CreateProductDtoReq } from './dto/requests/create-product.dto.req'
 import {
@@ -55,6 +62,8 @@ type PreparedProductUpdatePayload = {
 	attributes?: ProductAttributeValueData[]
 	removeAttributeIds?: string[]
 	variants?: ProductVariantUpdateData[]
+	variantMatrix?: ProductVariantData[]
+	hasCustomVariantValues: boolean
 	mediaIds?: string[]
 	removeVariantAttributeIds?: string[]
 	categoryIds?: string[]
@@ -67,7 +76,7 @@ const SLUG_MAX_LENGTH = 255
 const SKU_MAX_LENGTH = 100
 const PRODUCT_SLUG_FALLBACK = 'product'
 const PRODUCT_SKU_FALLBACK = 'SKU'
-const PRODUCT_DUPLICATE_SUFFIX = ' (\u043a\u043e\u043f\u0438\u044f)'
+const PRODUCT_DUPLICATE_SUFFIX = ' (копия)'
 
 function slugifyValue(value: string, lower: boolean): string {
 	const slug = slugify(value, { lower, strict: true, trim: true })
@@ -116,7 +125,10 @@ export class ProductCommandService {
 	constructor(
 		private readonly repo: ProductRepository,
 		private readonly attributeBuilder: ProductAttributeBuilder,
-		private readonly featureEntitlements: CapabilityService,
+		@Inject(CAPABILITY_ASSERT_PORT)
+		private readonly featureAssertions: CapabilityAssertPort,
+		@Inject(CAPABILITY_READER_PORT)
+		private readonly featureReader: CapabilityReaderPort,
 		private readonly finalizer: ProductWriteFinalizer,
 		private readonly mediaRepo: MediaRepository,
 		private readonly s3Service: S3Service,
@@ -148,7 +160,7 @@ export class ProductCommandService {
 		const created = await this.repo.findById(product.id, catalogId, true)
 		if (!created)
 			throw new NotFoundException(
-				'\u0422\u043e\u0432\u0430\u0440 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d'
+				'Товар не найден'
 			)
 
 		const hasCustomVariantValues = payload.variants?.some(variant =>
@@ -186,12 +198,17 @@ export class ProductCommandService {
 			payload.mediaIds
 		]
 		const updated =
-			payload.removeVariantAttributeIds === undefined
+			payload.removeVariantAttributeIds === undefined &&
+			payload.variantMatrix === undefined
 				? await this.repo.update(...updateArgs)
-				: await this.repo.update(...updateArgs, payload.removeVariantAttributeIds)
+				: await this.repo.update(
+						...updateArgs,
+						payload.removeVariantAttributeIds,
+						payload.variantMatrix
+					)
 		if (!updated)
 			throw new NotFoundException(
-				'\u0422\u043e\u0432\u0430\u0440 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d'
+				'Товар не найден'
 			)
 
 		if (payload.categoryIds !== undefined) {
@@ -213,10 +230,11 @@ export class ProductCommandService {
 				: updated
 		if (!product)
 			throw new NotFoundException(
-				'\u0422\u043e\u0432\u0430\u0440 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d'
+				'Товар не найден'
 			)
 
 		return this.finalizer.finalizeProduct(product, catalogId, {
+			bumpCatalogTypeId: payload.hasCustomVariantValues ? typeId : null,
 			invalidateCatalogProducts: true,
 			invalidateCategoryProducts: true,
 			syncSeo: true
@@ -249,7 +267,7 @@ export class ProductCommandService {
 		const product = await this.repo.toggleStatus(id, catalogId)
 		if (!product)
 			throw new NotFoundException(
-				'\u0422\u043e\u0432\u0430\u0440 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d'
+				'Товар не найден'
 			)
 
 		return this.finalizer.finalizeProduct(product, catalogId, {
@@ -264,7 +282,7 @@ export class ProductCommandService {
 		const product = await this.repo.togglePopular(id, catalogId)
 		if (!product)
 			throw new NotFoundException(
-				'\u0422\u043e\u0432\u0430\u0440 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d'
+				'Товар не найден'
 			)
 
 		return this.finalizer.finalizeProduct(product, catalogId, {
@@ -279,7 +297,7 @@ export class ProductCommandService {
 		const source = await this.repo.findById(id, catalogId, true)
 		if (!source)
 			throw new NotFoundException(
-				'\u0422\u043e\u0432\u0430\u0440 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d'
+				'Товар не найден'
 			)
 
 		await this.assertCanDuplicateSource(source, catalogId)
@@ -330,7 +348,7 @@ export class ProductCommandService {
 		const duplicated = await this.repo.findById(product.id, catalogId, true)
 		if (!duplicated)
 			throw new NotFoundException(
-				'\u0422\u043e\u0432\u0430\u0440 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d'
+				'Товар не найден'
 			)
 
 		return this.finalizer.finalizeProduct(duplicated, catalogId, {
@@ -345,7 +363,7 @@ export class ProductCommandService {
 		const product = await this.repo.softDelete(id, catalogId)
 		if (!product)
 			throw new NotFoundException(
-				'\u0422\u043e\u0432\u0430\u0440 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d'
+				'Товар не найден'
 			)
 		await this.finalizer.removeProductSeo(id, catalogId)
 
@@ -377,7 +395,7 @@ export class ProductCommandService {
 		catalogId: string
 	): Promise<void> {
 		if (dto.variants !== undefined) return
-		if (await this.featureEntitlements.canUseProductVariants(catalogId)) return
+		if (await this.featureReader.canUseProductVariants(catalogId)) return
 
 		const product = await this.repo.findSkuById(id, catalogId)
 		if (!product) return
@@ -431,10 +449,10 @@ export class ProductCommandService {
 		}
 		const normalizedProductTypeId = normalizeNullableTrimmedString(productTypeId)
 		if (normalizedProductTypeId) {
-			await this.featureEntitlements.assertCanUseProductTypes(catalogId)
+			await this.featureAssertions.assertCanUseProductTypes(catalogId)
 		}
 		if (this.variants.hasVariantAttributeInputs(variants)) {
-			await this.featureEntitlements.assertCanUseProductVariants(catalogId)
+			await this.featureAssertions.assertCanUseProductVariants(catalogId)
 		}
 		await this.variants.assertCanUseSaleUnitsFromVariantInputs(
 			catalogId,
@@ -447,7 +465,7 @@ export class ProductCommandService {
 				)
 			: null
 		if (this.variants.hasProductTypeVariantAttributes(productType)) {
-			await this.featureEntitlements.assertCanUseProductVariants(catalogId)
+			await this.featureAssertions.assertCanUseProductVariants(catalogId)
 		}
 		const validationScope = this.buildValidationScope(
 			typeId,
@@ -536,17 +554,30 @@ export class ProductCommandService {
 		const hasAttributeChanges = dto.attributes !== undefined
 		const hasRemovedAttributeChanges = dto.removeAttributeIds !== undefined
 		const hasVariantChanges = dto.variants !== undefined
+		const hasVariantMatrixChanges = dto.variantMatrix !== undefined
+		if (hasVariantChanges && hasVariantMatrixChanges) {
+			throw new BadRequestException(
+				'Use either variants updates or variantMatrix replacement, not both'
+			)
+		}
 		const hasMediaChanges = mediaIds !== undefined
 		const hasCategoryChanges =
 			categoryIds !== undefined || dto.categoryId !== undefined
 		if (dto.productTypeId !== undefined) {
-			await this.featureEntitlements.assertCanUseProductTypes(catalogId)
+			await this.featureAssertions.assertCanUseProductTypes(catalogId)
 		}
 		if (hasVariantChanges) {
-			await this.featureEntitlements.assertCanUseProductVariants(catalogId)
+			await this.featureAssertions.assertCanUseProductVariants(catalogId)
 			await this.variants.assertCanUseSaleUnitsFromVariantUpdates(
 				catalogId,
 				dto.variants ?? []
+			)
+		}
+		if (hasVariantMatrixChanges) {
+			await this.featureAssertions.assertCanUseProductVariants(catalogId)
+			await this.variants.assertCanUseSaleUnitsFromVariantInputs(
+				catalogId,
+				dto.variantMatrix ?? []
 			)
 		}
 		const requestedProductType = await this.resolveRequestedProductType(
@@ -561,7 +592,8 @@ export class ProductCommandService {
 			dto.productTypeId !== undefined ||
 			hasAttributeChanges ||
 			hasRemovedAttributeChanges ||
-			hasVariantChanges
+			hasVariantChanges ||
+			hasVariantMatrixChanges
 		const productRef = needsProductValidationRef
 			? await this.loadProductValidationRef(id, catalogId)
 			: null
@@ -582,14 +614,14 @@ export class ProductCommandService {
 			(hasAttributeChanges || hasRemovedAttributeChanges) &&
 			effectiveProductTypeId
 		) {
-			await this.featureEntitlements.assertCanUseProductTypes(catalogId)
+			await this.featureAssertions.assertCanUseProductTypes(catalogId)
 		}
 		if (
 			requestedProductTypeId !== undefined &&
-			hasVariantChanges &&
+			(hasVariantChanges || hasVariantMatrixChanges) &&
 			this.variants.hasProductTypeVariantAttributes(productType)
 		) {
-			await this.featureEntitlements.assertCanUseProductVariants(catalogId)
+			await this.featureAssertions.assertCanUseProductVariants(catalogId)
 		}
 		const validationScope = this.buildValidationScope(
 			typeId,
@@ -616,6 +648,7 @@ export class ProductCommandService {
 			!hasAttributeChanges &&
 			!hasRemovedAttributeChanges &&
 			!hasVariantChanges &&
+			!hasVariantMatrixChanges &&
 			!hasMediaChanges &&
 			!hasCategoryChanges
 		) {
@@ -642,11 +675,17 @@ export class ProductCommandService {
 		const variants = hasVariantChanges
 			? this.variants.prepareVariantUpdates(dto.variants ?? [])
 			: undefined
-		const removeVariantAttributeIds =
-			hasProductTypeChange && requestedProductTypeId === null
-				? this.collectExistingVariantAttributeIds(productRef)
-				: undefined
-
+		const variantMatrix = hasVariantMatrixChanges
+			? await this.buildUpdateVariantMatrix(
+					id,
+					catalogId,
+					validationScope,
+					productType,
+					dto.variantMatrix ?? [],
+					data,
+					productRef
+				)
+			: undefined
 		this.assertNoAttributeRemovalConflicts(attributes, removeAttributeIds)
 
 		return {
@@ -654,8 +693,11 @@ export class ProductCommandService {
 			attributes,
 			removeAttributeIds,
 			variants,
+			variantMatrix,
+			hasCustomVariantValues: this.variants.hasCustomVariantValues(
+				dto.variantMatrix
+			),
 			mediaIds,
-			removeVariantAttributeIds,
 			categoryIds,
 			categoryId,
 			categoryPosition: dto.categoryPosition ?? 0
@@ -670,11 +712,48 @@ export class ProductCommandService {
 		return { catalogTypeId, catalogId, productTypeId }
 	}
 
+	private async buildUpdateVariantMatrix(
+		id: string,
+		catalogId: string,
+		validationScope: ProductValidationScopeInput,
+		productType: ProductTypeValidationSchema | null,
+		items: UpdateProductDtoReq['variantMatrix'],
+		data: ProductUpdateInput,
+		productRef: ProductValidationRef | null
+	): Promise<ProductVariantData[]> {
+		if (items?.length) {
+			return this.variants.buildProductTypeChangeVariantMatrix(
+				id,
+				catalogId,
+				validationScope,
+				productType,
+				items
+			)
+		}
+
+		const sku = normalizeRequiredString(
+			productRef?.sku ?? (await this.repo.findSkuById(id, catalogId))?.sku,
+			'product.sku'
+		)
+		const price = Object.hasOwn(data, 'price')
+			? (data as { price?: unknown }).price
+			: productRef?.price
+		const status = Object.hasOwn(data, 'status')
+			? (data as { status?: ProductStatus }).status
+			: productRef?.status
+
+		return [
+			await this.variants.buildDefaultVariantData(sku, price, {
+				productStatus: status
+			})
+		]
+	}
+
 	private async assertCanDuplicateSource(
 		source: ProductDetailsItem,
 		catalogId: string
 	): Promise<void> {
-		const features = await this.featureEntitlements.getCurrentFeatures(catalogId)
+		const features = await this.featureReader.getCurrentFeatures(catalogId)
 
 		if (source.productType && !features.canUseProductTypes) {
 			throw new BadRequestException(
@@ -902,23 +981,9 @@ export class ProductCommandService {
 		const product = await this.repo.findProductValidationRef(id, catalogId)
 		if (!product)
 			throw new NotFoundException(
-				'\u0422\u043e\u0432\u0430\u0440 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d'
+				'Товар не найден'
 			)
 		return product
-	}
-
-	private collectExistingVariantAttributeIds(
-		productRef: ProductValidationRef | null
-	): string[] | undefined {
-		const attributeIds = [
-			...new Set(
-				(productRef?.variants ?? []).flatMap(variant =>
-					variant.attributes.map(attribute => attribute.attributeId)
-				)
-			)
-		]
-
-		return attributeIds.length ? attributeIds : undefined
 	}
 
 	private async ensureCategoriesExist(

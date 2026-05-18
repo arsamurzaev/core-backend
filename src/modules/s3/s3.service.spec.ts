@@ -1,5 +1,6 @@
 import {
 	CompleteMultipartUploadCommand,
+	CopyObjectCommand,
 	CreateMultipartUploadCommand,
 	PutObjectCommand,
 	UploadPartCommand
@@ -11,6 +12,7 @@ import { Test, TestingModule } from '@nestjs/testing'
 
 import { AllInterfaces } from '@/core/config'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { OBSERVABILITY_RECORDER_PORT } from '@/modules/observability/contracts'
 import { ObservabilityService } from '@/modules/observability/observability.service'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
@@ -144,6 +146,10 @@ describe('S3Service', () => {
 						decrementQueueJobActive: jest.fn(),
 						recordQueueJob: jest.fn()
 					}
+				},
+				{
+					provide: OBSERVABILITY_RECORDER_PORT,
+					useExisting: ObservabilityService
 				}
 			]
 		}).compile()
@@ -310,6 +316,35 @@ describe('S3Service', () => {
 		)
 		expect(command?.input.UploadId).toBe('upload-1')
 		expect(command?.input.PartNumber).toBe(2)
+	})
+
+	it('copies an object into a new catalog key', async () => {
+		sendMock.mockResolvedValue({})
+
+		const result = await service.copyObjectToCatalog({
+			sourceKey:
+				'  catalogs/catalog-source/products/product-1/2026/05/18/raw/photo 1.jpg  ',
+			targetCatalogId: ' catalog-copy ',
+			path: 'products',
+			entityId: 'product-copy'
+		})
+
+		expect(result.ok).toBe(true)
+		expect(result.key).toMatch(
+			/^catalogs\/catalog-copy\/products\/product-copy\/\d{4}\/\d{2}\/\d{2}\/raw\/[0-9a-f-]+\.jpg$/i
+		)
+		expect(result.url).toBe(`https://cdn.example.test/${result.key}`)
+
+		const sendCall = sendMock.mock.calls.at(0) as [CopyObjectCommand] | undefined
+		expect(sendCall).toBeDefined()
+		const command = sendCall?.[0]
+		expect(command).toBeInstanceOf(CopyObjectCommand)
+		expect(command?.input.Bucket).toBe('catalog-bucket')
+		expect(command?.input.Key).toBe(result.key)
+		expect(command?.input.CopySource).toBe(
+			'catalog-bucket/catalogs/catalog-source/products/product-1/2026/05/18/raw/photo%201.jpg'
+		)
+		expect(command?.input.MetadataDirective).toBe('COPY')
 	})
 
 	it('completes multipart upload with normalized sorted parts and enqueues processing', async () => {

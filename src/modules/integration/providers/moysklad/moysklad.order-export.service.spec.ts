@@ -2,6 +2,7 @@ import { IntegrationProvider, OrderStatus } from '@generated/enums'
 import { Test, TestingModule } from '@nestjs/testing'
 
 import { CapabilityService } from '@/modules/capability/capability.service'
+import { CAPABILITY_ASSERT_PORT } from '@/modules/capability/contracts'
 
 import { IntegrationRepository } from '../../integration.repository'
 
@@ -108,6 +109,10 @@ describe('MoySkladOrderExportService', () => {
 					useValue: {
 						assertCanUseMoySkladIntegration: jest.fn().mockResolvedValue(undefined)
 					}
+				},
+				{
+					provide: CAPABILITY_ASSERT_PORT,
+					useExisting: CapabilityService
 				}
 			]
 		}).compile()

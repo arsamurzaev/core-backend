@@ -127,7 +127,15 @@ describe('InventoryRepository', () => {
 			ok: true,
 			warehouseId: 'old-warehouse',
 			consumedLines: 1,
-			affectedVariantIds: ['variant-1']
+			affectedVariantIds: ['variant-1'],
+			stockChanges: [
+				expect.objectContaining({
+					variantId: 'variant-1',
+					previousStock: null,
+					nextStock: 8,
+					changed: true
+				})
+			]
 		})
 		expect(tx.inventoryWarehouseCatalog.findMany).not.toHaveBeenCalled()
 		expect(tx.inventoryReservation.update).toHaveBeenCalledWith({
@@ -218,7 +226,15 @@ describe('InventoryRepository', () => {
 			ok: true,
 			warehouseId: 'old-warehouse',
 			consumedLines: 1,
-			affectedVariantIds: ['variant-1']
+			affectedVariantIds: ['variant-1'],
+			stockChanges: [
+				expect.objectContaining({
+					variantId: 'variant-1',
+					previousStock: null,
+					nextStock: 11,
+					changed: true
+				})
+			]
 		})
 		expect(tx.inventoryWarehouseCatalog.findMany).toHaveBeenCalledTimes(1)
 		expect(tx.inventoryReservation.create).toHaveBeenCalledWith({
@@ -303,7 +319,8 @@ describe('InventoryRepository', () => {
 			releasedReservations: 0,
 			affectedVariants: 0,
 			affectedVariantIds: [],
-			affectedCatalogIds: []
+			affectedCatalogIds: [],
+			stockChanges: []
 		})
 		expect(tx.inventoryStockBalance.findUnique).not.toHaveBeenCalled()
 		expect(tx.inventoryMovement.create).not.toHaveBeenCalled()

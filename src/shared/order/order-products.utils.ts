@@ -3,12 +3,16 @@ export type OrderProductSnapshot = {
 	productId: string | null
 	variantId: string | null
 	saleUnitId: string | null
+	variantHidden: boolean
+	saleUnitHidden: boolean
 	variant: OrderProductVariantSnapshot | null
 	saleUnit: OrderProductSaleUnitSnapshot | null
 	externalProducts: OrderExternalLinkSnapshot[]
 	externalVariants: OrderExternalLinkSnapshot[]
 	quantity: number
 	baseQuantity: number
+	priceState: string | null
+	displayPrice: number | null
 	baseUnitPrice: number
 	unitPrice: number
 	unitPriceSnapshot: number
@@ -100,12 +104,16 @@ export function normalizeOrderProducts(value: unknown): OrderProductSnapshot[] {
 				productId: readString(item.productId),
 				variantId: readString(item.variantId),
 				saleUnitId: readString(item.saleUnitId),
+				variantHidden: item.variantHidden === true,
+				saleUnitHidden: item.saleUnitHidden === true,
 				variant: normalizeVariant(item.variant),
 				saleUnit: normalizeSaleUnit(item.saleUnit),
 				externalProducts: normalizeExternalLinks(item.externalProducts),
 				externalVariants: normalizeExternalLinks(item.externalVariants),
 				quantity,
 				baseQuantity,
+				priceState: readString(item.priceState),
+				displayPrice: readNumber(item.displayPrice),
 				baseUnitPrice,
 				unitPrice,
 				unitPriceSnapshot: unitPrice,

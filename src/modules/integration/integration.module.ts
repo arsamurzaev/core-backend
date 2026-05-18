@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common'
 
-import { CapabilityModule } from '@/modules/capability/capability.module'
+import { CapabilityModule } from '@/modules/capability/public'
+import { INVENTORY_EXTERNAL_STOCK_PORT } from '@/modules/inventory/contracts'
+import { ProductModule } from '@/modules/product/public'
 import { MediaRepository } from '@/shared/media/media.repository'
 
-import { S3Module } from '../s3/s3.module'
+import { S3Module } from '@/modules/s3/public'
 
 import { ORDER_EXPORT_PORT } from './contracts'
 import { IntegrationController } from './integration.controller'
@@ -18,6 +20,7 @@ import { MoySkladProductFolderSyncService } from './providers/moysklad/moysklad.
 import { MoySkladProductSyncService } from './providers/moysklad/moysklad.product-sync.service'
 import { MoySkladQueueService } from './providers/moysklad/moysklad.queue.service'
 import { MoySkladStockSyncService } from './providers/moysklad/moysklad.stock-sync.service'
+import { MoySkladSyncCompletedDiagnosticsHandler } from './providers/moysklad/moysklad.sync-completed-diagnostics.handler'
 import { MoySkladSyncOrchestratorService } from './providers/moysklad/moysklad.sync-orchestrator.service'
 import { MoySkladSyncRunRecorderService } from './providers/moysklad/moysklad.sync-run-recorder.service'
 import { MoySkladSyncService } from './providers/moysklad/moysklad.sync.service'
@@ -25,7 +28,7 @@ import { MoySkladVariantAttributeResolverService } from './providers/moysklad/mo
 import { MoySkladVariantSyncService } from './providers/moysklad/moysklad.variant-sync.service'
 
 @Module({
-	imports: [S3Module, CapabilityModule],
+	imports: [S3Module, CapabilityModule, ProductModule],
 	controllers: [IntegrationController],
 	providers: [
 		IntegrationService,
@@ -39,19 +42,25 @@ import { MoySkladVariantSyncService } from './providers/moysklad/moysklad.varian
 		MoySkladProductFolderSyncService,
 		MoySkladProductSyncService,
 		MoySkladStockSyncService,
+		MoySkladSyncCompletedDiagnosticsHandler,
 		MoySkladSyncOrchestratorService,
 		MoySkladSyncRunRecorderService,
 		MoySkladSyncService,
 		MoySkladVariantAttributeResolverService,
 		MoySkladVariantSyncService,
 		MediaRepository,
-		{ provide: ORDER_EXPORT_PORT, useExisting: MoySkladOrderExportQueueService }
+		{ provide: ORDER_EXPORT_PORT, useExisting: MoySkladOrderExportQueueService },
+		{
+			provide: INVENTORY_EXTERNAL_STOCK_PORT,
+			useExisting: MoySkladStockSyncService
+		}
 	],
 	exports: [
 		IntegrationService,
 		MoySkladQueueService,
 		MoySkladOrderExportQueueService,
-		ORDER_EXPORT_PORT
+		ORDER_EXPORT_PORT,
+		INVENTORY_EXTERNAL_STOCK_PORT
 	]
 })
 export class IntegrationModule {}

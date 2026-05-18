@@ -1,6 +1,12 @@
+import { IntegrationSyncSnapshotCompleteness } from '@generated/enums'
 import { Injectable } from '@nestjs/common'
 
+import type { MoySkladExternalStockDiagnostics } from './moysklad.stock-sync.service'
 import { MoySkladSyncService } from './moysklad.sync.service'
+import type {
+	MoySkladEntityType,
+	MoySkladProductFolderWebhookAction
+} from './moysklad.types'
 
 export type MoySkladSyncRunJsonValue =
 	| string
@@ -66,8 +72,19 @@ type SyncStockResult = {
 	updatedProducts: number
 	updatedVariants: number
 	skipped: number
+	diagnostics?: MoySkladExternalStockDiagnostics
 	durationMs: number
 	syncedAt: Date
+}
+
+type SyncProductFolderResult = {
+	ok: true
+	externalId: string
+	action: MoySkladProductFolderWebhookAction
+	categoryId: string | null
+	updated: boolean
+	deleted: number
+	durationMs: number
 }
 
 export type MoySkladSyncRunCompletionInput = {
@@ -78,6 +95,7 @@ export type MoySkladSyncRunCompletionInput = {
 	deletedProducts: number
 	imagesImported: number
 	durationMs: number
+	snapshotCompleteness?: IntegrationSyncSnapshotCompleteness
 	metadata: MoySkladSyncRunJsonObject
 }
 
@@ -102,6 +120,7 @@ export class MoySkladSyncOrchestratorService {
 				deletedProducts: result.deleted,
 				imagesImported: 0,
 				durationMs: result.durationMs,
+				snapshotCompleteness: this.resolveCatalogSnapshotCompleteness(result),
 				metadata: this.buildCatalogSyncMetadata(result)
 			}
 		}
@@ -132,7 +151,117 @@ export class MoySkladSyncOrchestratorService {
 				deletedProducts: result.deletedVariants,
 				imagesImported: result.imagesImported,
 				durationMs: result.durationMs,
+				snapshotCompleteness: IntegrationSyncSnapshotCompleteness.PARTIAL,
 				metadata: this.buildProductSyncMetadata(result)
+			}
+		}
+	}
+
+	async syncWebhookProduct(input: {
+		catalogId: string
+		runId: string
+		entityType: MoySkladEntityType
+		externalId: string
+	}): Promise<{
+		result: SyncProductResult
+		completion: MoySkladSyncRunCompletionInput
+	}> {
+		const result = await this.sync.syncExternalProduct(input.catalogId, {
+			entityType: input.entityType,
+			externalId: input.externalId,
+			runId: input.runId
+		})
+		const productUpdated = result.productUpdated ?? result.updated
+		const createdItems = (result.created ? 1 : 0) + result.createdVariants
+		const updatedItems = (productUpdated ? 1 : 0) + result.updatedVariants
+
+		return {
+			result,
+			completion: {
+				externalId: result.externalId,
+				totalProducts: 1 + result.totalVariants,
+				createdProducts: createdItems,
+				updatedProducts: updatedItems,
+				deletedProducts: result.deletedVariants,
+				imagesImported: result.imagesImported,
+				durationMs: result.durationMs,
+				snapshotCompleteness: IntegrationSyncSnapshotCompleteness.WEBHOOK_DELTA,
+				metadata: {
+					...this.buildProductSyncMetadata(result),
+					webhook: {
+						entityType: input.entityType,
+						externalId: input.externalId
+					}
+				}
+			}
+		}
+	}
+
+	async syncProductFolder(input: {
+		catalogId: string
+		runId: string
+		externalId: string
+		action: MoySkladProductFolderWebhookAction
+	}): Promise<{
+		result: SyncProductFolderResult
+		completion: MoySkladSyncRunCompletionInput
+	}> {
+		const result = await this.sync.syncProductFolder(input.catalogId, {
+			runId: input.runId,
+			externalId: input.externalId,
+			action: input.action
+		})
+
+		return {
+			result,
+			completion: {
+				externalId: result.externalId,
+				totalProducts: 0,
+				createdProducts: 0,
+				updatedProducts: result.updated ? 1 : 0,
+				deletedProducts: result.deleted,
+				imagesImported: 0,
+				durationMs: result.durationMs,
+				snapshotCompleteness: IntegrationSyncSnapshotCompleteness.WEBHOOK_DELTA,
+				metadata: {
+					products: {
+						total: 0,
+						created: 0,
+						updated: 0,
+						deleted: 0,
+						skipped: 0
+					},
+					variants: {
+						total: 0,
+						created: 0,
+						updated: 0,
+						deleted: 0,
+						skipped: 0
+					},
+					stockRows: {
+						total: 0,
+						applied: 0,
+						skipped: 0
+					},
+					categories: {
+						total: 1,
+						updated: result.updated ? 1 : 0,
+						deleted: result.deleted
+					},
+					warnings: [],
+					errors: [],
+					webhook: {
+						entityType: 'productfolder',
+						externalId: input.externalId,
+						action: input.action
+					},
+					progress: this.buildTerminalProgress(
+						'COMPLETED',
+						'Синхронизация категории MoySklad завершена',
+						1,
+						1
+					)
+				}
 			}
 		}
 	}
@@ -154,6 +283,7 @@ export class MoySkladSyncOrchestratorService {
 				deletedProducts: 0,
 				imagesImported: 0,
 				durationMs: result.durationMs,
+				snapshotCompleteness: IntegrationSyncSnapshotCompleteness.PARTIAL,
 				metadata: this.buildStockSyncMetadata(result)
 			}
 		}
@@ -181,9 +311,24 @@ export class MoySkladSyncOrchestratorService {
 				deletedProducts: 0,
 				imagesImported: 0,
 				durationMs: result.durationMs,
+				snapshotCompleteness: IntegrationSyncSnapshotCompleteness.WEBHOOK_DELTA,
 				metadata: this.buildStockSyncMetadata(result)
 			}
 		}
+	}
+
+	private resolveCatalogSnapshotCompleteness(
+		result: SyncCatalogResult
+	): IntegrationSyncSnapshotCompleteness {
+		if (
+			result.totalProducts > 0 &&
+			result.errors.length === 0 &&
+			result.skippedProducts === 0
+		) {
+			return IntegrationSyncSnapshotCompleteness.FULL_COMPLETE
+		}
+
+		return IntegrationSyncSnapshotCompleteness.PARTIAL
 	}
 
 	private buildCatalogSyncMetadata(result: SyncCatalogResult) {
@@ -275,6 +420,9 @@ export class MoySkladSyncOrchestratorService {
 				total: result.total,
 				applied: result.updated,
 				skipped: result.skipped,
+				diagnostics: result.diagnostics
+					? (result.diagnostics as unknown as MoySkladSyncRunJsonObject)
+					: null,
 				lastStockSyncedAt: result.syncedAt.toISOString()
 			},
 			warnings: [],

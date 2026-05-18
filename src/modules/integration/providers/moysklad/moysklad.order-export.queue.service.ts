@@ -1,6 +1,7 @@
 import type { Prisma } from '@generated/client'
 import { IntegrationProvider } from '@generated/enums'
 import {
+	Inject,
 	Injectable,
 	Logger,
 	type OnModuleDestroy,
@@ -11,8 +12,14 @@ import { SpanStatusCode, trace } from '@opentelemetry/api'
 import { Job, Queue, Worker } from 'bullmq'
 
 import { AllInterfaces } from '@/core/config'
-import { CapabilityService } from '@/modules/capability/capability.service'
-import { ObservabilityService } from '@/modules/observability/observability.service'
+import {
+	CAPABILITY_READER_PORT,
+	type CapabilityReaderPort
+} from '@/modules/capability/contracts'
+import {
+	OBSERVABILITY_RECORDER_PORT,
+	type ObservabilityRecorderPort
+} from '@/modules/observability/contracts'
 import { buildBullMqSafeJobId } from '@/shared/utils/bullmq-job-id'
 
 import { IntegrationRepository } from '../../integration.repository'
@@ -80,8 +87,10 @@ export class MoySkladOrderExportQueueService
 		private readonly repo: IntegrationRepository,
 		private readonly metadataCrypto: MoySkladMetadataCryptoService,
 		private readonly orderExport: MoySkladOrderExportService,
-		private readonly observability: ObservabilityService,
-		private readonly featureEntitlements: CapabilityService
+		@Inject(OBSERVABILITY_RECORDER_PORT)
+		private readonly observability: ObservabilityRecorderPort,
+		@Inject(CAPABILITY_READER_PORT)
+		private readonly featureEntitlements: CapabilityReaderPort
 	) {
 		const redis = this.configService.get('redis', { infer: true })
 		const connection: Record<string, any> = {

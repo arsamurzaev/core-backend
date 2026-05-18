@@ -1,11 +1,15 @@
 import {
 	BadRequestException,
+	Inject,
 	Injectable,
 	NotFoundException
 } from '@nestjs/common'
 import slugify from 'slugify'
 
-import { CapabilityService } from '@/modules/capability/capability.service'
+import {
+	CAPABILITY_ASSERT_PORT,
+	type CapabilityAssertPort
+} from '@/modules/capability/contracts'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import {
 	assertHasUpdateFields,
@@ -43,7 +47,8 @@ function buildCodeBase(value: string): string {
 export class CatalogSaleUnitService {
 	constructor(
 		private readonly repo: CatalogSaleUnitRepository,
-		private readonly featureEntitlements: CapabilityService
+		@Inject(CAPABILITY_ASSERT_PORT)
+		private readonly featureEntitlements: CapabilityAssertPort
 	) {}
 
 	async getAll(options: { includeArchived?: boolean } = {}) {

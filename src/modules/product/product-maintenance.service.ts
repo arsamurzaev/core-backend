@@ -2,9 +2,43 @@ import { Injectable } from '@nestjs/common'
 
 import { ProductVariantService } from './product-variant.service'
 import { ProductWriteFinalizer } from './product-write-finalizer.service'
-import { ProductRepository } from './product.repository'
+import {
+	type ProductDefaultVariantDiagnosticCheck,
+	type ProductDefaultVariantPriceMismatchRepairCandidate,
+	ProductRepository
+} from './product.repository'
 
 const DEFAULT_VARIANT_REPAIR_BATCH_SIZE = 100
+const DEFAULT_VARIANT_DIAGNOSTIC_SAMPLE_LIMIT = 10
+const DEFAULT_VARIANT_PRICE_REPAIR_BATCH_SIZE = 100
+const DEFAULT_VARIANT_PRICE_REPAIR_SAMPLE_LIMIT = 20
+
+export type ProductDefaultVariantDiagnostics = {
+	catalogId: string
+	sampleLimit: number
+	checks: ProductDefaultVariantDiagnosticCheck[]
+	warnCount: number
+	failCount: number
+	ok: boolean
+}
+
+export type ProductDefaultVariantPriceMismatchRepairOptions = {
+	apply?: boolean
+	batchSize?: number
+	sampleLimit?: number
+}
+
+export type ProductDefaultVariantPriceMismatchRepairResult = {
+	catalogId: string
+	dryRun: boolean
+	checkedProducts: number
+	repairableProducts: number
+	updatedProducts: number
+	affectedCatalogs: number
+	batchSize: number
+	sampleLimit: number
+	samples: ProductDefaultVariantPriceMismatchRepairCandidate[]
+}
 
 @Injectable()
 export class ProductMaintenanceService {
@@ -101,6 +135,92 @@ export class ProductMaintenanceService {
 		}
 	}
 
+	async diagnoseDefaultVariantsForCatalog(
+		catalogId: string,
+		sampleLimit = DEFAULT_VARIANT_DIAGNOSTIC_SAMPLE_LIMIT
+	): Promise<ProductDefaultVariantDiagnostics> {
+		const normalizedSampleLimit = this.normalizeDiagnosticSampleLimit(sampleLimit)
+		const checks = await this.repo.findDefaultVariantDiagnostics(
+			catalogId,
+			normalizedSampleLimit
+		)
+		const warnCount = checks.filter(check => check.status === 'warn').length
+		const failCount = checks.filter(check => check.status === 'fail').length
+
+		return {
+			catalogId,
+			sampleLimit: normalizedSampleLimit,
+			checks,
+			warnCount,
+			failCount,
+			ok: warnCount === 0 && failCount === 0
+		}
+	}
+
+	async repairDefaultVariantPriceMismatchesForCatalog(
+		catalogId: string,
+		options: ProductDefaultVariantPriceMismatchRepairOptions = {}
+	): Promise<ProductDefaultVariantPriceMismatchRepairResult> {
+		const apply = options.apply === true
+		const batchSize = this.normalizeBatchSize(
+			options.batchSize,
+			DEFAULT_VARIANT_PRICE_REPAIR_BATCH_SIZE
+		)
+		const sampleLimit = this.normalizeRepairSampleLimit(options.sampleLimit)
+		let cursorProductId: string | undefined
+		let checkedProducts = 0
+		let updatedProducts = 0
+		const samples: ProductDefaultVariantPriceMismatchRepairCandidate[] = []
+		const updatedProductIds: string[] = []
+
+		for (;;) {
+			const candidates =
+				await this.repo.findDefaultVariantPriceMismatchRepairCandidates(
+					catalogId,
+					batchSize,
+					cursorProductId
+				)
+			if (!candidates.length) break
+
+			checkedProducts += candidates.length
+			const remainingSampleSlots = sampleLimit - samples.length
+			if (remainingSampleSlots > 0) {
+				samples.push(...candidates.slice(0, remainingSampleSlots))
+			}
+
+			if (apply) {
+				const repairedProductIds =
+					await this.repo.applyDefaultVariantPriceMismatchRepairs(
+						catalogId,
+						candidates.map(candidate => candidate.productId)
+					)
+				updatedProducts += repairedProductIds.length
+				updatedProductIds.push(...repairedProductIds)
+			}
+
+			cursorProductId = candidates[candidates.length - 1]?.productId
+			if (candidates.length < batchSize) break
+		}
+
+		if (apply && updatedProducts > 0) {
+			await this.finalizer.invalidateCatalogProductsCache(catalogId)
+			await this.finalizer.invalidateCategoryProductsCache(catalogId)
+			await this.syncRepairedProductSeo(catalogId, updatedProductIds)
+		}
+
+		return {
+			catalogId,
+			dryRun: !apply,
+			checkedProducts,
+			repairableProducts: checkedProducts,
+			updatedProducts,
+			affectedCatalogs: updatedProducts > 0 ? 1 : 0,
+			batchSize,
+			sampleLimit,
+			samples
+		}
+	}
+
 	async rebuildSeoForCatalog(catalogId: string) {
 		const batchSize = 100
 		let cursorId: string | undefined
@@ -143,5 +263,26 @@ export class ProductMaintenanceService {
 				await this.finalizer.syncProductSeo(product, catalogId)
 			}
 		}
+	}
+
+	private normalizeDiagnosticSampleLimit(value: number): number {
+		if (!Number.isInteger(value) || value <= 0) {
+			return DEFAULT_VARIANT_DIAGNOSTIC_SAMPLE_LIMIT
+		}
+		return Math.min(value, 100)
+	}
+
+	private normalizeBatchSize(value: number | undefined, fallback: number): number {
+		if (!Number.isInteger(value) || value <= 0) {
+			return fallback
+		}
+		return Math.min(value, 1000)
+	}
+
+	private normalizeRepairSampleLimit(value: number | undefined): number {
+		if (!Number.isInteger(value) || value <= 0) {
+			return DEFAULT_VARIANT_PRICE_REPAIR_SAMPLE_LIMIT
+		}
+		return Math.min(value, 100)
 	}
 }

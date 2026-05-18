@@ -27,14 +27,13 @@ import { SkipThrottle } from '@nestjs/throttler'
 import type { Request } from 'express'
 
 import { Roles } from '@/modules/auth/decorators/roles.decorator'
-import { ChangePasswordDtoReq } from '@/modules/auth/dto/requests/change-password.dto.req'
-import { AuthSessionsResponseDto } from '@/modules/auth/dto/responses/session.dto.res'
 import { CatalogAccessGuard } from '@/modules/auth/guards/catalog-access.guard'
 import { SessionGuard } from '@/modules/auth/guards/session.guard'
+import {
+	AuthSessionsResponseDto,
+	ChangePasswordDtoReq
+} from '@/modules/auth/public'
 import type { AuthRequest } from '@/modules/auth/types/auth-request'
-import { TestMoySkladConnectionDtoReq } from '@/modules/integration/dto/requests/test-moysklad-connection.dto.req'
-import { UpdateMoySkladIntegrationDtoReq } from '@/modules/integration/dto/requests/update-moysklad-integration.dto.req'
-import { UpsertMoySkladIntegrationDtoReq } from '@/modules/integration/dto/requests/upsert-moysklad-integration.dto.req'
 import {
 	MoySkladIntegrationDto,
 	MoySkladIntegrationStatusDto,
@@ -42,8 +41,11 @@ import {
 	MoySkladQueuedSyncDto,
 	MoySkladSyncProgressDto,
 	MoySkladSyncRunDto,
-	MoySkladTestConnectionDto
-} from '@/modules/integration/dto/responses/moysklad.dto.res'
+	MoySkladTestConnectionDto,
+	TestMoySkladConnectionDtoReq,
+	UpdateMoySkladIntegrationDtoReq,
+	UpsertMoySkladIntegrationDtoReq
+} from '@/modules/integration/public'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 
 import { CatalogAdvancedSettingsService } from './catalog-advanced-settings.service'

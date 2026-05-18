@@ -6,8 +6,10 @@ import {
 } from '@generated/models'
 import {
 	BadRequestException,
+	Inject,
 	Injectable,
-	NotFoundException
+	NotFoundException,
+	Optional
 } from '@nestjs/common'
 
 import { CacheService } from '@/shared/cache/cache.service'
@@ -15,6 +17,11 @@ import {
 	CATALOG_CURRENT_CACHE_TTL_SEC,
 	CATALOG_TYPE_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
+import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
+import {
+	DOMAIN_EVENT_DISPATCHER,
+	type DomainEventDispatcher
+} from '@/shared/domain-events/domain-events.contract'
 import { RequestContext } from '@/shared/tenancy/request-context'
 import { assertHasUpdateFields } from '@/shared/utils'
 
@@ -51,7 +58,10 @@ export class AttributeService {
 
 	constructor(
 		private readonly repo: AttributeRepository,
-		private readonly cache: CacheService
+		private readonly cache: CacheService,
+		@Optional()
+		@Inject(DOMAIN_EVENT_DISPATCHER)
+		private readonly events?: DomainEventDispatcher
 	) {}
 
 	async getByType(typeId: string) {
@@ -306,6 +316,20 @@ export class AttributeService {
 	private async invalidateTypeCache(typeIds: string[]): Promise<void> {
 		if (!this.cacheTtlSec) return
 		const unique = Array.from(new Set(typeIds)).filter(Boolean)
+		if (this.events && unique.length) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'catalog.cache_invalidated',
+					catalogId: this.currentCatalogId(),
+					scopes: unique.map(typeId => ({
+						name: 'catalog_type' as const,
+						key: typeId
+					}))
+				})
+			)
+			return
+		}
+
 		await Promise.all(
 			unique.map(typeId =>
 				this.cache.bumpVersion(CATALOG_TYPE_CACHE_VERSION, typeId)

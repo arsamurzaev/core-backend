@@ -1,14 +1,15 @@
+import type { Prisma } from '@generated/client'
 import {
 	AuditOutcome,
 	DataType,
 	IntegrationProvider,
 	IntegrationSyncRunStatus
 } from '@generated/enums'
-import type { Prisma } from '@generated/client'
 import {
 	BadRequestException,
 	ConflictException,
 	ForbiddenException,
+	Inject,
 	Injectable,
 	Logger,
 	NotFoundException
@@ -18,8 +19,20 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto'
 import slugify from 'slugify'
 
 import { AllInterfaces } from '@/core/config'
-import { AuditService } from '@/modules/audit/audit.service'
-import { CapabilityService } from '@/modules/capability/capability.service'
+import {
+	AUDIT_RECORDER_PORT,
+	type AuditRecorderPort
+} from '@/modules/audit/contracts'
+import {
+	CAPABILITY_ASSERT_PORT,
+	CAPABILITY_READER_PORT,
+	type CapabilityAssertPort,
+	type CapabilityReaderPort
+} from '@/modules/capability/contracts'
+import {
+	PRODUCT_EXTERNAL_SYNC_PORT,
+	type ProductExternalSyncPort
+} from '@/modules/product/public'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 
@@ -63,7 +76,13 @@ import {
 	normalizeMoySkladStockReportUrl
 } from './providers/moysklad/moysklad.client'
 import {
+	isMoySkladExternalField,
 	maskToken,
+	MOYSKLAD_PRODUCT_CHANGE_WEBHOOK_ACTIONS,
+	MOYSKLAD_PRODUCT_CHANGE_WEBHOOK_ENTITY_TYPES,
+	MOYSKLAD_PRODUCT_DELETE_WEBHOOK_ENTITY_TYPES,
+	MOYSKLAD_PRODUCT_FOLDER_WEBHOOK_ACTIONS,
+	MOYSKLAD_PRODUCT_FOLDER_WEBHOOK_ENTITY_TYPE,
 	MoySkladMetadataCryptoService
 } from './providers/moysklad/moysklad.metadata'
 import { MoySkladOrderExportQueueService } from './providers/moysklad/moysklad.order-export.queue.service'
@@ -73,8 +92,20 @@ import type {
 	MoySkladMetadata,
 	MoySkladNamedEntity,
 	MoySkladProduct,
+	MoySkladProductChangeWebhookAction,
+	MoySkladProductChangeWebhookEntityType,
+	MoySkladProductChangeWebhookMetadata,
+	MoySkladProductChangeWebhookNotification,
+	MoySkladProductDeleteWebhookEntityType,
+	MoySkladProductDeleteWebhookMetadata,
+	MoySkladProductDeleteWebhookNotification,
+	MoySkladProductFolderWebhookAction,
+	MoySkladProductFolderWebhookMetadata,
+	MoySkladProductFolderWebhookNotification,
 	MoySkladStockWebhookNotification,
-	MoySkladVariantCharacteristic
+	MoySkladVariantCharacteristic,
+	MoySkladWebhook,
+	MoySkladWebhookStock
 } from './providers/moysklad/moysklad.types'
 
 type SyncRunEntityStats = {
@@ -89,6 +120,27 @@ type SyncRunStockStats = {
 	total: number
 	applied: number
 	skipped: number
+	diagnostics: SyncRunStockDiagnostics | null
+}
+
+type SyncRunStockSkippedReasons = {
+	missingStock: number
+	productHasVariantLinks: number
+	variantsCapabilityDisabled: number
+	stockRowWithoutLocalLink: number
+}
+
+type SyncRunStockDiagnostics = {
+	source: 'FULL_SYNC' | 'WEBHOOK'
+	stockRows: number
+	matchedStockRows: number
+	unmatchedStockRows: number
+	productLinks: number
+	variantLinks: number
+	ignoredVariantLinks: number
+	appliedProductLinks: number
+	appliedVariantLinks: number
+	skippedReasons: SyncRunStockSkippedReasons
 }
 
 type SyncRunIssue = {
@@ -127,7 +179,15 @@ const EMPTY_SYNC_ENTITY_STATS: SyncRunEntityStats = {
 const EMPTY_SYNC_STOCK_STATS: SyncRunStockStats = {
 	total: 0,
 	applied: 0,
-	skipped: 0
+	skipped: 0,
+	diagnostics: null
+}
+
+const EMPTY_STOCK_SKIPPED_REASONS: SyncRunStockSkippedReasons = {
+	missingStock: 0,
+	productHasVariantLinks: 0,
+	variantsCapabilityDisabled: 0,
+	stockRowWithoutLocalLink: 0
 }
 
 const MAPPING_SAMPLE_LIMIT = 10
@@ -181,14 +241,20 @@ export class IntegrationService {
 		private readonly moySkladQueue: MoySkladQueueService,
 		private readonly moySkladOrderExportQueue: MoySkladOrderExportQueueService,
 		private readonly metadataCrypto: MoySkladMetadataCryptoService,
-		private readonly audit: AuditService,
-		private readonly featureEntitlements: CapabilityService,
+		@Inject(AUDIT_RECORDER_PORT)
+		private readonly audit: AuditRecorderPort,
+		@Inject(CAPABILITY_ASSERT_PORT)
+		private readonly featureAssertions: CapabilityAssertPort,
+		@Inject(CAPABILITY_READER_PORT)
+		private readonly featureReader: CapabilityReaderPort,
+		@Inject(PRODUCT_EXTERNAL_SYNC_PORT)
+		private readonly products: ProductExternalSyncPort,
 		private readonly configService: ConfigService<AllInterfaces>
 	) {}
 
 	async getMoySklad(): Promise<MoySkladIntegrationDto> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		const integration = await this.repo.findMoySklad(catalogId)
 		if (!integration) {
 			throw new NotFoundException('Интеграция MoySklad не настроена')
@@ -199,7 +265,7 @@ export class IntegrationService {
 
 	async getMoySkladStatus(): Promise<MoySkladIntegrationStatusDto> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		const [integration, activeRun, lastRun] = await Promise.all([
 			this.repo.findMoySklad(catalogId),
 			this.repo.findLatestActiveSyncRun(catalogId),
@@ -216,7 +282,7 @@ export class IntegrationService {
 
 	async getMoySkladRuns(limit?: number | string): Promise<MoySkladSyncRunDto[]> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		const normalizedLimit = this.normalizeRunsLimit(limit)
 		const runs = await this.repo.findRecentSyncRuns(catalogId, normalizedLimit)
 		return runs.map(run => this.mapSyncRun(run))
@@ -224,7 +290,7 @@ export class IntegrationService {
 
 	async getMoySkladRunProgress(runId: string): Promise<MoySkladSyncProgressDto> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		const run = await this.repo.findSyncRunById(runId)
 		if (
 			!run ||
@@ -242,7 +308,7 @@ export class IntegrationService {
 		limit?: number | string
 	): Promise<MoySkladOrderExportDto[]> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		const normalizedLimit = this.normalizeRunsLimit(limit)
 		const exports = await this.repo.findOrderExportsByCatalog(
 			catalogId,
@@ -253,7 +319,7 @@ export class IntegrationService {
 
 	async getMoySkladOrderExportRefs(): Promise<MoySkladOrderExportRefsDto> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		const integration = await this.getActiveMoySkladIntegration(catalogId)
 		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
 		if (!metadata.token) {
@@ -276,9 +342,9 @@ export class IntegrationService {
 
 	async previewMoySkladMapping(): Promise<MoySkladMappingPreviewDto> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
-		await this.featureEntitlements.assertCanUseProductTypes(catalogId)
-		await this.featureEntitlements.assertCanUseProductVariants(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseProductTypes(catalogId)
+		await this.featureAssertions.assertCanUseProductVariants(catalogId)
 		const integration = await this.getActiveMoySkladIntegration(catalogId)
 		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
 		if (!metadata.token) {
@@ -303,9 +369,9 @@ export class IntegrationService {
 		dto: ApplyMoySkladMappingDtoReq
 	): Promise<MoySkladMappingApplyReportDto> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
-		await this.featureEntitlements.assertCanUseProductTypes(catalogId)
-		await this.featureEntitlements.assertCanUseProductVariants(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseProductTypes(catalogId)
+		await this.featureAssertions.assertCanUseProductVariants(catalogId)
 		const integration = await this.getActiveMoySkladIntegration(catalogId)
 		const attributeSelections = dto.attributes ?? []
 		const enumValueSelections = dto.enumValues ?? []
@@ -372,7 +438,7 @@ export class IntegrationService {
 		reqOrActor: AuthRequest | SessionUser | null = null
 	): Promise<MoySkladQueuedOrderExportDto> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		const result = await this.moySkladOrderExportQueue.retryOrderExport(
 			catalogId,
 			exportId
@@ -405,7 +471,7 @@ export class IntegrationService {
 		dto: UpsertMoySkladIntegrationDtoReq
 	): Promise<MoySkladIntegrationDto> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		const existing = await this.repo.findMoySklad(catalogId)
 		const currentMetadata = existing
 			? this.metadataCrypto.parseStoredMetadata(existing.metadata)
@@ -418,6 +484,13 @@ export class IntegrationService {
 			stockWebhookEnabled:
 				dto.stockWebhookEnabled ?? currentMetadata?.stockWebhookEnabled ?? false,
 			stockWebhook: currentMetadata?.stockWebhook ?? null,
+			productDeleteWebhook: currentMetadata?.productDeleteWebhook ?? null,
+			productChangeWebhook: currentMetadata?.productChangeWebhook ?? null,
+			productFolderWebhook: currentMetadata?.productFolderWebhook ?? null,
+			fieldOwnership: {
+				...(currentMetadata?.fieldOwnership ?? {}),
+				...(dto.fieldOwnership ?? {})
+			},
 			exportOrders: dto.exportOrders,
 			orderExportOrganizationId: dto.orderExportOrganizationId,
 			orderExportCounterpartyId: dto.orderExportCounterpartyId,
@@ -432,6 +505,9 @@ export class IntegrationService {
 			isActive: dto.isActive ?? true
 		})
 		integration = await this.reconcileMoySkladStockWebhook(integration)
+		integration = await this.reconcileMoySkladProductChangeWebhooks(integration)
+		integration = await this.reconcileMoySkladProductFolderWebhooks(integration)
+		integration = await this.reconcileMoySkladProductDeleteWebhooks(integration)
 		await this.moySkladQueue.syncSchedulerForIntegration(integration)
 
 		await this.tryQueueInitialSync({
@@ -450,7 +526,7 @@ export class IntegrationService {
 		this.assertHasUpdateFields(dto)
 
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		const existing = await this.repo.findMoySklad(catalogId)
 		if (!existing) {
 			throw new NotFoundException('Интеграция MoySklad не настроена')
@@ -467,6 +543,13 @@ export class IntegrationService {
 			stockWebhookEnabled:
 				dto.stockWebhookEnabled ?? currentMetadata.stockWebhookEnabled,
 			stockWebhook: currentMetadata.stockWebhook,
+			productDeleteWebhook: currentMetadata.productDeleteWebhook,
+			productChangeWebhook: currentMetadata.productChangeWebhook,
+			productFolderWebhook: currentMetadata.productFolderWebhook,
+			fieldOwnership: {
+				...currentMetadata.fieldOwnership,
+				...(dto.fieldOwnership ?? {})
+			},
 			exportOrders: dto.exportOrders ?? currentMetadata.exportOrders,
 			orderExportOrganizationId:
 				dto.orderExportOrganizationId !== undefined
@@ -497,6 +580,9 @@ export class IntegrationService {
 			throw new NotFoundException('Интеграция MoySklad не настроена')
 		}
 		integration = await this.reconcileMoySkladStockWebhook(integration)
+		integration = await this.reconcileMoySkladProductChangeWebhooks(integration)
+		integration = await this.reconcileMoySkladProductFolderWebhooks(integration)
+		integration = await this.reconcileMoySkladProductDeleteWebhooks(integration)
 		await this.moySkladQueue.syncSchedulerForIntegration(integration)
 		await this.tryQueueInitialSync({
 			catalogId,
@@ -510,13 +596,16 @@ export class IntegrationService {
 
 	async removeMoySklad(): Promise<OkResponseDto> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		const existing = await this.repo.findMoySklad(catalogId)
 		if (!existing) {
 			throw new NotFoundException('Интеграция MoySklad не настроена')
 		}
 
 		await this.deleteMoySkladStockWebhook(existing)
+		await this.deleteMoySkladProductChangeWebhooks(existing)
+		await this.deleteMoySkladProductFolderWebhooks(existing)
+		await this.deleteMoySkladProductDeleteWebhooks(existing)
 		const integration = await this.repo.softDeleteMoySklad(catalogId)
 		if (!integration) {
 			throw new NotFoundException('Интеграция MoySklad не настроена')
@@ -529,28 +618,26 @@ export class IntegrationService {
 	async testMoySkladConnection(
 		dto: TestMoySkladConnectionDtoReq
 	): Promise<MoySkladTestConnectionDto> {
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(
-			mustCatalogId()
-		)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(mustCatalogId())
 		const token = await this.resolveToken(dto.token)
 		return this.moySkladSync.testConnection(token)
 	}
 
 	async syncMoySkladCatalog(): Promise<MoySkladQueuedSyncDto> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		return this.moySkladQueue.enqueueCatalogSync(catalogId)
 	}
 
 	async syncMoySkladProduct(productId: string): Promise<MoySkladQueuedSyncDto> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		return this.moySkladQueue.enqueueProductSync(catalogId, productId)
 	}
 
 	async syncMoySkladStock(): Promise<MoySkladQueuedSyncDto> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		return this.moySkladQueue.enqueueStockSync(catalogId)
 	}
 
@@ -566,11 +653,16 @@ export class IntegrationService {
 		}
 
 		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
-		this.assertMoySkladWebhookSecret(metadata, params.secret)
+		this.assertMoySkladWebhookSecret(
+			metadata.stockWebhook,
+			params.secret,
+			'MoySklad stock webhook'
+		)
 
 		if (
 			!integration.isActive ||
 			!metadata.syncStock ||
+			!isMoySkladExternalField(metadata, 'stock') ||
 			!metadata.stockWebhookEnabled
 		) {
 			this.logger.warn(
@@ -580,9 +672,7 @@ export class IntegrationService {
 		}
 
 		if (
-			!(await this.featureEntitlements.canUseMoySkladIntegration(
-				integration.catalogId
-			))
+			!(await this.featureReader.canUseMoySkladIntegration(integration.catalogId))
 		) {
 			this.logger.warn(
 				`Ignoring MoySklad stock webhook for catalog ${integration.catalogId}: capability disabled`
@@ -598,7 +688,11 @@ export class IntegrationService {
 		let created = 0
 
 		for (const [index, event] of events.entries()) {
-			this.assertMoySkladWebhookAccount(metadata, event.accountId)
+			this.assertMoySkladWebhookAccount(
+				metadata.stockWebhook,
+				event.accountId,
+				'MoySklad stock webhook'
+			)
 			const requestId =
 				events.length === 1 ? baseRequestId : `${baseRequestId}:${index}`
 			const result = await this.repo.createWebhookEventIfNew({
@@ -625,9 +719,246 @@ export class IntegrationService {
 		}
 	}
 
+	async receiveMoySkladProductChangeWebhook(params: {
+		integrationId: string
+		secret: string
+		payload: unknown
+	}): Promise<void> {
+		const integration = await this.repo.findMoySkladById(params.integrationId)
+		if (!integration) {
+			throw new NotFoundException('MoySklad integration not found')
+		}
+
+		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
+		this.assertMoySkladWebhookSecret(
+			metadata.productChangeWebhook,
+			params.secret,
+			'MoySklad product change webhook'
+		)
+
+		if (!integration.isActive || !metadata.productChangeWebhook.enabled) {
+			this.logger.warn(
+				`Ignoring MoySklad product change webhook for disabled integration ${integration.id}`
+			)
+			return
+		}
+
+		if (
+			!(await this.featureReader.canUseMoySkladIntegration(integration.catalogId))
+		) {
+			this.logger.warn(
+				`Ignoring MoySklad product change webhook for catalog ${integration.catalogId}: capability disabled`
+			)
+			return
+		}
+
+		const events = this.dedupeMoySkladProductChangeWebhookEvents(
+			this.extractMoySkladProductChangeWebhookEvents(params.payload)
+		)
+
+		for (const event of events) {
+			this.assertMoySkladWebhookAccount(
+				metadata.productChangeWebhook,
+				event.accountId,
+				'MoySklad product change webhook'
+			)
+		}
+
+		for (const event of events) {
+			await this.moySkladQueue.enqueueProductWebhookSync(
+				integration.catalogId,
+				integration.id,
+				{
+					entityType: event.entityType,
+					externalId: event.externalId,
+					action: event.action
+				}
+			)
+		}
+
+		await this.repo.patchMoySkladProductChangeWebhookMetadata(integration.id, {
+			lastReceivedAt: new Date().toISOString(),
+			lastError: null
+		})
+	}
+
+	async receiveMoySkladProductFolderWebhook(params: {
+		integrationId: string
+		secret: string
+		payload: unknown
+	}): Promise<void> {
+		const integration = await this.repo.findMoySkladById(params.integrationId)
+		if (!integration) {
+			throw new NotFoundException('MoySklad integration not found')
+		}
+
+		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
+		this.assertMoySkladWebhookSecret(
+			metadata.productFolderWebhook,
+			params.secret,
+			'MoySklad productfolder webhook'
+		)
+
+		if (!integration.isActive || !metadata.productFolderWebhook.enabled) {
+			this.logger.warn(
+				`Ignoring MoySklad productfolder webhook for disabled integration ${integration.id}`
+			)
+			return
+		}
+
+		if (
+			!(await this.featureReader.canUseMoySkladIntegration(integration.catalogId))
+		) {
+			this.logger.warn(
+				`Ignoring MoySklad productfolder webhook for catalog ${integration.catalogId}: capability disabled`
+			)
+			return
+		}
+
+		const events = this.dedupeMoySkladProductFolderWebhookEvents(
+			this.extractMoySkladProductFolderWebhookEvents(params.payload)
+		)
+
+		for (const event of events) {
+			this.assertMoySkladWebhookAccount(
+				metadata.productFolderWebhook,
+				event.accountId,
+				'MoySklad productfolder webhook'
+			)
+		}
+
+		for (const event of events) {
+			await this.moySkladQueue.enqueueProductFolderWebhookSync(
+				integration.catalogId,
+				integration.id,
+				{
+					externalId: event.externalId,
+					action: event.action
+				}
+			)
+		}
+
+		await this.repo.patchMoySkladProductFolderWebhookMetadata(integration.id, {
+			lastReceivedAt: new Date().toISOString(),
+			lastError: null
+		})
+	}
+
+	async receiveMoySkladProductDeleteWebhook(params: {
+		integrationId: string
+		secret: string
+		payload: unknown
+	}): Promise<void> {
+		const integration = await this.repo.findMoySkladById(params.integrationId)
+		if (!integration) {
+			throw new NotFoundException('MoySklad integration not found')
+		}
+
+		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
+		this.assertMoySkladWebhookSecret(
+			metadata.productDeleteWebhook,
+			params.secret,
+			'MoySklad product delete webhook'
+		)
+
+		if (!integration.isActive || !metadata.productDeleteWebhook.enabled) {
+			this.logger.warn(
+				`Ignoring MoySklad product delete webhook for disabled integration ${integration.id}`
+			)
+			return
+		}
+
+		if (
+			!(await this.featureReader.canUseMoySkladIntegration(integration.catalogId))
+		) {
+			this.logger.warn(
+				`Ignoring MoySklad product delete webhook for catalog ${integration.catalogId}: capability disabled`
+			)
+			return
+		}
+
+		const events = this.extractMoySkladProductDeleteWebhookEvents(params.payload)
+		let deleted = 0
+		let linkByExternalIdentity: ReadonlyMap<
+			string,
+			{
+				productId: string
+			}
+		> | null = null
+
+		for (const event of events) {
+			this.assertMoySkladWebhookAccount(
+				metadata.productDeleteWebhook,
+				event.accountId,
+				'MoySklad product delete webhook'
+			)
+		}
+
+		for (const event of events) {
+			if (event.entityType === 'variant') {
+				const result = await this.repo.softDeleteIntegratedVariantByExternalId({
+					integrationId: integration.id,
+					catalogId: integration.catalogId,
+					externalId: event.externalId
+				})
+				if (!result.deleted) {
+					this.logger.warn(
+						`MoySklad delete webhook skipped: local variant link not found for ${event.entityType}:${event.externalId}`
+					)
+					continue
+				}
+
+				if (result.productId) {
+					await this.repo.recomputeProductStatusFromVariants(
+						integration.catalogId,
+						result.productId
+					)
+					await this.products.recomputeProductCommercialState({
+						catalogId: integration.catalogId,
+						productId: result.productId
+					})
+				}
+				deleted += 1
+				continue
+			}
+
+			if (!linkByExternalIdentity) {
+				const links = await this.repo.findProductLinksByIntegration(integration.id)
+				linkByExternalIdentity = this.buildProductLinkByExternalIdentity(links)
+			}
+			const link = linkByExternalIdentity.get(event.externalId)
+			if (!link) {
+				this.logger.warn(
+					`MoySklad delete webhook skipped: local product link not found for ${event.entityType}:${event.externalId}`
+				)
+				continue
+			}
+
+			const removed = await this.products.softDeleteExternalProduct({
+				catalogId: integration.catalogId,
+				productId: link.productId
+			})
+			if (removed) {
+				deleted += 1
+			}
+		}
+
+		await this.repo.patchMoySkladProductDeleteWebhookMetadata(integration.id, {
+			lastReceivedAt: new Date().toISOString(),
+			lastProcessedAt: new Date().toISOString(),
+			lastError: null
+		})
+
+		if (deleted > 0) {
+			this.logger.log(
+				`Soft deleted ${deleted} items from MoySklad delete webhook for catalog ${integration.catalogId}`
+			)
+		}
+	}
+
 	async cancelMoySkladSync(): Promise<void> {
 		const catalogId = mustCatalogId()
-		await this.featureEntitlements.assertCanUseMoySkladIntegration(catalogId)
+		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		await this.repo.failMoySkladSync(catalogId, 'Отменено пользователем')
 	}
 
@@ -1345,7 +1676,10 @@ export class IntegrationService {
 	): Promise<IntegrationRecord> {
 		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
 		const shouldEnable =
-			integration.isActive && metadata.syncStock && metadata.stockWebhookEnabled
+			integration.isActive &&
+			metadata.syncStock &&
+			isMoySkladExternalField(metadata, 'stock') &&
+			metadata.stockWebhookEnabled
 
 		if (!shouldEnable) {
 			return this.disableMoySkladStockWebhook(integration, metadata)
@@ -1370,18 +1704,15 @@ export class IntegrationService {
 			? this.buildMoySkladStockWebhookUrl(integration.id, secret, baseUrl)
 			: undefined
 
-		let remoteWebhook
+		let remoteWebhook: MoySkladWebhookStock | undefined
 		if (currentWebhook.externalId) {
 			try {
-				remoteWebhook = await client.updateWebhookStock(
-					currentWebhook.externalId,
-					{
-						...(url ? { url } : {}),
-						enabled: true,
-						reportType: 'all',
-						stockType: 'stock'
-					}
-				)
+				remoteWebhook = await client.updateWebhookStock(currentWebhook.externalId, {
+					...(url ? { url } : {}),
+					enabled: true,
+					reportType: 'all',
+					stockType: 'stock'
+				})
 			} catch (error) {
 				if (!this.isProviderNotFound(error)) throw error
 			}
@@ -1390,11 +1721,7 @@ export class IntegrationService {
 		if (!remoteWebhook) {
 			const newSecret = secret ?? this.generateWebhookSecret()
 			remoteWebhook = await client.createWebhookStock({
-				url: this.buildMoySkladStockWebhookUrl(
-					integration.id,
-					newSecret,
-					baseUrl
-				),
+				url: this.buildMoySkladStockWebhookUrl(integration.id, newSecret, baseUrl),
 				enabled: true,
 				reportType: 'all',
 				stockType: 'stock'
@@ -1429,6 +1756,268 @@ export class IntegrationService {
 		})
 	}
 
+	private async reconcileMoySkladProductChangeWebhooks(
+		integration: IntegrationRecord
+	): Promise<IntegrationRecord> {
+		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
+
+		if (!integration.isActive) {
+			return this.disableMoySkladProductChangeWebhooks(integration, metadata)
+		}
+
+		const currentWebhook = metadata.productChangeWebhook
+		const needsRegistration =
+			!currentWebhook.secretHash ||
+			MOYSKLAD_PRODUCT_CHANGE_WEBHOOK_ENTITY_TYPES.some(entityType =>
+				MOYSKLAD_PRODUCT_CHANGE_WEBHOOK_ACTIONS.some(
+					action => !currentWebhook.externalIds[entityType][action]
+				)
+			)
+		const needsEnable = !currentWebhook.enabled
+
+		if (!needsRegistration && !needsEnable) {
+			return integration
+		}
+
+		const baseUrl = this.getMoySkladWebhookBaseUrl()
+		if (!baseUrl) {
+			this.logger.warn(
+				`MOYSKLAD_WEBHOOK_BASE_URL is required to enable MoySklad product change webhook for integration ${integration.id}`
+			)
+			return integration
+		}
+
+		const client = new MoySkladClient({ token: metadata.token })
+		const secret = needsRegistration ? this.generateWebhookSecret() : null
+		const url = secret
+			? this.buildMoySkladProductChangeWebhookUrl(integration.id, secret, baseUrl)
+			: undefined
+		const externalIds = this.cloneMoySkladProductChangeWebhookIds(currentWebhook)
+		let accountId = currentWebhook.accountId
+
+		for (const entityType of MOYSKLAD_PRODUCT_CHANGE_WEBHOOK_ENTITY_TYPES) {
+			for (const action of MOYSKLAD_PRODUCT_CHANGE_WEBHOOK_ACTIONS) {
+				let remoteWebhook: MoySkladWebhook | undefined
+				const existingId = currentWebhook.externalIds[entityType][action]
+				if (existingId) {
+					try {
+						remoteWebhook = await client.updateWebhook(existingId, {
+							...(url ? { url } : {}),
+							enabled: true,
+							action,
+							entityType
+						})
+					} catch (error) {
+						if (!this.isProviderNotFound(error)) throw error
+					}
+				}
+
+				if (!remoteWebhook) {
+					if (!url || !secret) {
+						throw new BadRequestException(
+							'MoySklad product change webhook secret rotation is required'
+						)
+					}
+					remoteWebhook = await client.createWebhook({
+						url,
+						enabled: true,
+						action,
+						entityType
+					})
+				}
+
+				externalIds[entityType][action] = remoteWebhook.id
+				accountId = accountId ?? remoteWebhook.accountId ?? null
+			}
+		}
+
+		return this.persistMoySkladMetadata(integration, {
+			...metadata,
+			productChangeWebhook: {
+				...metadata.productChangeWebhook,
+				enabled: true,
+				externalIds,
+				accountId,
+				secretHash: secret
+					? this.hashWebhookSecret(secret)
+					: metadata.productChangeWebhook.secretHash,
+				lastError: null
+			}
+		})
+	}
+
+	private async reconcileMoySkladProductFolderWebhooks(
+		integration: IntegrationRecord
+	): Promise<IntegrationRecord> {
+		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
+
+		if (!integration.isActive) {
+			return this.disableMoySkladProductFolderWebhooks(integration, metadata)
+		}
+
+		const currentWebhook = metadata.productFolderWebhook
+		const needsRegistration =
+			!currentWebhook.secretHash ||
+			MOYSKLAD_PRODUCT_FOLDER_WEBHOOK_ACTIONS.some(
+				action => !currentWebhook.externalIds[action]
+			)
+		const needsEnable = !currentWebhook.enabled
+
+		if (!needsRegistration && !needsEnable) {
+			return integration
+		}
+
+		const baseUrl = this.getMoySkladWebhookBaseUrl()
+		if (!baseUrl) {
+			this.logger.warn(
+				`MOYSKLAD_WEBHOOK_BASE_URL is required to enable MoySklad productfolder webhook for integration ${integration.id}`
+			)
+			return integration
+		}
+
+		const client = new MoySkladClient({ token: metadata.token })
+		const secret = needsRegistration ? this.generateWebhookSecret() : null
+		const url = secret
+			? this.buildMoySkladProductFolderWebhookUrl(integration.id, secret, baseUrl)
+			: undefined
+		const externalIds = { ...currentWebhook.externalIds }
+		let accountId = currentWebhook.accountId
+
+		for (const action of MOYSKLAD_PRODUCT_FOLDER_WEBHOOK_ACTIONS) {
+			let remoteWebhook: MoySkladWebhook | undefined
+			const existingId = currentWebhook.externalIds[action]
+			if (existingId) {
+				try {
+					remoteWebhook = await client.updateWebhook(existingId, {
+						...(url ? { url } : {}),
+						enabled: true,
+						action,
+						entityType: MOYSKLAD_PRODUCT_FOLDER_WEBHOOK_ENTITY_TYPE
+					})
+				} catch (error) {
+					if (!this.isProviderNotFound(error)) throw error
+				}
+			}
+
+			if (!remoteWebhook) {
+				if (!url || !secret) {
+					throw new BadRequestException(
+						'MoySklad productfolder webhook secret rotation is required'
+					)
+				}
+				remoteWebhook = await client.createWebhook({
+					url,
+					enabled: true,
+					action,
+					entityType: MOYSKLAD_PRODUCT_FOLDER_WEBHOOK_ENTITY_TYPE
+				})
+			}
+
+			externalIds[action] = remoteWebhook.id
+			accountId = accountId ?? remoteWebhook.accountId ?? null
+		}
+
+		return this.persistMoySkladMetadata(integration, {
+			...metadata,
+			productFolderWebhook: {
+				...metadata.productFolderWebhook,
+				enabled: true,
+				externalIds,
+				accountId,
+				secretHash: secret
+					? this.hashWebhookSecret(secret)
+					: metadata.productFolderWebhook.secretHash,
+				lastError: null
+			}
+		})
+	}
+
+	private async reconcileMoySkladProductDeleteWebhooks(
+		integration: IntegrationRecord
+	): Promise<IntegrationRecord> {
+		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
+
+		if (!integration.isActive) {
+			return this.disableMoySkladProductDeleteWebhooks(integration, metadata)
+		}
+
+		const currentWebhook = metadata.productDeleteWebhook
+		const needsRegistration =
+			!currentWebhook.secretHash ||
+			MOYSKLAD_PRODUCT_DELETE_WEBHOOK_ENTITY_TYPES.some(
+				entityType => !currentWebhook.externalIds[entityType]
+			)
+		const needsEnable = !currentWebhook.enabled
+
+		if (!needsRegistration && !needsEnable) {
+			return integration
+		}
+
+		const baseUrl = this.getMoySkladWebhookBaseUrl()
+		if (!baseUrl) {
+			this.logger.warn(
+				`MOYSKLAD_WEBHOOK_BASE_URL is required to enable MoySklad product delete webhook for integration ${integration.id}`
+			)
+			return integration
+		}
+
+		const client = new MoySkladClient({ token: metadata.token })
+		const secret = needsRegistration ? this.generateWebhookSecret() : null
+		const url = secret
+			? this.buildMoySkladProductDeleteWebhookUrl(integration.id, secret, baseUrl)
+			: undefined
+		const externalIds = { ...currentWebhook.externalIds }
+		let accountId = currentWebhook.accountId
+
+		for (const entityType of MOYSKLAD_PRODUCT_DELETE_WEBHOOK_ENTITY_TYPES) {
+			let remoteWebhook: MoySkladWebhook | undefined
+			const existingId = currentWebhook.externalIds[entityType]
+			if (existingId) {
+				try {
+					remoteWebhook = await client.updateWebhook(existingId, {
+						...(url ? { url } : {}),
+						enabled: true,
+						action: 'DELETE',
+						entityType
+					})
+				} catch (error) {
+					if (!this.isProviderNotFound(error)) throw error
+				}
+			}
+
+			if (!remoteWebhook) {
+				if (!url || !secret) {
+					throw new BadRequestException(
+						'MoySklad product delete webhook secret rotation is required'
+					)
+				}
+				remoteWebhook = await client.createWebhook({
+					url,
+					enabled: true,
+					action: 'DELETE',
+					entityType
+				})
+			}
+
+			externalIds[entityType] = remoteWebhook.id
+			accountId = accountId ?? remoteWebhook.accountId ?? null
+		}
+
+		return this.persistMoySkladMetadata(integration, {
+			...metadata,
+			productDeleteWebhook: {
+				...metadata.productDeleteWebhook,
+				enabled: true,
+				externalIds,
+				accountId,
+				secretHash: secret
+					? this.hashWebhookSecret(secret)
+					: metadata.productDeleteWebhook.secretHash,
+				lastError: null
+			}
+		})
+	}
+
 	private async disableMoySkladStockWebhook(
 		integration: IntegrationRecord,
 		metadata: MoySkladMetadata
@@ -1451,6 +2040,93 @@ export class IntegrationService {
 		})
 	}
 
+	private async disableMoySkladProductDeleteWebhooks(
+		integration: IntegrationRecord,
+		metadata: MoySkladMetadata
+	): Promise<IntegrationRecord> {
+		const webhookIds = this.getMoySkladProductDeleteWebhookIds(
+			metadata.productDeleteWebhook
+		)
+		if (!metadata.productDeleteWebhook.enabled && !webhookIds.length) {
+			return integration
+		}
+
+		const client = new MoySkladClient({ token: metadata.token })
+		for (const webhookId of webhookIds) {
+			try {
+				await client.disableWebhook(webhookId)
+			} catch (error) {
+				if (!this.isProviderNotFound(error)) throw error
+			}
+		}
+
+		return this.persistMoySkladMetadata(integration, {
+			...metadata,
+			productDeleteWebhook: {
+				...metadata.productDeleteWebhook,
+				enabled: false
+			}
+		})
+	}
+
+	private async disableMoySkladProductFolderWebhooks(
+		integration: IntegrationRecord,
+		metadata: MoySkladMetadata
+	): Promise<IntegrationRecord> {
+		const webhookIds = this.getMoySkladProductFolderWebhookIds(
+			metadata.productFolderWebhook
+		)
+		if (!metadata.productFolderWebhook.enabled && !webhookIds.length) {
+			return integration
+		}
+
+		const client = new MoySkladClient({ token: metadata.token })
+		for (const webhookId of webhookIds) {
+			try {
+				await client.disableWebhook(webhookId)
+			} catch (error) {
+				if (!this.isProviderNotFound(error)) throw error
+			}
+		}
+
+		return this.persistMoySkladMetadata(integration, {
+			...metadata,
+			productFolderWebhook: {
+				...metadata.productFolderWebhook,
+				enabled: false
+			}
+		})
+	}
+
+	private async disableMoySkladProductChangeWebhooks(
+		integration: IntegrationRecord,
+		metadata: MoySkladMetadata
+	): Promise<IntegrationRecord> {
+		const webhookIds = this.getMoySkladProductChangeWebhookIds(
+			metadata.productChangeWebhook
+		)
+		if (!metadata.productChangeWebhook.enabled && !webhookIds.length) {
+			return integration
+		}
+
+		const client = new MoySkladClient({ token: metadata.token })
+		for (const webhookId of webhookIds) {
+			try {
+				await client.disableWebhook(webhookId)
+			} catch (error) {
+				if (!this.isProviderNotFound(error)) throw error
+			}
+		}
+
+		return this.persistMoySkladMetadata(integration, {
+			...metadata,
+			productChangeWebhook: {
+				...metadata.productChangeWebhook,
+				enabled: false
+			}
+		})
+	}
+
 	private async deleteMoySkladStockWebhook(
 		integration: IntegrationRecord
 	): Promise<void> {
@@ -1463,6 +2139,112 @@ export class IntegrationService {
 			)
 		} catch (error) {
 			if (!this.isProviderNotFound(error)) throw error
+		}
+	}
+
+	private async deleteMoySkladProductChangeWebhooks(
+		integration: IntegrationRecord
+	): Promise<void> {
+		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
+		const webhookIds = this.getMoySkladProductChangeWebhookIds(
+			metadata.productChangeWebhook
+		)
+		if (!webhookIds.length) return
+
+		const client = new MoySkladClient({ token: metadata.token })
+		for (const webhookId of webhookIds) {
+			try {
+				await client.deleteWebhook(webhookId)
+			} catch (error) {
+				if (!this.isProviderNotFound(error)) throw error
+			}
+		}
+	}
+
+	private async deleteMoySkladProductFolderWebhooks(
+		integration: IntegrationRecord
+	): Promise<void> {
+		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
+		const webhookIds = this.getMoySkladProductFolderWebhookIds(
+			metadata.productFolderWebhook
+		)
+		if (!webhookIds.length) return
+
+		const client = new MoySkladClient({ token: metadata.token })
+		for (const webhookId of webhookIds) {
+			try {
+				await client.deleteWebhook(webhookId)
+			} catch (error) {
+				if (!this.isProviderNotFound(error)) throw error
+			}
+		}
+	}
+
+	private async deleteMoySkladProductDeleteWebhooks(
+		integration: IntegrationRecord
+	): Promise<void> {
+		const metadata = this.metadataCrypto.parseStoredMetadata(integration.metadata)
+		const webhookIds = this.getMoySkladProductDeleteWebhookIds(
+			metadata.productDeleteWebhook
+		)
+		if (!webhookIds.length) return
+
+		const client = new MoySkladClient({ token: metadata.token })
+		for (const webhookId of webhookIds) {
+			try {
+				await client.deleteWebhook(webhookId)
+			} catch (error) {
+				if (!this.isProviderNotFound(error)) throw error
+			}
+		}
+	}
+
+	private getMoySkladProductDeleteWebhookIds(
+		webhook: MoySkladProductDeleteWebhookMetadata
+	): string[] {
+		return [
+			...new Set(
+				MOYSKLAD_PRODUCT_DELETE_WEBHOOK_ENTITY_TYPES.map(
+					entityType => webhook.externalIds[entityType]
+				).filter(isPresent)
+			)
+		]
+	}
+
+	private getMoySkladProductChangeWebhookIds(
+		webhook: MoySkladProductChangeWebhookMetadata
+	): string[] {
+		const ids: string[] = []
+		for (const entityType of MOYSKLAD_PRODUCT_CHANGE_WEBHOOK_ENTITY_TYPES) {
+			for (const action of MOYSKLAD_PRODUCT_CHANGE_WEBHOOK_ACTIONS) {
+				const webhookId = webhook.externalIds[entityType][action]
+				if (webhookId) ids.push(webhookId)
+			}
+		}
+
+		return [...new Set(ids)]
+	}
+
+	private getMoySkladProductFolderWebhookIds(
+		webhook: MoySkladProductFolderWebhookMetadata
+	): string[] {
+		return [
+			...new Set(
+				MOYSKLAD_PRODUCT_FOLDER_WEBHOOK_ACTIONS.map(
+					action => webhook.externalIds[action]
+				).filter(isPresent)
+			)
+		]
+	}
+
+	private cloneMoySkladProductChangeWebhookIds(
+		webhook: MoySkladProductChangeWebhookMetadata
+	): MoySkladProductChangeWebhookMetadata['externalIds'] {
+		return {
+			product: { ...webhook.externalIds.product },
+			service: { ...webhook.externalIds.service },
+			bundle: { ...webhook.externalIds.bundle },
+			variant: { ...webhook.externalIds.variant }
 		}
 	}
 
@@ -1506,6 +2288,30 @@ export class IntegrationService {
 		return `${baseUrl}/integration/webhooks/moysklad/stock/${encodeURIComponent(integrationId)}/${encodeURIComponent(secret)}`
 	}
 
+	private buildMoySkladProductDeleteWebhookUrl(
+		integrationId: string,
+		secret: string,
+		baseUrl: string
+	): string {
+		return `${baseUrl}/integration/webhooks/moysklad/product-delete/${encodeURIComponent(integrationId)}/${encodeURIComponent(secret)}`
+	}
+
+	private buildMoySkladProductChangeWebhookUrl(
+		integrationId: string,
+		secret: string,
+		baseUrl: string
+	): string {
+		return `${baseUrl}/integration/webhooks/moysklad/product-change/${encodeURIComponent(integrationId)}/${encodeURIComponent(secret)}`
+	}
+
+	private buildMoySkladProductFolderWebhookUrl(
+		integrationId: string,
+		secret: string,
+		baseUrl: string
+	): string {
+		return `${baseUrl}/integration/webhooks/moysklad/productfolder/${encodeURIComponent(integrationId)}/${encodeURIComponent(secret)}`
+	}
+
 	private generateWebhookSecret(): string {
 		return randomBytes(32).toString('hex')
 	}
@@ -1515,28 +2321,30 @@ export class IntegrationService {
 	}
 
 	private assertMoySkladWebhookSecret(
-		metadata: MoySkladMetadata,
-		secret: string
+		webhook: { secretHash: string | null },
+		secret: string,
+		label: string
 	): void {
-		const expectedHash = metadata.stockWebhook.secretHash
+		const expectedHash = webhook.secretHash
 		if (!expectedHash) {
-			throw new ForbiddenException('MoySklad stock webhook is not registered')
+			throw new ForbiddenException(`${label} is not registered`)
 		}
 
 		const actual = Buffer.from(this.hashWebhookSecret(secret), 'hex')
 		const expected = Buffer.from(expectedHash, 'hex')
 		if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
-			throw new ForbiddenException('Invalid MoySklad stock webhook secret')
+			throw new ForbiddenException(`Invalid ${label} secret`)
 		}
 	}
 
 	private assertMoySkladWebhookAccount(
-		metadata: MoySkladMetadata,
-		accountId: string
+		webhook: { accountId: string | null },
+		accountId: string,
+		label: string
 	): void {
-		const expectedAccountId = metadata.stockWebhook.accountId
+		const expectedAccountId = webhook.accountId
 		if (expectedAccountId && expectedAccountId !== accountId) {
-			throw new ForbiddenException('Invalid MoySklad stock webhook account')
+			throw new ForbiddenException(`Invalid ${label} account`)
 		}
 	}
 
@@ -1570,6 +2378,332 @@ export class IntegrationService {
 		return events
 	}
 
+	private extractMoySkladProductDeleteWebhookEvents(
+		payload: unknown
+	): MoySkladProductDeleteWebhookNotification[] {
+		const rootAccountId = isRecord(payload)
+			? readNonEmptyString(payload.accountId)
+			: null
+		const eventsSource =
+			isRecord(payload) && Array.isArray(payload.events)
+				? payload.events
+				: [payload]
+		const events = eventsSource
+			.map(item => {
+				if (!isRecord(item)) return null
+				const accountId = readNonEmptyString(item.accountId) ?? rootAccountId
+				const action = readNonEmptyString(item.action)?.toUpperCase()
+				const meta = isRecord(item.meta)
+					? item.meta
+					: isRecord(payload) && isRecord(payload.meta)
+						? payload.meta
+						: null
+				const href = readNonEmptyString(meta?.href)
+				const entityType = this.normalizeMoySkladProductDeleteEntityType(
+					readNonEmptyString(meta?.type) ?? this.extractMoySkladEntityType(href)
+				)
+				const externalId = this.extractMoySkladEntityId(href, entityType)
+
+				if (
+					!accountId ||
+					action !== 'DELETE' ||
+					!href ||
+					!entityType ||
+					!externalId
+				) {
+					return null
+				}
+
+				return {
+					accountId,
+					action: 'DELETE',
+					entityType,
+					externalId,
+					href
+				} satisfies MoySkladProductDeleteWebhookNotification
+			})
+			.filter(isPresent)
+
+		if (!events.length) {
+			throw new BadRequestException(
+				'MoySklad product delete webhook payload is empty'
+			)
+		}
+
+		return events
+	}
+
+	private extractMoySkladProductChangeWebhookEvents(
+		payload: unknown
+	): MoySkladProductChangeWebhookNotification[] {
+		const rootAccountId = isRecord(payload)
+			? readNonEmptyString(payload.accountId)
+			: null
+		const eventsSource =
+			isRecord(payload) && Array.isArray(payload.events)
+				? payload.events
+				: [payload]
+		const events = eventsSource
+			.map(item => {
+				if (!isRecord(item)) return null
+				const accountId = readNonEmptyString(item.accountId) ?? rootAccountId
+				const action = this.normalizeMoySkladProductChangeAction(
+					readNonEmptyString(item.action)
+				)
+				const meta = isRecord(item.meta)
+					? item.meta
+					: isRecord(payload) && isRecord(payload.meta)
+						? payload.meta
+						: null
+				const href = readNonEmptyString(meta?.href)
+				const entityType = this.normalizeMoySkladProductChangeEntityType(
+					readNonEmptyString(meta?.type) ?? this.extractMoySkladEntityType(href)
+				)
+				const externalId = this.extractMoySkladEntityId(href, entityType)
+
+				if (!accountId || !action || !href || !entityType || !externalId) {
+					return null
+				}
+
+				return {
+					accountId,
+					action,
+					entityType,
+					externalId,
+					href
+				} satisfies MoySkladProductChangeWebhookNotification
+			})
+			.filter(isPresent)
+
+		if (!events.length) {
+			throw new BadRequestException(
+				'MoySklad product change webhook payload is empty'
+			)
+		}
+
+		return events
+	}
+
+	private extractMoySkladProductFolderWebhookEvents(
+		payload: unknown
+	): MoySkladProductFolderWebhookNotification[] {
+		const rootAccountId = isRecord(payload)
+			? readNonEmptyString(payload.accountId)
+			: null
+		const eventsSource =
+			isRecord(payload) && Array.isArray(payload.events)
+				? payload.events
+				: [payload]
+		const events = eventsSource
+			.map(item => {
+				if (!isRecord(item)) return null
+				const accountId = readNonEmptyString(item.accountId) ?? rootAccountId
+				const action = this.normalizeMoySkladProductFolderAction(
+					readNonEmptyString(item.action)
+				)
+				const meta = isRecord(item.meta)
+					? item.meta
+					: isRecord(payload) && isRecord(payload.meta)
+						? payload.meta
+						: null
+				const href = readNonEmptyString(meta?.href)
+				const entityType = this.normalizeMoySkladProductFolderEntityType(
+					readNonEmptyString(meta?.type) ?? this.extractMoySkladEntityType(href)
+				)
+				const externalId = this.extractMoySkladEntityId(href, entityType)
+
+				if (!accountId || !action || !href || !entityType || !externalId) {
+					return null
+				}
+
+				return {
+					accountId,
+					action,
+					entityType,
+					externalId,
+					href
+				} satisfies MoySkladProductFolderWebhookNotification
+			})
+			.filter(isPresent)
+
+		if (!events.length) {
+			throw new BadRequestException(
+				'MoySklad productfolder webhook payload is empty'
+			)
+		}
+
+		return events
+	}
+
+	private dedupeMoySkladProductChangeWebhookEvents(
+		events: MoySkladProductChangeWebhookNotification[]
+	): MoySkladProductChangeWebhookNotification[] {
+		const byEntity = new Map<string, MoySkladProductChangeWebhookNotification>()
+		for (const event of events) {
+			const key = `${event.entityType}:${event.externalId}`
+			const existing = byEntity.get(key)
+			if (!existing || event.action === 'UPDATE') {
+				byEntity.set(key, event)
+			}
+		}
+
+		return [...byEntity.values()]
+	}
+
+	private dedupeMoySkladProductFolderWebhookEvents(
+		events: MoySkladProductFolderWebhookNotification[]
+	): MoySkladProductFolderWebhookNotification[] {
+		const priority: Record<MoySkladProductFolderWebhookAction, number> = {
+			CREATE: 1,
+			UPDATE: 2,
+			DELETE: 3
+		}
+		const byFolder = new Map<string, MoySkladProductFolderWebhookNotification>()
+		for (const event of events) {
+			const key = event.externalId
+			const existing = byFolder.get(key)
+			if (!existing || priority[event.action] >= priority[existing.action]) {
+				byFolder.set(key, event)
+			}
+		}
+
+		return [...byFolder.values()]
+	}
+
+	private buildProductLinkByExternalIdentity(
+		links: Array<{
+			productId: string
+			externalId: string
+			externalCode: string | null
+			rawMeta: unknown
+		}>
+	): Map<string, (typeof links)[number]> {
+		const map = new Map<string, (typeof links)[number]>()
+		for (const link of links) {
+			this.addProductLinkIdentity(map, link.externalId, link)
+			this.addProductLinkIdentity(map, link.externalCode, link)
+			this.addProductLinkIdentity(
+				map,
+				this.readRawMetaString(link.rawMeta, 'id'),
+				link
+			)
+		}
+		return map
+	}
+
+	private addProductLinkIdentity<TLink>(
+		map: Map<string, TLink>,
+		value: string | null | undefined,
+		link: TLink
+	): void {
+		const normalized = value?.trim()
+		if (normalized && !map.has(normalized)) {
+			map.set(normalized, link)
+		}
+	}
+
+	private normalizeMoySkladProductDeleteEntityType(
+		value: string | null
+	): MoySkladProductDeleteWebhookEntityType | null {
+		if (
+			MOYSKLAD_PRODUCT_DELETE_WEBHOOK_ENTITY_TYPES.includes(
+				value as MoySkladProductDeleteWebhookEntityType
+			)
+		) {
+			return value as MoySkladProductDeleteWebhookEntityType
+		}
+		return null
+	}
+
+	private normalizeMoySkladProductChangeEntityType(
+		value: string | null
+	): MoySkladProductChangeWebhookEntityType | null {
+		if (
+			MOYSKLAD_PRODUCT_CHANGE_WEBHOOK_ENTITY_TYPES.includes(
+				value as MoySkladProductChangeWebhookEntityType
+			)
+		) {
+			return value as MoySkladProductChangeWebhookEntityType
+		}
+		return null
+	}
+
+	private normalizeMoySkladProductChangeAction(
+		value: string | null
+	): MoySkladProductChangeWebhookAction | null {
+		const normalized = value?.toUpperCase()
+		if (
+			MOYSKLAD_PRODUCT_CHANGE_WEBHOOK_ACTIONS.includes(
+				normalized as MoySkladProductChangeWebhookAction
+			)
+		) {
+			return normalized as MoySkladProductChangeWebhookAction
+		}
+		return null
+	}
+
+	private normalizeMoySkladProductFolderEntityType(
+		value: string | null
+	): 'productfolder' | null {
+		return value === MOYSKLAD_PRODUCT_FOLDER_WEBHOOK_ENTITY_TYPE
+			? MOYSKLAD_PRODUCT_FOLDER_WEBHOOK_ENTITY_TYPE
+			: null
+	}
+
+	private normalizeMoySkladProductFolderAction(
+		value: string | null
+	): MoySkladProductFolderWebhookAction | null {
+		const normalized = value?.toUpperCase()
+		if (
+			MOYSKLAD_PRODUCT_FOLDER_WEBHOOK_ACTIONS.includes(
+				normalized as MoySkladProductFolderWebhookAction
+			)
+		) {
+			return normalized as MoySkladProductFolderWebhookAction
+		}
+		return null
+	}
+
+	private extractMoySkladEntityType(href: string | null): string | null {
+		const match = this.matchMoySkladEntityHref(href)
+		return match?.entityType ?? null
+	}
+
+	private extractMoySkladEntityId(
+		href: string | null,
+		entityType: string | null
+	): string | null {
+		const match = this.matchMoySkladEntityHref(href)
+		if (!match || match.entityType !== entityType) return null
+		return match.externalId
+	}
+
+	private matchMoySkladEntityHref(
+		href: string | null
+	): { entityType: string; externalId: string } | null {
+		if (!href) return null
+
+		let url: URL
+		try {
+			url = new URL(href)
+		} catch {
+			return null
+		}
+		if (url.hostname !== 'api.moysklad.ru') return null
+
+		const match = url.pathname.match(/\/entity\/([^/]+)\/([^/?#]+)/i)
+		const entityType = match?.[1] ? decodeURIComponent(match[1]) : ''
+		const externalId = match?.[2] ? decodeURIComponent(match[2]) : ''
+		if (!entityType || !externalId) return null
+		return { entityType, externalId }
+	}
+
+	private readRawMetaString(rawMeta: unknown, key: string): string | null {
+		if (!isRecord(rawMeta)) return null
+
+		return readNonEmptyString(rawMeta[key])
+	}
+
 	private normalizeWebhookRequestId(
 		value: string | string[] | undefined,
 		payload: unknown
@@ -1588,7 +2722,9 @@ export class IntegrationService {
 	}
 
 	private isProviderNotFound(error: unknown): boolean {
-		return error instanceof Error && /MoySklad API error 404:/i.test(error.message)
+		return (
+			error instanceof Error && /MoySklad API error 404:/i.test(error.message)
+		)
 	}
 
 	private mapMoySkladIntegration(
@@ -1605,6 +2741,7 @@ export class IntegrationService {
 			priceTypeName: metadata.priceTypeName,
 			importImages: metadata.importImages,
 			syncStock: metadata.syncStock,
+			fieldOwnership: metadata.fieldOwnership,
 			stockWebhook: {
 				enabled: metadata.stockWebhookEnabled,
 				registered: Boolean(metadata.stockWebhook.externalId),
@@ -1648,6 +2785,7 @@ export class IntegrationService {
 			mode: run.mode,
 			trigger: run.trigger,
 			status: run.status,
+			snapshotCompleteness: run.snapshotCompleteness,
 			jobId: run.jobId,
 			productId: run.productId,
 			externalId: run.externalId,
@@ -1873,7 +3011,53 @@ export class IntegrationService {
 		return {
 			total: readNonNegativeInteger(source.total) ?? fallback.total,
 			applied: readNonNegativeInteger(source.applied) ?? fallback.applied,
-			skipped: readNonNegativeInteger(source.skipped) ?? fallback.skipped
+			skipped: readNonNegativeInteger(source.skipped) ?? fallback.skipped,
+			diagnostics:
+				this.normalizeStockDiagnostics(source.diagnostics) ?? fallback.diagnostics
+		}
+	}
+
+	private normalizeStockDiagnostics(
+		value: unknown
+	): SyncRunStockDiagnostics | null {
+		if (!isRecord(value)) return null
+
+		const source = readStockApplySource(value.source)
+		if (!source) return null
+		const skippedReasons = this.normalizeStockSkippedReasons(value.skippedReasons)
+
+		return {
+			source,
+			stockRows: readNonNegativeInteger(value.stockRows) ?? 0,
+			matchedStockRows: readNonNegativeInteger(value.matchedStockRows) ?? 0,
+			unmatchedStockRows: readNonNegativeInteger(value.unmatchedStockRows) ?? 0,
+			productLinks: readNonNegativeInteger(value.productLinks) ?? 0,
+			variantLinks: readNonNegativeInteger(value.variantLinks) ?? 0,
+			ignoredVariantLinks: readNonNegativeInteger(value.ignoredVariantLinks) ?? 0,
+			appliedProductLinks: readNonNegativeInteger(value.appliedProductLinks) ?? 0,
+			appliedVariantLinks: readNonNegativeInteger(value.appliedVariantLinks) ?? 0,
+			skippedReasons
+		}
+	}
+
+	private normalizeStockSkippedReasons(
+		value: unknown
+	): SyncRunStockSkippedReasons {
+		const source = isRecord(value) ? value : {}
+
+		return {
+			missingStock:
+				readNonNegativeInteger(source.missingStock) ??
+				EMPTY_STOCK_SKIPPED_REASONS.missingStock,
+			productHasVariantLinks:
+				readNonNegativeInteger(source.productHasVariantLinks) ??
+				EMPTY_STOCK_SKIPPED_REASONS.productHasVariantLinks,
+			variantsCapabilityDisabled:
+				readNonNegativeInteger(source.variantsCapabilityDisabled) ??
+				EMPTY_STOCK_SKIPPED_REASONS.variantsCapabilityDisabled,
+			stockRowWithoutLocalLink:
+				readNonNegativeInteger(source.stockRowWithoutLocalLink) ??
+				EMPTY_STOCK_SKIPPED_REASONS.stockRowWithoutLocalLink
 		}
 	}
 
@@ -1905,6 +3089,7 @@ export class IntegrationService {
 			dto.priceTypeName === undefined &&
 			dto.importImages === undefined &&
 			dto.syncStock === undefined &&
+			dto.fieldOwnership === undefined &&
 			dto.stockWebhookEnabled === undefined &&
 			dto.exportOrders === undefined &&
 			dto.orderExportOrganizationId === undefined &&
@@ -1999,6 +3184,11 @@ function readNonEmptyString(value: unknown): string | null {
 	if (typeof value !== 'string') return null
 	const normalized = value.trim()
 	return normalized || null
+}
+
+function readStockApplySource(value: unknown): 'FULL_SYNC' | 'WEBHOOK' | null {
+	if (value === 'FULL_SYNC' || value === 'WEBHOOK') return value
+	return null
 }
 
 function isPresent<T>(value: T | null | undefined): value is T {

@@ -5,6 +5,7 @@ import { hash, verify } from 'argon2'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { RedisService } from '@/infrastructure/redis/redis.service'
+import { OBSERVABILITY_RECORDER_PORT } from '@/modules/observability/contracts'
 import { ObservabilityService } from '@/modules/observability/observability.service'
 
 import { AuthService } from './auth.service'
@@ -86,6 +87,10 @@ describe('AuthService', () => {
 				{
 					provide: ObservabilityService,
 					useValue: observability
+				},
+				{
+					provide: OBSERVABILITY_RECORDER_PORT,
+					useExisting: ObservabilityService
 				},
 				{
 					provide: RedisService,

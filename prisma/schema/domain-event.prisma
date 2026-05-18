@@ -1,0 +1,31 @@
+model DomainEventOutbox {
+  id String @id @default(uuid()) @db.Uuid
+
+  eventId   String @unique @map("event_id") @db.VarChar(100)
+  eventType String @map("event_type") @db.VarChar(120)
+
+  aggregateType String? @map("aggregate_type") @db.VarChar(80)
+  aggregateId   String? @map("aggregate_id") @db.VarChar(191)
+
+  catalogId String  @map("catalog_id") @db.Uuid
+  catalog   Catalog @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+
+  payload Json
+
+  status    DomainEventOutboxStatus @default(PENDING)
+  attempts  Int                     @default(0)
+  lastError String?                 @map("last_error") @db.Text
+
+  lockedAt    DateTime? @map("locked_at")
+  occurredAt  DateTime  @map("occurred_at")
+  processedAt DateTime? @map("processed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, occurredAt])
+  @@index([catalogId, occurredAt])
+  @@index([eventType, occurredAt])
+  @@index([aggregateType, aggregateId, occurredAt])
+  @@map("domain_event_outbox")
+}

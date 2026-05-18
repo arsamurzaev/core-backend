@@ -1,10 +1,12 @@
 ﻿import { Prisma } from '@generated/client'
-import { BadRequestException, Injectable } from '@nestjs/common'
+import { BadRequestException, Inject, Injectable } from '@nestjs/common'
 import { hash } from 'argon2'
 
+import {
+	AUTH_SESSION_ISSUER_PORT,
+	type AuthSessionIssuerPort
+} from '@/modules/auth/contracts'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
-
-import { AuthService } from '../auth/auth.service'
 
 import { CreateUserDtoReq } from './dto/requests/create-user.dto.req'
 
@@ -12,7 +14,8 @@ import { CreateUserDtoReq } from './dto/requests/create-user.dto.req'
 export class UserService {
 	constructor(
 		private readonly prisma: PrismaService,
-		private readonly authService: AuthService
+		@Inject(AUTH_SESSION_ISSUER_PORT)
+		private readonly authService: AuthSessionIssuerPort
 	) {}
 
 	async register(

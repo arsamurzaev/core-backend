@@ -3,6 +3,53 @@ import { ProductVariantStatus } from '@generated/enums'
 import { IntegrationRepository } from './integration.repository'
 
 describe('IntegrationRepository', () => {
+	it('marks product and variant stock links with skipped reasons', async () => {
+		const at = new Date('2026-05-17T09:00:00.000Z')
+		const prisma = {
+			integrationProductLink: {
+				updateMany: jest.fn().mockResolvedValue({ count: 1 })
+			},
+			integrationVariantLink: {
+				updateMany: jest.fn().mockResolvedValue({ count: 1 })
+			}
+		}
+		const repo = new IntegrationRepository(prisma as any)
+
+		await expect(
+			repo.markProductLinkStockSkipped(
+				'integration-1',
+				'product-1',
+				'stock_missing_in_external_report',
+				at
+			)
+		).resolves.toBe(1)
+		await expect(
+			repo.markVariantLinkStockSkipped(
+				'integration-1',
+				'variant-1',
+				'variants_capability_disabled',
+				at
+			)
+		).resolves.toBe(1)
+
+		expect(prisma.integrationProductLink.updateMany).toHaveBeenCalledWith({
+			where: { integrationId: 'integration-1', productId: 'product-1' },
+			data: {
+				lastSeenAt: at,
+				skippedReason: 'stock_missing_in_external_report',
+				lastExternalError: null
+			}
+		})
+		expect(prisma.integrationVariantLink.updateMany).toHaveBeenCalledWith({
+			where: { integrationId: 'integration-1', variantId: 'variant-1' },
+			data: {
+				lastSeenAt: at,
+				skippedReason: 'variants_capability_disabled',
+				lastExternalError: null
+			}
+		})
+	})
+
 	it('creates and assigns a MoySklad-managed product type for variant attributes', async () => {
 		const db = {
 			product: {
@@ -212,7 +259,17 @@ describe('IntegrationRepository', () => {
 				updateMany: jest.fn().mockResolvedValue({ count: 0 })
 			},
 			variantAttribute: {
-				updateMany: jest.fn().mockResolvedValue({ count: 0 })
+				updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+				findUnique: jest.fn().mockResolvedValue(null),
+				create: jest.fn().mockResolvedValue({ id: 'variant-attribute-1' })
+			},
+			attributeEnumValue: {
+				findFirst: jest.fn().mockResolvedValue(null),
+				aggregate: jest.fn().mockResolvedValue({ _max: { displayOrder: 0 } }),
+				create: jest.fn().mockResolvedValue({ id: 'enum-size-42' })
+			},
+			attributeEnumValueAlias: {
+				findFirst: jest.fn().mockResolvedValue(null)
 			}
 		}
 		const prisma = {
@@ -233,7 +290,13 @@ describe('IntegrationRepository', () => {
 			price: 150,
 			stock: 7,
 			status: ProductVariantStatus.ACTIVE,
-			attributes: []
+			attributes: [
+				{
+					attributeId: 'size-attribute',
+					value: '42',
+					displayName: '42'
+				}
+			]
 		})
 
 		expect(result.created).toBe(true)
@@ -266,10 +329,60 @@ describe('IntegrationRepository', () => {
 		)
 	})
 
-	it('archives integrated variants missing from a single product sync', async () => {
+	it('rejects creating a MoySklad matrix variant without attributes', async () => {
 		const db = {
+			integrationVariantLink: {
+				findUnique: jest.fn().mockResolvedValue(null)
+			},
 			productVariant: {
-				updateMany: jest.fn().mockResolvedValue({ count: 2 })
+				findUnique: jest.fn().mockResolvedValue(null),
+				create: jest.fn()
+			}
+		}
+		const prisma = {
+			$transaction: jest.fn((callback: (tx: typeof db) => unknown) => callback(db))
+		}
+		const repo = new IntegrationRepository(prisma as any)
+
+		await expect(
+			repo.upsertIntegratedProductVariant({
+				catalogId: 'catalog-1',
+				integrationId: 'integration-1',
+				productId: 'product-1',
+				externalId: 'external-variant',
+				sku: 'SKU-1',
+				variantKey: 'moysklad=external-variant',
+				price: 150,
+				stock: 7,
+				status: ProductVariantStatus.ACTIVE,
+				attributes: []
+			})
+		).rejects.toThrow('must have at least one variant attribute')
+
+		expect(db.productVariant.create).not.toHaveBeenCalled()
+	})
+
+	it('quarantines missing variants before archiving after confirmed product syncs', async () => {
+		const db = {
+			integrationVariantLink: {
+				findMany: jest.fn().mockResolvedValue([
+					{
+						id: 'link-first-miss',
+						variantId: 'variant-first-miss',
+						missingSince: null,
+						missingSyncCount: 0
+					},
+					{
+						id: 'link-confirmed-miss',
+						variantId: 'variant-confirmed-miss',
+						missingSince: new Date('2026-03-23T00:00:00.000Z'),
+						missingSyncCount: 1
+					}
+				]),
+				update: jest.fn().mockResolvedValue({})
+			},
+			productVariant: {
+				updateMany: jest.fn().mockResolvedValue({ count: 1 })
 			}
 		}
 		const repo = new IntegrationRepository(db as any)
@@ -280,17 +393,46 @@ describe('IntegrationRepository', () => {
 			externalIds: ['variant-1', 'variant-2', 'variant-1']
 		})
 
-		expect(count).toBe(2)
+		expect(count).toBe(1)
+		expect(db.integrationVariantLink.findMany).toHaveBeenCalledWith({
+			where: {
+				integrationId: 'integration-1',
+				externalId: { notIn: ['variant-1', 'variant-2'] },
+				variant: {
+					productId: 'product-1',
+					deleteAt: null
+				}
+			},
+			select: {
+				id: true,
+				missingSince: true,
+				missingSyncCount: true,
+				variantId: true
+			}
+		})
+		expect(db.integrationVariantLink.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: 'link-first-miss' },
+				data: expect.objectContaining({
+					missingSyncCount: 1,
+					skippedReason: 'missing_from_complete_snapshot'
+				})
+			})
+		)
+		expect(db.integrationVariantLink.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: 'link-confirmed-miss' },
+				data: expect.objectContaining({
+					missingSyncCount: 2,
+					skippedReason: 'hidden_after_missing_confirmations'
+				})
+			})
+		)
 		expect(db.productVariant.updateMany).toHaveBeenCalledWith({
 			where: {
+				id: 'variant-confirmed-miss',
 				productId: 'product-1',
-				deleteAt: null,
-				integrationLinks: {
-					some: {
-						integrationId: 'integration-1',
-						externalId: { notIn: ['variant-1', 'variant-2'] }
-					}
-				}
+				deleteAt: null
 			},
 			data: {
 				stock: 0,

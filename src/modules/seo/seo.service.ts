@@ -2,12 +2,19 @@
 import { SeoSettingCreateInput, SeoSettingUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
+	Inject,
 	Injectable,
-	NotFoundException
+	NotFoundException,
+	Optional
 } from '@nestjs/common'
 
 import { CacheService } from '@/shared/cache/cache.service'
 import { CATALOG_CACHE_VERSION } from '@/shared/cache/catalog-cache.constants'
+import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
+import {
+	DOMAIN_EVENT_DISPATCHER,
+	type DomainEventDispatcher
+} from '@/shared/domain-events/domain-events.contract'
 import type { MediaRecord } from '@/shared/media/media-url.service'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
@@ -30,7 +37,10 @@ export class SeoService {
 		private readonly repo: SeoRepository,
 		private readonly mediaRepo: MediaRepository,
 		private readonly mediaUrl: MediaUrlService,
-		private readonly cache: CacheService
+		private readonly cache: CacheService,
+		@Optional()
+		@Inject(DOMAIN_EVENT_DISPATCHER)
+		private readonly events?: DomainEventDispatcher
 	) {}
 
 	async getAll() {
@@ -161,6 +171,17 @@ export class SeoService {
 	}
 
 	private async invalidateCatalogCache(catalogId: string): Promise<void> {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'catalog.cache_invalidated',
+					catalogId,
+					scopes: [{ name: 'catalog' }]
+				})
+			)
+			return
+		}
+
 		await this.cache.bumpVersion(CATALOG_CACHE_VERSION, catalogId)
 	}
 }

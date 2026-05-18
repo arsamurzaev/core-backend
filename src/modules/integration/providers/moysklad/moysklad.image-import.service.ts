@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 
-import { S3Service } from '@/modules/s3/s3.service'
+import { S3Service } from '@/modules/s3/public'
 import { MediaRepository } from '@/shared/media/media.repository'
 
 import { IntegrationRepository } from '../../integration.repository'

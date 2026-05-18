@@ -22,8 +22,8 @@ import {
 	ApiTags
 } from '@nestjs/swagger'
 
-import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { Public } from '@/shared/http/decorators/public.decorator'
+import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
 import { Roles } from '../auth/decorators/roles.decorator'
@@ -245,6 +245,63 @@ export class IntegrationController {
 			integrationId,
 			secret,
 			requestId,
+			payload
+		})
+	}
+
+	@Post('/webhooks/moysklad/product-delete/:integrationId/:secret')
+	@Public()
+	@SkipCatalog()
+	@HttpCode(204)
+	@ApiOperation({ summary: 'Receive MoySklad product delete webhook' })
+	@ApiParam({ name: 'integrationId' })
+	@ApiParam({ name: 'secret' })
+	async receiveMoySkladProductDeleteWebhook(
+		@Param('integrationId') integrationId: string,
+		@Param('secret') secret: string,
+		@Body() payload: unknown
+	): Promise<void> {
+		await this.integrationService.receiveMoySkladProductDeleteWebhook({
+			integrationId,
+			secret,
+			payload
+		})
+	}
+
+	@Post('/webhooks/moysklad/product-change/:integrationId/:secret')
+	@Public()
+	@SkipCatalog()
+	@HttpCode(204)
+	@ApiOperation({ summary: 'Receive MoySklad product change webhook' })
+	@ApiParam({ name: 'integrationId' })
+	@ApiParam({ name: 'secret' })
+	async receiveMoySkladProductChangeWebhook(
+		@Param('integrationId') integrationId: string,
+		@Param('secret') secret: string,
+		@Body() payload: unknown
+	): Promise<void> {
+		await this.integrationService.receiveMoySkladProductChangeWebhook({
+			integrationId,
+			secret,
+			payload
+		})
+	}
+
+	@Post('/webhooks/moysklad/productfolder/:integrationId/:secret')
+	@Public()
+	@SkipCatalog()
+	@HttpCode(204)
+	@ApiOperation({ summary: 'Receive MoySklad product folder webhook' })
+	@ApiParam({ name: 'integrationId' })
+	@ApiParam({ name: 'secret' })
+	async receiveMoySkladProductFolderWebhook(
+		@Param('integrationId') integrationId: string,
+		@Param('secret') secret: string,
+		@Body() payload: unknown
+	): Promise<void> {
+		await this.integrationService.receiveMoySkladProductFolderWebhook({
+			integrationId,
+			secret,
 			payload
 		})
 	}

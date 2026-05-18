@@ -13,7 +13,7 @@ import {
 	normalizeCartCheckoutData,
 	resolveCatalogCheckoutConfig,
 	resolveCheckoutContactsSnapshot
-} from '@/modules/catalog/catalog-checkout'
+} from '@/modules/catalog/contracts'
 
 import { CartCurrentService } from './cart-current.service'
 import { CartInventoryReservationService } from './cart-inventory-reservation.service'
@@ -93,12 +93,14 @@ export class CartShareService {
 				cart: reserveEffect.reserved
 					? await this.lookup.findByIdOrThrow(current.cart.id, tx)
 					: updated,
-				inventoryCacheCatalogIds: reserveEffect.inventoryCacheCatalogIds
+				inventoryCacheCatalogIds: reserveEffect.inventoryCacheCatalogIds,
+				inventoryDomainEvents: reserveEffect.inventoryDomainEvents
 			}
 		})
 
 		await this.inventoryReservation.invalidateProductCaches(
-			result.inventoryCacheCatalogIds
+			result.inventoryCacheCatalogIds,
+			result.inventoryDomainEvents
 		)
 
 		return {

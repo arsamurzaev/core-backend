@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common'
 
 import { PrismaModule } from '@/infrastructure/prisma/prisma.module'
-import { CapabilityModule } from '@/modules/capability/capability.module'
+import { CapabilityModule } from '@/modules/capability/public'
 
 import { CatalogSaleUnitController } from './catalog-sale-unit.controller'
 import { CatalogSaleUnitRepository } from './catalog-sale-unit.repository'

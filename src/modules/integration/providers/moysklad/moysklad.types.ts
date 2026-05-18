@@ -124,6 +124,8 @@ export type MoySkladVariant = MoySkladProduct & {
 	characteristics: MoySkladVariantCharacteristic[]
 }
 
+export type MoySkladWebhookEntityType = MoySkladEntityType | 'productfolder'
+
 export type MoySkladListResponse<T> = {
 	context?: { employee?: { meta: MoySkladMeta } }
 	meta: MoySkladMeta
@@ -159,6 +161,18 @@ export type MoySkladStockWebhookReportType = 'all'
 
 export type MoySkladStockWebhookStockType = 'stock'
 
+export type MoySkladProductDeleteWebhookEntityType =
+	| 'product'
+	| 'service'
+	| 'bundle'
+	| 'variant'
+
+export type MoySkladProductChangeWebhookEntityType = MoySkladEntityType
+
+export type MoySkladProductChangeWebhookAction = 'CREATE' | 'UPDATE'
+
+export type MoySkladProductFolderWebhookAction = 'CREATE' | 'UPDATE' | 'DELETE'
+
 export type MoySkladStockWebhookMetadata = {
 	externalId: string | null
 	accountId: string | null
@@ -168,6 +182,48 @@ export type MoySkladStockWebhookMetadata = {
 	lastReceivedAt: string | null
 	lastProcessedAt: string | null
 	lastError: string | null
+}
+
+export type MoySkladProductDeleteWebhookMetadata = {
+	enabled: boolean
+	externalIds: Record<MoySkladProductDeleteWebhookEntityType, string | null>
+	accountId: string | null
+	secretHash: string | null
+	lastReceivedAt: string | null
+	lastProcessedAt: string | null
+	lastError: string | null
+}
+
+export type MoySkladProductChangeWebhookMetadata = {
+	enabled: boolean
+	externalIds: Record<
+		MoySkladProductChangeWebhookEntityType,
+		Record<MoySkladProductChangeWebhookAction, string | null>
+	>
+	accountId: string | null
+	secretHash: string | null
+	lastReceivedAt: string | null
+	lastProcessedAt: string | null
+	lastError: string | null
+}
+
+export type MoySkladProductFolderWebhookMetadata = {
+	enabled: boolean
+	externalIds: Record<MoySkladProductFolderWebhookAction, string | null>
+	accountId: string | null
+	secretHash: string | null
+	lastReceivedAt: string | null
+	lastProcessedAt: string | null
+	lastError: string | null
+}
+
+export type MoySkladFieldOwnershipValue = 'external' | 'local'
+
+export type MoySkladFieldOwnership = {
+	price: MoySkladFieldOwnershipValue
+	stock: MoySkladFieldOwnershipValue
+	content: MoySkladFieldOwnershipValue
+	images: MoySkladFieldOwnershipValue
 }
 
 export type MoySkladWebhookStock = {
@@ -187,11 +243,54 @@ export type MoySkladWebhookStockPayload = {
 	reportType?: MoySkladStockWebhookReportType
 }
 
+export type MoySkladWebhookAction = 'CREATE' | 'UPDATE' | 'DELETE'
+
+export type MoySkladWebhook = {
+	meta?: MoySkladMeta
+	id: string
+	accountId?: string
+	enabled: boolean
+	action: MoySkladWebhookAction
+	entityType: MoySkladWebhookEntityType
+	url: string
+}
+
+export type MoySkladWebhookPayload = {
+	url?: string
+	enabled?: boolean
+	action?: MoySkladWebhookAction
+	entityType?: MoySkladWebhookEntityType
+}
+
 export type MoySkladStockWebhookNotification = {
 	accountId: string
 	stockType: MoySkladStockWebhookStockType
 	reportType: MoySkladStockWebhookReportType
 	reportUrl: string
+}
+
+export type MoySkladProductDeleteWebhookNotification = {
+	accountId: string
+	action: 'DELETE'
+	entityType: MoySkladProductDeleteWebhookEntityType
+	externalId: string
+	href: string
+}
+
+export type MoySkladProductChangeWebhookNotification = {
+	accountId: string
+	action: MoySkladProductChangeWebhookAction
+	entityType: MoySkladProductChangeWebhookEntityType
+	externalId: string
+	href: string
+}
+
+export type MoySkladProductFolderWebhookNotification = {
+	accountId: string
+	action: MoySkladProductFolderWebhookAction
+	entityType: 'productfolder'
+	externalId: string
+	href: string
 }
 
 export type MoySkladCustomerOrderPosition = {
@@ -237,6 +336,10 @@ export type MoySkladMetadata = {
 	lastStockSyncedAt: string | null
 	stockWebhookEnabled: boolean
 	stockWebhook: MoySkladStockWebhookMetadata
+	productDeleteWebhook: MoySkladProductDeleteWebhookMetadata
+	productChangeWebhook: MoySkladProductChangeWebhookMetadata
+	productFolderWebhook: MoySkladProductFolderWebhookMetadata
+	fieldOwnership: MoySkladFieldOwnership
 }
 
 export type EncryptedMoySkladToken = {

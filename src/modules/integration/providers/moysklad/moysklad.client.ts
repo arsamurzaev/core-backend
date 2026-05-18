@@ -22,6 +22,8 @@ import {
 	type MoySkladStockResponse,
 	type MoySkladStore,
 	type MoySkladVariant,
+	type MoySkladWebhook,
+	type MoySkladWebhookPayload,
 	type MoySkladWebhookStock,
 	type MoySkladWebhookStockPayload
 } from './moysklad.types'
@@ -548,10 +550,9 @@ export class MoySkladClient {
 	}
 
 	async getWebhookStocks(): Promise<MoySkladWebhookStock[]> {
-		const response =
-			await this.request<MoySkladListResponse<MoySkladWebhookStock>>(
-				'/entity/webhookstock'
-			)
+		const response = await this.request<
+			MoySkladListResponse<MoySkladWebhookStock>
+		>('/entity/webhookstock')
 		return this.readListRows(response, '/entity/webhookstock')
 	}
 
@@ -588,6 +589,38 @@ export class MoySkladClient {
 				method: 'DELETE'
 			}
 		)
+	}
+
+	async createWebhook(
+		payload: Required<MoySkladWebhookPayload>
+	): Promise<MoySkladWebhook> {
+		return this.request<MoySkladWebhook>('/entity/webhook', {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		})
+	}
+
+	async updateWebhook(
+		webhookId: string,
+		payload: MoySkladWebhookPayload
+	): Promise<MoySkladWebhook> {
+		return this.request<MoySkladWebhook>(
+			`/entity/webhook/${encodeURIComponent(webhookId)}`,
+			{
+				method: 'PUT',
+				body: JSON.stringify(payload)
+			}
+		)
+	}
+
+	async disableWebhook(webhookId: string): Promise<MoySkladWebhook> {
+		return this.updateWebhook(webhookId, { enabled: false })
+	}
+
+	async deleteWebhook(webhookId: string): Promise<void> {
+		await this.request<void>(`/entity/webhook/${encodeURIComponent(webhookId)}`, {
+			method: 'DELETE'
+		})
 	}
 
 	async downloadImage(

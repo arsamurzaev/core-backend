@@ -23,6 +23,7 @@ describe('CategoryController', () => {
 							getProductCardsByCategory: jest.fn(),
 							create: jest.fn(),
 							update: jest.fn(),
+							updatePositions: jest.fn(),
 							updatePosition: jest.fn(),
 							remove: jest.fn()
 						}
@@ -37,6 +38,15 @@ describe('CategoryController', () => {
 
 	it('should be defined', () => {
 		expect(controller).toBeDefined()
+	})
+
+	it('passes includeEmpty=false to category list service', async () => {
+		service.getAll.mockResolvedValue([] as any)
+		const res = { setHeader: jest.fn() } as any
+
+		await controller.getAll(res, 'false')
+
+		expect(service.getAll).toHaveBeenCalledWith({ includeEmpty: false })
 	})
 
 	it('delegates category position updates to service', async () => {

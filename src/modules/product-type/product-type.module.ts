@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common'
 
 import { PrismaModule } from '@/infrastructure/prisma/prisma.module'
-import { CapabilityModule } from '@/modules/capability/capability.module'
+import { CapabilityModule } from '@/modules/capability/public'
 
 import {
 	PRODUCT_TYPE_COMMAND_PORT,

@@ -668,4 +668,69 @@ describe('MoySkladClient', () => {
 			})
 		)
 	})
+
+	it('creates and disables entity webhook entries', async () => {
+		const fetchMock = jest
+			.spyOn(global, 'fetch')
+			.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				headers: new Headers(),
+				json: jest.fn().mockResolvedValue({
+					id: 'webhook-1',
+					accountId: 'account-1',
+					enabled: true,
+					action: 'DELETE',
+					entityType: 'product',
+					url: 'https://api.example.test/webhook'
+				})
+			} as any)
+			.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				headers: new Headers(),
+				json: jest.fn().mockResolvedValue({
+					id: 'webhook-1',
+					enabled: false,
+					action: 'DELETE',
+					entityType: 'product',
+					url: 'https://api.example.test/webhook'
+				})
+			} as any)
+
+		const client = new MoySkladClient({
+			token: 'token',
+			maxRetries: 0
+		})
+
+		await client.createWebhook({
+			url: 'https://api.example.test/webhook',
+			enabled: true,
+			action: 'DELETE',
+			entityType: 'product'
+		})
+		await client.disableWebhook('webhook-1')
+
+		expect(fetchMock).toHaveBeenNthCalledWith(
+			1,
+			'https://api.moysklad.ru/api/remap/1.2/entity/webhook',
+			expect.objectContaining({
+				method: 'POST',
+				body: JSON.stringify({
+					url: 'https://api.example.test/webhook',
+					enabled: true,
+					action: 'DELETE',
+					entityType: 'product'
+				})
+			})
+		)
+		expect(fetchMock).toHaveBeenNthCalledWith(
+			2,
+			'https://api.moysklad.ru/api/remap/1.2/entity/webhook/webhook-1',
+			expect.objectContaining({
+				method: 'PUT',
+				body: JSON.stringify({ enabled: false })
+			})
+		)
+	})
 })

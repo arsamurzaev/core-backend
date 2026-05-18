@@ -1,3 +1,9 @@
+import {
+	DataType,
+	ProductVariantKind,
+	ProductVariantStatus
+} from '@generated/enums'
+
 import { ProductRepository } from './product.repository'
 
 describe('ProductRepository', () => {
@@ -203,6 +209,32 @@ describe('ProductRepository', () => {
 		expect(clause.values).toEqual(['product-type-1'])
 	})
 
+	it('builds price filter over commercial variant prices with product price fallback', () => {
+		const repository = new ProductRepository({} as any)
+
+		const clauses = (repository as any).buildPriceFilterClauses(100, 500)
+
+		expect(clauses).toHaveLength(1)
+		const text = clauses[0].strings.join(' ')
+		expect(text).toContain('FROM product_variants pv')
+		expect(text).toContain('pv.price IS NOT NULL')
+		expect(text).toContain('UNION ALL')
+		expect(text).toContain('SELECT p.price')
+		expect(text).toContain('NOT EXISTS')
+		expect(text).toContain('matrix_pv')
+		expect(text).toContain('commercial_price.price >=')
+		expect(text).toContain('commercial_price.price <=')
+		expect(clauses[0].values).toEqual(
+			expect.arrayContaining([
+				ProductVariantStatus.DISABLED,
+				ProductVariantKind.DEFAULT,
+				'default',
+				100,
+				500
+			])
+		)
+	})
+
 	it('keeps product type filtered product pages scoped to the current catalog', async () => {
 		const prisma = {
 			$queryRaw: jest.fn().mockResolvedValue([])
@@ -280,7 +312,9 @@ describe('ProductRepository', () => {
 							variants: {
 								none: {
 									deleteAt: null,
-									variantKey: { not: 'default' }
+									NOT: {
+										OR: [{ kind: ProductVariantKind.DEFAULT }, { variantKey: 'default' }]
+									}
 								}
 							}
 						})
@@ -298,6 +332,305 @@ describe('ProductRepository', () => {
 				skip: 1
 			})
 		)
+	})
+
+	it('builds default variant diagnostics with counts and samples', async () => {
+		const prisma = {
+			$queryRaw: jest
+				.fn()
+				.mockResolvedValueOnce([{ count: 1 }])
+				.mockResolvedValueOnce([
+					{
+						productId: 'product-1',
+						productName: 'Legacy product',
+						productSku: 'LEGACY',
+						variantId: null,
+						variantKey: null,
+						variantSku: null,
+						details: 'No custom variants and no technical default variant'
+					}
+				])
+				.mockResolvedValueOnce([{ count: 0 }])
+				.mockResolvedValueOnce([])
+				.mockResolvedValueOnce([{ count: 2 }])
+				.mockResolvedValueOnce([
+					{
+						productId: 'product-2',
+						productName: 'Matrix product',
+						productSku: 'MATRIX',
+						variantId: 'variant-2',
+						variantKey: 'size=s',
+						variantSku: 'MATRIX-S',
+						details: 'Custom variant has no variant attributes'
+					}
+				])
+				.mockResolvedValueOnce([{ count: 0 }])
+				.mockResolvedValueOnce([])
+				.mockResolvedValueOnce([{ count: 1 }])
+				.mockResolvedValueOnce([
+					{
+						productId: 'product-3',
+						productName: 'Price mismatch product',
+						productSku: 'PRICE',
+						variantId: 'variant-3',
+						variantKey: 'default',
+						variantSku: 'PRICE',
+						details: 'productPrice=100.00; variantPrice=null'
+					}
+				])
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		const result = await repository.findDefaultVariantDiagnostics('catalog-1', 5)
+
+		expect(prisma.$queryRaw).toHaveBeenCalledTimes(10)
+		expect(result).toEqual([
+			expect.objectContaining({
+				code: 'SIMPLE_WITHOUT_DEFAULT_VARIANT',
+				status: 'warn',
+				count: 1,
+				samples: [expect.objectContaining({ productId: 'product-1' })]
+			}),
+			expect.objectContaining({
+				code: 'MULTIPLE_DEFAULT_VARIANTS',
+				status: 'ok',
+				count: 0
+			}),
+			expect.objectContaining({
+				code: 'CUSTOM_VARIANT_WITHOUT_ATTRIBUTES',
+				status: 'fail',
+				count: 2,
+				samples: [expect.objectContaining({ variantId: 'variant-2' })]
+			}),
+			expect.objectContaining({
+				code: 'DEFAULT_VARIANT_WITH_ATTRIBUTES',
+				status: 'ok',
+				count: 0
+			}),
+			expect.objectContaining({
+				code: 'DEFAULT_VARIANT_PRICE_MISMATCH',
+				status: 'warn',
+				count: 1,
+				samples: [expect.objectContaining({ variantId: 'variant-3' })]
+			})
+		])
+	})
+
+	it('finds safe default variant price mismatch repair candidates', async () => {
+		const rows = [
+			{
+				productId: 'product-1',
+				productName: 'Legacy product',
+				productSku: 'LEGACY',
+				variantId: 'variant-1',
+				variantKey: 'default',
+				variantSku: 'LEGACY',
+				previousProductPrice: '0.00',
+				nextProductPrice: null
+			}
+		]
+		const prisma = {
+			$queryRaw: jest.fn().mockResolvedValue(rows)
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		const result =
+			await repository.findDefaultVariantPriceMismatchRepairCandidates(
+				'catalog-1',
+				25,
+				'cursor-product'
+			)
+
+		expect(result).toBe(rows)
+		const sql = prisma.$queryRaw.mock.calls[0]?.[0]
+		const text = sql.strings.join(' ')
+		expect(text).toContain('p.price IS DISTINCT FROM v.price')
+		expect(text).toContain('FROM product_variants other_default')
+		expect(text).toContain('FROM product_variants custom_variant')
+		expect(text).toContain('FROM variant_attributes attribute')
+		expect(text).toContain('AND p.id >')
+		expect(text).toContain('ORDER BY p.id ASC')
+		expect(sql.values).toContain('catalog-1')
+		expect(sql.values).toContain('cursor-product')
+	})
+
+	it('applies safe default variant price mismatch repairs', async () => {
+		const prisma = {
+			$queryRaw: jest.fn().mockResolvedValue([{ productId: 'product-1' }])
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		const result = await repository.applyDefaultVariantPriceMismatchRepairs(
+			'catalog-1',
+			['product-1', 'product-2']
+		)
+
+		expect(result).toEqual(['product-1'])
+		const sql = prisma.$queryRaw.mock.calls[0]?.[0]
+		const text = sql.strings.join(' ')
+		expect(text).toContain('WITH safe_candidates AS')
+		expect(text).toContain('UPDATE products p')
+		expect(text).toContain('SET price = safe_candidates.next_price')
+		expect(text).toContain('FROM variant_attributes attribute')
+		expect(text).toContain('RETURNING p.id::text AS "productId"')
+		expect(sql.values).toContain('catalog-1')
+		expect(sql.values).toContain('product-1')
+		expect(sql.values).toContain('product-2')
+	})
+
+	it('does not run price mismatch repair update for an empty product list', async () => {
+		const prisma = {
+			$queryRaw: jest.fn()
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		await expect(
+			repository.applyDefaultVariantPriceMismatchRepairs('catalog-1', [])
+		).resolves.toEqual([])
+		expect(prisma.$queryRaw).not.toHaveBeenCalled()
+	})
+
+	it('syncs external description into the description product attribute', async () => {
+		const prisma = {
+			attribute: {
+				findFirst: jest.fn().mockResolvedValue({
+					id: 'description-attribute'
+				})
+			},
+			productAttribute: {
+				findUnique: jest.fn().mockResolvedValue(null),
+				upsert: jest.fn().mockResolvedValue({ id: 'product-attribute-1' })
+			}
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		await expect(
+			repository.syncExternalDescription({
+				catalogId: 'catalog-1',
+				productId: 'product-1',
+				description: '  Fresh description  '
+			})
+		).resolves.toBe(true)
+
+		expect(prisma.attribute.findFirst).toHaveBeenCalledWith({
+			where: {
+				key: 'description',
+				dataType: DataType.STRING,
+				isVariantAttribute: false,
+				deleteAt: null,
+				types: {
+					some: {
+						catalogs: {
+							some: { id: 'catalog-1' }
+						}
+					}
+				}
+			},
+			select: { id: true }
+		})
+		expect(prisma.productAttribute.findUnique).toHaveBeenCalledWith({
+			where: {
+				productId_attributeId: {
+					productId: 'product-1',
+					attributeId: 'description-attribute'
+				}
+			},
+			select: {
+				id: true,
+				valueString: true,
+				deleteAt: true
+			}
+		})
+		expect(prisma.productAttribute.upsert).toHaveBeenCalledWith({
+			where: {
+				productId_attributeId: {
+					productId: 'product-1',
+					attributeId: 'description-attribute'
+				}
+			},
+			create: {
+				productId: 'product-1',
+				attributeId: 'description-attribute',
+				enumValueId: null,
+				valueString: 'Fresh description',
+				valueInteger: null,
+				valueDecimal: null,
+				valueBoolean: null,
+				valueDateTime: null
+			},
+			update: {
+				enumValueId: null,
+				valueString: 'Fresh description',
+				valueInteger: null,
+				valueDecimal: null,
+				valueBoolean: null,
+				valueDateTime: null,
+				deleteAt: null
+			}
+		})
+	})
+
+	it('soft deletes the description product attribute when external description is empty', async () => {
+		const prisma = {
+			attribute: {
+				findFirst: jest.fn().mockResolvedValue({
+					id: 'description-attribute'
+				})
+			},
+			productAttribute: {
+				findUnique: jest.fn().mockResolvedValue({
+					id: 'product-attribute-1',
+					valueString: 'Old description',
+					deleteAt: null
+				}),
+				updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+				upsert: jest.fn()
+			}
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		await expect(
+			repository.syncExternalDescription({
+				catalogId: 'catalog-1',
+				productId: 'product-1',
+				description: '   '
+			})
+		).resolves.toBe(true)
+
+		expect(prisma.productAttribute.updateMany).toHaveBeenCalledWith({
+			where: {
+				id: 'product-attribute-1',
+				deleteAt: null
+			},
+			data: { deleteAt: expect.any(Date) }
+		})
+		expect(prisma.productAttribute.upsert).not.toHaveBeenCalled()
+	})
+
+	it('skips external description sync when the description attribute is not configured', async () => {
+		const prisma = {
+			attribute: {
+				findFirst: jest.fn().mockResolvedValue(null)
+			},
+			productAttribute: {
+				findUnique: jest.fn(),
+				updateMany: jest.fn(),
+				upsert: jest.fn()
+			}
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		await expect(
+			repository.syncExternalDescription({
+				catalogId: 'catalog-1',
+				productId: 'product-1',
+				description: 'Fresh description'
+			})
+		).resolves.toBe(false)
+
+		expect(prisma.productAttribute.findUnique).not.toHaveBeenCalled()
+		expect(prisma.productAttribute.updateMany).not.toHaveBeenCalled()
+		expect(prisma.productAttribute.upsert).not.toHaveBeenCalled()
 	})
 
 	it('loads product type compatibility preview refs inside current catalog', async () => {
@@ -413,6 +746,9 @@ describe('ProductRepository', () => {
 					.mockResolvedValueOnce({ status: 'HIDDEN' })
 					.mockResolvedValueOnce({ id: 'product-1', media: [], variants: [] }),
 				update: jest.fn()
+			},
+			productVariant: {
+				findMany: jest.fn().mockResolvedValue([])
 			},
 			variantAttribute: {
 				updateMany: jest.fn()
@@ -555,7 +891,16 @@ describe('ProductRepository', () => {
 					.fn()
 					.mockResolvedValueOnce(null)
 					.mockResolvedValueOnce(null),
-				create: jest.fn().mockResolvedValue({ id: 'variant-default' })
+				create: jest.fn().mockResolvedValue({ id: 'variant-default' }),
+				findMany: jest.fn().mockResolvedValue([
+					{
+						id: 'variant-default',
+						sku: 'LEGACY-PRODUCT',
+						variantKey: 'default',
+						kind: ProductVariantKind.DEFAULT,
+						attributes: []
+					}
+				])
 			}
 		}
 		const prisma = {
@@ -579,6 +924,7 @@ describe('ProductRepository', () => {
 				productId: 'product-1',
 				sku: 'LEGACY-PRODUCT',
 				variantKey: 'default',
+				kind: ProductVariantKind.DEFAULT,
 				stock: 0,
 				price: 120,
 				status: 'OUT_OF_STOCK',
@@ -617,6 +963,111 @@ describe('ProductRepository', () => {
 		).resolves.toBe(false)
 
 		expect(tx.productVariant.create).not.toHaveBeenCalled()
+	})
+
+	it('rejects matrix variants without variant attributes before persisting', async () => {
+		const tx = {
+			product: {
+				findFirst: jest.fn().mockResolvedValue({ id: 'product-1' })
+			},
+			productVariant: {
+				updateMany: jest.fn(),
+				findMany: jest.fn()
+			}
+		}
+		const prisma = {
+			$transaction: jest.fn(async callback => callback(tx))
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		await expect(
+			repository.setVariants('product-1', 'catalog-1', [
+				{
+					sku: 'PRODUCT-MATRIX',
+					variantKey: 'size=s',
+					kind: ProductVariantKind.MATRIX,
+					price: 120,
+					stock: 1,
+					status: 'ACTIVE',
+					attributes: []
+				}
+			] as any)
+		).rejects.toThrow('must have variant attributes')
+
+		expect(tx.productVariant.updateMany).not.toHaveBeenCalled()
+	})
+
+	it('rejects technical default variants with attributes', async () => {
+		const tx = {
+			product: {
+				findFirst: jest.fn().mockResolvedValue({ id: 'product-1' })
+			},
+			productVariant: {
+				findFirst: jest
+					.fn()
+					.mockResolvedValueOnce(null)
+					.mockResolvedValueOnce(null),
+				create: jest.fn()
+			}
+		}
+		const prisma = {
+			$transaction: jest.fn(async callback => callback(tx))
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		await expect(
+			repository.ensureDefaultVariant('product-1', 'catalog-1', {
+				sku: 'PRODUCT',
+				variantKey: 'default',
+				kind: ProductVariantKind.DEFAULT,
+				price: 120,
+				stock: 0,
+				status: 'OUT_OF_STOCK',
+				attributes: [{ attributeId: 'size-attribute', enumValueId: 'size-s' }]
+			} as any)
+		).rejects.toThrow('must not have variant attributes')
+
+		expect(tx.productVariant.create).not.toHaveBeenCalled()
+	})
+
+	it('rejects replacing a product with multiple technical default variants', async () => {
+		const tx = {
+			product: {
+				findFirst: jest.fn().mockResolvedValue({ id: 'product-1' })
+			},
+			productVariant: {
+				updateMany: jest.fn()
+			}
+		}
+		const prisma = {
+			$transaction: jest.fn(async callback => callback(tx))
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		await expect(
+			repository.setVariants('product-1', 'catalog-1', [
+				{
+					sku: 'PRODUCT',
+					variantKey: 'default',
+					kind: ProductVariantKind.DEFAULT,
+					price: 100,
+					stock: 0,
+					status: 'OUT_OF_STOCK',
+					attributes: []
+				},
+				{
+					sku: 'PRODUCT-DEFAULT-2',
+					variantKey: 'default',
+					kind: ProductVariantKind.DEFAULT,
+					price: 100,
+					stock: 0,
+					status: 'OUT_OF_STOCK',
+					attributes: []
+				}
+			] as any)
+		).rejects.toThrow('only one technical default variant')
+
+		expect(tx.productVariant.updateMany).not.toHaveBeenCalled()
 	})
 
 	it('rejects toggling a product to active without a valid variant', async () => {
@@ -795,6 +1246,7 @@ describe('ProductRepository', () => {
 			},
 			productVariant: {
 				updateMany: jest.fn(),
+				findMany: jest.fn().mockResolvedValue([]),
 				findFirst: jest.fn().mockResolvedValue(null)
 			}
 		}

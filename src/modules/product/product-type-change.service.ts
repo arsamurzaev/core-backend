@@ -2,11 +2,15 @@ import type { ProductUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
 	ConflictException,
+	Inject,
 	Injectable,
 	NotFoundException
 } from '@nestjs/common'
 
-import { CapabilityService } from '@/modules/capability/capability.service'
+import {
+	CAPABILITY_ASSERT_PORT,
+	type CapabilityAssertPort
+} from '@/modules/capability/contracts'
 import { mustCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
 import { normalizeRequiredString } from '@/shared/utils'
 
@@ -49,7 +53,8 @@ export class ProductTypeChangeService {
 	constructor(
 		private readonly repo: ProductRepository,
 		private readonly attributeBuilder: ProductAttributeBuilder,
-		private readonly featureEntitlements: CapabilityService,
+		@Inject(CAPABILITY_ASSERT_PORT)
+		private readonly featureEntitlements: CapabilityAssertPort,
 		private readonly finalizer: ProductWriteFinalizer,
 		private readonly variants: ProductVariantService
 	) {}

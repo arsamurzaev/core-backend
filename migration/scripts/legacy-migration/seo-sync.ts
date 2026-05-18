@@ -57,7 +57,7 @@ type AnalyzeLegacySeoSummary = {
 	mappedCatalogs: number
 }
 
-type TargetCatalog = {
+export type TargetCatalog = {
 	id: string
 	name: string
 	slug: string
@@ -124,7 +124,7 @@ type TargetCategory = {
 	imageMediaId: string | null
 }
 
-type TargetProduct = {
+export type TargetProduct = {
 	id: string
 	catalogId: string
 	name: string
@@ -424,7 +424,7 @@ async function loadMappedCatalogIds(
 	return Array.from(new Set(mappings.map(mapping => mapping.targetId)))
 }
 
-async function loadTargetCatalogs(
+export async function loadTargetCatalogs(
 	prisma: PrismaClient,
 	catalogIds: string[]
 ): Promise<TargetCatalog[]> {
@@ -489,7 +489,7 @@ async function loadTargetCategories(
 	})
 }
 
-async function loadTargetProducts(
+export async function loadTargetProducts(
 	prisma: PrismaClient,
 	catalogIds: string[],
 	productIds?: string[]
@@ -995,7 +995,7 @@ function resolveProductAvailability(product: TargetProduct): string {
 		: 'https://schema.org/OutOfStock'
 }
 
-async function upsertProductSeo(
+export async function upsertProductSeo(
 	prisma: PrismaClient,
 	catalog: TargetCatalog,
 	product: TargetProduct
@@ -1028,30 +1028,6 @@ async function upsertProductSeo(
 			.join(' | '),
 		255
 	)
-	const description = truncateText(
-		[
-			`Купить ${product.name}${product.brand?.name ? ` ${product.brand.name}` : ''}.`,
-			categoryNames.length
-				? `Категория: ${categoryNames.slice(0, 2).join(', ')}.`
-				: null,
-			`Цена: ${formatPrice(product.price)} ${catalog.config?.currency?.trim() || 'RUB'}.`,
-			attributeSummary ? `Характеристики: ${attributeSummary}.` : null
-		]
-			.filter(Boolean)
-			.join(' '),
-		500
-	)
-	const seoText = [
-		`${product.name} доступен в каталоге ${catalog.name}.`,
-		product.brand?.name ? `Бренд: ${product.brand.name}.` : null,
-		categoryNames.length
-			? `Разделы: ${categoryNames.slice(0, 3).join(', ')}.`
-			: null,
-		attributeSummary ? `Основные характеристики: ${attributeSummary}.` : null,
-		`Артикул: ${product.sku}.`
-	]
-		.filter(Boolean)
-		.join(' ')
 	const isIndexable = product.status === ProductStatus.ACTIVE
 	const robots = isIndexable ? 'index,follow' : 'noindex,nofollow'
 	const canonicalUrl = buildCatalogUrl(
@@ -1078,7 +1054,6 @@ async function upsertProductSeo(
 		seenKeywords.add(key)
 		uniqueKeywords.push(part)
 	}
-	const keywords = truncateText(uniqueKeywords.join(', '), 500)
 	const productDescription = truncateText(
 		[
 			`Купить ${product.name}${product.brand?.name ? ` ${product.brand.name}` : ''}.`,

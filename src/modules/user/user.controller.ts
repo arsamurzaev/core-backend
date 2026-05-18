@@ -5,7 +5,7 @@ import type { Request, Response } from 'express'
 import {
 	resolveCookieDomain,
 	setSessionCookies
-} from '@/modules/auth/auth-cookie.utils'
+} from '@/modules/auth/public'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'

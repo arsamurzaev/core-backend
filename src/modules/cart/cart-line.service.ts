@@ -12,6 +12,12 @@ import {
 	CAPABILITY_READER_PORT,
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
+import {
+	PRODUCT_SELLABLE_READER_PORT,
+	type ProductSellableProjection,
+	type ProductSellableReader
+} from '@/modules/product/contracts'
+import type { DomainEvent } from '@/shared/domain-events/domain-events.contract'
 
 import { CartInventoryReservationService } from './cart-inventory-reservation.service'
 import {
@@ -124,6 +130,7 @@ export type CartLineMutationResult = {
 	cartId: string
 	changed: boolean
 	inventoryCacheCatalogIds?: string[]
+	inventoryDomainEvents?: DomainEvent[]
 }
 
 @Injectable()
@@ -134,7 +141,9 @@ export class CartLineService {
 		private readonly linePricing: CartLinePricingService,
 		private readonly variantSelection: CartVariantSelectionService,
 		@Inject(CAPABILITY_READER_PORT)
-		private readonly capabilities: CapabilityReaderPort
+		private readonly capabilities: CapabilityReaderPort,
+		@Inject(PRODUCT_SELLABLE_READER_PORT)
+		private readonly sellableReader: ProductSellableReader
 	) {}
 
 	async upsertItem(
@@ -148,7 +157,8 @@ export class CartLineService {
 		)
 
 		await this.inventoryReservation.invalidateProductCaches(
-			result.inventoryCacheCatalogIds
+			result.inventoryCacheCatalogIds,
+			result.inventoryDomainEvents
 		)
 		return result
 	}
@@ -207,7 +217,8 @@ export class CartLineService {
 					return {
 						cartId: cart.id,
 						changed: true,
-						inventoryCacheCatalogIds: []
+						inventoryCacheCatalogIds: [],
+						inventoryDomainEvents: []
 					}
 				}
 
@@ -222,14 +233,16 @@ export class CartLineService {
 				return {
 					cartId: cart.id,
 					changed: true,
-					inventoryCacheCatalogIds: reserveEffect.inventoryCacheCatalogIds
+					inventoryCacheCatalogIds: reserveEffect.inventoryCacheCatalogIds,
+					inventoryDomainEvents: reserveEffect.inventoryDomainEvents
 				}
 			},
 			{ isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
 		)
 
 		await this.inventoryReservation.invalidateProductCaches(
-			result.inventoryCacheCatalogIds
+			result.inventoryCacheCatalogIds,
+			result.inventoryDomainEvents
 		)
 		return result
 	}
@@ -251,13 +264,16 @@ export class CartLineService {
 			cart.status,
 			cart.inventoryMode
 		)
-		const canUseSaleUnits = await this.capabilities.canUseCatalogSaleUnits(
-			cart.catalogId
-		)
+		const features = await this.capabilities.getCurrentFeatures(cart.catalogId)
+		const canExposeSaleUnits =
+			features.canUseProductVariants && features.canUseCatalogSaleUnits
+		const featureAwareInput = canExposeSaleUnits
+			? input
+			: { ...input, saleUnitId: null }
 		const variantId = await this.variantSelection.resolveCartVariantId(
 			tx,
-			cart.catalogId,
-			canUseSaleUnits ? input : { ...input, saleUnitId: null },
+			productSnapshot.catalogId ?? cart.catalogId,
+			featureAwareInput,
 			usesReservationFlow ? INVENTORY_MODE_NONE : cart.inventoryMode
 		)
 		const variantSnapshot = await this.ensureVariantMatchesProduct(
@@ -268,7 +284,14 @@ export class CartLineService {
 		const saleUnit = await this.linePricing.resolveSaleUnit(
 			tx,
 			variantId,
-			variantId && canUseSaleUnits ? input.saleUnitId : null
+			variantId && canExposeSaleUnits ? featureAwareInput.saleUnitId : null
+		)
+		const commercialProjection = await this.resolveCommercialProjection(
+			productSnapshot.catalogId ?? cart.catalogId,
+			input.productId,
+			variantId,
+			input.quantity,
+			usesReservationFlow ? INVENTORY_MODE_NONE : cart.inventoryMode
 		)
 		const resolvedInput: ResolvedCartItemInput = {
 			...input,
@@ -279,7 +302,8 @@ export class CartLineService {
 				saleUnit,
 				quantity: input.quantity,
 				productSnapshot,
-				variantSnapshot
+				variantSnapshot,
+				commercialProjection
 			})
 		}
 
@@ -307,11 +331,8 @@ export class CartLineService {
 			}
 
 			if (resolvedInput.variantId) {
-				await this.variantSelection.ensureVariantPurchasable(
-					tx,
-					resolvedInput.variantId,
-					resolvedInput.baseQuantity,
-					resolvedInput.productId,
+				this.ensureCommercialProjectionPurchasable(
+					commercialProjection,
 					usesReservationFlow ? INVENTORY_MODE_NONE : cart.inventoryMode
 				)
 			}
@@ -346,7 +367,8 @@ export class CartLineService {
 			return {
 				cartId: cart.id,
 				changed: true,
-				inventoryCacheCatalogIds: []
+				inventoryCacheCatalogIds: [],
+				inventoryDomainEvents: []
 			}
 		}
 
@@ -361,7 +383,8 @@ export class CartLineService {
 		return {
 			cartId: cart.id,
 			changed: true,
-			inventoryCacheCatalogIds: reserveEffect.inventoryCacheCatalogIds
+			inventoryCacheCatalogIds: reserveEffect.inventoryCacheCatalogIds,
+			inventoryDomainEvents: reserveEffect.inventoryDomainEvents
 		}
 	}
 
@@ -440,6 +463,7 @@ export class CartLineService {
 			},
 			select: {
 				id: true,
+				catalogId: true,
 				price: true,
 				productAttributes: {
 					where: { deleteAt: null },
@@ -463,9 +487,42 @@ export class CartLineService {
 		}
 
 		return {
+			catalogId: product.catalogId,
 			price: product.price,
 			productAttributes: product.productAttributes
 		}
+	}
+
+	private async resolveCommercialProjection(
+		catalogId: string,
+		productId: string,
+		variantId: string | null,
+		quantity: number,
+		inventoryMode: CatalogInventoryMode
+	): Promise<ProductSellableProjection | null> {
+		if (quantity <= 0) return null
+
+		const options = {
+			quantity,
+			enforceStock: inventoryMode !== INVENTORY_MODE_NONE
+		}
+
+		if (variantId) {
+			return this.sellableReader.resolveVariantSellable(
+				catalogId,
+				productId,
+				variantId,
+				options
+			)
+		}
+
+		const projection = await this.sellableReader.resolveProductSellable(
+			catalogId,
+			productId,
+			options
+		)
+
+		return projection.requiresVariantSelection ? null : projection
 	}
 
 	private async ensureVariantMatchesProduct(
@@ -489,6 +546,31 @@ export class CartLineService {
 		}
 
 		return { price: variant.price }
+	}
+
+	private ensureCommercialProjectionPurchasable(
+		projection: ProductSellableProjection | null,
+		inventoryMode: CatalogInventoryMode
+	): void {
+		if (!projection) {
+			throw new BadRequestException('Вариация товара недоступна')
+		}
+
+		if (projection.availabilityState === 'AVAILABLE') return
+
+		if (projection.availabilityState === 'OUT_OF_STOCK') {
+			throw new BadRequestException(
+				`Недостаточно товара на складе. Доступно: ${projection.stock ?? 0}`
+			)
+		}
+
+		if (projection.availabilityState === 'UNAVAILABLE') {
+			throw new BadRequestException('Вариация товара недоступна')
+		}
+
+		if (inventoryMode !== INVENTORY_MODE_NONE) {
+			throw new BadRequestException('Вариация товара недоступна')
+		}
 	}
 
 	private async findExistingItems(

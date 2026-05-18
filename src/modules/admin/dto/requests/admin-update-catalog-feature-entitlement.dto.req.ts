@@ -11,7 +11,7 @@ import {
 import {
 	CATALOG_CAPABILITIES,
 	type CatalogCapability
-} from '@/modules/capability/capability.constants'
+} from '@/modules/capability/public'
 
 export class AdminUpdateCatalogFeatureEntitlementDtoReq {
 	@ApiProperty({ enum: CATALOG_CAPABILITIES })

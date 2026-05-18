@@ -1,8 +1,20 @@
-import { Injectable } from '@nestjs/common'
+import { Inject, Injectable, Optional } from '@nestjs/common'
 
 import { IntegrationRepository } from '../../integration.repository'
 
+import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
+import {
+	DOMAIN_EVENT_DISPATCHER,
+	type DomainEventDispatcher
+} from '@/shared/domain-events/domain-events.contract'
+import type { InventoryExternalStockPort } from '@/modules/inventory/contracts'
+
 import { MoySkladClient } from './moysklad.client'
+import {
+	createMoySkladStockSkippedReasons,
+	MOYSKLAD_SKIPPED_REASONS,
+	type MoySkladExternalStockSkippedReasons
+} from './moysklad.skipped-reasons'
 
 type StockSyncProgressReporter = {
 	report(input: {
@@ -26,17 +38,48 @@ type VariantStockLink = {
 	rawMeta: unknown
 }
 
+type StockUpdateResult = {
+	changed: boolean
+	productId: string | null
+	variantId: string | null
+	previousStock: number | null
+	nextStock: number | null
+}
+
+export type MoySkladExternalStockApplySource = 'FULL_SYNC' | 'WEBHOOK'
+
+export type { MoySkladExternalStockSkippedReasons }
+
+export type MoySkladExternalStockDiagnostics = {
+	source: MoySkladExternalStockApplySource
+	stockRows: number
+	matchedStockRows: number
+	unmatchedStockRows: number
+	productLinks: number
+	variantLinks: number
+	ignoredVariantLinks: number
+	appliedProductLinks: number
+	appliedVariantLinks: number
+	skippedReasons: MoySkladExternalStockSkippedReasons
+}
+
 export type MoySkladExternalStockSyncResult = {
 	total: number
 	updated: number
 	updatedProducts: number
 	updatedVariants: number
 	skipped: number
+	diagnostics: MoySkladExternalStockDiagnostics
 }
 
 @Injectable()
-export class MoySkladStockSyncService {
-	constructor(private readonly repo: IntegrationRepository) {}
+export class MoySkladStockSyncService implements InventoryExternalStockPort {
+	constructor(
+		private readonly repo: IntegrationRepository,
+		@Optional()
+		@Inject(DOMAIN_EVENT_DISPATCHER)
+		private readonly events?: DomainEventDispatcher
+	) {}
 
 	async syncExternalStock(params: {
 		catalogId: string
@@ -58,6 +101,7 @@ export class MoySkladStockSyncService {
 			catalogId: params.catalogId,
 			integrationId: params.integrationId,
 			stockMap,
+			source: 'FULL_SYNC',
 			canSyncVariants: params.canSyncVariants,
 			progress: params.progress
 		})
@@ -67,6 +111,7 @@ export class MoySkladStockSyncService {
 		catalogId: string
 		integrationId: string
 		stockMap: Map<string, number>
+		source: MoySkladExternalStockApplySource
 		canSyncVariants: boolean
 		progress: StockSyncProgressReporter
 	}): Promise<MoySkladExternalStockSyncResult> {
@@ -83,6 +128,13 @@ export class MoySkladStockSyncService {
 			: []
 		const productsWithVariants = new Set(productIdsWithVariantLinks)
 		const totalStockLinks = productLinks.length + variantLinks.length
+		const matchedStockRowIds = new Set<string>()
+		const skippedReasons = createMoySkladStockSkippedReasons({
+			variantsCapabilityDisabled: params.canSyncVariants
+				? 0
+				: rawVariantLinks.length,
+			capabilityDisabled: params.canSyncVariants ? 0 : rawVariantLinks.length
+		})
 		let processedStockLinks = 0
 
 		await params.progress.report({
@@ -97,26 +149,71 @@ export class MoySkladStockSyncService {
 		let updatedProducts = 0
 		let updatedVariants = 0
 		let skipped = 0
+		let appliedProductLinks = 0
+		let appliedVariantLinks = 0
 		const variantProductIds = new Set<string>()
+
+		if (!params.canSyncVariants) {
+			for (const link of rawVariantLinks) {
+				const stockResolution = resolveStockForExternalLink(
+					params.stockMap,
+					link
+				)
+				if (stockResolution) {
+					matchedStockRowIds.add(stockResolution.matchedExternalId)
+				}
+				await this.repo.markVariantLinkStockSkipped(
+					params.integrationId,
+					link.variantId,
+					MOYSKLAD_SKIPPED_REASONS.VARIANTS_CAPABILITY_DISABLED
+				)
+			}
+		}
 
 		for (const link of variantLinks) {
 			try {
-				const stock = resolveStockForExternalLink(params.stockMap, link)
-				if (stock === null) {
+				const stockResolution = resolveStockForExternalLink(
+					params.stockMap,
+					link
+				)
+				if (!stockResolution) {
+					skippedReasons.missingStock += 1
+					skippedReasons.snapshotIncomplete += 1
 					skipped += 1
+					await this.repo.markVariantLinkStockSkipped(
+						params.integrationId,
+						link.variantId,
+						MOYSKLAD_SKIPPED_REASONS.STOCK_MISSING_IN_EXTERNAL_REPORT
+					)
 					continue
 				}
+				matchedStockRowIds.add(stockResolution.matchedExternalId)
 
 				const changed = await this.repo.updateLinkedVariantStock(
 					link.variantId,
-					stock
+					stockResolution.stock
 				)
-				if (changed.productId) {
-					variantProductIds.add(changed.productId)
+				appliedVariantLinks += 1
+				const stockUpdate = normalizeStockUpdateResult(changed, {
+					variantId: link.variantId
+				})
+				await this.repo.touchVariantLinkStockSynced(
+					params.integrationId,
+					link.variantId
+				)
+				if (stockUpdate.productId) {
+					variantProductIds.add(stockUpdate.productId)
 				}
-				if (changed.changed) {
+				if (stockUpdate.changed) {
 					updatedVariants += 1
 				}
+				await this.publishStockChangedEvent({
+					catalogId: params.catalogId,
+					integrationId: params.integrationId,
+					externalId: link.externalId,
+					source: params.source,
+					update: stockUpdate
+				})
 			} finally {
 				processedStockLinks += 1
 				await reportStockProgress(
@@ -140,24 +237,63 @@ export class MoySkladStockSyncService {
 		for (const link of productLinks) {
 			try {
 				if (productsWithVariants.has(link.productId)) {
+					const stockResolution = resolveStockForExternalLink(
+						params.stockMap,
+						link
+					)
+					if (stockResolution) {
+						matchedStockRowIds.add(stockResolution.matchedExternalId)
+					}
+					skippedReasons.productHasVariantLinks += 1
 					skipped += 1
+					await this.repo.markProductLinkStockSkipped(
+						params.integrationId,
+						link.productId,
+						MOYSKLAD_SKIPPED_REASONS.STOCK_OWNED_BY_VARIANT_LINKS
+					)
 					continue
 				}
 
-				const stock = resolveStockForExternalLink(params.stockMap, link)
-				if (stock === null) {
+				const stockResolution = resolveStockForExternalLink(
+					params.stockMap,
+					link
+				)
+				if (!stockResolution) {
+					skippedReasons.missingStock += 1
+					skippedReasons.snapshotIncomplete += 1
 					skipped += 1
+					await this.repo.markProductLinkStockSkipped(
+						params.integrationId,
+						link.productId,
+						MOYSKLAD_SKIPPED_REASONS.STOCK_MISSING_IN_EXTERNAL_REPORT
+					)
 					continue
 				}
+				matchedStockRowIds.add(stockResolution.matchedExternalId)
 
 				const changed = await this.repo.updateLinkedProductStock(
 					params.catalogId,
 					link.productId,
-					stock
+					stockResolution.stock
 				)
-				if (changed) {
+				appliedProductLinks += 1
+				const stockUpdate = normalizeStockUpdateResult(changed, {
+					productId: link.productId
+				})
+				await this.repo.touchProductLinkStockSynced(
+					params.integrationId,
+					link.productId
+				)
+				if (stockUpdate.changed) {
 					updatedProducts += 1
 				}
+				await this.publishStockChangedEvent({
+					catalogId: params.catalogId,
+					integrationId: params.integrationId,
+					externalId: link.externalId,
+					source: params.source,
+					update: stockUpdate
+				})
 			} finally {
 				processedStockLinks += 1
 				await reportStockProgress(
@@ -168,13 +304,31 @@ export class MoySkladStockSyncService {
 			}
 		}
 
+		const unmatchedStockRows = Math.max(
+			0,
+			params.stockMap.size - matchedStockRowIds.size
+		)
+		skippedReasons.stockRowWithoutLocalLink = unmatchedStockRows
+		skippedReasons.missingMapping = unmatchedStockRows
 		const updated = updatedProducts + updatedVariants
 		return {
 			total: params.stockMap.size,
 			updated,
 			updatedProducts,
 			updatedVariants,
-			skipped
+			skipped,
+			diagnostics: {
+				source: params.source,
+				stockRows: params.stockMap.size,
+				matchedStockRows: matchedStockRowIds.size,
+				unmatchedStockRows,
+				productLinks: productLinks.length,
+				variantLinks: rawVariantLinks.length,
+				ignoredVariantLinks: params.canSyncVariants ? 0 : rawVariantLinks.length,
+				appliedProductLinks,
+				appliedVariantLinks,
+				skippedReasons
+			}
 		}
 	}
 
@@ -212,6 +366,32 @@ export class MoySkladStockSyncService {
 		return Array.isArray(productIds)
 			? productIds.map(readMoySkladString).filter(Boolean)
 			: []
+	}
+
+	private async publishStockChangedEvent(params: {
+		catalogId: string
+		integrationId: string
+		externalId: string
+		source: MoySkladExternalStockApplySource
+		update: StockUpdateResult
+	}): Promise<void> {
+		if (!this.events || !params.update.variantId) return
+		if (!hasStockFieldChanged(params.update)) return
+
+		await this.events.dispatch(
+			createDomainEvent({
+				type: 'variant.stock_changed',
+				catalogId: params.catalogId,
+				productId: params.update.productId,
+				variantId: params.update.variantId,
+				previousStock: params.update.previousStock,
+				nextStock: params.update.nextStock,
+				source: 'integration',
+				reason: resolveStockChangedReason(params.source),
+				integrationId: params.integrationId,
+				externalId: params.externalId
+			})
+		)
 	}
 }
 
@@ -266,19 +446,90 @@ function normalizeVariantStockLink(value: unknown): VariantStockLink | null {
 	}
 }
 
+function normalizeStockUpdateResult(
+	value: unknown,
+	fallback: { productId?: string | null; variantId?: string | null }
+): StockUpdateResult {
+	if (typeof value === 'boolean') {
+		return {
+			changed: value,
+			productId: fallback.productId ?? null,
+			variantId: fallback.variantId ?? null,
+			previousStock: null,
+			nextStock: null
+		}
+	}
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		return {
+			changed: false,
+			productId: fallback.productId ?? null,
+			variantId: fallback.variantId ?? null,
+			previousStock: null,
+			nextStock: null
+		}
+	}
+
+	const record = value as Record<string, unknown>
+	return {
+		changed: record.changed === true,
+		productId:
+			readMoySkladString(record.productId) || fallback.productId || null,
+		variantId:
+			readMoySkladString(record.variantId) || fallback.variantId || null,
+		previousStock: readNullableNumber(record.previousStock),
+		nextStock: readNullableNumber(record.nextStock)
+	}
+}
+
+function hasStockFieldChanged(update: StockUpdateResult): boolean {
+	if (
+		typeof update.previousStock === 'number' &&
+		typeof update.nextStock === 'number'
+	) {
+		return update.previousStock !== update.nextStock
+	}
+
+	return update.changed
+}
+
+function resolveStockChangedReason(
+	source: MoySkladExternalStockApplySource
+): string {
+	return source === 'WEBHOOK'
+		? 'moysklad_stock_webhook'
+		: 'moysklad_stock_full_sync'
+}
+
+function readNullableNumber(value: unknown): number | null {
+	if (value === null || value === undefined) return null
+	const numberValue = Number(value)
+	return Number.isFinite(numberValue) ? numberValue : null
+}
+
 function resolveStockForExternalLink(
 	stockMap: Map<string, number>,
 	link: ProductStockLink | VariantStockLink
-): number | null {
+): { stock: number; matchedExternalId: string } | null {
 	const rawMetaId = readRawMetaString(link.rawMeta, 'id')
-	const stock =
-		(rawMetaId ? stockMap.get(rawMetaId) : undefined) ??
-		stockMap.get(link.externalId)
+	if (rawMetaId) {
+		const stock = stockMap.get(rawMetaId)
+		if (stock !== undefined) {
+			return {
+				stock: normalizeStockQuantity(stock),
+				matchedExternalId: rawMetaId
+			}
+		}
+	}
+
+	const stock = stockMap.get(link.externalId)
 	if (stock === undefined) {
 		return null
 	}
 
-	return normalizeStockQuantity(stock)
+	return {
+		stock: normalizeStockQuantity(stock),
+		matchedExternalId: link.externalId
+	}
 }
 
 function readRawMetaString(rawMeta: unknown, key: string): string | null {

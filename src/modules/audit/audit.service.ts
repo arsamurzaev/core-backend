@@ -22,7 +22,7 @@ type AuditChangeInput = {
 	newValue?: Prisma.InputJsonValue | null
 }
 
-type AuditRecordInput = {
+export type AuditRecordInput = {
 	action: string
 	category?: string | null
 	outcome?: AuditOutcome

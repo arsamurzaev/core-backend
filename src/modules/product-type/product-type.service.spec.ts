@@ -3,6 +3,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 
 import { CapabilityService } from '@/modules/capability/capability.service'
+import { CAPABILITY_ASSERT_PORT } from '@/modules/capability/contracts'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_TYPE_CACHE_VERSION,
@@ -70,6 +71,10 @@ describe('ProductTypeService', () => {
 					useValue: {
 						assertCanUseProductTypes: jest.fn().mockResolvedValue(undefined)
 					}
+				},
+				{
+					provide: CAPABILITY_ASSERT_PORT,
+					useExisting: CapabilityService
 				}
 			]
 		}).compile()

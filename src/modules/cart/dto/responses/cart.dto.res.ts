@@ -68,8 +68,8 @@ export class CartVariantDto {
 	@ApiProperty({ type: Number, example: 2199, nullable: true })
 	price: number | null
 
-	@ApiProperty({ type: Number, example: 4 })
-	stock: number
+	@ApiProperty({ type: Number, example: 4, nullable: true })
+	stock: number | null
 
 	@ApiProperty({ enum: ProductVariantStatus, enumName: 'ProductVariantStatus' })
 	status: ProductVariantStatus

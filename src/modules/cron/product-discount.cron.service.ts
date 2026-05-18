@@ -1,9 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
 import { SpanStatusCode, trace } from '@opentelemetry/api'
 
-import { ObservabilityService } from '@/modules/observability/observability.service'
-import { ProductMaintenanceService } from '@/modules/product/product-maintenance.service'
+import {
+	OBSERVABILITY_RECORDER_PORT,
+	type ObservabilityRecorderPort
+} from '@/modules/observability/contracts'
+import {
+	PRODUCT_MAINTENANCE_PORT,
+	type ProductMaintenancePort
+} from '@/modules/product/contracts'
 
 const PRODUCT_DISCOUNT_EXPIRY_CRON = '0 1 * * *'
 const PRODUCT_DISCOUNT_EXPIRY_TIMEZONE = 'Europe/Moscow'
@@ -15,8 +21,10 @@ export class ProductDiscountCronService {
 	private readonly tracer = trace.getTracer('catalog_backend.cron')
 
 	constructor(
-		private readonly products: ProductMaintenanceService,
-		private readonly observability: ObservabilityService
+		@Inject(PRODUCT_MAINTENANCE_PORT)
+		private readonly products: ProductMaintenancePort,
+		@Inject(OBSERVABILITY_RECORDER_PORT)
+		private readonly observability: ObservabilityRecorderPort
 	) {}
 
 	@Cron(PRODUCT_DISCOUNT_EXPIRY_CRON, {

@@ -8,10 +8,10 @@ import {
 	CAPABILITY_PRODUCT_TYPES,
 	CAPABILITY_PRODUCT_VARIANTS,
 	CATALOG_CAPABILITIES,
+	CapabilityService,
 	type CatalogCapability,
 	type CatalogCapabilityFlags
-} from '@/modules/capability/capability.constants'
-import { CapabilityService } from '@/modules/capability/capability.service'
+} from '@/modules/capability/public'
 
 export const CATALOG_FEATURE_PRODUCT_TYPES = CAPABILITY_PRODUCT_TYPES
 export const CATALOG_FEATURE_PRODUCT_VARIANTS = CAPABILITY_PRODUCT_VARIANTS
@@ -25,7 +25,7 @@ export type CatalogFeature = CatalogCapability
 export type CatalogFeatureFlags = CatalogCapabilityFlags
 
 /**
- * Backward-compatible shim. New code should inject CapabilityService directly.
+ * Backward-compatible shim. New code should inject capability ports directly.
  */
 @Injectable()
 export class CatalogFeatureEntitlementService extends CapabilityService {

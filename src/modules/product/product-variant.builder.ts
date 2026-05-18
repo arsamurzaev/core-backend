@@ -1,4 +1,8 @@
-import { DataType, ProductVariantStatus } from '@generated/enums'
+import {
+	DataType,
+	ProductVariantKind,
+	ProductVariantStatus
+} from '@generated/enums'
 import { BadRequestException, Injectable } from '@nestjs/common'
 import { createHash } from 'crypto'
 import slugify from 'slugify'
@@ -33,7 +37,8 @@ export type ProductVariantSaleUnitInput = {
 export type ProductVariantData = {
 	sku: string
 	variantKey: string
-	stock: number
+	kind?: ProductVariantKind
+	stock: number | null
 	price: number | null
 	status: ProductVariantStatus
 	attributes: ProductVariantAttributeInput[]
@@ -133,15 +138,16 @@ export class ProductVariantBuilder {
 		const preparedInputs: {
 			input: ProductVariantDtoReq
 			status: ProductVariantStatus
+			stock: number | null
 		}[] = []
 
 		for (const [index, input] of inputs.entries()) {
 			const variantLabel = `варианта #${index + 1}`
-			const stock = input.stock ?? 0
+			const stock = this.normalizeStock(input.stock)
 			const price = input.price ?? options.defaultPrice ?? null
 			const status = this.resolveStatus(input, stock)
 
-			if (!Number.isInteger(stock) || stock < 0) {
+			if (stock !== null && (!Number.isInteger(stock) || stock < 0)) {
 				throw new BadRequestException(
 					`Некорректное значение остатка для ${variantLabel}`
 				)
@@ -159,7 +165,7 @@ export class ProductVariantBuilder {
 				)
 			}
 
-			preparedInputs.push({ input, status })
+			preparedInputs.push({ input, status, stock })
 
 			const providedIds = new Set<string>()
 
@@ -236,7 +242,7 @@ export class ProductVariantBuilder {
 		)
 		const variantKeySet = new Set<string>()
 
-		return preparedInputs.map(({ input, status }) => {
+		return preparedInputs.map(({ input, status, stock }) => {
 			const valueByAttribute = new Map<string, string>()
 			const preparedAttributes: ProductVariantAttributeInput[] = []
 
@@ -326,12 +332,12 @@ export class ProductVariantBuilder {
 			}
 			skuSet.add(sku)
 
-			const stock = input.stock ?? 0
 			const price = input.price ?? options.defaultPrice ?? null
 
 			return {
 				sku,
 				variantKey,
+				kind: ProductVariantKind.MATRIX,
 				stock,
 				price,
 				status,
@@ -436,17 +442,22 @@ export class ProductVariantBuilder {
 
 	private resolveStatus(
 		input: ProductVariantDtoReq,
-		stock: number
+		stock: number | null
 	): ProductVariantStatus {
 		if (input.status) return input.status
 		if (input.isAvailable === false) {
-			return stock > 0
-				? ProductVariantStatus.DISABLED
-				: ProductVariantStatus.OUT_OF_STOCK
+			return stock === 0
+				? ProductVariantStatus.OUT_OF_STOCK
+				: ProductVariantStatus.DISABLED
 		}
-		return stock > 0
-			? ProductVariantStatus.ACTIVE
-			: ProductVariantStatus.OUT_OF_STOCK
+		return stock === 0
+			? ProductVariantStatus.OUT_OF_STOCK
+			: ProductVariantStatus.ACTIVE
+	}
+
+	private normalizeStock(value: number | null | undefined): number | null {
+		if (value === null || value === undefined) return null
+		return value
 	}
 
 	private async loadEnumValues(

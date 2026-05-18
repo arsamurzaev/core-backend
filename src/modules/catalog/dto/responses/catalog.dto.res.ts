@@ -9,9 +9,9 @@ import {
 import type { CatalogInventoryMode } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
-import { AttributeDto } from '@/modules/attribute/dto/responses/attribute.dto.res'
-import { CATALOG_CAPABILITIES } from '@/modules/capability/capability.constants'
-import { SeoDto } from '@/modules/seo/dto/responses/seo.dto.res'
+import { AttributeDto } from '@/modules/attribute/public'
+import { CATALOG_CAPABILITIES } from '@/modules/capability/public'
+import { SeoDto } from '@/modules/seo/public'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
 

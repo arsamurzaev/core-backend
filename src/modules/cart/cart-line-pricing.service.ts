@@ -1,6 +1,8 @@
 import type { Prisma } from '@generated/client'
 import { BadRequestException, Injectable } from '@nestjs/common'
 
+import type { ProductSellableProjection } from '@/modules/product/contracts'
+
 import { resolveCartItemPricing } from './cart.utils'
 
 export type CartSaleUnitSelection = {
@@ -11,6 +13,7 @@ export type CartSaleUnitSelection = {
 } | null
 
 export type CartProductSnapshotSource = {
+	catalogId?: string
 	price: Prisma.Decimal | number | string | null
 	productAttributes?: {
 		valueDecimal?: Prisma.Decimal | number | string | null
@@ -78,15 +81,26 @@ export class CartLinePricingService {
 		quantity: number
 		productSnapshot: CartProductSnapshotSource
 		variantSnapshot: CartVariantSnapshotSource
+		commercialProjection?: ProductSellableProjection | null
 	}): CartResolvedLineSnapshot {
+		const commercialPrice = this.resolveCommercialPrice(
+			params.commercialProjection
+		)
+		const pricingProduct = params.variantId
+			? params.productSnapshot
+			: this.withCommercialPrice(params.productSnapshot, commercialPrice)
+		const pricingVariant = params.variantId
+			? this.withCommercialPrice(params.variantSnapshot, commercialPrice)
+			: params.variantSnapshot
 		const hasKnownPrice = this.hasKnownPrice(
 			params.saleUnit?.price ??
+				commercialPrice ??
 				params.variantSnapshot?.price ??
 				params.productSnapshot.price
 		)
 		const pricing = resolveCartItemPricing({
-			product: params.productSnapshot,
-			variant: params.variantSnapshot,
+			product: pricingProduct,
+			variant: pricingVariant,
 			saleUnit: params.saleUnit,
 			quantity: params.quantity
 		})
@@ -120,6 +134,23 @@ export class CartLinePricingService {
 
 	isSameMoney(left: unknown, right: unknown): boolean {
 		return this.toMoneyNumber(left) === this.toMoneyNumber(right)
+	}
+
+	private resolveCommercialPrice(
+		projection: ProductSellableProjection | null | undefined
+	): string | null {
+		if (!projection || projection.priceState === 'UNKNOWN') return null
+		return typeof projection.displayPrice === 'string'
+			? projection.displayPrice
+			: null
+	}
+
+	private withCommercialPrice<T extends { price: unknown } | null>(
+		source: T,
+		commercialPrice: string | null
+	): T {
+		if (commercialPrice === null || !source) return source
+		return { ...source, price: commercialPrice }
 	}
 
 	private resolveBaseQuantity(quantity: number, baseQuantity: unknown): number {

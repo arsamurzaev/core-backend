@@ -16,6 +16,7 @@ import {
 } from 'class-validator'
 
 import { ProductAttributeValueDto } from './product-attribute.dto.req'
+import { ProductVariantDtoReq } from './product-variant.dto.req'
 import { ProductVariantUpdateDtoReq } from './product-variant-update.dto.req'
 
 export class UpdateProductDtoReq {
@@ -165,4 +166,15 @@ export class UpdateProductDtoReq {
 	@ValidateNested({ each: true })
 	@Type(() => ProductVariantUpdateDtoReq)
 	variants?: ProductVariantUpdateDtoReq[]
+
+	@ApiPropertyOptional({
+		type: [ProductVariantDtoReq],
+		description:
+			'Full variant matrix replacement applied atomically with product update.'
+	})
+	@IsOptional()
+	@IsArray()
+	@ValidateNested({ each: true })
+	@Type(() => ProductVariantDtoReq)
+	variantMatrix?: ProductVariantDtoReq[]
 }

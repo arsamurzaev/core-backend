@@ -1,16 +1,27 @@
 import { ProductStatus } from '@generated/enums'
-import { Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
+
+import {
+	PRODUCT_EXTERNAL_SYNC_PORT,
+	type ProductExternalSyncPort
+} from '@/modules/product/public'
 
 import {
 	type IntegrationProductLinkRecord,
 	IntegrationRepository
 } from '../../integration.repository'
 
+const REQUIRED_MISSING_PRODUCT_CONFIRMATIONS = 2
+
 @Injectable()
 export class MoySkladMissingProductSyncService {
 	private readonly logger = new Logger(MoySkladMissingProductSyncService.name)
 
-	constructor(private readonly repo: IntegrationRepository) {}
+	constructor(
+		private readonly repo: IntegrationRepository,
+		@Inject(PRODUCT_EXTERNAL_SYNC_PORT)
+		private readonly products: ProductExternalSyncPort
+	) {}
 
 	async hideMissingProducts(params: {
 		catalogId: string
@@ -22,6 +33,7 @@ export class MoySkladMissingProductSyncService {
 			params.productLinks ??
 			(await this.repo.findProductLinksByIntegration(params.integrationId))
 		let hidden = 0
+		let quarantined = 0
 
 		for (const link of links) {
 			const rawMetaId = readRawMetaString(link.rawMeta, 'id')
@@ -32,22 +44,39 @@ export class MoySkladMissingProductSyncService {
 				continue
 			}
 
-			const product = await this.repo.findProductById(
-				params.catalogId,
-				link.productId
+			const missingLink = await this.repo.markProductLinkMissingFromSnapshot(
+				link.id
 			)
+			if (
+				!missingLink ||
+				missingLink.missingSyncCount < REQUIRED_MISSING_PRODUCT_CONFIRMATIONS
+			) {
+				quarantined += 1
+				continue
+			}
+
+			const product = await this.products.findExternalProductById({
+				catalogId: params.catalogId,
+				productId: link.productId
+			})
 			if (!product || product.status !== ProductStatus.ACTIVE) {
 				continue
 			}
 
-			await this.repo.updateProduct({
+			await this.products.updateExternalProduct({
 				productId: product.id,
 				catalogId: params.catalogId,
 				data: { status: ProductStatus.HIDDEN }
 			})
+			await this.repo.markProductLinkHiddenAfterMissing(link.id)
 			hidden += 1
 		}
 
+		if (quarantined > 0) {
+			this.logger.warn(
+				`Quarantined ${quarantined} missing MoySklad products for catalog ${params.catalogId}; waiting for ${REQUIRED_MISSING_PRODUCT_CONFIRMATIONS} complete snapshots before hiding`
+			)
+		}
 		if (hidden > 0) {
 			this.logger.log(
 				`Hidden ${hidden} missing MoySklad products for catalog ${params.catalogId}`

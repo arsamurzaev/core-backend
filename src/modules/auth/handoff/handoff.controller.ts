@@ -3,6 +3,7 @@ import {
 	Controller,
 	ForbiddenException,
 	Get,
+	Inject,
 	Logger,
 	Query,
 	Req,
@@ -19,7 +20,10 @@ import {
 } from '@nestjs/swagger'
 import type { Request, Response } from 'express'
 
-import { ObservabilityService } from '@/modules/observability/observability.service'
+import {
+	OBSERVABILITY_RECORDER_PORT,
+	type ObservabilityRecorderPort
+} from '@/modules/observability/contracts'
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
@@ -37,7 +41,8 @@ export class HandoffController {
 	constructor(
 		private readonly handoff: HandoffService,
 		private readonly auth: AuthService,
-		private readonly observability: ObservabilityService
+		@Inject(OBSERVABILITY_RECORDER_PORT)
+		private readonly observability: ObservabilityRecorderPort
 	) {}
 
 	@Get('/handoff')

@@ -1,5 +1,37 @@
 import { ApiPropertyOptional } from '@nestjs/swagger'
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator'
+import { Type } from 'class-transformer'
+import {
+	IsBoolean,
+	IsIn,
+	IsOptional,
+	IsString,
+	MaxLength,
+	ValidateNested
+} from 'class-validator'
+
+const MOYSKLAD_FIELD_OWNERSHIP_VALUES = ['external', 'local'] as const
+
+export class UpdateMoySkladFieldOwnershipDtoReq {
+	@ApiPropertyOptional({ enum: MOYSKLAD_FIELD_OWNERSHIP_VALUES })
+	@IsOptional()
+	@IsIn(MOYSKLAD_FIELD_OWNERSHIP_VALUES)
+	price?: 'external' | 'local'
+
+	@ApiPropertyOptional({ enum: MOYSKLAD_FIELD_OWNERSHIP_VALUES })
+	@IsOptional()
+	@IsIn(MOYSKLAD_FIELD_OWNERSHIP_VALUES)
+	stock?: 'external' | 'local'
+
+	@ApiPropertyOptional({ enum: MOYSKLAD_FIELD_OWNERSHIP_VALUES })
+	@IsOptional()
+	@IsIn(MOYSKLAD_FIELD_OWNERSHIP_VALUES)
+	content?: 'external' | 'local'
+
+	@ApiPropertyOptional({ enum: MOYSKLAD_FIELD_OWNERSHIP_VALUES })
+	@IsOptional()
+	@IsIn(MOYSKLAD_FIELD_OWNERSHIP_VALUES)
+	images?: 'external' | 'local'
+}
 
 export class UpdateMoySkladIntegrationDtoReq {
 	@ApiPropertyOptional({ type: String, example: 'ms-token' })
@@ -28,6 +60,12 @@ export class UpdateMoySkladIntegrationDtoReq {
 	@IsOptional()
 	@IsBoolean()
 	syncStock?: boolean
+
+	@ApiPropertyOptional({ type: UpdateMoySkladFieldOwnershipDtoReq })
+	@IsOptional()
+	@ValidateNested()
+	@Type(() => UpdateMoySkladFieldOwnershipDtoReq)
+	fieldOwnership?: UpdateMoySkladFieldOwnershipDtoReq
 
 	@ApiPropertyOptional({ type: Boolean, example: false })
 	@IsOptional()

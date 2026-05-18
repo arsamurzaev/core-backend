@@ -1,9 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 import { Cron } from '@nestjs/schedule'
 import { SpanStatusCode, trace } from '@opentelemetry/api'
 
-import { InventoryService } from '@/modules/inventory/inventory.service'
-import { ObservabilityService } from '@/modules/observability/observability.service'
+import {
+	INVENTORY_RESERVATION_PORT,
+	type InventoryReservationPort
+} from '@/modules/inventory/contracts'
+import {
+	OBSERVABILITY_RECORDER_PORT,
+	type ObservabilityRecorderPort
+} from '@/modules/observability/contracts'
 
 const INVENTORY_RESERVATION_EXPIRY_CRON =
 	process.env.INVENTORY_RESERVATION_EXPIRY_CRON ?? '*/5 * * * *'
@@ -17,8 +23,10 @@ export class InventoryReservationCronService {
 	private readonly tracer = trace.getTracer('catalog_backend.cron')
 
 	constructor(
-		private readonly inventory: InventoryService,
-		private readonly observability: ObservabilityService
+		@Inject(INVENTORY_RESERVATION_PORT)
+		private readonly inventory: InventoryReservationPort,
+		@Inject(OBSERVABILITY_RECORDER_PORT)
+		private readonly observability: ObservabilityRecorderPort
 	) {}
 
 	@Cron(INVENTORY_RESERVATION_EXPIRY_CRON, {

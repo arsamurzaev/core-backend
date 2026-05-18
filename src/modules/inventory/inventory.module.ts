@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common'
 
-import { CapabilityModule } from '@/modules/capability/capability.module'
+import { CapabilityModule } from '@/modules/capability/public'
 
 import { INVENTORY_RESERVATION_PORT } from './contracts'
 import { InventoryController } from './inventory.controller'

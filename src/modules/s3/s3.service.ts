@@ -1,6 +1,7 @@
 ﻿import {
 	AbortMultipartUploadCommand,
 	CompleteMultipartUploadCommand,
+	CopyObjectCommand,
 	CreateMultipartUploadCommand,
 	DeleteObjectCommand,
 	GetObjectCommand,
@@ -14,6 +15,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { MediaStatus } from '@generated/enums'
 import {
 	BadRequestException,
+	Inject,
 	Injectable,
 	InternalServerErrorException,
 	Logger,
@@ -32,7 +34,10 @@ import slugify from 'slugify'
 
 import { AllInterfaces } from '@/core/config'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
-import { ObservabilityService } from '@/modules/observability/observability.service'
+import {
+	OBSERVABILITY_RECORDER_PORT,
+	type ObservabilityRecorderPort
+} from '@/modules/observability/contracts'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import { formatUnknownValue } from '@/shared/utils'
 
@@ -158,6 +163,12 @@ export type UploadGeneratedAssetResult = {
 	url: string
 }
 
+export type CopyObjectToCatalogResult = {
+	ok: true
+	key: string
+	url: string
+}
+
 export type PresignUploadResult = {
 	ok: true
 	mediaId: string
@@ -242,7 +253,8 @@ export class S3Service implements OnModuleDestroy {
 	constructor(
 		private readonly configService: ConfigService<AllInterfaces>,
 		private readonly prisma: PrismaService,
-		private readonly observability: ObservabilityService
+		@Inject(OBSERVABILITY_RECORDER_PORT)
+		private readonly observability: ObservabilityRecorderPort
 	) {
 		const config = this.configService.get('s3', { infer: true })
 
@@ -712,6 +724,35 @@ export class S3Service implements OnModuleDestroy {
 			throw new InternalServerErrorException(
 				`Не удалось удалить файлы из S3: ${failedKeys.join(', ')}`
 			)
+		}
+	}
+
+	async copyObjectToCatalog(params: {
+		sourceKey: string
+		targetCatalogId: string
+		path?: string | null
+		folder?: string | null
+		entityId?: string | null
+	}): Promise<CopyObjectToCatalogResult> {
+		this.assertUploadEnabled()
+		const sourceKey = this.normalizeRequiredKey(params.sourceKey)
+		const targetCatalogId = params.targetCatalogId.trim()
+		if (!targetCatalogId) {
+			throw new BadRequestException('ID каталога обязателен')
+		}
+
+		const targetKey = this.buildCopiedObjectKey(sourceKey, {
+			targetCatalogId,
+			path: params.path,
+			folder: params.folder,
+			entityId: params.entityId
+		})
+		await this.copyObject(sourceKey, targetKey)
+
+		return {
+			ok: true,
+			key: targetKey,
+			url: this.buildPublicUrl(targetKey)
 		}
 	}
 
@@ -1426,6 +1467,20 @@ export class S3Service implements OnModuleDestroy {
 		await this.client.send(command)
 	}
 
+	private async copyObject(sourceKey: string, targetKey: string): Promise<void> {
+		if (!this.client) return
+
+		await this.client.send(
+			new CopyObjectCommand({
+				Bucket: this.bucket,
+				Key: targetKey,
+				CopySource: this.buildCopySource(sourceKey),
+				MetadataDirective: 'COPY',
+				...(this.publicRead ? { ACL: 'public-read' } : {})
+			})
+		)
+	}
+
 	private async headObject(key: string) {
 		try {
 			const command = new HeadObjectCommand({
@@ -1469,6 +1524,39 @@ export class S3Service implements OnModuleDestroy {
 			if (error instanceof BadRequestException) throw error
 			throw new BadRequestException(`Не удалось скачать файл ${key}`)
 		}
+	}
+
+	private buildCopiedObjectKey(
+		sourceKey: string,
+		options: {
+			targetCatalogId: string
+			path?: string | null
+			folder?: string | null
+			entityId?: string | null
+		}
+	): string {
+		const normalizedSourceKey = sourceKey.replace(/\\/g, '/')
+		const extension = path.extname(normalizedSourceKey).toLowerCase()
+		const safeExtension = extension.replace(/[^a-z0-9.]/g, '') || '.bin'
+		const isRaw = normalizedSourceKey.split('/').includes(RAW_SEGMENT)
+		const prefix = this.buildPrefix(
+			options.targetCatalogId,
+			{
+				path: options.path ?? undefined,
+				folder: options.folder ?? undefined,
+				entityId: options.entityId ?? undefined
+			},
+			isRaw ? [RAW_SEGMENT] : []
+		)
+
+		return `${prefix}/${randomUUID()}${safeExtension}`
+	}
+
+	private buildCopySource(key: string): string {
+		return `${this.bucket}/${key
+			.split('/')
+			.map(segment => encodeURIComponent(segment))
+			.join('/')}`
 	}
 
 	private buildBaseKeyFromRawKey(key: string): string {

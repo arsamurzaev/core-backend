@@ -71,12 +71,14 @@ export class CartManagerSessionService {
 				cart: reserveEffect.reserved
 					? await this.findByIdOrThrow(cart.id, tx)
 					: updated,
-				inventoryCacheCatalogIds: reserveEffect.inventoryCacheCatalogIds
+				inventoryCacheCatalogIds: reserveEffect.inventoryCacheCatalogIds,
+				inventoryDomainEvents: reserveEffect.inventoryDomainEvents
 			}
 		})
 
 		await this.inventoryReservation.invalidateProductCaches(
-			result.inventoryCacheCatalogIds
+			result.inventoryCacheCatalogIds,
+			result.inventoryDomainEvents
 		)
 
 		return {
@@ -126,12 +128,14 @@ export class CartManagerSessionService {
 				cart: reserveEffect.reserved
 					? await this.findByIdOrThrow(cart.id, tx)
 					: updated,
-				inventoryCacheCatalogIds: reserveEffect.inventoryCacheCatalogIds
+				inventoryCacheCatalogIds: reserveEffect.inventoryCacheCatalogIds,
+				inventoryDomainEvents: reserveEffect.inventoryDomainEvents
 			}
 		})
 
 		await this.inventoryReservation.invalidateProductCaches(
-			result.inventoryCacheCatalogIds
+			result.inventoryCacheCatalogIds,
+			result.inventoryDomainEvents
 		)
 
 		return {

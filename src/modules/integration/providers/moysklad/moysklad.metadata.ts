@@ -8,7 +8,15 @@ import { normalizeRequiredString } from '@/shared/utils'
 
 import {
 	type EncryptedMoySkladToken,
+	type MoySkladFieldOwnership,
 	type MoySkladMetadata,
+	type MoySkladProductChangeWebhookAction,
+	type MoySkladProductChangeWebhookEntityType,
+	type MoySkladProductChangeWebhookMetadata,
+	type MoySkladProductDeleteWebhookEntityType,
+	type MoySkladProductDeleteWebhookMetadata,
+	type MoySkladProductFolderWebhookAction,
+	type MoySkladProductFolderWebhookMetadata,
 	type MoySkladStockWebhookMetadata,
 	type StoredMoySkladMetadata
 } from './moysklad.types'
@@ -17,11 +25,51 @@ export const MOYSKLAD_DEFAULT_PRICE_TYPE_NAME = 'Цена продажи'
 export const MOYSKLAD_DEFAULT_SCHEDULE_TIMEZONE = 'Europe/Moscow'
 export const MOYSKLAD_STOCK_WEBHOOK_REPORT_TYPE = 'all'
 export const MOYSKLAD_STOCK_WEBHOOK_STOCK_TYPE = 'stock'
+export const MOYSKLAD_PRODUCT_DELETE_WEBHOOK_ENTITY_TYPES = [
+	'product',
+	'service',
+	'bundle',
+	'variant'
+] as const satisfies readonly MoySkladProductDeleteWebhookEntityType[]
+export const MOYSKLAD_PRODUCT_CHANGE_WEBHOOK_ENTITY_TYPES = [
+	'product',
+	'service',
+	'bundle',
+	'variant'
+] as const satisfies readonly MoySkladProductChangeWebhookEntityType[]
+export const MOYSKLAD_PRODUCT_CHANGE_WEBHOOK_ACTIONS = [
+	'CREATE',
+	'UPDATE'
+] as const satisfies readonly MoySkladProductChangeWebhookAction[]
+export const MOYSKLAD_PRODUCT_FOLDER_WEBHOOK_ACTIONS = [
+	'CREATE',
+	'UPDATE',
+	'DELETE'
+] as const satisfies readonly MoySkladProductFolderWebhookAction[]
+export const MOYSKLAD_PRODUCT_FOLDER_WEBHOOK_ENTITY_TYPE = 'productfolder'
+export const MOYSKLAD_FIELD_OWNERSHIP_VALUES = ['external', 'local'] as const
+export const MOYSKLAD_DEFAULT_FIELD_OWNERSHIP: MoySkladFieldOwnership = {
+	price: 'external',
+	stock: 'external',
+	content: 'external',
+	images: 'external'
+}
 
 const MOYSKLAD_TOKEN_ENCRYPTION_FORMAT = 'enc-v1'
 const MOYSKLAD_TOKEN_ENCRYPTION_ALGORITHM = 'aes-256-gcm'
 const AES_GCM_KEY_BYTES = 32
 const AES_GCM_IV_BYTES = 12
+const moySkladFieldOwnershipValueSchema = z.enum(
+	MOYSKLAD_FIELD_OWNERSHIP_VALUES
+)
+const moySkladFieldOwnershipSchema = z
+	.object({
+		price: moySkladFieldOwnershipValueSchema.optional(),
+		stock: moySkladFieldOwnershipValueSchema.optional(),
+		content: moySkladFieldOwnershipValueSchema.optional(),
+		images: moySkladFieldOwnershipValueSchema.optional()
+	})
+	.optional()
 
 const storedMoySkladMetadataSchema = z
 	.object({
@@ -47,6 +95,7 @@ const storedMoySkladMetadataSchema = z
 		schedulePattern: z.string().nullable().optional(),
 		scheduleTimezone: z.string().optional(),
 		lastStockSyncedAt: z.string().nullable().optional(),
+		fieldOwnership: moySkladFieldOwnershipSchema,
 		stockWebhookEnabled: z.boolean().optional(),
 		stockWebhook: z
 			.object({
@@ -59,11 +108,114 @@ const storedMoySkladMetadataSchema = z
 				lastProcessedAt: z.string().nullable().optional(),
 				lastError: z.string().nullable().optional()
 			})
+			.optional(),
+		productDeleteWebhook: z
+			.object({
+				enabled: z.boolean().optional(),
+				externalIds: z
+					.object({
+						product: z.string().nullable().optional(),
+						service: z.string().nullable().optional(),
+						bundle: z.string().nullable().optional(),
+						variant: z.string().nullable().optional()
+					})
+					.optional(),
+				accountId: z.string().nullable().optional(),
+				secretHash: z.string().nullable().optional(),
+				lastReceivedAt: z.string().nullable().optional(),
+				lastProcessedAt: z.string().nullable().optional(),
+				lastError: z.string().nullable().optional()
+			})
+			.optional(),
+		productChangeWebhook: z
+			.object({
+				enabled: z.boolean().optional(),
+				externalIds: z
+					.object({
+						product: z
+							.object({
+								CREATE: z.string().nullable().optional(),
+								UPDATE: z.string().nullable().optional()
+							})
+							.optional(),
+						service: z
+							.object({
+								CREATE: z.string().nullable().optional(),
+								UPDATE: z.string().nullable().optional()
+							})
+							.optional(),
+						bundle: z
+							.object({
+								CREATE: z.string().nullable().optional(),
+								UPDATE: z.string().nullable().optional()
+							})
+							.optional(),
+						variant: z
+							.object({
+								CREATE: z.string().nullable().optional(),
+								UPDATE: z.string().nullable().optional()
+							})
+							.optional()
+					})
+					.optional(),
+				accountId: z.string().nullable().optional(),
+				secretHash: z.string().nullable().optional(),
+				lastReceivedAt: z.string().nullable().optional(),
+				lastProcessedAt: z.string().nullable().optional(),
+				lastError: z.string().nullable().optional()
+			})
+			.optional(),
+		productFolderWebhook: z
+			.object({
+				enabled: z.boolean().optional(),
+				externalIds: z
+					.object({
+						CREATE: z.string().nullable().optional(),
+						UPDATE: z.string().nullable().optional(),
+						DELETE: z.string().nullable().optional()
+					})
+					.optional(),
+				accountId: z.string().nullable().optional(),
+				secretHash: z.string().nullable().optional(),
+				lastReceivedAt: z.string().nullable().optional(),
+				lastProcessedAt: z.string().nullable().optional(),
+				lastError: z.string().nullable().optional()
+			})
 			.optional()
 	})
 	.refine(data => data.token || data.tokenEncrypted, {
 		message: 'Токен MoySklad обязателен'
 	})
+
+type PartialMoySkladProductDeleteWebhookMetadata = Omit<
+	Partial<MoySkladProductDeleteWebhookMetadata>,
+	'externalIds'
+> & {
+	externalIds?: Partial<
+		Record<MoySkladProductDeleteWebhookEntityType, string | null>
+	> | null
+}
+
+type PartialMoySkladProductChangeWebhookMetadata = Omit<
+	Partial<MoySkladProductChangeWebhookMetadata>,
+	'externalIds'
+> & {
+	externalIds?: Partial<
+		Record<
+			MoySkladProductChangeWebhookEntityType,
+			Partial<Record<MoySkladProductChangeWebhookAction, string | null>>
+		>
+	> | null
+}
+
+type PartialMoySkladProductFolderWebhookMetadata = Omit<
+	Partial<MoySkladProductFolderWebhookMetadata>,
+	'externalIds'
+> & {
+	externalIds?: Partial<
+		Record<MoySkladProductFolderWebhookAction, string | null>
+	> | null
+}
 
 type PartialMoySkladMetadata = {
 	token?: string
@@ -80,6 +232,10 @@ type PartialMoySkladMetadata = {
 	lastStockSyncedAt?: string | null
 	stockWebhookEnabled?: boolean
 	stockWebhook?: Partial<MoySkladStockWebhookMetadata> | null
+	productDeleteWebhook?: PartialMoySkladProductDeleteWebhookMetadata | null
+	productChangeWebhook?: PartialMoySkladProductChangeWebhookMetadata | null
+	productFolderWebhook?: PartialMoySkladProductFolderWebhookMetadata | null
+	fieldOwnership?: Partial<MoySkladFieldOwnership> | null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -126,6 +282,16 @@ export function buildMoySkladMetadata(
 	const lastStockSyncedAt = normalizeOptionalString(input.lastStockSyncedAt)
 	const stockWebhookEnabled = input.stockWebhookEnabled ?? false
 	const stockWebhook = normalizeStockWebhookMetadata(input.stockWebhook)
+	const productDeleteWebhook = normalizeProductDeleteWebhookMetadata(
+		input.productDeleteWebhook
+	)
+	const productChangeWebhook = normalizeProductChangeWebhookMetadata(
+		input.productChangeWebhook
+	)
+	const productFolderWebhook = normalizeProductFolderWebhookMetadata(
+		input.productFolderWebhook
+	)
+	const fieldOwnership = normalizeMoySkladFieldOwnership(input.fieldOwnership)
 
 	if (scheduleEnabled && !schedulePattern) {
 		throw new BadRequestException(
@@ -158,8 +324,40 @@ export function buildMoySkladMetadata(
 		scheduleTimezone,
 		lastStockSyncedAt,
 		stockWebhookEnabled,
-		stockWebhook
+		stockWebhook,
+		productDeleteWebhook,
+		productChangeWebhook,
+		productFolderWebhook,
+		fieldOwnership
 	}
+}
+
+export function normalizeMoySkladFieldOwnership(
+	input?: Partial<MoySkladFieldOwnership> | null
+): MoySkladFieldOwnership {
+	if (!input) return { ...MOYSKLAD_DEFAULT_FIELD_OWNERSHIP }
+
+	return {
+		price: normalizeMoySkladFieldOwnershipValue(input.price),
+		stock: normalizeMoySkladFieldOwnershipValue(input.stock),
+		content: normalizeMoySkladFieldOwnershipValue(input.content),
+		images: normalizeMoySkladFieldOwnershipValue(input.images)
+	}
+}
+
+export function isMoySkladExternalField(
+	metadata: { fieldOwnership?: Partial<MoySkladFieldOwnership> | null },
+	field: keyof MoySkladFieldOwnership
+): boolean {
+	return (
+		normalizeMoySkladFieldOwnership(metadata.fieldOwnership)[field] === 'external'
+	)
+}
+
+function normalizeMoySkladFieldOwnershipValue(
+	value?: MoySkladFieldOwnership[keyof MoySkladFieldOwnership] | null
+): MoySkladFieldOwnership[keyof MoySkladFieldOwnership] {
+	return value === 'local' ? 'local' : 'external'
 }
 
 export function buildDefaultMoySkladStockWebhookMetadata(): MoySkladStockWebhookMetadata {
@@ -187,6 +385,147 @@ function normalizeStockWebhookMetadata(
 		secretHash: normalizeOptionalString(input.secretHash),
 		reportType: defaults.reportType,
 		stockType: defaults.stockType,
+		lastReceivedAt: normalizeOptionalString(input.lastReceivedAt),
+		lastProcessedAt: normalizeOptionalString(input.lastProcessedAt),
+		lastError: normalizeOptionalString(input.lastError)
+	}
+}
+
+export function buildDefaultMoySkladProductDeleteWebhookMetadata(): MoySkladProductDeleteWebhookMetadata {
+	return {
+		enabled: false,
+		externalIds: {
+			product: null,
+			service: null,
+			bundle: null,
+			variant: null
+		},
+		accountId: null,
+		secretHash: null,
+		lastReceivedAt: null,
+		lastProcessedAt: null,
+		lastError: null
+	}
+}
+
+function normalizeProductDeleteWebhookMetadata(
+	input?: PartialMoySkladProductDeleteWebhookMetadata | null
+): MoySkladProductDeleteWebhookMetadata {
+	const defaults = buildDefaultMoySkladProductDeleteWebhookMetadata()
+	if (!input) return defaults
+
+	const externalIds =
+		input.externalIds && typeof input.externalIds === 'object'
+			? input.externalIds
+			: defaults.externalIds
+
+	return {
+		enabled: input.enabled ?? defaults.enabled,
+		externalIds: {
+			product: normalizeOptionalString(externalIds.product),
+			service: normalizeOptionalString(externalIds.service),
+			bundle: normalizeOptionalString(externalIds.bundle),
+			variant: normalizeOptionalString(externalIds.variant)
+		},
+		accountId: normalizeOptionalString(input.accountId),
+		secretHash: normalizeOptionalString(input.secretHash),
+		lastReceivedAt: normalizeOptionalString(input.lastReceivedAt),
+		lastProcessedAt: normalizeOptionalString(input.lastProcessedAt),
+		lastError: normalizeOptionalString(input.lastError)
+	}
+}
+
+export function buildDefaultMoySkladProductChangeWebhookMetadata(): MoySkladProductChangeWebhookMetadata {
+	return {
+		enabled: false,
+		externalIds: {
+			product: { CREATE: null, UPDATE: null },
+			service: { CREATE: null, UPDATE: null },
+			bundle: { CREATE: null, UPDATE: null },
+			variant: { CREATE: null, UPDATE: null }
+		},
+		accountId: null,
+		secretHash: null,
+		lastReceivedAt: null,
+		lastProcessedAt: null,
+		lastError: null
+	}
+}
+
+function normalizeProductChangeWebhookMetadata(
+	input?: PartialMoySkladProductChangeWebhookMetadata | null
+): MoySkladProductChangeWebhookMetadata {
+	const defaults = buildDefaultMoySkladProductChangeWebhookMetadata()
+	if (!input) return defaults
+
+	const externalIds =
+		input.externalIds && typeof input.externalIds === 'object'
+			? input.externalIds
+			: defaults.externalIds
+
+	return {
+		enabled: input.enabled ?? defaults.enabled,
+		externalIds: {
+			product: normalizeProductChangeWebhookActionIds(externalIds.product),
+			service: normalizeProductChangeWebhookActionIds(externalIds.service),
+			bundle: normalizeProductChangeWebhookActionIds(externalIds.bundle),
+			variant: normalizeProductChangeWebhookActionIds(externalIds.variant)
+		},
+		accountId: normalizeOptionalString(input.accountId),
+		secretHash: normalizeOptionalString(input.secretHash),
+		lastReceivedAt: normalizeOptionalString(input.lastReceivedAt),
+		lastProcessedAt: normalizeOptionalString(input.lastProcessedAt),
+		lastError: normalizeOptionalString(input.lastError)
+	}
+}
+
+function normalizeProductChangeWebhookActionIds(
+	input?: Partial<
+		Record<MoySkladProductChangeWebhookAction, string | null>
+	> | null
+): Record<MoySkladProductChangeWebhookAction, string | null> {
+	return {
+		CREATE: normalizeOptionalString(input?.CREATE),
+		UPDATE: normalizeOptionalString(input?.UPDATE)
+	}
+}
+
+export function buildDefaultMoySkladProductFolderWebhookMetadata(): MoySkladProductFolderWebhookMetadata {
+	return {
+		enabled: false,
+		externalIds: {
+			CREATE: null,
+			UPDATE: null,
+			DELETE: null
+		},
+		accountId: null,
+		secretHash: null,
+		lastReceivedAt: null,
+		lastProcessedAt: null,
+		lastError: null
+	}
+}
+
+function normalizeProductFolderWebhookMetadata(
+	input?: PartialMoySkladProductFolderWebhookMetadata | null
+): MoySkladProductFolderWebhookMetadata {
+	const defaults = buildDefaultMoySkladProductFolderWebhookMetadata()
+	if (!input) return defaults
+
+	const externalIds =
+		input.externalIds && typeof input.externalIds === 'object'
+			? input.externalIds
+			: defaults.externalIds
+
+	return {
+		enabled: input.enabled ?? defaults.enabled,
+		externalIds: {
+			CREATE: normalizeOptionalString(externalIds.CREATE),
+			UPDATE: normalizeOptionalString(externalIds.UPDATE),
+			DELETE: normalizeOptionalString(externalIds.DELETE)
+		},
+		accountId: normalizeOptionalString(input.accountId),
+		secretHash: normalizeOptionalString(input.secretHash),
 		lastReceivedAt: normalizeOptionalString(input.lastReceivedAt),
 		lastProcessedAt: normalizeOptionalString(input.lastProcessedAt),
 		lastError: normalizeOptionalString(input.lastError)
@@ -247,8 +586,12 @@ export class MoySkladMetadataCryptoService {
 			schedulePattern: metadata.schedulePattern,
 			scheduleTimezone: metadata.scheduleTimezone,
 			lastStockSyncedAt: metadata.lastStockSyncedAt,
+			fieldOwnership: metadata.fieldOwnership,
 			stockWebhookEnabled: metadata.stockWebhookEnabled,
 			stockWebhook: metadata.stockWebhook,
+			productDeleteWebhook: metadata.productDeleteWebhook,
+			productChangeWebhook: metadata.productChangeWebhook,
+			productFolderWebhook: metadata.productFolderWebhook,
 			tokenEncrypted: this.encryptToken(metadata.token)
 		}
 	}
@@ -271,8 +614,12 @@ export class MoySkladMetadataCryptoService {
 			schedulePattern: parsed.schedulePattern,
 			scheduleTimezone: parsed.scheduleTimezone,
 			lastStockSyncedAt: parsed.lastStockSyncedAt,
+			fieldOwnership: parsed.fieldOwnership,
 			stockWebhookEnabled: parsed.stockWebhookEnabled,
-			stockWebhook: parsed.stockWebhook
+			stockWebhook: parsed.stockWebhook,
+			productDeleteWebhook: parsed.productDeleteWebhook,
+			productChangeWebhook: parsed.productChangeWebhook,
+			productFolderWebhook: parsed.productFolderWebhook
 		})
 	}
 

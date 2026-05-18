@@ -1,23 +1,29 @@
 import { Module } from '@nestjs/common'
 
 import { PrismaModule } from '@/infrastructure/prisma/prisma.module'
-import { CapabilityModule } from '@/modules/capability/capability.module'
-import { S3Module } from '@/modules/s3/s3.module'
-import { SeoRepository } from '@/modules/seo/seo.repository'
+import { CapabilityModule } from '@/modules/capability/public'
+import { S3Module } from '@/modules/s3/public'
+import { SeoRepository } from '@/modules/seo/public'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
 
 import {
 	PRODUCT_COMMAND_PORT,
+	PRODUCT_EXTERNAL_SYNC_PORT,
+	PRODUCT_MAINTENANCE_PORT,
 	PRODUCT_PRICING_PORT,
-	PRODUCT_READER_PORT
+	PRODUCT_READER_PORT,
+	PRODUCT_SELLABLE_READER_PORT
 } from './contracts'
 import { ProductAttributeBuilder } from './product-attribute.builder'
 import { ProductCommandService } from './product-command.service'
+import { ProductExternalSyncService } from './product-external-sync.service'
 import { ProductMaintenanceService } from './product-maintenance.service'
 import { ProductPricingService } from './product-pricing.service'
 import { ProductReadService } from './product-read.service'
+import { ProductSellableService } from './product-sellable.service'
+import { ProductSeoDomainEventHandler } from './product-seo-domain-event.handler'
 import { ProductSeoSyncService } from './product-seo-sync.service'
 import { ProductTypeChangeService } from './product-type-change.service'
 import { ProductVariantBuilder } from './product-variant.builder'
@@ -33,30 +39,42 @@ import { ProductService } from './product.service'
 	providers: [
 		ProductService,
 		ProductCommandService,
+		ProductExternalSyncService,
 		ProductMaintenanceService,
 		ProductWriteFinalizer,
 		ProductPricingService,
 		ProductReadService,
+		ProductSellableService,
 		ProductTypeChangeService,
 		ProductVariantService,
 		ProductRepository,
 		ProductAttributeBuilder,
 		ProductVariantBuilder,
 		ProductSeoSyncService,
+		ProductSeoDomainEventHandler,
 		SeoRepository,
 		ProductMediaMapper,
 		MediaRepository,
 		MediaUrlService,
 		{ provide: PRODUCT_COMMAND_PORT, useExisting: ProductService },
+		{
+			provide: PRODUCT_EXTERNAL_SYNC_PORT,
+			useExisting: ProductExternalSyncService
+		},
+		{ provide: PRODUCT_MAINTENANCE_PORT, useExisting: ProductMaintenanceService },
 		{ provide: PRODUCT_READER_PORT, useExisting: ProductReadService },
-		{ provide: PRODUCT_PRICING_PORT, useExisting: ProductPricingService }
+		{ provide: PRODUCT_PRICING_PORT, useExisting: ProductPricingService },
+		{ provide: PRODUCT_SELLABLE_READER_PORT, useExisting: ProductSellableService }
 	],
 	exports: [
 		ProductService,
 		ProductMaintenanceService,
 		PRODUCT_COMMAND_PORT,
+		PRODUCT_EXTERNAL_SYNC_PORT,
+		PRODUCT_MAINTENANCE_PORT,
 		PRODUCT_READER_PORT,
-		PRODUCT_PRICING_PORT
+		PRODUCT_PRICING_PORT,
+		PRODUCT_SELLABLE_READER_PORT
 	]
 })
 export class ProductModule {}

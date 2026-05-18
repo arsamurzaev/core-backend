@@ -1,22 +1,40 @@
 import type { Prisma } from '@generated/client'
-import { ProductVariantStatus } from '@generated/client'
 import type { CatalogInventoryMode } from '@generated/enums'
-import { BadRequestException, Inject, Injectable } from '@nestjs/common'
+import {
+	BadRequestException,
+	Inject,
+	Injectable,
+	NotFoundException
+} from '@nestjs/common'
 
 import {
 	CAPABILITY_READER_PORT,
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
+import {
+	PRODUCT_SELLABLE_READER_PORT,
+	type ProductSellableReader
+} from '@/modules/product/contracts'
 
 import type { NormalizedCartItemInput } from './cart.utils'
 
 const INVENTORY_MODE_NONE: CatalogInventoryMode = 'NONE'
 
+type EnsureCartVariantPurchasableInput = {
+	catalogId: string
+	productId: string
+	variantId: string
+	quantity: number
+	inventoryMode: CatalogInventoryMode
+}
+
 @Injectable()
 export class CartVariantSelectionService {
 	constructor(
 		@Inject(CAPABILITY_READER_PORT)
-		private readonly capabilities: CapabilityReaderPort
+		private readonly capabilities: CapabilityReaderPort,
+		@Inject(PRODUCT_SELLABLE_READER_PORT)
+		private readonly sellableReader: ProductSellableReader
 	) {}
 
 	async resolveCartVariantId(
@@ -27,7 +45,14 @@ export class CartVariantSelectionService {
 	): Promise<string | null> {
 		const canUseVariants =
 			await this.capabilities.canUseProductVariants(catalogId)
-		if (!canUseVariants) return null
+
+		if (input.quantity <= 0) return input.variantId
+
+		if (!canUseVariants) {
+			return this.resolveImplicitProductVariantId(catalogId, input, inventoryMode, {
+				requireExplicitSelection: false
+			})
+		}
 
 		if (input.variantId) return input.variantId
 
@@ -54,86 +79,77 @@ export class CartVariantSelectionService {
 			return saleUnit.variantId
 		}
 
-		if (input.quantity <= 0) return input.variantId
-
-		const variants = await tx.productVariant.findMany({
-			where: { productId: input.productId, deleteAt: null },
-			select: {
-				id: true,
-				stock: true,
-				status: true,
-				isAvailable: true,
-				attributes: {
-					where: { deleteAt: null },
-					select: { id: true }
-				}
-			},
-			orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
+		return this.resolveImplicitProductVariantId(catalogId, input, inventoryMode, {
+			requireExplicitSelection: true
 		})
-
-		if (!variants.length) return null
-
-		const purchasable = variants.filter(variant =>
-			this.isVariantPurchasable(variant, input.quantity, inventoryMode)
-		)
-
-		if (purchasable.length === 1) return purchasable[0].id
-		if (purchasable.length > 1) {
-			throw new BadRequestException('Выберите вариацию товара')
-		}
-
-		throw new BadRequestException('Вариация товара недоступна')
 	}
 
 	async ensureVariantPurchasable(
-		tx: Prisma.TransactionClient,
-		variantId: string,
-		quantity: number,
-		productId: string | undefined,
-		inventoryMode: CatalogInventoryMode
+		input: EnsureCartVariantPurchasableInput
 	): Promise<void> {
-		const variant = await tx.productVariant.findFirst({
-			where: {
-				id: variantId,
-				...(productId ? { productId } : {}),
-				deleteAt: null
-			},
-			select: { stock: true, isAvailable: true, status: true }
-		})
+		const sellable = await this.resolveVariantSellableOrBadRequest(input)
 
-		if (!variant) {
+		if (sellable.variantId !== input.variantId) {
 			throw new BadRequestException('Вариация товара недоступна')
 		}
 
-		if (this.isVariantPurchasable(variant, quantity, inventoryMode)) return
+		if (sellable.availabilityState === 'AVAILABLE') return
 
-		if (this.shouldEnforceStock(inventoryMode)) {
+		if (sellable.availabilityState === 'OUT_OF_STOCK') {
 			throw new BadRequestException(
-				`Недостаточно товара на складе. Доступно: ${variant.stock}`
+				`Недостаточно товара на складе. Доступно: ${sellable.stock ?? 0}`
 			)
 		}
 
-		throw new BadRequestException('Вариация товара недоступна')
+		if (sellable.availabilityState === 'UNAVAILABLE') {
+			throw new BadRequestException('Вариация товара недоступна')
+		}
 	}
 
-	private isVariantPurchasable(
-		variant: {
-			stock: number
-			isAvailable: boolean
-			status: ProductVariantStatus
-		},
-		quantity: number,
-		inventoryMode: CatalogInventoryMode
-	): boolean {
-		if (!this.shouldEnforceStock(inventoryMode)) {
-			return variant.status !== ProductVariantStatus.DISABLED
+	private async resolveImplicitProductVariantId(
+		catalogId: string,
+		input: NormalizedCartItemInput,
+		inventoryMode: CatalogInventoryMode,
+		options: { requireExplicitSelection: boolean }
+	): Promise<string | null> {
+		const sellable = await this.sellableReader.resolveProductSellable(
+			catalogId,
+			input.productId,
+			{
+				quantity: input.quantity,
+				enforceStock: this.shouldEnforceStock(inventoryMode)
+			}
+		)
+
+		if (sellable.requiresVariantSelection) {
+			if (options.requireExplicitSelection) {
+				throw new BadRequestException('Выберите вариацию товара')
+			}
+			return null
 		}
 
-		return (
-			variant.status === ProductVariantStatus.ACTIVE &&
-			variant.isAvailable &&
-			variant.stock >= quantity
-		)
+		return sellable.variantId
+	}
+
+	private async resolveVariantSellableOrBadRequest(
+		input: EnsureCartVariantPurchasableInput
+	) {
+		try {
+			return await this.sellableReader.resolveVariantSellable(
+				input.catalogId,
+				input.productId,
+				input.variantId,
+				{
+					quantity: input.quantity,
+					enforceStock: this.shouldEnforceStock(input.inventoryMode)
+				}
+			)
+		} catch (error) {
+			if (error instanceof NotFoundException) {
+				throw new BadRequestException('Вариация товара недоступна')
+			}
+			throw error
+		}
 	}
 
 	private shouldEnforceStock(inventoryMode: CatalogInventoryMode): boolean {

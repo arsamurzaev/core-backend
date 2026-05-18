@@ -17,6 +17,7 @@ import {
 	CAPABILITY_READER_PORT,
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
+import type { DomainEvent } from '@/shared/domain-events/domain-events.contract'
 
 import { CartInventoryReservationService } from './cart-inventory-reservation.service'
 import { CartOrderExportService } from './cart-order-export.service'
@@ -24,8 +25,6 @@ import {
 	CartOrderSnapshotService,
 	completedOrderSelect
 } from './cart-order-snapshot.service'
-import { CartVariantSelectionService } from './cart-variant-selection.service'
-import { resolveCartItemBaseQuantity } from './cart.utils'
 
 const CURRENT_CART_VISIBLE_STATUSES = [
 	CartStatus.DRAFT,
@@ -69,6 +68,7 @@ const checkoutCartSelect = {
 			product: {
 				select: {
 					id: true,
+					catalogId: true,
 					name: true,
 					slug: true,
 					price: true,
@@ -152,7 +152,6 @@ export class OrderCheckoutService {
 		private readonly inventoryReservation: CartInventoryReservationService,
 		private readonly orderExport: CartOrderExportService,
 		private readonly orderSnapshot: CartOrderSnapshotService,
-		private readonly variantSelection: CartVariantSelectionService,
 		@Inject(CAPABILITY_READER_PORT)
 		private readonly capabilities: CapabilityReaderPort
 	) {}
@@ -192,9 +191,6 @@ export class OrderCheckoutService {
 
 			const inventoryMode = this.resolveInventoryMode(cart)
 			const features = await this.capabilities.getCurrentFeatures(cart.catalogId)
-			if (features.canUseProductVariants) {
-				await this.ensureCheckoutVariantsPurchasable(tx, cart, inventoryMode)
-			}
 
 			const snapshotItems = await this.orderSnapshot.buildSnapshotItems(
 				tx,
@@ -202,7 +198,8 @@ export class OrderCheckoutService {
 				cart.items,
 				{
 					canUseProductVariants: features.canUseProductVariants,
-					canUseCatalogSaleUnits: features.canUseCatalogSaleUnits
+					canUseCatalogSaleUnits: features.canUseCatalogSaleUnits,
+					enforceStock: this.shouldEnforceStockOnCheckout(inventoryMode)
 				}
 			)
 			if (
@@ -236,8 +233,9 @@ export class OrderCheckoutService {
 			})
 
 			let inventoryCacheCatalogIds: string[] = []
+			let inventoryDomainEvents: DomainEvent[] = []
 			if (inventoryMode === INVENTORY_MODE_INTERNAL) {
-				inventoryCacheCatalogIds =
+				const inventoryEffects =
 					await this.inventoryReservation.consumeCompletedOrderStockTx(tx, {
 						catalogId: cart.catalogId,
 						cartId: cart.id,
@@ -250,17 +248,21 @@ export class OrderCheckoutService {
 						})),
 						actorUserId
 					})
+				inventoryCacheCatalogIds = inventoryEffects.affectedCatalogIds
+				inventoryDomainEvents = inventoryEffects.domainEvents
 			}
 
 			return {
 				cartId: cart.id,
 				order,
-				inventoryCacheCatalogIds
+				inventoryCacheCatalogIds,
+				inventoryDomainEvents
 			}
 		})
 
 		await this.inventoryReservation.invalidateProductCaches(
-			result.inventoryCacheCatalogIds
+			result.inventoryCacheCatalogIds,
+			result.inventoryDomainEvents
 		)
 		await this.orderExport.enqueueCompletedOrderSafely(
 			result.order.catalogId,
@@ -287,31 +289,17 @@ export class OrderCheckoutService {
 		return cart
 	}
 
-	private async ensureCheckoutVariantsPurchasable(
-		tx: Prisma.TransactionClient,
-		cart: CheckoutCartEntity,
-		inventoryMode: CatalogInventoryMode
-	): Promise<void> {
-		const purchasableInventoryMode =
-			inventoryMode === INVENTORY_MODE_INTERNAL
-				? INVENTORY_MODE_NONE
-				: inventoryMode
-
-		for (const item of cart.items) {
-			if (!item.variantId) continue
-
-			await this.variantSelection.ensureVariantPurchasable(
-				tx,
-				item.variantId,
-				resolveCartItemBaseQuantity(item),
-				item.productId,
-				purchasableInventoryMode
-			)
-		}
-	}
-
 	private resolveInventoryMode(cart: CheckoutCartEntity): CatalogInventoryMode {
 		return cart.catalog.settings?.inventoryMode ?? INVENTORY_MODE_NONE
+	}
+
+	private shouldEnforceStockOnCheckout(
+		inventoryMode: CatalogInventoryMode
+	): boolean {
+		return (
+			inventoryMode !== INVENTORY_MODE_NONE &&
+			inventoryMode !== INVENTORY_MODE_INTERNAL
+		)
 	}
 
 	private resolveTotalAmount(

@@ -3,6 +3,7 @@ import {
 	ForbiddenException,
 	HttpException,
 	HttpStatus,
+	Inject,
 	Injectable,
 	Logger,
 	UnauthorizedException
@@ -11,7 +12,10 @@ import { hash, verify } from 'argon2'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { RedisService } from '@/infrastructure/redis/redis.service'
-import { ObservabilityService } from '@/modules/observability/observability.service'
+import {
+	OBSERVABILITY_RECORDER_PORT,
+	type ObservabilityRecorderPort
+} from '@/modules/observability/contracts'
 
 import { ChangePasswordDtoReq } from './dto/requests/change-password.dto.req'
 import { LoginDtoReq } from './dto/requests/login.dto.req'
@@ -42,7 +46,8 @@ export class AuthService {
 	constructor(
 		private readonly prisma: PrismaService,
 		private readonly sessions: SessionService,
-		private readonly observability: ObservabilityService,
+		@Inject(OBSERVABILITY_RECORDER_PORT)
+		private readonly observability: ObservabilityRecorderPort,
 		private readonly redis: RedisService
 	) {}
 

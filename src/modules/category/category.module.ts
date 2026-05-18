@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 
 import { PrismaModule } from '@/infrastructure/prisma/prisma.module'
+import { ProductModule } from '@/modules/product/public'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
@@ -11,7 +12,7 @@ import { CategoryService } from './category.service'
 
 @Module({
 	controllers: [CategoryController],
-	imports: [PrismaModule],
+	imports: [PrismaModule, ProductModule],
 	providers: [
 		CategoryService,
 		CategoryRepository,

@@ -1,4 +1,8 @@
-import { ProductVariantStatus, SeoEntityType } from '@generated/enums'
+import {
+	ProductVariantKind,
+	ProductVariantStatus,
+	SeoEntityType
+} from '@generated/enums'
 import {
 	BadRequestException,
 	Inject,
@@ -7,7 +11,7 @@ import {
 } from '@nestjs/common'
 import { createHash } from 'crypto'
 
-import type { CatalogCapabilityFlags } from '@/modules/capability/capability.constants'
+import type { CatalogCapabilityFlags } from '@/modules/capability/public'
 import {
 	CAPABILITY_READER_PORT,
 	type CapabilityReaderPort
@@ -33,8 +37,18 @@ import {
 } from '@/shared/media/product-media.mapper'
 import { effectiveCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
 
-import { SeoRepository } from '../seo/seo.repository'
+import { SeoRepository } from '@/modules/seo/public'
 
+import {
+	PRODUCT_SELLABLE_READER_PORT,
+	type ProductSellableReader
+} from './contracts'
+import {
+	applyProductCommercialFields,
+	type ProductCommercialFields,
+	toProductCommercialFields,
+	toProductCommercialFieldsMap
+} from './product-commercial-fields.mapper'
 import {
 	type DecodedInfiniteCursor,
 	decodeProductInfiniteCursor,
@@ -98,12 +112,12 @@ type ProductVariantPickerOption = {
 	id: string
 	label: string
 	price: string | null
-	stock: number
+	stock: number | null
 	status: ProductVariantPickerOptionRecord['status']
 	isAvailable: boolean
 	saleUnitId: string | null
 	saleUnitPrice: string | null
-	maxQuantity: number
+	maxQuantity: number | null
 }
 type ProductVariantPickerSource = Omit<
 	ProductVariantPickerOptionRecord,
@@ -114,6 +128,7 @@ type ProductVariantPickerSource = Omit<
 
 type ProductListMappableRecord = ProductMappableRecord & {
 	id: string
+	price?: unknown
 	productType?: { id?: string | null } | null
 }
 
@@ -127,6 +142,7 @@ const EMPTY_VARIANT_SUMMARY: ProductVariantSummary = {
 	singleVariantId: null
 }
 const FALLBACK_VARIANT_LABEL = 'Вариация'
+const DEFAULT_VARIANT_KEY = 'default'
 
 function normalizeSlug(value: string): string {
 	return value.trim().toLowerCase()
@@ -223,6 +239,13 @@ function buildVariantPickerLabel(variant: ProductVariantPickerSource): string {
 	)
 }
 
+function isDefaultVariant(variant: ProductVariantPickerSource): boolean {
+	return (
+		variant.kind === ProductVariantKind.DEFAULT ||
+		variant.variantKey === DEFAULT_VARIANT_KEY
+	)
+}
+
 function compareVariantPickerOptions(
 	left: ProductVariantPickerSource,
 	right: ProductVariantPickerSource
@@ -252,15 +275,28 @@ function mapVariantPickerOption(
 		isAvailable: variant.isAvailable,
 		saleUnitId: null,
 		saleUnitPrice: null,
-		maxQuantity: Math.max(0, variant.stock)
+		maxQuantity: variant.stock === null ? null : Math.max(0, variant.stock)
 	}
+}
+
+function resolveVariantTotalStock(
+	variants: ProductVariantPickerSource[]
+): number | null {
+	if (!variants.length) return 0
+	if (variants.some(variant => variant.stock === null)) return null
+	return variants.reduce(
+		(sum, variant) => sum + Math.max(0, variant.stock ?? 0),
+		0
+	)
 }
 
 function buildVariantSummaryFromVariants(
 	variants: ProductVariantPickerSource[]
 ): ProductVariantSummary {
 	const activeVariants = variants.filter(
-		variant => variant.status !== ProductVariantStatus.DISABLED
+		variant =>
+			!isDefaultVariant(variant) &&
+			variant.status !== ProductVariantStatus.DISABLED
 	)
 
 	if (!activeVariants.length) {
@@ -274,10 +310,7 @@ function buildVariantSummaryFromVariants(
 		return {
 			...EMPTY_VARIANT_SUMMARY,
 			activeCount: activeVariants.length,
-			totalStock: activeVariants.reduce(
-				(sum, variant) => sum + Math.max(0, variant.stock),
-				0
-			),
+			totalStock: resolveVariantTotalStock(activeVariants),
 			singleVariantId: activeVariants.length === 1 ? activeVariants[0].id : null
 		}
 	}
@@ -288,10 +321,7 @@ function buildVariantSummaryFromVariants(
 		minPrice: minPrice.toFixed(2),
 		maxPrice: maxPrice.toFixed(2),
 		activeCount: activeVariants.length,
-		totalStock: activeVariants.reduce(
-			(sum, variant) => sum + Math.max(0, variant.stock),
-			0
-		),
+		totalStock: resolveVariantTotalStock(activeVariants),
 		singleVariantId: activeVariants.length === 1 ? activeVariants[0].id : null
 	}
 }
@@ -305,7 +335,11 @@ function buildVariantPickerOptionsFromVariants(
 	}
 
 	return variants
-		.filter(variant => variant.status !== ProductVariantStatus.DISABLED)
+		.filter(
+			variant =>
+				!isDefaultVariant(variant) &&
+				variant.status !== ProductVariantStatus.DISABLED
+		)
 		.slice()
 		.sort(compareVariantPickerOptions)
 		.map(mapVariantPickerOption)
@@ -416,7 +450,9 @@ export class ProductReadService {
 		private readonly seoRepo: SeoRepository,
 		private readonly mediaUrl: MediaUrlService,
 		@Inject(CAPABILITY_READER_PORT)
-		private readonly capabilities: CapabilityReaderPort
+		private readonly capabilities: CapabilityReaderPort,
+		@Inject(PRODUCT_SELLABLE_READER_PORT)
+		private readonly sellableReader: ProductSellableReader
 	) {}
 
 	// ─── Public read methods ─────────────────────────────────────────────────
@@ -431,6 +467,7 @@ export class ProductReadService {
 			return this.mapProductsWithVariantSummary(
 				products,
 				MEDIA_LIST_VARIANT_NAMES,
+				catalogId,
 				readFeatures
 			)
 		}
@@ -443,6 +480,7 @@ export class ProductReadService {
 				return this.mapProductsWithVariantSummary(
 					products,
 					MEDIA_LIST_VARIANT_NAMES,
+					catalogId,
 					readFeatures
 				)
 			},
@@ -460,6 +498,7 @@ export class ProductReadService {
 			return this.mapProductsWithVariantSummary(
 				products,
 				MEDIA_LIST_VARIANT_NAMES,
+				catalogId,
 				readFeatures
 			)
 		}
@@ -475,6 +514,7 @@ export class ProductReadService {
 				return this.mapProductsWithVariantSummary(
 					products,
 					MEDIA_LIST_VARIANT_NAMES,
+					catalogId,
 					readFeatures
 				)
 			},
@@ -492,6 +532,7 @@ export class ProductReadService {
 			return this.mapProductsWithVariantSummary(
 				products,
 				MEDIA_LIST_VARIANT_NAMES,
+				catalogId,
 				readFeatures
 			)
 		}
@@ -507,6 +548,7 @@ export class ProductReadService {
 				return this.mapProductsWithVariantSummary(
 					products,
 					MEDIA_LIST_VARIANT_NAMES,
+					catalogId,
 					readFeatures
 				)
 			},
@@ -668,6 +710,7 @@ export class ProductReadService {
 					items: await this.mapProductsWithVariantSummary(
 						pageRows,
 						MEDIA_LIST_VARIANT_NAMES,
+						catalogId,
 						readFeatures
 					),
 					nextCursor:
@@ -729,6 +772,7 @@ export class ProductReadService {
 					items: await this.mapProductsWithVariantSummary(
 						pageRows,
 						MEDIA_LIST_VARIANT_NAMES,
+						catalogId,
 						readFeatures
 					),
 					nextCursor:
@@ -1059,6 +1103,7 @@ export class ProductReadService {
 		const mapped = await this.mapProductsWithVariantSummary(
 			products,
 			MEDIA_LIST_VARIANT_NAMES,
+			catalogId,
 			readFeatures
 		)
 		const byId = new Map(mapped.map(product => [product.id, product] as const))
@@ -1078,6 +1123,7 @@ export class ProductReadService {
 		const mapped = await this.mapProductsWithVariantSummary(
 			products,
 			MEDIA_LIST_VARIANT_NAMES,
+			catalogId,
 			readFeatures
 		)
 		const byId = new Map(mapped.map(product => [product.id, product] as const))
@@ -1188,10 +1234,14 @@ export class ProductReadService {
 		const variantSummary = shouldExposeVariants
 			? buildVariantSummaryFromVariants(variantSources)
 			: { ...EMPTY_VARIANT_SUMMARY }
+		const commercial = await this.resolveCommercialProjection(catalogId, product.id)
 
 		return sanitizeProductForReadFeatures(
 			{
-				...this.mapper.mapProduct(product, MEDIA_DETAIL_VARIANT_NAMES),
+				...applyProductCommercialFields(
+					this.mapper.mapProduct(product, MEDIA_DETAIL_VARIANT_NAMES),
+					commercial
+				),
 				variantSummary,
 				variantPickerOptions: shouldExposeVariants
 					? buildVariantPickerOptionsFromVariants(variantSources, variantSummary)
@@ -1208,6 +1258,7 @@ export class ProductReadService {
 	>(
 		products: T[],
 		variantNames: readonly string[],
+		catalogId: string,
 		readFeatures: ProductReadFeatures
 	) {
 		if (!products.length) return []
@@ -1228,6 +1279,10 @@ export class ProductReadService {
 		const variantPickerOptionsMap = variantPickerProductIds.length
 			? await this.loadVariantPickerOptionsMap(variantPickerProductIds)
 			: new Map<string, ProductVariantPickerOption[]>()
+		const commercialMap = await this.resolveCommercialProjectionMap(
+			catalogId,
+			products
+		)
 
 		return products.map(product => {
 			const shouldExposeVariants = shouldExposeProductVariantsForProduct(
@@ -1240,7 +1295,10 @@ export class ProductReadService {
 
 			return sanitizeProductForReadFeatures(
 				{
-					...this.mapper.mapProduct(product, variantNames),
+					...applyProductCommercialFields(
+						this.mapper.mapProduct(product, variantNames),
+						commercialMap.get(product.id)
+					),
 					variantSummary,
 					variantPickerOptions: variantPickerOptionsMap.get(product.id) ?? []
 				},
@@ -1271,6 +1329,29 @@ export class ProductReadService {
 		}
 
 		return map
+	}
+
+	private async resolveCommercialProjectionMap(
+		catalogId: string,
+		products: Array<{ id: string }>
+	): Promise<Map<string, ProductCommercialFields>> {
+		const projections = await this.sellableReader.resolveProductsSellable(
+			catalogId,
+			products.map(product => product.id)
+		)
+		return toProductCommercialFieldsMap(projections)
+	}
+
+	private async resolveCommercialProjection(
+		catalogId: string,
+		productId: string
+	): Promise<ProductCommercialFields> {
+		const projection = await this.sellableReader.resolveProductSellable(
+			catalogId,
+			productId
+		)
+
+		return toProductCommercialFields(projection)
 	}
 
 	private mapSeo(seo?: ProductSeoRecord | null): ProductSeoMapped | null {

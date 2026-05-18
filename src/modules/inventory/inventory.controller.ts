@@ -22,9 +22,9 @@ import {
 	ApiTags
 } from '@nestjs/swagger'
 
-import { CAPABILITY_INVENTORY_INTERNAL } from '@/modules/capability/capability.constants'
-import { RequireCapability } from '@/modules/capability/decorators/require-capability.decorator'
-import { CapabilityGuard } from '@/modules/capability/guards/capability.guard'
+import { CAPABILITY_INVENTORY_INTERNAL } from '@/modules/capability/public'
+import { RequireCapability } from '@/modules/capability/public'
+import { CapabilityGuard } from '@/modules/capability/public'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 
 import { Roles } from '../auth/decorators/roles.decorator'

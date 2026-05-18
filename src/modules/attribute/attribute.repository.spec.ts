@@ -70,6 +70,7 @@ describe('AttributeRepository', () => {
 			data: {
 				attributeId: 'attribute-id',
 				enumValueId: 'target-id',
+				catalogId: null,
 				value: 'black-old',
 				displayName: 'Black old'
 			},

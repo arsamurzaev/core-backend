@@ -4,8 +4,10 @@ import { Inject, Injectable } from '@nestjs/common'
 
 import {
 	INVENTORY_RESERVATION_PORT,
+	type InventoryTransactionEffects,
 	type InventoryReservationPort
 } from '@/modules/inventory/contracts'
+import type { DomainEvent } from '@/shared/domain-events/domain-events.contract'
 
 import { resolveCartItemBaseQuantity } from './cart.utils'
 
@@ -15,6 +17,7 @@ const INVENTORY_MODE_INTERNAL: CatalogInventoryMode = 'INTERNAL'
 export type InventoryReservationEffect = {
 	reserved: boolean
 	inventoryCacheCatalogIds: string[]
+	inventoryDomainEvents: DomainEvent[]
 }
 
 type CartInventoryReservationCart = {
@@ -49,10 +52,14 @@ export class CartInventoryReservationService {
 		const inventoryMode =
 			cart.catalog.settings?.inventoryMode ?? INVENTORY_MODE_NONE
 		if (!this.shouldReserveCartStock(cart.status, inventoryMode)) {
-			return { reserved: false, inventoryCacheCatalogIds: [] }
+			return {
+				reserved: false,
+				inventoryCacheCatalogIds: [],
+				inventoryDomainEvents: []
+			}
 		}
 
-		const inventoryCacheCatalogIds = await this.inventory.reserveCartStockTx(tx, {
+		const effects = await this.inventory.reserveCartStockTx(tx, {
 			catalogId: cart.catalogId,
 			cartId: cart.id,
 			lines: cart.items.map(item => ({
@@ -64,7 +71,11 @@ export class CartInventoryReservationService {
 			actorUserId
 		})
 
-		return { reserved: true, inventoryCacheCatalogIds }
+		return {
+			reserved: true,
+			inventoryCacheCatalogIds: effects.affectedCatalogIds,
+			inventoryDomainEvents: effects.domainEvents
+		}
 	}
 
 	consumeCompletedOrderStockTx(
@@ -72,7 +83,7 @@ export class CartInventoryReservationService {
 		params: Parameters<
 			InventoryReservationPort['consumeCompletedOrderStockTx']
 		>[1]
-	): Promise<string[]> {
+	): Promise<InventoryTransactionEffects> {
 		return this.inventory.consumeCompletedOrderStockTx(tx, params)
 	}
 
@@ -84,9 +95,13 @@ export class CartInventoryReservationService {
 	}
 
 	invalidateProductCaches(
-		catalogIds: string[] | undefined | Iterable<string | null | undefined>
+		catalogIds: string[] | undefined | Iterable<string | null | undefined>,
+		domainEvents?: DomainEvent[]
 	): Promise<void> {
-		return this.inventory.invalidateProductCachesForCatalogs(catalogIds ?? [])
+		return this.inventory.invalidateProductCachesForCatalogs(
+			catalogIds ?? [],
+			domainEvents
+		)
 	}
 
 	shouldReserveCartStock(

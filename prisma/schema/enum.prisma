@@ -35,12 +35,26 @@ enum IntegrationSyncRunStatus {
   SKIPPED
 }
 
+enum IntegrationSyncSnapshotCompleteness {
+  FULL_COMPLETE
+  PARTIAL
+  WEBHOOK_DELTA
+  FAILED_BEFORE_SNAPSHOT
+}
+
 enum IntegrationWebhookEventStatus {
   PENDING
   PROCESSING
   PROCESSED
   FAILED
   SKIPPED
+}
+
+enum DomainEventOutboxStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
 }
 
 enum IntegrationOrderExportStatus {
@@ -224,6 +238,11 @@ enum ProductVariantStatus {
   ACTIVE
   OUT_OF_STOCK
   DISABLED
+}
+
+enum ProductVariantKind {
+  DEFAULT
+  MATRIX
 }
 
 enum DataType {

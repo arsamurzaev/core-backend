@@ -141,6 +141,50 @@ describe('ProductVariantBuilder', () => {
 		])
 	})
 
+	it('keeps omitted stock as null and marks the variant active', async () => {
+		prisma.productTypeAttribute.findMany.mockResolvedValueOnce([
+			{
+				isRequired: true,
+				displayOrder: 1,
+				attribute: {
+					id: 'attribute-1',
+					key: 'size',
+					dataType: DataType.ENUM
+				}
+			}
+		])
+		prisma.attributeEnumValue.findMany.mockResolvedValueOnce([
+			{
+				id: 'enum-1',
+				attributeId: 'attribute-1',
+				value: 's'
+			}
+		])
+
+		await expect(
+			builder.build(
+				{ catalogTypeId: 'type-1', productTypeId: 'product-type-1' },
+				[
+					{
+						attributes: [
+							{
+								attributeId: 'attribute-1',
+								enumValueId: 'enum-1'
+							}
+						]
+					}
+				],
+				'SKU'
+			)
+		).resolves.toEqual([
+			expect.objectContaining({
+				status: 'ACTIVE',
+				stock: null,
+				variantKey: 'size=s'
+			})
+		])
+	})
+
 	it('builds multi-attribute variants with default product price', async () => {
 		prisma.productTypeAttribute.findMany.mockResolvedValueOnce([
 			{

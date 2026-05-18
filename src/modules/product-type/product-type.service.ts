@@ -2,17 +2,27 @@ import { DataType } from '@generated/enums'
 import {
 	BadRequestException,
 	ConflictException,
+	Inject,
 	Injectable,
-	NotFoundException
+	NotFoundException,
+	Optional
 } from '@nestjs/common'
 
-import { CapabilityService } from '@/modules/capability/capability.service'
+import {
+	CAPABILITY_ASSERT_PORT,
+	type CapabilityAssertPort
+} from '@/modules/capability/contracts'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_TYPE_CACHE_VERSION,
 	CATEGORY_PRODUCTS_CACHE_VERSION,
 	PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
+import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
+import {
+	DOMAIN_EVENT_DISPATCHER,
+	type DomainEventDispatcher
+} from '@/shared/domain-events/domain-events.contract'
 import { mustCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
 import {
 	assertHasUpdateFields,
@@ -44,7 +54,11 @@ export class ProductTypeService {
 	constructor(
 		private readonly repo: ProductTypeRepository,
 		private readonly cache: CacheService,
-		private readonly featureEntitlements: CapabilityService
+		@Inject(CAPABILITY_ASSERT_PORT)
+		private readonly featureEntitlements: CapabilityAssertPort,
+		@Optional()
+		@Inject(DOMAIN_EVENT_DISPATCHER)
+		private readonly events?: DomainEventDispatcher
 	) {}
 
 	async getAll(options: { includeArchived?: boolean } = {}) {
@@ -440,6 +454,21 @@ export class ProductTypeService {
 		catalogId: string
 	): Promise<void> {
 		const typeId = mustTypeId()
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'catalog.cache_invalidated',
+					catalogId,
+					scopes: [
+						{ name: 'catalog_products' },
+						{ name: 'category_products' },
+						{ name: 'catalog_type', key: typeId }
+					]
+				})
+			)
+			return
+		}
+
 		await Promise.all([
 			this.cache.bumpVersion(PRODUCTS_CACHE_VERSION, catalogId),
 			this.cache.bumpVersion(CATEGORY_PRODUCTS_CACHE_VERSION, catalogId),

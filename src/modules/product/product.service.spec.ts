@@ -1,7 +1,10 @@
 ﻿import { Test, TestingModule } from '@nestjs/testing'
 
 import { CapabilityService } from '@/modules/capability/capability.service'
-import { CAPABILITY_READER_PORT } from '@/modules/capability/contracts'
+import {
+	CAPABILITY_ASSERT_PORT,
+	CAPABILITY_READER_PORT
+} from '@/modules/capability/contracts'
 import { S3Service } from '@/modules/s3/s3.service'
 import { SeoRepository } from '@/modules/seo/seo.repository'
 import { CacheService } from '@/shared/cache/cache.service'
@@ -21,6 +24,7 @@ import { ProductAttributeBuilder } from './product-attribute.builder'
 import type { ProductAttributeValueData } from './product-attribute.builder'
 import { ProductCommandService } from './product-command.service'
 import { ProductMaintenanceService } from './product-maintenance.service'
+import { PRODUCT_SELLABLE_READER_PORT } from './contracts'
 import {
 	encodeProductDefaultCursor,
 	encodeProductSeedCursor
@@ -50,6 +54,10 @@ describe('ProductService', () => {
 	let productSeoSync: jest.Mocked<ProductSeoSyncService>
 	let seoRepo: jest.Mocked<SeoRepository>
 	let capabilities: jest.Mocked<CapabilityService>
+	let sellableReader: {
+		resolveProductSellable: jest.Mock
+		resolveProductsSellable: jest.Mock
+	}
 
 	const runWithCatalog = <T>(fn: () => Promise<T>) =>
 		RequestContext.run(
@@ -120,6 +128,9 @@ describe('ProductService', () => {
 						findRecommendedProductIdsPageDefault: jest.fn(),
 						findRecommendedProductIdsPageSeeded: jest.fn(),
 						findDefaultVariantRepairCandidates: jest.fn(),
+						findDefaultVariantDiagnostics: jest.fn(),
+						findDefaultVariantPriceMismatchRepairCandidates: jest.fn(),
+						applyDefaultVariantPriceMismatchRepairs: jest.fn(),
 						findAttributesByTypeAndKeys: jest.fn(),
 						findBrandById: jest.fn(),
 						findProductTypeById: jest.fn(),
@@ -182,6 +193,39 @@ describe('ProductService', () => {
 					}
 				},
 				{
+					provide: PRODUCT_SELLABLE_READER_PORT,
+					useValue: {
+						resolveProductSellable: jest.fn().mockResolvedValue({
+							priceState: 'UNKNOWN',
+							displayPrice: null,
+							minPrice: null,
+							maxPrice: null,
+							availabilityState: 'AVAILABLE',
+							stock: null,
+							defaultVariantId: null,
+							requiresVariantSelection: false
+						}),
+						resolveProductsSellable: jest.fn(
+							async (_catalogId: string, productIds: string[]) =>
+								new Map(
+									productIds.map(productId => [
+										productId,
+										{
+											priceState: 'UNKNOWN',
+											displayPrice: null,
+											minPrice: null,
+											maxPrice: null,
+											availabilityState: 'AVAILABLE',
+											stock: null,
+											defaultVariantId: null,
+											requiresVariantSelection: false
+										}
+									])
+								)
+						)
+					}
+				},
+				{
 					provide: CapabilityService,
 					useValue: {
 						getCurrentFeatures: jest.fn().mockResolvedValue({
@@ -200,6 +244,10 @@ describe('ProductService', () => {
 				{
 					provide: CAPABILITY_READER_PORT,
 					useExisting: CapabilityService
+				},
+				{
+					provide: CAPABILITY_ASSERT_PORT,
+					useExisting: CapabilityService
 				}
 			]
 		}).compile()
@@ -215,6 +263,7 @@ describe('ProductService', () => {
 		productSeoSync = module.get(ProductSeoSyncService)
 		seoRepo = module.get(SeoRepository)
 		capabilities = module.get(CapabilityService)
+		sellableReader = module.get(PRODUCT_SELLABLE_READER_PORT)
 
 		cache.buildKey.mockImplementation(parts =>
 			parts
@@ -377,7 +426,8 @@ describe('ProductService', () => {
 				sku: 'LEGACY-PRODUCT',
 				variantKey: 'default',
 				price: 100,
-				status: 'OUT_OF_STOCK',
+				stock: null,
+				status: 'ACTIVE',
 				attributes: []
 			})
 		)
@@ -393,6 +443,155 @@ describe('ProductService', () => {
 			expect.objectContaining({ id: 'product-1' }),
 			'catalog-1'
 		)
+	})
+
+	it('returns default variant diagnostics for current catalog', async () => {
+		repo.findDefaultVariantDiagnostics.mockResolvedValue([
+			{
+				code: 'SIMPLE_WITHOUT_DEFAULT_VARIANT',
+				status: 'warn',
+				count: 1,
+				message: 'Simple products without a technical default variant',
+				samples: [
+					{
+						productId: 'product-1',
+						productName: 'Legacy product',
+						productSku: 'LEGACY',
+						variantId: null,
+						variantKey: null,
+						variantSku: null,
+						details: 'No custom variants and no technical default variant'
+					}
+				]
+			},
+			{
+				code: 'MULTIPLE_DEFAULT_VARIANTS',
+				status: 'fail',
+				count: 2,
+				message: 'Products with more than one technical default variant',
+				samples: []
+			}
+		] as any)
+
+		const result = await runWithCatalog(() =>
+			service.diagnoseDefaultVariantsForCurrentCatalog(5)
+		)
+
+		expect(repo.findDefaultVariantDiagnostics).toHaveBeenCalledWith(
+			'catalog-1',
+			5
+		)
+		expect(result).toEqual({
+			catalogId: 'catalog-1',
+			sampleLimit: 5,
+			warnCount: 1,
+			failCount: 1,
+			ok: false,
+			checks: expect.any(Array)
+		})
+	})
+
+	it('dry-runs safe default variant price mismatch repairs', async () => {
+		repo.findDefaultVariantPriceMismatchRepairCandidates.mockResolvedValue([
+			{
+				productId: 'product-1',
+				productName: 'Legacy product',
+				productSku: 'LEGACY',
+				variantId: 'variant-1',
+				variantKey: 'default',
+				variantSku: 'LEGACY',
+				previousProductPrice: '0.00',
+				nextProductPrice: null
+			}
+		] as any)
+
+		const result = await runWithCatalog(() =>
+			service.repairDefaultVariantPriceMismatchesForCurrentCatalog({
+				batchSize: 5,
+				sampleLimit: 1
+			})
+		)
+
+		expect(
+			repo.findDefaultVariantPriceMismatchRepairCandidates
+		).toHaveBeenCalledWith('catalog-1', 5, undefined)
+		expect(repo.applyDefaultVariantPriceMismatchRepairs).not.toHaveBeenCalled()
+		expect(cache.bumpVersion).not.toHaveBeenCalled()
+		expect(productSeoSync.syncProduct).not.toHaveBeenCalled()
+		expect(result).toEqual({
+			catalogId: 'catalog-1',
+			dryRun: true,
+			checkedProducts: 1,
+			repairableProducts: 1,
+			updatedProducts: 0,
+			affectedCatalogs: 0,
+			batchSize: 5,
+			sampleLimit: 1,
+			samples: [
+				expect.objectContaining({
+					productId: 'product-1',
+					previousProductPrice: '0.00',
+					nextProductPrice: null
+				})
+			]
+		})
+	})
+
+	it('applies safe default variant price mismatch repairs', async () => {
+		repo.findDefaultVariantPriceMismatchRepairCandidates.mockResolvedValue([
+			{
+				productId: 'product-1',
+				productName: 'Legacy product',
+				productSku: 'LEGACY',
+				variantId: 'variant-1',
+				variantKey: 'default',
+				variantSku: 'LEGACY',
+				previousProductPrice: '0.00',
+				nextProductPrice: null
+			}
+		] as any)
+		repo.applyDefaultVariantPriceMismatchRepairs.mockResolvedValue(['product-1'])
+		repo.findByIdsWithDetails.mockResolvedValue([
+			{ id: 'product-1', slug: 'legacy-product' }
+		] as any)
+
+		const result = await runWithCatalog(() =>
+			service.repairDefaultVariantPriceMismatchesForCurrentCatalog({
+				apply: true
+			})
+		)
+
+		expect(repo.applyDefaultVariantPriceMismatchRepairs).toHaveBeenCalledWith(
+			'catalog-1',
+			['product-1']
+		)
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			PRODUCTS_CACHE_VERSION,
+			'catalog-1'
+		)
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			CATEGORY_PRODUCTS_CACHE_VERSION,
+			'catalog-1'
+		)
+		expect(repo.findByIdsWithDetails).toHaveBeenCalledWith(
+			['product-1'],
+			'catalog-1'
+		)
+		expect(productSeoSync.syncProduct).toHaveBeenCalledWith(
+			expect.objectContaining({ id: 'product-1' }),
+			'catalog-1'
+		)
+		expect(result).toEqual({
+			catalogId: 'catalog-1',
+			dryRun: false,
+			checkedProducts: 1,
+			repairableProducts: 1,
+			updatedProducts: 1,
+			affectedCatalogs: 1,
+			batchSize: 100,
+			sampleLimit: 20,
+			samples: [expect.objectContaining({ productId: 'product-1' })]
+		})
 	})
 
 	it('returns integration metadata for integrated products', async () => {
@@ -1149,6 +1348,58 @@ describe('ProductService', () => {
 		expect(cache.setJson).toHaveBeenCalled()
 	})
 
+	it('adds commercial projection fields to product cards', async () => {
+		repo.findPopularCards.mockResolvedValue([
+			{
+				id: 'product-1',
+				price: null,
+				media: [],
+				categoryProducts: [],
+				integrationLinks: [],
+				isPopular: true,
+				productType: { id: 'product-type-1' },
+				productAttributes: []
+			}
+		] as any)
+		sellableReader.resolveProductsSellable.mockResolvedValueOnce(
+			new Map([
+				[
+					'product-1',
+					{
+						priceState: 'KNOWN',
+						displayPrice: '1200.00',
+						minPrice: '1200.00',
+						maxPrice: '1200.00',
+						availabilityState: 'AVAILABLE',
+						stock: 4,
+						defaultVariantId: 'default-variant',
+						requiresVariantSelection: false
+					}
+				]
+			])
+		)
+
+		const result = await runWithCatalog(() => service.getPopularCards())
+
+		expect(sellableReader.resolveProductsSellable).toHaveBeenCalledWith(
+			'catalog-1',
+			['product-1']
+		)
+		expect(result[0]).toEqual(
+			expect.objectContaining({
+				price: '1200.00',
+				priceState: 'KNOWN',
+				displayPrice: '1200.00',
+				minPrice: '1200.00',
+				maxPrice: '1200.00',
+				availabilityState: 'AVAILABLE',
+				stock: 4,
+				defaultVariantId: 'default-variant',
+				requiresVariantSelection: false
+			})
+		)
+	})
+
 	it('returns popular products with product attributes, default variant summary and without variants in bulk read', async () => {
 		repo.findPopular.mockResolvedValue([
 			{
@@ -1212,6 +1463,137 @@ describe('ProductService', () => {
 		expect(result[0]).toHaveProperty('variantPickerOptions', [])
 		expect(cache.buildKey).toHaveBeenCalledWith(
 			expect.arrayContaining([expect.stringContaining('variants-off')])
+		)
+	})
+
+	it('keeps commercial projection visible when variants capability is disabled', async () => {
+		capabilities.getCurrentFeatures.mockResolvedValueOnce({
+			canUseProductTypes: true,
+			canUseProductVariants: false,
+			canUseCatalogSaleUnits: true,
+			canUseInternalInventory: false,
+			canUseMoySkladIntegration: true
+		})
+		repo.findPopularCards.mockResolvedValue([
+			{
+				id: 'product-1',
+				price: null,
+				media: [],
+				categoryProducts: [],
+				integrationLinks: [],
+				isPopular: true,
+				productType: { id: 'product-type-1' },
+				productAttributes: []
+			}
+		] as any)
+		sellableReader.resolveProductsSellable.mockResolvedValueOnce(
+			new Map([
+				[
+					'product-1',
+					{
+						priceState: 'RANGE',
+						displayPrice: '900.00',
+						minPrice: '900.00',
+						maxPrice: '1200.00',
+						availabilityState: 'AVAILABLE',
+						stock: 2,
+						defaultVariantId: 'default-variant',
+						requiresVariantSelection: false
+					}
+				]
+			])
+		)
+
+		const result = await runWithCatalog(() => service.getPopularCards())
+
+		expect(repo.findVariantSummaries).not.toHaveBeenCalled()
+		expect(repo.findVariantPickerOptions).not.toHaveBeenCalled()
+		expect(result[0]).toEqual(
+			expect.objectContaining({
+				price: '900.00',
+				priceState: 'RANGE',
+				displayPrice: '900.00',
+				minPrice: '900.00',
+				maxPrice: '1200.00',
+				defaultVariantId: 'default-variant',
+				requiresVariantSelection: false,
+				variantSummary: {
+					minPrice: null,
+					maxPrice: null,
+					activeCount: 0,
+					totalStock: 0,
+					singleVariantId: null
+				},
+				variantPickerOptions: []
+			})
+		)
+	})
+
+	it('adds commercial price range to product details', async () => {
+		repo.findPublicById.mockResolvedValue({
+			id: 'product-1',
+			price: null,
+			media: [],
+			productType: { id: 'product-type-1', code: 'clothes', name: 'Clothes' },
+			productAttributes: [],
+			variants: [
+				{
+					id: 'variant-s',
+					sku: 'SKU-S',
+					variantKey: 'size=s',
+					kind: 'CUSTOM',
+					stock: 2,
+					price: 1000,
+					status: 'ACTIVE',
+					isAvailable: true,
+					createdAt: new Date('2026-03-23T15:00:00.000Z'),
+					updatedAt: new Date('2026-03-23T15:00:00.000Z'),
+					attributes: [],
+					saleUnits: []
+				},
+				{
+					id: 'variant-m',
+					sku: 'SKU-M',
+					variantKey: 'size=m',
+					kind: 'CUSTOM',
+					stock: 3,
+					price: 1500,
+					status: 'ACTIVE',
+					isAvailable: true,
+					createdAt: new Date('2026-03-23T15:00:00.000Z'),
+					updatedAt: new Date('2026-03-23T15:00:00.000Z'),
+					attributes: [],
+					saleUnits: []
+				}
+			],
+			categoryProducts: [],
+			integrationLinks: []
+		} as any)
+		sellableReader.resolveProductSellable.mockResolvedValueOnce({
+			priceState: 'RANGE',
+			displayPrice: '1000.00',
+			minPrice: '1000.00',
+			maxPrice: '1500.00',
+			availabilityState: 'AVAILABLE',
+			stock: 5,
+			defaultVariantId: null,
+			requiresVariantSelection: true
+		})
+
+		const result = await runWithCatalog(() => service.getById('product-1'))
+
+		expect(result).toEqual(
+			expect.objectContaining({
+				price: '1000.00',
+				priceState: 'RANGE',
+				displayPrice: '1000.00',
+				minPrice: '1000.00',
+				maxPrice: '1500.00',
+				availabilityState: 'AVAILABLE',
+				stock: 5,
+				defaultVariantId: null,
+				requiresVariantSelection: true
+			})
 		)
 	})
 
@@ -1396,8 +1778,8 @@ describe('ProductService', () => {
 					sku: 'SIMPLE-PRODUCT',
 					variantKey: 'default',
 					price: 100,
-					stock: 0,
-					status: 'OUT_OF_STOCK',
+					stock: null,
+					status: 'ACTIVE',
 					attributes: []
 				})
 			]
@@ -1971,7 +2353,132 @@ describe('ProductService', () => {
 		expect(result).toMatchObject({ ok: true, id: 'product-1' })
 	})
 
-	it('rejects custom variant matrix for legacy product without product type', async () => {
+	it('falls back to a technical default variant when clearing matrix variants', async () => {
+		const updatedProduct = {
+			id: 'product-1',
+			slug: 'legacy-product',
+			name: 'Legacy Product',
+			price: 120,
+			status: 'ACTIVE',
+			brand: null,
+			media: [],
+			productAttributes: [],
+			variants: [
+				{
+					id: 'variant-default',
+					sku: 'LEGACY-PRODUCT',
+					variantKey: 'default',
+					kind: 'DEFAULT',
+					price: 120,
+					stock: 0,
+					status: 'OUT_OF_STOCK',
+					isAvailable: false,
+					attributes: []
+				}
+			],
+			categoryProducts: []
+		} as any
+		repo.findSkuById.mockResolvedValue({
+			id: 'product-1',
+			sku: 'LEGACY-PRODUCT',
+			price: 120,
+			status: 'ACTIVE',
+			productTypeId: null
+		} as any)
+		repo.setVariants.mockResolvedValue(updatedProduct)
+
+		const result = await runWithCatalog(() =>
+			service.setVariantMatrix('product-1', { items: [] })
+		)
+
+		expect(repo.findProductTypeValidationSchemaById).not.toHaveBeenCalled()
+		expect(variantBuilder.build).not.toHaveBeenCalled()
+		expect(repo.setVariants).toHaveBeenCalledWith('product-1', 'catalog-1', [
+			expect.objectContaining({
+				sku: 'LEGACY-PRODUCT',
+				variantKey: 'default',
+				kind: 'DEFAULT',
+				price: 120,
+				stock: null,
+				status: 'ACTIVE',
+				attributes: []
+			})
+		])
+		expect(result).toMatchObject({ ok: true, id: 'product-1' })
+	})
+
+	it('falls back to a technical default variant when clearing a typed matrix', async () => {
+		const updatedProduct = {
+			id: 'product-1',
+			slug: 'typed-product',
+			name: 'Typed Product',
+			price: 120,
+			status: 'ACTIVE',
+			brand: null,
+			media: [],
+			productAttributes: [],
+			variants: [
+				{
+					id: 'variant-default',
+					sku: 'TYPED-PRODUCT',
+					variantKey: 'default',
+					kind: 'DEFAULT',
+					price: 120,
+					stock: null,
+					status: 'ACTIVE',
+					isAvailable: true,
+					attributes: []
+				}
+			],
+			categoryProducts: []
+		} as any
+		repo.findSkuById.mockResolvedValue({
+			id: 'product-1',
+			sku: 'TYPED-PRODUCT',
+			price: 120,
+			status: 'ACTIVE',
+			productTypeId: 'product-type-1'
+		} as any)
+		repo.findProductTypeValidationSchemaById.mockResolvedValue({
+			id: 'product-type-1',
+			catalogId: 'catalog-1',
+			attributes: [
+				{
+					attributeId: 'size-attribute',
+					isVariant: true,
+					isRequired: true,
+					displayOrder: 0,
+					attribute: {
+						id: 'size-attribute',
+						key: 'size',
+						dataType: 'ENUM'
+					}
+				}
+			]
+		} as any)
+		repo.setVariants.mockResolvedValue(updatedProduct)
+
+		const result = await runWithCatalog(() =>
+			service.setVariantMatrix('product-1', { items: [] })
+		)
+
+		expect(repo.findProductTypeValidationSchemaById).not.toHaveBeenCalled()
+		expect(variantBuilder.build).not.toHaveBeenCalled()
+		expect(repo.setVariants).toHaveBeenCalledWith('product-1', 'catalog-1', [
+			expect.objectContaining({
+				sku: 'TYPED-PRODUCT',
+				variantKey: 'default',
+				kind: 'DEFAULT',
+				price: 120,
+				stock: null,
+				status: 'ACTIVE',
+				attributes: []
+			})
+		])
+		expect(result).toMatchObject({ ok: true, id: 'product-1' })
+	})
+
+	it('allows custom variant matrix for legacy product without product type', async () => {
 		const dto = {
 			items: [
 				{
@@ -1991,14 +2498,55 @@ describe('ProductService', () => {
 			price: 90,
 			productTypeId: null
 		} as any)
+		const builtVariants = [
+			{
+				sku: 'LEGACY-PRODUCT-M',
+				variantKey: 'size=m',
+				price: 90,
+				stock: 2,
+				status: 'ACTIVE',
+				attributes: [
+					{
+						attributeId: 'size-attribute',
+						enumValueId: 'size-m'
+					}
+				]
+			}
+		] as any
+		variantBuilder.build.mockResolvedValue(builtVariants)
+		repo.setVariants.mockResolvedValue({
+			id: 'product-1',
+			slug: 'legacy-product',
+			name: 'Legacy Product',
+			price: 90,
+			status: 'ACTIVE',
+			brand: null,
+			media: [],
+			productAttributes: [],
+			variants: builtVariants,
+			categoryProducts: []
+		} as any)
 
 		await expect(
 			runWithCatalog(() => service.setVariantMatrix('product-1', dto))
-		).rejects.toThrow('Product type is required to manage product variants')
+		).resolves.toMatchObject({ ok: true, id: 'product-1' })
 
 		expect(repo.findProductTypeValidationSchemaById).not.toHaveBeenCalled()
-		expect(variantBuilder.build).not.toHaveBeenCalled()
-		expect(repo.setVariants).not.toHaveBeenCalled()
+		expect(variantBuilder.build).toHaveBeenCalledWith(
+			{
+				catalogTypeId: 'type-1',
+				catalogId: 'catalog-1',
+				productTypeId: null
+			},
+			dto.items,
+			'LEGACY-PRODUCT',
+			{ defaultPrice: 90 }
+		)
+		expect(repo.setVariants).toHaveBeenCalledWith(
+			'product-1',
+			'catalog-1',
+			builtVariants
+		)
 	})
 
 	it('rejects duplicate ProductType variant combinations when applying variant matrix', async () => {
@@ -2100,6 +2648,110 @@ describe('ProductService', () => {
 		)
 	})
 
+	it('updates product type and replaces variant matrix in one request', async () => {
+		const matrixItems = [
+			{
+				price: 130,
+				stock: 3,
+				attributes: [
+					{
+						attributeId: 'size-attribute',
+						enumValueId: 'size-s'
+					}
+				]
+			}
+		]
+		const builtVariants = [
+			{
+				sku: 'LEGACY-PRODUCT-S',
+				variantKey: 'size=s',
+				price: 130,
+				stock: 3,
+				status: 'ACTIVE',
+				attributes: [
+					{
+						attributeId: 'size-attribute',
+						enumValueId: 'size-s'
+					}
+				]
+			}
+		] as any
+		repo.findProductValidationRef.mockResolvedValue({
+			id: 'product-1',
+			sku: 'LEGACY-PRODUCT',
+			price: 100,
+			status: 'ACTIVE',
+			productTypeId: null,
+			productAttributes: [],
+			variants: []
+		} as any)
+		repo.findProductTypeValidationSchemaById.mockResolvedValue({
+			id: 'product-type-1',
+			catalogId: 'catalog-1',
+			attributes: [
+				{
+					attributeId: 'size-attribute',
+					isVariant: true,
+					isRequired: true,
+					displayOrder: 0,
+					attribute: {
+						id: 'size-attribute',
+						key: 'size',
+						dataType: 'ENUM'
+					}
+				}
+			]
+		} as any)
+		repo.findSkuById.mockResolvedValue({
+			id: 'product-1',
+			sku: 'LEGACY-PRODUCT',
+			price: 100,
+			status: 'ACTIVE',
+			productTypeId: null
+		} as any)
+		variantBuilder.build.mockResolvedValue(builtVariants)
+		repo.update.mockResolvedValue({
+			id: 'product-1',
+			slug: 'legacy-product',
+			media: [],
+			productAttributes: [],
+			variants: builtVariants,
+			categoryProducts: [],
+			productType: { id: 'product-type-1', code: 'shoes', name: 'Shoes' }
+		} as any)
+
+		await runWithCatalog(() =>
+			service.update('product-1', {
+				productTypeId: 'product-type-1',
+				variantMatrix: matrixItems
+			})
+		)
+
+		expect(variantBuilder.build).toHaveBeenCalledWith(
+			{
+				catalogTypeId: 'type-1',
+				catalogId: 'catalog-1',
+				productTypeId: 'product-type-1'
+			},
+			matrixItems,
+			'LEGACY-PRODUCT',
+			{ defaultPrice: 100 }
+		)
+		expect(repo.update).toHaveBeenCalledWith(
+			'product-1',
+			expect.objectContaining({
+				productType: { connect: { id: 'product-type-1' } }
+			}),
+			'catalog-1',
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			builtVariants
+		)
+	})
+
 	it('clears product type relation', async () => {
 		repo.update.mockResolvedValue({
 			id: 'product-1',
@@ -2166,15 +2818,15 @@ describe('ProductService', () => {
 				sku: 'LEGACY-PRODUCT',
 				variantKey: 'default',
 				price: 120,
-				stock: 0,
-				status: 'OUT_OF_STOCK',
+				stock: null,
+				status: 'ACTIVE',
 				attributes: []
 			})
 		)
 		expect(repo.update).toHaveBeenCalled()
 	})
 
-	it('removes old product type values when product type relation is cleared', async () => {
+	it('keeps existing variant attributes when product type relation is cleared', async () => {
 		repo.findProductValidationRef.mockResolvedValue({
 			id: 'product-1',
 			productTypeId: 'product-type-old',
@@ -2229,8 +2881,7 @@ describe('ProductService', () => {
 			undefined,
 			['material'],
 			undefined,
-			undefined,
-			['size', 'color']
+			undefined
 		)
 	})
 
