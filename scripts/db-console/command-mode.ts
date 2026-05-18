@@ -18,6 +18,9 @@ type CommandTokens = {
 	options: Record<string, string | boolean>
 }
 
+const uuidRegex =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
 export async function runCommandMode(ctx: AppContext, models: ModelMeta[]) {
 	if (!ctx.options.commandArgs.length) return false
 
@@ -224,18 +227,22 @@ async function buildCommandWhere(
 }
 
 async function resolveCatalogId(ctx: AppContext, value: string) {
+	const normalized = value.trim()
+	const identity: Record<string, unknown>[] = uuidRegex.test(normalized)
+		? [{ id: normalized }]
+		: []
 	const catalog = await (ctx.prisma as any).catalog.findFirst({
 		where: {
 			OR: [
-				{ id: value },
-				{ slug: value },
-				{ domain: value },
-				{ name: { equals: value, mode: 'insensitive' } }
+				...identity,
+				{ slug: normalized },
+				{ domain: normalized },
+				{ name: { equals: normalized, mode: 'insensitive' } }
 			]
 		},
 		select: { id: true, slug: true, name: true }
 	})
-	if (!catalog) throw new Error(`Catalog not found: ${value}`)
+	if (!catalog) throw new Error(`Catalog not found: ${normalized}`)
 	return catalog as { id: string; slug: string; name: string }
 }
 

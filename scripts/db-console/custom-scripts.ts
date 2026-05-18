@@ -16,6 +16,8 @@ type CustomScript = {
 const ZERO_PRICE = new Prisma.Decimal(0)
 const PRODUCT_VARIANT_KIND_DEFAULT = 'DEFAULT'
 const PRODUCT_VARIANT_KIND_MATRIX = 'MATRIX'
+const uuidRegex =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const CUSTOM_SCRIPTS: CustomScript[] = [
 	{
@@ -527,14 +529,12 @@ function readCatalogLookupOption(
 
 async function resolveCatalogForCustomScript(ctx: AppContext, lookup: string) {
 	const normalized = lookup.trim()
-	const isUuid =
-		/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-			normalized
-		)
+	const isUuid = uuidRegex.test(normalized)
+	const identity: Record<string, unknown>[] = isUuid ? [{ id: normalized }] : []
 	const catalog = await ctx.prisma.catalog.findFirst({
 		where: {
 			OR: [
-				...(isUuid ? [{ id: normalized }] : []),
+				...identity,
 				{ slug: normalized },
 				{ domain: normalized },
 				{ name: { equals: normalized, mode: 'insensitive' } },
