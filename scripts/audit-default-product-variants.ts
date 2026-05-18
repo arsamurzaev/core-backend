@@ -15,6 +15,7 @@ const DEFAULT_VARIANT_KEY = 'default'
 const PRODUCT_VARIANT_KIND_DEFAULT = 'DEFAULT'
 const DEFAULT_BATCH_SIZE = 100
 const DEFAULT_SAMPLE_LIMIT = 20
+const DEFAULT_PROGRESS_INTERVAL = 1000
 const SKU_MAX_LENGTH = 100
 const ACTIVE_CART_STATUSES = [
 	CartStatus.DRAFT,
@@ -30,6 +31,12 @@ type CliOptions = {
 	help: boolean
 	batchSize: number
 	sampleLimit: number
+}
+
+type ProgressOptions = {
+	enabled: boolean
+	label: string
+	total: number
 }
 
 type ProductWithoutVariantRow = {
@@ -137,10 +144,22 @@ async function main() {
 		}
 
 		assertNoBlockingAuditIssues(audit)
-		const backfill = await backfillDefaultVariants(prisma, options)
+		const backfill = await backfillDefaultVariants(prisma, options, {
+			enabled: true,
+			label: 'Default variant backfill',
+			total: audit.summary.productsWithoutVariants
+		})
 		printBackfill(backfill)
 		if (options.applyCartItems) {
-			const cartItemBackfill = await backfillOpenCartItemVariants(prisma, options)
+			const cartItemBackfill = await backfillOpenCartItemVariants(
+				prisma,
+				options,
+				{
+					enabled: true,
+					label: 'Open cart item variant backfill',
+					total: audit.summary.activeCartItemsWithoutVariant
+				}
+			)
 			printCartItemBackfill(cartItemBackfill)
 		}
 	} finally {
@@ -389,13 +408,23 @@ async function findInvalidVariantPrices(
 
 async function backfillDefaultVariants(
 	prisma: PrismaClient,
-	options: CliOptions
+	options: CliOptions,
+	progress?: ProgressOptions
 ): Promise<BackfillResult> {
 	const result: BackfillResult = {
 		created: 0,
 		skipped: 0,
 		samples: []
 	}
+	const startedAt = Date.now()
+	const progressInterval = resolveProgressInterval()
+	let processed = 0
+
+	logBackfillProgress(progress, 'started', {
+		total: progress?.total ?? null,
+		batchSize: options.batchSize,
+		progressInterval
+	})
 
 	while (true) {
 		const products = await prisma.product.findMany({
@@ -414,10 +443,30 @@ async function backfillDefaultVariants(
 		if (!products.length) break
 
 		for (const product of products) {
+			processed += 1
 			const created = await createDefaultVariantIfMissing(prisma, product)
 
 			if (!created) {
 				result.skipped += 1
+				if (
+					shouldLogProgress(
+						processed,
+						progress?.total ?? processed,
+						progressInterval
+					)
+				) {
+					logBackfillProgress(progress, 'progress', {
+						...buildProgressDetails(
+							processed,
+							progress?.total ?? processed,
+							startedAt
+						),
+						created: result.created,
+						skipped: result.skipped,
+						productId: product.id,
+						productSku: product.sku
+					})
+				}
 				continue
 			}
 
@@ -425,8 +474,29 @@ async function backfillDefaultVariants(
 			if (result.samples.length < options.sampleLimit) {
 				result.samples.push(created)
 			}
+			if (
+				shouldLogProgress(processed, progress?.total ?? processed, progressInterval)
+			) {
+				logBackfillProgress(progress, 'progress', {
+					...buildProgressDetails(
+						processed,
+						progress?.total ?? processed,
+						startedAt
+					),
+					created: result.created,
+					skipped: result.skipped,
+					productId: product.id,
+					productSku: product.sku
+				})
+			}
 		}
 	}
+
+	logBackfillProgress(progress, 'completed', {
+		...buildProgressDetails(processed, progress?.total ?? processed, startedAt),
+		created: result.created,
+		skipped: result.skipped
+	})
 
 	return result
 }
@@ -468,13 +538,23 @@ async function createDefaultVariantIfMissing(
 
 async function backfillOpenCartItemVariants(
 	prisma: PrismaClient,
-	options: CliOptions
+	options: CliOptions,
+	progress?: ProgressOptions
 ): Promise<CartItemBackfillResult> {
 	const result: CartItemBackfillResult = {
 		updated: 0,
 		skipped: 0,
 		samples: []
 	}
+	const startedAt = Date.now()
+	const progressInterval = resolveProgressInterval()
+	let processed = 0
+
+	logBackfillProgress(progress, 'started', {
+		total: progress?.total ?? null,
+		batchSize: options.batchSize,
+		progressInterval
+	})
 
 	while (true) {
 		const items = await prisma.cartItem.findMany({
@@ -508,6 +588,7 @@ async function backfillOpenCartItemVariants(
 
 		let updatedInBatch = 0
 		for (const item of items) {
+			processed += 1
 			const [variant] = item.product.variants
 			const shouldUpdate =
 				item.product.variants.length === 1 &&
@@ -516,6 +597,25 @@ async function backfillOpenCartItemVariants(
 
 			if (!shouldUpdate) {
 				result.skipped += 1
+				if (
+					shouldLogProgress(
+						processed,
+						progress?.total ?? processed,
+						progressInterval
+					)
+				) {
+					logBackfillProgress(progress, 'progress', {
+						...buildProgressDetails(
+							processed,
+							progress?.total ?? processed,
+							startedAt
+						),
+						updated: result.updated,
+						skipped: result.skipped,
+						cartItemId: item.id,
+						productId: item.productId
+					})
+				}
 				continue
 			}
 
@@ -533,10 +633,31 @@ async function backfillOpenCartItemVariants(
 					variantId: variant.id
 				})
 			}
+			if (
+				shouldLogProgress(processed, progress?.total ?? processed, progressInterval)
+			) {
+				logBackfillProgress(progress, 'progress', {
+					...buildProgressDetails(
+						processed,
+						progress?.total ?? processed,
+						startedAt
+					),
+					updated: result.updated,
+					skipped: result.skipped,
+					cartItemId: item.id,
+					productId: item.productId
+				})
+			}
 		}
 
 		if (updatedInBatch === 0) break
 	}
+
+	logBackfillProgress(progress, 'completed', {
+		...buildProgressDetails(processed, progress?.total ?? processed, startedAt),
+		updated: result.updated,
+		skipped: result.skipped
+	})
 
 	return result
 }
@@ -582,6 +703,58 @@ async function isVariantSkuFree(
 	})
 
 	return !existing
+}
+
+function shouldLogProgress(current: number, total: number, interval: number) {
+	return total > 0 && (current === total || current % interval === 0)
+}
+
+function buildProgressDetails(
+	processed: number,
+	total: number,
+	startedAt: number
+) {
+	const elapsedMs = Date.now() - startedAt
+	const elapsedSec = Number((elapsedMs / 1000).toFixed(1))
+	const percent =
+		total > 0 ? Number(((processed / total) * 100).toFixed(2)) : 100
+	const rowsPerMinute =
+		elapsedMs > 0 ? Number((processed / (elapsedMs / 60000)).toFixed(2)) : null
+
+	return {
+		processed,
+		total,
+		remaining: Math.max(0, total - processed),
+		percent,
+		elapsedSec,
+		rowsPerMinute
+	}
+}
+
+function resolveProgressInterval() {
+	const raw = Number(
+		process.env.DEFAULT_VARIANT_PROGRESS_INTERVAL ?? DEFAULT_PROGRESS_INTERVAL
+	)
+	if (!Number.isInteger(raw) || raw < 1) return DEFAULT_PROGRESS_INTERVAL
+	return raw
+}
+
+function logBackfillProgress(
+	progress: ProgressOptions | undefined,
+	event: 'started' | 'progress' | 'completed',
+	details: Record<string, unknown>
+) {
+	if (!progress?.enabled) return
+
+	console.log(
+		colors.dim(
+			`${progress.label} ${event}: ${JSON.stringify({
+				label: progress.label,
+				event,
+				...details
+			})}`
+		)
+	)
 }
 
 function printAudit(

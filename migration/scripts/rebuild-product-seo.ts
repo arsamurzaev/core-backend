@@ -46,6 +46,7 @@ type ProductSeoStats = {
 const DEFAULT_SOURCE_NAME = 'product-seo-rebuild'
 const PHASE = 'product-seo-rebuild'
 const CHUNK_SIZE = 500
+const DEFAULT_PROGRESS_INTERVAL = 100
 
 async function main() {
 	loadMigrationEnv()
@@ -238,17 +239,117 @@ async function applyRebuild(
 	baseStats: ProductSeoStats
 ): Promise<ProductSeoStats> {
 	const stats = { ...baseStats, created: 0, updated: 0 }
+	const startedAt = Date.now()
+	const progressInterval = resolveProgressInterval()
+	let processed = 0
+
+	logProgress('product SEO rebuild apply started', {
+		totalProducts: products.length,
+		candidates: baseStats.candidates,
+		wouldCreate: baseStats.wouldCreate,
+		wouldUpdate: baseStats.wouldUpdate,
+		progressInterval
+	})
 
 	for (const product of products) {
+		processed += 1
 		const catalog = catalogById.get(product.catalogId)
-		if (!catalog) continue
+		if (!catalog) {
+			if (shouldLogProgress(processed, products.length, progressInterval)) {
+				logProgress('product SEO rebuild progress', {
+					...buildProgressDetails({
+						processed,
+						total: products.length,
+						startedAt
+					}),
+					created: stats.created,
+					updated: stats.updated,
+					skippedMissingCatalog: stats.skippedMissingCatalog,
+					productId: product.id,
+					productName: product.name,
+					catalogId: product.catalogId
+				})
+			}
+			continue
+		}
 
 		const existed = await upsertProductSeo(prisma, catalog, product)
 		if (existed) stats.updated += 1
 		else stats.created += 1
+
+		if (shouldLogProgress(processed, products.length, progressInterval)) {
+			logProgress('product SEO rebuild progress', {
+				...buildProgressDetails({
+					processed,
+					total: products.length,
+					startedAt
+				}),
+				created: stats.created,
+				updated: stats.updated,
+				skippedMissingCatalog: stats.skippedMissingCatalog,
+				productId: product.id,
+				productName: product.name,
+				catalogId: product.catalogId,
+				catalogName: catalog.name
+			})
+		}
 	}
 
+	logProgress('product SEO rebuild apply completed', {
+		...buildProgressDetails({
+			processed,
+			total: products.length,
+			startedAt
+		}),
+		created: stats.created,
+		updated: stats.updated,
+		skippedMissingCatalog: stats.skippedMissingCatalog
+	})
+
 	return stats
+}
+
+function shouldLogProgress(
+	current: number,
+	total: number,
+	interval: number
+): boolean {
+	return total > 0 && (current === total || current % interval === 0)
+}
+
+function buildProgressDetails(input: {
+	processed: number
+	total: number
+	startedAt: number
+}) {
+	const elapsedMs = Date.now() - input.startedAt
+	const elapsedSec = Number((elapsedMs / 1000).toFixed(1))
+	const percent =
+		input.total > 0
+			? Number(((input.processed / input.total) * 100).toFixed(2))
+			: 100
+	const productsPerMinute =
+		elapsedMs > 0
+			? Number((input.processed / (elapsedMs / 60000)).toFixed(2))
+			: null
+
+	return {
+		processedProducts: input.processed,
+		totalProducts: input.total,
+		remainingProducts: Math.max(0, input.total - input.processed),
+		percent,
+		elapsedSec,
+		productsPerMinute
+	}
+}
+
+function resolveProgressInterval(): number {
+	const raw = Number(
+		process.env.LEGACY_MIGRATION_SEO_PROGRESS_INTERVAL ??
+			DEFAULT_PROGRESS_INTERVAL
+	)
+	if (!Number.isInteger(raw) || raw < 1) return DEFAULT_PROGRESS_INTERVAL
+	return raw
 }
 
 function parseCliOptions(args: string[]): CliOptions {
@@ -355,6 +456,7 @@ What it does:
   - rebuilds only SeoSetting rows where entityType=PRODUCT
   - uses the current UTF-8 product SEO generator
   - overwrites generated product SEO fields with clean Russian text
+  - prints JSON progress events during --apply; set LEGACY_MIGRATION_SEO_PROGRESS_INTERVAL=50 to change interval
   - does not touch catalog/category SEO, products, variants, categories or media
   - dry-run by default; pass --apply to write changes
 	`.trim()
@@ -472,6 +574,16 @@ function logStep(message: string, details?: Record<string, unknown>) {
 		channel: 'phase',
 		phase: PHASE,
 		scope: 'step',
+		message,
+		details
+	})
+}
+
+function logProgress(message: string, details?: Record<string, unknown>) {
+	logLegacyEvent({
+		channel: 'phase',
+		phase: PHASE,
+		scope: 'progress',
 		message,
 		details
 	})
