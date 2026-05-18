@@ -11,6 +11,8 @@ import {
 	MaxLength
 } from 'class-validator'
 
+export const PRODUCT_ATTRIBUTE_VALUE_STRING_MAX_LENGTH = 3000
+
 export class ProductAttributeValueDto {
 	@ApiProperty({ type: String, example: 'attribute-id' })
 	@IsString()
@@ -22,10 +24,14 @@ export class ProductAttributeValueDto {
 	@IsString()
 	enumValueId?: string
 
-	@ApiPropertyOptional({ type: String, example: '100% cotton' })
+	@ApiPropertyOptional({
+		type: String,
+		example: '100% cotton',
+		maxLength: PRODUCT_ATTRIBUTE_VALUE_STRING_MAX_LENGTH
+	})
 	@IsOptional()
 	@IsString()
-	@MaxLength(500)
+	@MaxLength(PRODUCT_ATTRIBUTE_VALUE_STRING_MAX_LENGTH)
 	valueString?: string
 
 	@ApiPropertyOptional({ type: Number, example: 42 })

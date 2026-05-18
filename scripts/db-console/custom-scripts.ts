@@ -31,6 +31,13 @@ const CUSTOM_SCRIPTS: CustomScript[] = [
 		description:
 			'Set ProductVariant.kind from legacy variantKey: default => DEFAULT, all others => MATRIX.',
 		run: runBackfillProductVariantKind
+	},
+	{
+		id: 'inspect-product-variant',
+		name: 'Inspect product variant',
+		description:
+			'Show a product with catalog and selected variants by productId or variantId.',
+		run: runInspectProductVariant
 	}
 ]
 
@@ -46,6 +53,50 @@ type VariantKindBackfillSummary = {
 	matrixToFix: number
 	samples: Record<string, unknown>[]
 }
+
+type ProductVariantInspectionRow = {
+	id: string
+	productId: string
+	sku: string
+	variantKey: string
+	kind: string
+	price: unknown
+	stock: number | null
+	status: string
+	isAvailable: boolean
+	deleteAt: Date | null
+	updatedAt: Date
+	product: {
+		id: string
+		catalogId: string
+		name: string
+		sku: string
+		price: unknown
+		status: string
+		deleteAt: Date | null
+		updatedAt: Date
+		catalog: {
+			id: string
+			name: string
+			slug: string
+			domain: string | null
+		}
+	}
+}
+
+const productVariantInspectionSelect = {
+	id: true,
+	productId: true,
+	sku: true,
+	variantKey: true,
+	kind: true,
+	price: true,
+	stock: true,
+	status: true,
+	isAvailable: true,
+	deleteAt: true,
+	updatedAt: true
+} as const
 
 export async function runCustomScriptsMenu(
 	ctx: AppContext,
@@ -98,7 +149,10 @@ async function runBackfillProductVariantKind(
 		where: {
 			OR: [
 				{ variantKey: 'default', kind: { not: PRODUCT_VARIANT_KIND_DEFAULT } },
-				{ variantKey: { not: 'default' }, kind: { not: PRODUCT_VARIANT_KIND_MATRIX } }
+				{
+					variantKey: { not: 'default' },
+					kind: { not: PRODUCT_VARIANT_KIND_MATRIX }
+				}
 			]
 		},
 		select: {
@@ -111,10 +165,16 @@ async function runBackfillProductVariantKind(
 		}
 	})
 	const backupPath = rows.length
-		? await writeBackup(ctx, variantModel, 'custom-backfill-product-variant-kind', rows, {
-				defaultToFix: summary.defaultToFix,
-				matrixToFix: summary.matrixToFix
-			})
+		? await writeBackup(
+				ctx,
+				variantModel,
+				'custom-backfill-product-variant-kind',
+				rows,
+				{
+					defaultToFix: summary.defaultToFix,
+					matrixToFix: summary.matrixToFix
+				}
+			)
 		: undefined
 
 	const result = await runAudited(
@@ -203,6 +263,158 @@ async function loadVariantKindBackfillSummary(
 		defaultToFix,
 		matrixToFix,
 		samples: samples as Record<string, unknown>[]
+	}
+}
+
+async function runInspectProductVariant(ctx: AppContext) {
+	const lookup = await askText('Product ID or Variant ID', {
+		required: true
+	})
+	const normalized = lookup.trim()
+	const [product, variantsById] = await Promise.all([
+		ctx.prisma.product.findUnique({
+			where: { id: normalized },
+			select: {
+				id: true,
+				catalogId: true,
+				name: true,
+				sku: true,
+				price: true,
+				status: true,
+				deleteAt: true,
+				updatedAt: true,
+				catalog: {
+					select: {
+						id: true,
+						name: true,
+						slug: true,
+						domain: true
+					}
+				},
+				variants: {
+					where: { deleteAt: null },
+					select: productVariantInspectionSelect,
+					orderBy: [{ variantKey: 'asc' }, { id: 'asc' }]
+				}
+			}
+		}),
+		ctx.prisma.productVariant.findMany({
+			where: {
+				OR: [{ id: normalized }, { productId: normalized }]
+			},
+			select: {
+				...productVariantInspectionSelect,
+				product: {
+					select: {
+						id: true,
+						catalogId: true,
+						name: true,
+						sku: true,
+						price: true,
+						status: true,
+						deleteAt: true,
+						updatedAt: true,
+						catalog: {
+							select: {
+								id: true,
+								name: true,
+								slug: true,
+								domain: true
+							}
+						}
+					}
+				}
+			},
+			orderBy: [{ variantKey: 'asc' }, { id: 'asc' }]
+		})
+	])
+
+	if (product) {
+		printProductInspection(product)
+		await pause()
+		return
+	}
+
+	if (!variantsById.length) {
+		console.log(colors.yellow('Product or variant not found'))
+		await pause()
+		return
+	}
+
+	const first = variantsById[0] as ProductVariantInspectionRow
+	printProductInspection({
+		...first.product,
+		variants: variantsById.map(variant => ({
+			id: variant.id,
+			productId: variant.productId,
+			sku: variant.sku,
+			variantKey: variant.variantKey,
+			kind: variant.kind,
+			price: variant.price,
+			stock: variant.stock,
+			status: variant.status,
+			isAvailable: variant.isAvailable,
+			deleteAt: variant.deleteAt,
+			updatedAt: variant.updatedAt
+		}))
+	})
+	await pause()
+}
+
+function printProductInspection(product: {
+	id: string
+	catalogId: string
+	name: string
+	sku: string
+	price: unknown
+	status: string
+	deleteAt: Date | null
+	updatedAt: Date
+	catalog: {
+		id: string
+		name: string
+		slug: string
+		domain: string | null
+	}
+	variants: Array<{
+		id: string
+		productId: string
+		sku: string
+		variantKey: string
+		kind: string
+		price: unknown
+		stock: number | null
+		status: string
+		isAvailable: boolean
+		deleteAt: Date | null
+		updatedAt: Date
+	}>
+}) {
+	console.log(colors.cyan('Product'))
+	table(
+		[
+			{
+				id: product.id,
+				name: product.name,
+				sku: product.sku,
+				price: product.price,
+				status: product.status,
+				deleteAt: product.deleteAt,
+				updatedAt: product.updatedAt
+			}
+		],
+		undefined,
+		1
+	)
+
+	console.log(colors.cyan('Catalog'))
+	table([product.catalog], undefined, 1)
+
+	console.log(colors.cyan(`Variants (${product.variants.length})`))
+	if (product.variants.length) {
+		table(product.variants, undefined, product.variants.length)
+	} else {
+		console.log(colors.yellow('Пусто'))
 	}
 }
 
@@ -418,7 +630,9 @@ async function applyNullifyZeroPrices(
 
 	console.log(colors.green(`Updated products: ${result.products.count}`))
 	if (includeVariants) {
-		console.log(colors.green(`Updated product variants: ${result.variants.count}`))
+		console.log(
+			colors.green(`Updated product variants: ${result.variants.count}`)
+		)
 	}
 }
 
