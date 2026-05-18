@@ -13,6 +13,8 @@ import {
 	Prisma,
 	PrismaClient,
 	ProductStatus,
+	ProductVariantKind,
+	ProductVariantStatus,
 	SeoChangeFreq,
 	SeoEntityType
 } from '../../../prisma/generated/client.js'
@@ -110,6 +112,7 @@ const SOCIAL_OG_LOGO_SIZE = 420
 const SOCIAL_OG_VERTICAL_GAP = 18
 const SOCIAL_FALLBACK_LOGO_FONT_RATIO = 0.37
 const FAVICON_SIZE = 64
+const DEFAULT_VARIANT_KEY = 'default'
 const SEO_PROGRESS_INTERVAL = Math.max(
 	1,
 	Number(process.env.LEGACY_MIGRATION_SEO_PROGRESS_INTERVAL ?? 100)
@@ -130,7 +133,7 @@ export type TargetProduct = {
 	name: string
 	slug: string
 	sku: string
-	price: Prisma.Decimal
+	price: Prisma.Decimal | null
 	status: ProductStatus
 	brand: { name: string } | null
 	media: Array<{
@@ -156,9 +159,12 @@ export type TargetProduct = {
 		valueDateTime: Date | null
 	}>
 	variants: Array<{
+		variantKey: string
+		kind: ProductVariantKind
 		stock: number | null
+		price: Prisma.Decimal | null
 		isAvailable: boolean
-		status: string
+		status: ProductVariantStatus
 	}>
 }
 
@@ -560,7 +566,10 @@ export async function loadTargetProducts(
 			variants: {
 				where: { deleteAt: null },
 				select: {
+					variantKey: true,
+					kind: true,
 					stock: true,
+					price: true,
 					isAvailable: true,
 					status: true
 				}
@@ -976,6 +985,14 @@ function buildProductAttributeSummary(product: TargetProduct): string | null {
 	return joined.length <= 220 ? joined : joined.slice(0, 220)
 }
 
+type ProductSeoPriceInfo = {
+	min: string
+	max: string
+	label: string
+	isRange: boolean
+	count: number
+}
+
 function resolveProductAvailability(product: TargetProduct): string {
 	if (product.status !== ProductStatus.ACTIVE) {
 		return 'https://schema.org/OutOfStock'
@@ -986,13 +1003,119 @@ function resolveProductAvailability(product: TargetProduct): string {
 	const hasAvailable = product.variants.some(
 		v =>
 			v.isAvailable &&
-			v.status === 'ACTIVE' &&
-			typeof v.stock === 'number' &&
-			v.stock > 0
+			v.status === ProductVariantStatus.ACTIVE &&
+			(v.stock === null || v.stock > 0)
 	)
 	return hasAvailable
 		? 'https://schema.org/InStock'
 		: 'https://schema.org/OutOfStock'
+}
+
+function resolveProductSeoPrice(
+	product: TargetProduct
+): ProductSeoPriceInfo | null {
+	const candidates = resolveProductSeoPriceCandidates(product)
+	if (!candidates.length) return null
+
+	const min = Math.min(...candidates)
+	const max = Math.max(...candidates)
+	const minFormatted = formatPrice(min)
+	const maxFormatted = formatPrice(max)
+	if (!minFormatted || !maxFormatted) return null
+
+	const isRange = min !== max
+	return {
+		min: minFormatted,
+		max: maxFormatted,
+		label: isRange ? `от ${minFormatted}` : minFormatted,
+		isRange,
+		count: candidates.length
+	}
+}
+
+function resolveProductSeoPriceCandidates(product: TargetProduct): number[] {
+	const matrixVariants = product.variants.filter(isMatrixSeoVariant)
+	if (matrixVariants.length) {
+		return matrixVariants
+			.filter(variant => variant.status !== ProductVariantStatus.DISABLED)
+			.map(variant => toPriceNumber(variant.price))
+			.filter((price): price is number => price !== null)
+	}
+
+	const defaultVariant =
+		product.variants.find(variant => isDefaultSeoVariant(variant)) ?? null
+	const simpleVariants = defaultVariant ? [defaultVariant] : product.variants
+	const variantPrices = simpleVariants
+		.filter(variant => variant.status !== ProductVariantStatus.DISABLED)
+		.map(variant => toPriceNumber(variant.price))
+		.filter((price): price is number => price !== null)
+	if (variantPrices.length) return variantPrices
+
+	const productPrice = toPriceNumber(product.price)
+	return productPrice === null ? [] : [productPrice]
+}
+
+function isMatrixSeoVariant(
+	variant: TargetProduct['variants'][number]
+): boolean {
+	return (
+		!isDefaultSeoVariant(variant) && variant.kind === ProductVariantKind.MATRIX
+	)
+}
+
+function isDefaultSeoVariant(
+	variant: TargetProduct['variants'][number]
+): boolean {
+	return (
+		variant.kind === ProductVariantKind.DEFAULT ||
+		variant.variantKey === DEFAULT_VARIANT_KEY
+	)
+}
+
+function toPriceNumber(
+	value: Prisma.Decimal | number | string | null | undefined
+): number | null {
+	if (value === null || value === undefined) return null
+	const numeric = typeof value === 'number' ? value : Number(value.toString())
+	if (!Number.isFinite(numeric) || numeric < 0) return null
+	return numeric
+}
+
+function buildProductStructuredDataOffer(input: {
+	priceInfo: ProductSeoPriceInfo | null
+	currency: string
+	availability: string
+	canonicalUrl: string | null
+}) {
+	const base = {
+		priceCurrency: input.currency,
+		availability: input.availability,
+		itemCondition: 'https://schema.org/NewCondition',
+		...(input.canonicalUrl ? { url: input.canonicalUrl } : {})
+	}
+
+	if (!input.priceInfo) {
+		return {
+			'@type': 'Offer',
+			...base
+		}
+	}
+
+	if (input.priceInfo.isRange) {
+		return {
+			'@type': 'AggregateOffer',
+			...base,
+			lowPrice: input.priceInfo.min,
+			highPrice: input.priceInfo.max,
+			offerCount: input.priceInfo.count
+		}
+	}
+
+	return {
+		'@type': 'Offer',
+		...base,
+		price: input.priceInfo.min
+	}
 }
 
 export async function upsertProductSeo(
@@ -1036,6 +1159,7 @@ export async function upsertProductSeo(
 	)
 	const twitterCard = primaryMediaId ? 'summary_large_image' : 'summary'
 	const availability = resolveProductAvailability(product)
+	const priceInfo = resolveProductSeoPrice(product)
 
 	const keywordParts: string[] = [
 		product.name,
@@ -1060,7 +1184,7 @@ export async function upsertProductSeo(
 			categoryNames.length
 				? `Категория: ${categoryNames.slice(0, 2).join(', ')}.`
 				: null,
-			`Цена: ${formatPrice(product.price)} ${currency}.`,
+			priceInfo ? `Цена: ${priceInfo.label} ${currency}.` : null,
 			attributeSummary ? `Характеристики: ${attributeSummary}.` : null
 		]
 			.filter(Boolean)
@@ -1068,7 +1192,9 @@ export async function upsertProductSeo(
 		500
 	)
 	const productSeoText = [
-		`${product.name} доступен в каталоге с актуальной ценой ${formatPrice(product.price)} ${currency}.`,
+		priceInfo
+			? `${product.name} доступен в каталоге с актуальной ценой ${priceInfo.label} ${currency}.`
+			: `${product.name} доступен в каталоге.`,
 		product.brand?.name ? `Бренд: ${product.brand.name}.` : null,
 		categoryNames.length
 			? `Разделы: ${categoryNames.slice(0, 3).join(', ')}.`
@@ -1092,14 +1218,12 @@ export async function upsertProductSeo(
 			: {}),
 		...(categoryNames.length ? { category: categoryNames.join(' / ') } : {}),
 		...(canonicalUrl ? { url: canonicalUrl } : {}),
-		offers: {
-			'@type': 'Offer',
-			priceCurrency: currency,
-			price: formatPrice(product.price),
+		offers: buildProductStructuredDataOffer({
+			priceInfo,
+			currency,
 			availability,
-			itemCondition: 'https://schema.org/NewCondition',
-			...(canonicalUrl ? { url: canonicalUrl } : {})
-		}
+			canonicalUrl
+		})
 	})
 	const productSeoExtras = JSON.stringify({
 		source: 'product-seo-sync-v1',
@@ -1755,6 +1879,11 @@ function buildUniqueSlug(slugState: Set<string>, baseSlug: string): string {
 	return candidate
 }
 
-function formatPrice(value: Prisma.Decimal): string {
-	return value.toDecimalPlaces(2).toString()
+function formatPrice(
+	value: Prisma.Decimal | number | string | null | undefined
+): string | null {
+	if (value === null || value === undefined) return null
+	const numeric = typeof value === 'number' ? value : Number(value.toString())
+	if (!Number.isFinite(numeric)) return null
+	return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(2)
 }
