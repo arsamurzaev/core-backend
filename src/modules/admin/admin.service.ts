@@ -12,6 +12,7 @@ import {
 	BadRequestException,
 	Inject,
 	Injectable,
+	Logger,
 	NotFoundException,
 	Optional
 } from '@nestjs/common'
@@ -94,11 +95,17 @@ const ALLOWED_PAYMENT_PROOF_MIME = new Set([
 ])
 
 type DuplicateCatalogMediaRecord = {
+	id: string
 	storage: string
 	key: string
 	path: string | null
 	entityId: string | null
 	variants: { storage: string; key: string }[]
+}
+
+type DuplicateCatalogCopiedMediaKeys = {
+	key: string
+	variantKeys: Array<string | null>
 }
 
 const adminCatalogSelect = {
@@ -214,6 +221,8 @@ export type UploadedPaymentProofFile = {
 
 @Injectable()
 export class AdminService {
+	private readonly logger = new Logger(AdminService.name)
+
 	constructor(
 		private readonly prisma: PrismaService,
 		private readonly mediaUrl: MediaUrlService,
@@ -583,6 +592,24 @@ export class AdminService {
 						catalog.id,
 						copiedS3Keys
 					)
+					if (!copiedKeys) continue
+
+					const variantCreates = media.variants.flatMap((variant, index) => {
+						const key = copiedKeys.variantKeys[index]
+						if (!key) return []
+
+						return [
+							{
+								kind: variant.kind,
+								mimeType: variant.mimeType,
+								size: variant.size,
+								width: variant.width,
+								height: variant.height,
+								storage: variant.storage,
+								key
+							}
+						]
+					})
 					mediaIdMap.set(media.id, nextMediaId)
 					await tx.media.create({
 						data: {
@@ -599,17 +626,7 @@ export class AdminService {
 							key: copiedKeys.key,
 							checksum: media.checksum,
 							status: media.status,
-							variants: {
-								create: media.variants.map((variant, index) => ({
-									kind: variant.kind,
-									mimeType: variant.mimeType,
-									size: variant.size,
-									width: variant.width,
-									height: variant.height,
-									storage: variant.storage,
-									key: copiedKeys.variantKeys[index] ?? variant.key
-								}))
-							}
+							variants: variantCreates.length ? { create: variantCreates } : undefined
 						}
 					})
 				}
@@ -1752,7 +1769,7 @@ export class AdminService {
 		media: DuplicateCatalogMediaRecord,
 		targetCatalogId: string,
 		copiedS3Keys: string[]
-	): Promise<{ key: string; variantKeys: string[] }> {
+	): Promise<DuplicateCatalogCopiedMediaKeys | null> {
 		const key =
 			media.storage === 's3'
 				? await this.copyDuplicatedS3Key(
@@ -1762,7 +1779,14 @@ export class AdminService {
 						copiedS3Keys
 					)
 				: media.key
-		const variantKeys: string[] = []
+		if (!key) {
+			this.logger.warn(
+				`Skipping duplicated media ${media.id}: source S3 object is missing (${media.key})`
+			)
+			return null
+		}
+
+		const variantKeys: Array<string | null> = []
 
 		for (const variant of media.variants) {
 			const variantKey =
@@ -1774,6 +1798,11 @@ export class AdminService {
 							copiedS3Keys
 						)
 					: variant.key
+			if (!variantKey) {
+				this.logger.warn(
+					`Skipping duplicated media variant for media ${media.id}: source S3 object is missing (${variant.key})`
+				)
+			}
 			variantKeys.push(variantKey)
 		}
 
@@ -1785,15 +1814,20 @@ export class AdminService {
 		media: Pick<DuplicateCatalogMediaRecord, 'path' | 'entityId'>,
 		targetCatalogId: string,
 		copiedS3Keys: string[]
-	): Promise<string> {
-		const result = await this.s3.copyObjectToCatalog({
-			sourceKey,
-			targetCatalogId,
-			path: media.path,
-			entityId: media.entityId
-		})
-		copiedS3Keys.push(result.key)
-		return result.key
+	): Promise<string | null> {
+		try {
+			const result = await this.s3.copyObjectToCatalog({
+				sourceKey,
+				targetCatalogId,
+				path: media.path,
+				entityId: media.entityId
+			})
+			copiedS3Keys.push(result.key)
+			return result.key
+		} catch (error) {
+			if (isMissingS3ObjectError(error)) return null
+			throw error
+		}
 	}
 
 	private async invalidateCatalogTypeChangeCaches(
@@ -2311,6 +2345,23 @@ function mapNullableId(
 ) {
 	if (!id) return null
 	return idMap.get(id) ?? null
+}
+
+function isMissingS3ObjectError(error: unknown) {
+	if (typeof error !== 'object' || error === null) return false
+	const candidate = error as {
+		name?: unknown
+		code?: unknown
+		Code?: unknown
+		$metadata?: { httpStatusCode?: unknown }
+	}
+
+	return (
+		candidate.name === 'NoSuchKey' ||
+		candidate.code === 'NoSuchKey' ||
+		candidate.Code === 'NoSuchKey' ||
+		candidate.$metadata?.httpStatusCode === 404
+	)
 }
 
 function buildDuplicatedSku(value: string, catalogSlug: string) {

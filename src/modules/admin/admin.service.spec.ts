@@ -614,6 +614,36 @@ describe('AdminService', () => {
 		})
 	})
 
+	it('skips missing S3 media while duplicating catalog', async () => {
+		const tx = createDuplicateTransactionMock()
+		const { prisma, s3, service } = createService(tx as any)
+		prisma.catalog.findUnique.mockResolvedValueOnce(
+			createDuplicateSourceCatalog() as any
+		)
+		s3.copyObjectToCatalog.mockRejectedValueOnce(
+			Object.assign(new Error('source object is missing'), {
+				name: 'NoSuchKey',
+				$metadata: { httpStatusCode: 404 }
+			})
+		)
+
+		await expect(
+			service.duplicateCatalog('catalog-source', {
+				name: 'Catalog Copy',
+				slug: 'catalog-copy',
+				typeId: 'type-1',
+				status: CatalogStatus.OPERATIONAL
+			})
+		).resolves.toMatchObject({
+			catalog: expect.objectContaining({ id: 'catalog-copy' })
+		})
+
+		expect(s3.copyObjectToCatalog).toHaveBeenCalledTimes(1)
+		expect(tx.media.create).not.toHaveBeenCalled()
+		expect(tx.productMedia.createMany).not.toHaveBeenCalled()
+		expect(s3.deleteObjectsByKeys).not.toHaveBeenCalled()
+	})
+
 	it('soft-deletes catalog content and keeps catalog-level data intact', async () => {
 		const { cache, service, tx } = createService()
 
