@@ -399,7 +399,7 @@ describe('MoySkladSyncService', () => {
 			undefined
 		)
 		expect(repo.finishMoySkladSync).toHaveBeenCalled()
-		expect(cache.bumpVersion).toHaveBeenCalledTimes(2)
+		expect(cache.bumpVersion).toHaveBeenCalledTimes(3)
 		expect(mediaRepo.findOrphanedByIds).not.toHaveBeenCalled()
 	})
 
@@ -973,7 +973,7 @@ describe('MoySkladSyncService', () => {
 				lastStockSyncedAt: result.syncedAt
 			})
 		)
-		expect(cache.bumpVersion).toHaveBeenCalledTimes(2)
+		expect(cache.bumpVersion).toHaveBeenCalledTimes(3)
 	})
 
 	it('keeps external stock as reconciliation-only for INTERNAL inventory catalogs', async () => {

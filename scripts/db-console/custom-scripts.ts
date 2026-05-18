@@ -61,6 +61,13 @@ const CUSTOM_SCRIPTS: CustomScript[] = [
 		description:
 			'Set zero-stock MoySklad-linked products back to ACTIVE after the old stock hiding behavior.',
 		run: runMoySkladRestoreZeroStockVisibility
+	},
+	{
+		id: 'bump-catalog-cache',
+		name: 'Bump catalog cache versions',
+		description:
+			'Increment Redis cache versions for catalog products, category products, and category list.',
+		run: runBumpCatalogCache
 	}
 ]
 
@@ -498,6 +505,14 @@ async function runMoySkladRestoreZeroStockVisibility(ctx: AppContext) {
 	await pause()
 }
 
+async function runBumpCatalogCache(ctx: AppContext) {
+	const lookup = await askText('Catalog slug/name/domain/id', {
+		required: true
+	})
+	await runBumpCatalogCacheReport(ctx, lookup)
+	await pause()
+}
+
 export async function runMoySkladCatalogVisibilityCommand(
 	ctx: AppContext,
 	options: Record<string, string | boolean>
@@ -527,6 +542,22 @@ export async function runMoySkladRestoreZeroStockVisibilityCommand(
 
 	await runMoySkladRestoreZeroStockVisibilityReport(ctx, lookup, {
 		apply: Boolean(options.yes),
+		json: Boolean(options.json)
+	})
+}
+
+export async function runBumpCatalogCacheCommand(
+	ctx: AppContext,
+	options: Record<string, string | boolean>
+) {
+	const lookup = readCatalogLookupOption(options)
+	if (!lookup) {
+		throw new Error(
+			'Catalog lookup is required. Pass --catalog, --slug, --id or --query.'
+		)
+	}
+
+	await runBumpCatalogCacheReport(ctx, lookup, {
 		json: Boolean(options.json)
 	})
 }
@@ -749,6 +780,28 @@ async function runMoySkladRestoreZeroStockVisibilityReport(
 				colors.green(`Bumped cache scopes: ${bumpedCacheScopes.join(', ')}`)
 			)
 		}
+	}
+}
+
+async function runBumpCatalogCacheReport(
+	ctx: AppContext,
+	lookup: string,
+	options: { json?: boolean } = {}
+) {
+	const catalog = await resolveCatalogForCustomScript(ctx, lookup)
+	const bumpedCacheScopes = await bumpCatalogRedisCacheVersions(catalog.id)
+
+	if (ctx.options.json || options.json) {
+		printJson({ catalog, bumpedCacheScopes })
+		return
+	}
+
+	if (bumpedCacheScopes.length) {
+		console.log(
+			colors.green(`Bumped cache scopes: ${bumpedCacheScopes.join(', ')}`)
+		)
+	} else {
+		console.log(colors.yellow('No cache scopes were bumped.'))
 	}
 }
 

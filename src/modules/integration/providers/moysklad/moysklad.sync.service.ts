@@ -1851,7 +1851,7 @@ export class MoySkladSyncService {
 					type: 'product.changed',
 					catalogId,
 					productId: '*',
-					changes: ['catalog_products', 'category_products']
+					changes: ['catalog_products', 'category_products', 'category_list']
 				})
 			)
 			return
@@ -1859,6 +1859,7 @@ export class MoySkladSyncService {
 
 		await this.cache.bumpVersion(PRODUCTS_CACHE_VERSION, catalogId)
 		await this.cache.bumpVersion(CATEGORY_PRODUCTS_CACHE_VERSION, catalogId)
+		await this.cache.bumpVersion(CATEGORY_LIST_CACHE_VERSION, catalogId)
 	}
 
 	private async invalidateCategoryCaches(catalogId: string): Promise<void> {

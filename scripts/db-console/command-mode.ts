@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 import { runCatalogDiagnostics } from './catalog-diagnostics.js'
 import {
+	runBumpCatalogCacheCommand,
 	runMoySkladCatalogVisibilityCommand,
 	runMoySkladRestoreZeroStockVisibilityCommand
 } from './custom-scripts.js'
@@ -57,6 +58,14 @@ export async function runCommandMode(ctx: AppContext, models: ModelMeta[]) {
 		].includes(command.action)
 	) {
 		await runMoySkladRestoreZeroStockVisibilityCommand(ctx, command.options)
+		return true
+	}
+
+	if (
+		command.subject === 'catalog' &&
+		['bump-cache', 'cache-bump', 'refresh-cache'].includes(command.action)
+	) {
+		await runBumpCatalogCacheCommand(ctx, command.options)
 		return true
 	}
 
