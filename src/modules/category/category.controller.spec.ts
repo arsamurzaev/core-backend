@@ -43,10 +43,14 @@ describe('CategoryController', () => {
 	it('passes includeEmpty=false to category list service', async () => {
 		service.getAll.mockResolvedValue([] as any)
 		const res = { setHeader: jest.fn() } as any
+		const req = { user: undefined } as any
 
-		await controller.getAll(res, 'false')
+		await controller.getAll(res, req, 'false')
 
-		expect(service.getAll).toHaveBeenCalledWith({ includeEmpty: false })
+		expect(service.getAll).toHaveBeenCalledWith({
+			includeEmpty: false,
+			includeInactive: false
+		})
 	})
 
 	it('delegates category position updates to service', async () => {

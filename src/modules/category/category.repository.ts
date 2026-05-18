@@ -16,32 +16,36 @@ import {
 const uuidRegex =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-const categorySelect = {
-	id: true,
-	catalogId: true,
-	parentId: true,
-	position: true,
-	_count: {
-		select: {
-			categoryProducts: {
-				where: {
-					product: {
-						deleteAt: null,
-						status: ProductStatus.ACTIVE
+function buildCategorySelect(includeInactive = false) {
+	return {
+		id: true,
+		catalogId: true,
+		parentId: true,
+		position: true,
+		_count: {
+			select: {
+				categoryProducts: {
+					where: {
+						product: {
+							deleteAt: null,
+							...(!includeInactive ? { status: ProductStatus.ACTIVE } : {})
+						}
 					}
 				}
 			}
-		}
-	},
-	name: true,
-	imageMedia: {
-		select: buildMediaSelect()
-	},
-	descriptor: true,
-	discount: true,
-	createdAt: true,
-	updatedAt: true
+		},
+		name: true,
+		imageMedia: {
+			select: buildMediaSelect()
+		},
+		descriptor: true,
+		discount: true,
+		createdAt: true,
+		updatedAt: true
+	} satisfies Prisma.CategorySelect
 }
+
+const categorySelect = buildCategorySelect(false)
 
 function buildProductMediaSelect() {
 	return {
@@ -165,10 +169,10 @@ export type CategorySelectWithRelations = Prisma.CategoryGetPayload<{
 export class CategoryRepository {
 	constructor(private readonly prisma: PrismaService) {}
 
-	findAll(catalogId: string) {
+	findAll(catalogId: string, options: { includeInactive?: boolean } = {}) {
 		return this.prisma.category.findMany({
 			where: { catalogId, deleteAt: null },
-			select: categorySelect,
+			select: options.includeInactive ? buildCategorySelect(true) : categorySelect,
 			orderBy: [{ position: SortOrder.asc }, { name: SortOrder.asc }]
 		})
 	}

@@ -72,13 +72,19 @@ export class CategoryController {
 		type: CategoryDto,
 		isArray: true
 	})
+	@UseGuards(OptionalSessionGuard)
 	async getAll(
 		@Res({ passthrough: true }) res: Response,
+		@Req() req: AuthRequest,
 		@Query('includeEmpty') includeEmpty?: string
 	) {
 		setPrivateNoStoreHeaders(res)
 		return this.categoryService.getAll({
-			includeEmpty: parseBooleanQuery(includeEmpty, true)
+			includeEmpty: parseBooleanQuery(includeEmpty, true),
+			includeInactive: canReadInactiveCatalogProducts(
+				req?.user,
+				RequestContext.get()?.ownerUserId
+			)
 		})
 	}
 

@@ -67,6 +67,7 @@ type CategoryOrderItem = Awaited<
 >[number]
 type CategoryListOptions = {
 	includeEmpty?: boolean
+	includeInactive?: boolean
 }
 
 @Injectable()
@@ -93,9 +94,13 @@ export class CategoryService {
 	async getAll(options: CategoryListOptions = {}) {
 		const catalogId = effectiveCatalogId()
 		const includeEmpty = options.includeEmpty !== false
+		const includeInactive = options.includeInactive === true
 		const cacheKey =
 			this.listCacheTtlSec > 0
-				? await this.buildCategoryListCacheKey(catalogId, { includeEmpty })
+				? await this.buildCategoryListCacheKey(catalogId, {
+						includeEmpty,
+						includeInactive
+					})
 				: undefined
 
 		if (cacheKey) {
@@ -103,7 +108,7 @@ export class CategoryService {
 			if (cached !== null) return cached
 		}
 
-		const categories = await this.repo.findAll(catalogId)
+		const categories = await this.repo.findAll(catalogId, { includeInactive })
 		const mapped = this.normalizeCategoryListForRead(categories)
 			.map(category => this.mapCategory(category))
 			.filter(category => includeEmpty || category.productCount > 0)
@@ -603,7 +608,7 @@ export class CategoryService {
 
 	private async buildCategoryListCacheKey(
 		catalogId: string,
-		options: { includeEmpty: boolean }
+		options: { includeEmpty: boolean; includeInactive: boolean }
 	): Promise<string> {
 		const version = await this.cache.getVersion(
 			CATEGORY_LIST_CACHE_VERSION,
@@ -615,6 +620,7 @@ export class CategoryService {
 			'category',
 			'list',
 			options.includeEmpty ? 'include-empty' : 'non-empty',
+			options.includeInactive ? 'include-inactive' : 'active-only',
 			`v${version}`
 		])
 	}
