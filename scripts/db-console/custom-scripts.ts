@@ -156,6 +156,39 @@ type MoySkladSyncRunRow = {
 	finishedAt: Date | null
 }
 
+type MoySkladCategoryCoverageSummaryRow = {
+	check: string
+	count: number
+	details: string | null
+}
+
+type MoySkladCategoryCoverageRow = {
+	id: string
+	name: string
+	parentName: string | null
+	productLinks: number
+	activeProducts: number
+	moySkladProducts: number
+	activeMoySkladProducts: number
+}
+
+type MoySkladUncategorizedProductRow = {
+	id: string
+	name: string
+	sku: string
+	status: string
+	externalId: string | null
+	totalStock: number
+	activeVariants: number
+	updatedAt: Date
+}
+
+type MoySkladAvailabilitySummaryRow = {
+	check: string
+	count: number
+	details: string | null
+}
+
 type MoySkladRestoreVisibilityCandidateRow = {
 	id: string
 	name: string
@@ -523,14 +556,27 @@ async function runMoySkladCatalogVisibilityReport(
 		}
 	})
 
-	const [summary, productStatuses, variantStatuses, hiddenSamples, latestRuns] =
-		await Promise.all([
-			loadMoySkladVisibilitySummary(ctx, catalog.id),
-			loadMoySkladProductStatusCounts(ctx, catalog.id),
-			loadMoySkladVariantStatusCounts(ctx, catalog.id),
-			loadMoySkladHiddenProductSamples(ctx, catalog.id, ctx.options.limit),
-			loadMoySkladLatestSyncRuns(ctx, catalog.id, ctx.options.limit)
-		])
+	const [
+		summary,
+		productStatuses,
+		variantStatuses,
+		availabilitySummary,
+		categoryCoverage,
+		categorySamples,
+		uncategorizedProducts,
+		hiddenSamples,
+		latestRuns
+	] = await Promise.all([
+		loadMoySkladVisibilitySummary(ctx, catalog.id),
+		loadMoySkladProductStatusCounts(ctx, catalog.id),
+		loadMoySkladVariantStatusCounts(ctx, catalog.id),
+		loadMoySkladAvailabilitySummary(ctx, catalog.id),
+		loadMoySkladCategoryCoverageSummary(ctx, catalog.id),
+		loadMoySkladCategoryCoverageRows(ctx, catalog.id, ctx.options.limit),
+		loadMoySkladUncategorizedProductSamples(ctx, catalog.id, ctx.options.limit),
+		loadMoySkladHiddenProductSamples(ctx, catalog.id, ctx.options.limit),
+		loadMoySkladLatestSyncRuns(ctx, catalog.id, ctx.options.limit)
+	])
 
 	if (ctx.options.json || options.json) {
 		printJson({
@@ -539,6 +585,10 @@ async function runMoySkladCatalogVisibilityReport(
 			summary,
 			productStatuses,
 			variantStatuses,
+			availabilitySummary,
+			categoryCoverage,
+			categorySamples,
+			uncategorizedProducts,
 			hiddenSamples,
 			latestRuns
 		})
@@ -561,6 +611,26 @@ async function runMoySkladCatalogVisibilityReport(
 
 	console.log(colors.cyan('Variant statuses'))
 	table(variantStatuses, undefined, variantStatuses.length)
+
+	console.log(colors.cyan('Availability summary'))
+	table(availabilitySummary, undefined, availabilitySummary.length)
+
+	console.log(colors.cyan('Category coverage'))
+	table(categoryCoverage, undefined, categoryCoverage.length)
+
+	console.log(colors.cyan(`Category samples (${categorySamples.length})`))
+	table(categorySamples, undefined, categorySamples.length || ctx.options.limit)
+
+	console.log(
+		colors.cyan(
+			`Uncategorized MoySklad products (${uncategorizedProducts.length})`
+		)
+	)
+	table(
+		uncategorizedProducts,
+		undefined,
+		uncategorizedProducts.length || ctx.options.limit
+	)
 
 	console.log(
 		colors.cyan(`Hidden MoySklad product samples (${hiddenSamples.length})`)
@@ -926,6 +996,206 @@ async function loadMoySkladLatestSyncRuns(
 		where run.catalog_id = '${catalogId}'::uuid
 			and run.provider::text = 'MOYSKLAD'
 		order by run.requested_at desc
+		limit ${Math.max(1, Math.trunc(limit))}
+	`)
+}
+
+async function loadMoySkladAvailabilitySummary(
+	ctx: AppContext,
+	catalogId: string
+): Promise<MoySkladAvailabilitySummaryRow[]> {
+	return ctx.prisma.$queryRawUnsafe<MoySkladAvailabilitySummaryRow[]>(`
+		with product_variants as (
+			select
+				p.id,
+				p.status::text as status,
+				count(v.id) filter (
+					where v.status::text <> 'DISABLED'
+				)::int as enabled_variants,
+				count(v.id) filter (
+					where v.status::text = 'ACTIVE'
+						and v.is_available = true
+				)::int as active_available_variants,
+				coalesce(sum(greatest(coalesce(v.stock, 0), 0)), 0)::int as total_stock
+			from products p
+			join integration_product_links link on link.product_id = p.id
+			join integrations integration
+				on integration.id = link.integration_id
+				and integration.provider::text = 'MOYSKLAD'
+				and integration.catalog_id = p.catalog_id
+				and integration.delete_at is null
+			left join product_variants v
+				on v.product_id = p.id
+				and v.delete_at is null
+			where p.catalog_id = '${catalogId}'::uuid
+				and p.delete_at is null
+			group by p.id, p.status
+		)
+		select 'products with purchasable variant' as check, count(*)::int as count, 'active/isAvailable variant exists' as details
+		from product_variants
+		where status = 'ACTIVE' and active_available_variants > 0
+		union all
+		select 'active products without purchasable variant', count(*)::int, 'Product ACTIVE but no active/isAvailable variant'
+		from product_variants
+		where status = 'ACTIVE' and active_available_variants = 0
+		union all
+		select 'active products with zero total stock', count(*)::int, 'Product ACTIVE and summed variant stock = 0'
+		from product_variants
+		where status = 'ACTIVE' and total_stock <= 0
+		union all
+		select 'active products with stock > 0', count(*)::int, 'Product ACTIVE and summed variant stock > 0'
+		from product_variants
+		where status = 'ACTIVE' and total_stock > 0
+	`)
+}
+
+async function loadMoySkladCategoryCoverageSummary(
+	ctx: AppContext,
+	catalogId: string
+): Promise<MoySkladCategoryCoverageSummaryRow[]> {
+	return ctx.prisma.$queryRawUnsafe<MoySkladCategoryCoverageSummaryRow[]>(`
+		with moysklad_products as (
+			select p.id, p.status::text as status
+			from products p
+			join integration_product_links link on link.product_id = p.id
+			join integrations integration
+				on integration.id = link.integration_id
+				and integration.provider::text = 'MOYSKLAD'
+				and integration.catalog_id = p.catalog_id
+				and integration.delete_at is null
+			where p.catalog_id = '${catalogId}'::uuid
+				and p.delete_at is null
+		),
+		product_category_links as (
+			select
+				p.id,
+				p.status,
+				count(cp.category_id) filter (
+					where c.id is not null
+				)::int as category_links
+			from moysklad_products p
+			left join category_products cp on cp.product_id = p.id
+			left join categories c
+				on c.id = cp.category_id
+				and c.catalog_id = '${catalogId}'::uuid
+				and c.delete_at is null
+			group by p.id, p.status
+		),
+		category_counts as (
+			select
+				c.id,
+				count(cp.product_id) filter (
+					where p.delete_at is null and p.status::text = 'ACTIVE'
+				)::int as active_products
+			from categories c
+			left join category_products cp on cp.category_id = c.id
+			left join products p on p.id = cp.product_id
+			where c.catalog_id = '${catalogId}'::uuid
+				and c.delete_at is null
+			group by c.id
+		)
+		select 'categories total' as check, count(*)::int as count, 'non-deleted categories' as details
+		from category_counts
+		union all
+		select 'categories with active products', count(*)::int, 'category has Product.status ACTIVE'
+		from category_counts
+		where active_products > 0
+		union all
+		select 'MoySklad products with category', count(*)::int, 'linked to at least one non-deleted category'
+		from product_category_links
+		where category_links > 0
+		union all
+		select 'MoySklad products without category', count(*)::int, 'no category_products link to non-deleted category'
+		from product_category_links
+		where category_links = 0
+		union all
+		select 'active MoySklad products without category', count(*)::int, 'ACTIVE but uncategorized'
+		from product_category_links
+		where status = 'ACTIVE' and category_links = 0
+	`)
+}
+
+async function loadMoySkladCategoryCoverageRows(
+	ctx: AppContext,
+	catalogId: string,
+	limit: number
+): Promise<MoySkladCategoryCoverageRow[]> {
+	return ctx.prisma.$queryRawUnsafe<MoySkladCategoryCoverageRow[]>(`
+		select
+			c.id::text,
+			c.name,
+			parent.name as "parentName",
+			count(cp.product_id)::int as "productLinks",
+			count(cp.product_id) filter (
+				where p.delete_at is null and p.status::text = 'ACTIVE'
+			)::int as "activeProducts",
+			count(cp.product_id) filter (
+				where link.id is not null
+			)::int as "moySkladProducts",
+			count(cp.product_id) filter (
+				where link.id is not null
+					and p.delete_at is null
+					and p.status::text = 'ACTIVE'
+			)::int as "activeMoySkladProducts"
+		from categories c
+		left join categories parent on parent.id = c.parent_id
+		left join category_products cp on cp.category_id = c.id
+		left join products p on p.id = cp.product_id
+		left join integration_product_links link on link.product_id = p.id
+		left join integrations integration
+			on integration.id = link.integration_id
+			and integration.provider::text = 'MOYSKLAD'
+			and integration.catalog_id = c.catalog_id
+			and integration.delete_at is null
+		where c.catalog_id = '${catalogId}'::uuid
+			and c.delete_at is null
+		group by c.id, c.name, parent.name
+		order by "activeMoySkladProducts" desc, "activeProducts" desc, c.name asc
+		limit ${Math.max(1, Math.trunc(limit))}
+	`)
+}
+
+async function loadMoySkladUncategorizedProductSamples(
+	ctx: AppContext,
+	catalogId: string,
+	limit: number
+): Promise<MoySkladUncategorizedProductRow[]> {
+	return ctx.prisma.$queryRawUnsafe<MoySkladUncategorizedProductRow[]>(`
+		select
+			p.id::text,
+			p.name,
+			p.sku,
+			p.status::text as status,
+			link.external_id as "externalId",
+			coalesce(sum(greatest(coalesce(v.stock, 0), 0)), 0)::int as "totalStock",
+			count(v.id) filter (
+				where v.status::text = 'ACTIVE'
+					and v.is_available = true
+			)::int as "activeVariants",
+			p.updated_at as "updatedAt"
+		from products p
+		join integration_product_links link on link.product_id = p.id
+		join integrations integration
+			on integration.id = link.integration_id
+			and integration.provider::text = 'MOYSKLAD'
+			and integration.catalog_id = p.catalog_id
+			and integration.delete_at is null
+		left join product_variants v
+			on v.product_id = p.id
+			and v.delete_at is null
+		where p.catalog_id = '${catalogId}'::uuid
+			and p.delete_at is null
+			and not exists (
+				select 1
+				from category_products cp
+				join categories c
+					on c.id = cp.category_id
+					and c.catalog_id = p.catalog_id
+					and c.delete_at is null
+				where cp.product_id = p.id
+			)
+		group by p.id, p.name, p.sku, p.status, link.external_id, p.updated_at
+		order by p.updated_at desc, p.id asc
 		limit ${Math.max(1, Math.trunc(limit))}
 	`)
 }
