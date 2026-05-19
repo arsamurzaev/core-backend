@@ -2,6 +2,7 @@ import { Prisma } from '@generated/client'
 import {
 	IntegrationProvider,
 	IntegrationSyncRunMode,
+	MediaStatus,
 	Metric,
 	MetricScope,
 	PaymentKind,
@@ -92,6 +93,7 @@ const ALLOWED_PAYMENT_PROOF_MIME = new Set([
 	'image/png',
 	'image/webp'
 ])
+const DUPLICATE_CATALOG_TRANSACTION_TIMEOUT_MS = 60_000
 
 type DuplicateCatalogMediaRecord = {
 	id: string
@@ -105,6 +107,32 @@ type DuplicateCatalogMediaRecord = {
 type DuplicateCatalogCopiedMediaKeys = {
 	key: string
 	variantKeys: Array<string | null>
+}
+
+type DuplicateCatalogPreparedMediaVariant = {
+	kind: string
+	mimeType: string | null
+	size: number | null
+	width: number | null
+	height: number | null
+	storage: string
+	key: string
+}
+
+type DuplicateCatalogPreparedMedia = {
+	id: string
+	originalName: string
+	mimeType: string
+	size: number | null
+	width: number | null
+	height: number | null
+	path: string | null
+	entityId: string | null
+	storage: string
+	key: string
+	checksum: string | null
+	status: MediaStatus
+	variants: DuplicateCatalogPreparedMediaVariant[]
 }
 
 const adminCatalogSelect = {
@@ -527,362 +555,389 @@ export class AdminService {
 		const passwordHash = await hash(password)
 		const login = await this.generateOwnerLogin(dto.slug)
 		const ownerName = dto.name
+		const nextCatalogId = randomUUID()
 		const copiedS3Keys: string[] = []
+		const mediaIdMap = new Map<string, string>()
+		const duplicatedMedia: DuplicateCatalogPreparedMedia[] = []
 
 		let created!: {
 			owner: { id: string; name: string; login: string }
 			catalog: AdminCatalogRecord
 		}
 		try {
-			created = await this.prisma.$transaction(async tx => {
-				const owner = await tx.user.create({
-					data: {
-						name: ownerName,
-						login,
-						password: passwordHash,
-						role: Role.CATALOG,
-						isEmailConfirmed: true
-					},
-					select: {
-						id: true,
-						name: true,
-						login: true
-					}
+			for (const media of source.media) {
+				const nextMediaId = randomUUID()
+				const copiedKeys = await this.copyDuplicatedMediaKeys(
+					media,
+					nextCatalogId,
+					copiedS3Keys
+				)
+				if (!copiedKeys) continue
+
+				const variants = media.variants.flatMap((variant, index) => {
+					const key = copiedKeys.variantKeys[index]
+					if (!key) return []
+
+					return [
+						{
+							kind: variant.kind,
+							mimeType: variant.mimeType,
+							size: variant.size,
+							width: variant.width,
+							height: variant.height,
+							storage: variant.storage,
+							key
+						}
+					]
 				})
 
-				const catalog = await tx.catalog.create({
-					data: {
-						name: dto.name,
-						slug,
-						type: { connect: { id: dto.typeId } },
-						user: { connect: { id: owner.id } },
-						...(source.parentId
-							? { parent: { connect: { id: source.parentId } } }
-							: {}),
-						...(activityIds.length
-							? { activity: { connect: activityIds.map(id => ({ id })) } }
-							: {}),
-						...(regionIds.length
-							? { region: { connect: regionIds.map(id => ({ id })) } }
-							: {}),
-						config: { create: { status: dto.status } },
-						settings: { create: {} },
-						metrics: {
-							connectOrCreate: [
-								{
-									where: { counterId: GLOBAL_YANDEX_METRIKA_COUNTER_ID },
-									create: {
-										provider: Metric.YANDEX,
-										scope: MetricScope.GLOBAL,
-										counterId: GLOBAL_YANDEX_METRIKA_COUNTER_ID
+				mediaIdMap.set(media.id, nextMediaId)
+				duplicatedMedia.push({
+					id: nextMediaId,
+					originalName: media.originalName,
+					mimeType: media.mimeType,
+					size: media.size,
+					width: media.width,
+					height: media.height,
+					path: media.path,
+					entityId: media.entityId,
+					storage: media.storage,
+					key: copiedKeys.key,
+					checksum: media.checksum,
+					status: media.status,
+					variants
+				})
+			}
+
+			created = await this.prisma.$transaction(
+				async tx => {
+					const owner = await tx.user.create({
+						data: {
+							name: ownerName,
+							login,
+							password: passwordHash,
+							role: Role.CATALOG,
+							isEmailConfirmed: true
+						},
+						select: {
+							id: true,
+							name: true,
+							login: true
+						}
+					})
+
+					const catalog = await tx.catalog.create({
+						data: {
+							id: nextCatalogId,
+							name: dto.name,
+							slug,
+							type: { connect: { id: dto.typeId } },
+							user: { connect: { id: owner.id } },
+							...(source.parentId
+								? { parent: { connect: { id: source.parentId } } }
+								: {}),
+							...(activityIds.length
+								? { activity: { connect: activityIds.map(id => ({ id })) } }
+								: {}),
+							...(regionIds.length
+								? { region: { connect: regionIds.map(id => ({ id })) } }
+								: {}),
+							config: { create: { status: dto.status } },
+							settings: { create: {} },
+							metrics: {
+								connectOrCreate: [
+									{
+										where: { counterId: GLOBAL_YANDEX_METRIKA_COUNTER_ID },
+										create: {
+											provider: Metric.YANDEX,
+											scope: MetricScope.GLOBAL,
+											counterId: GLOBAL_YANDEX_METRIKA_COUNTER_ID
+										}
 									}
-								}
-							]
-						}
-					},
-					select: { id: true }
-				})
-
-				const mediaIdMap = new Map<string, string>()
-				for (const media of source.media) {
-					const nextMediaId = randomUUID()
-					const copiedKeys = await this.copyDuplicatedMediaKeys(
-						media,
-						catalog.id,
-						copiedS3Keys
-					)
-					if (!copiedKeys) continue
-
-					const variantCreates = media.variants.flatMap((variant, index) => {
-						const key = copiedKeys.variantKeys[index]
-						if (!key) return []
-
-						return [
-							{
-								kind: variant.kind,
-								mimeType: variant.mimeType,
-								size: variant.size,
-								width: variant.width,
-								height: variant.height,
-								storage: variant.storage,
-								key
+								]
 							}
-						]
-					})
-					mediaIdMap.set(media.id, nextMediaId)
-					await tx.media.create({
-						data: {
-							id: nextMediaId,
-							catalogId: catalog.id,
-							originalName: media.originalName,
-							mimeType: media.mimeType,
-							size: media.size,
-							width: media.width,
-							height: media.height,
-							path: media.path,
-							entityId: media.entityId,
-							storage: media.storage,
-							key: copiedKeys.key,
-							checksum: media.checksum,
-							status: media.status
-						}
+						},
+						select: { id: true }
 					})
 
-					if (variantCreates.length) {
-						await tx.mediaVariant.createMany({
-							data: variantCreates.map(variant => ({
-								mediaId: nextMediaId,
-								...variant
-							}))
-						})
-					}
-				}
-
-				if (source.config) {
-					await tx.catalogConfig.update({
-						where: { catalogId: catalog.id },
-						data: {
-							about: source.config.about,
-							description: source.config.description,
-							currency: source.config.currency,
-							logoMediaId: mapNullableId(source.config.logoMediaId, mediaIdMap),
-							bgMediaId: mapNullableId(source.config.bgMediaId, mediaIdMap),
-							note: source.config.note,
-							deleteAt: source.config.deleteAt
-						}
-					})
-				}
-
-				if (source.settings) {
-					await tx.catalogSettings.update({
-						where: { catalogId: catalog.id },
-						data: {
-							isActive: source.settings.isActive,
-							defaultMode: source.settings.defaultMode,
-							allowedModes: source.settings.allowedModes,
-							googleVerification: source.settings.googleVerification,
-							yandexVerification: source.settings.yandexVerification,
-							deleteAt: source.settings.deleteAt
-						}
-					})
-				}
-
-				if (source.contacts.length) {
-					await tx.catalogContact.createMany({
-						data: source.contacts.map(contact => ({
-							catalogId: catalog.id,
-							type: contact.type,
-							position: contact.position,
-							value: contact.value,
-							deleteAt: contact.deleteAt
-						}))
-					})
-				}
-
-				const brandIdMap = new Map<string, string>()
-				for (const brand of source.brands) {
-					const nextBrandId = randomUUID()
-					brandIdMap.set(brand.id, nextBrandId)
-					await tx.brand.create({
-						data: {
-							id: nextBrandId,
-							catalogId: catalog.id,
-							name: brand.name,
-							slug: brand.slug,
-							deleteAt: brand.deleteAt
-						}
-					})
-				}
-
-				const categoryIdMap = new Map<string, string>()
-				const pendingCategories = [...source.category]
-				while (pendingCategories.length) {
-					let createdInPass = 0
-					for (let index = pendingCategories.length - 1; index >= 0; index -= 1) {
-						const category = pendingCategories[index]
-						if (category.parentId && !categoryIdMap.has(category.parentId)) {
-							continue
-						}
-
-						const nextCategoryId = randomUUID()
-						categoryIdMap.set(category.id, nextCategoryId)
-						await tx.category.create({
+					for (const media of duplicatedMedia) {
+						await tx.media.create({
 							data: {
-								id: nextCategoryId,
+								id: media.id,
 								catalogId: catalog.id,
-								parentId: category.parentId
-									? categoryIdMap.get(category.parentId)
-									: null,
-								position: category.position,
-								name: category.name,
-								imageMediaId: mapNullableId(category.imageMediaId, mediaIdMap),
-								descriptor: category.descriptor,
-								discount: category.discount,
-								deleteAt: category.deleteAt
-							}
-						})
-						pendingCategories.splice(index, 1)
-						createdInPass += 1
-					}
-
-					if (!createdInPass) {
-						throw new BadRequestException('Unable to duplicate category tree')
-					}
-				}
-
-				const productIdMap = new Map<string, string>()
-				for (const product of source.products) {
-					const nextProductId = randomUUID()
-					productIdMap.set(product.id, nextProductId)
-					await tx.product.create({
-						data: {
-							id: nextProductId,
-							catalogId: catalog.id,
-							brandId: product.brandId
-								? (brandIdMap.get(product.brandId) ?? null)
-								: null,
-							sku: buildDuplicatedSku(product.sku, slug),
-							name: product.name,
-							slug: product.slug,
-							price: product.price,
-							isPopular: product.isPopular,
-							status: product.status,
-							position: product.position,
-							deleteAt: product.deleteAt
-						}
-					})
-
-					if (product.productAttributes.length) {
-						await tx.productAttribute.createMany({
-							data: product.productAttributes.map(attribute => ({
-								productId: nextProductId,
-								attributeId: attribute.attributeId,
-								enumValueId: attribute.enumValueId,
-								valueString: attribute.valueString,
-								valueInteger: attribute.valueInteger,
-								valueDecimal: attribute.valueDecimal,
-								valueBoolean: attribute.valueBoolean,
-								valueDateTime: attribute.valueDateTime,
-								deleteAt: attribute.deleteAt
-							}))
-						})
-					}
-
-					for (const variant of product.variants) {
-						const nextVariantId = randomUUID()
-						await tx.productVariant.create({
-							data: {
-								id: nextVariantId,
-								productId: nextProductId,
-								sku: buildDuplicatedSku(variant.sku, slug),
-								variantKey: variant.variantKey,
-								stock: variant.stock,
-								price: variant.price,
-								status: variant.status,
-								isAvailable: variant.isAvailable,
-								deleteAt: variant.deleteAt
+								originalName: media.originalName,
+								mimeType: media.mimeType,
+								size: media.size,
+								width: media.width,
+								height: media.height,
+								path: media.path,
+								entityId: media.entityId,
+								storage: media.storage,
+								key: media.key,
+								checksum: media.checksum,
+								status: media.status
 							}
 						})
 
-						if (variant.attributes.length) {
-							await tx.variantAttribute.createMany({
-								data: variant.attributes.map(attribute => ({
-									variantId: nextVariantId,
-									attributeId: attribute.attributeId,
-									enumValueId: attribute.enumValueId,
-									deleteAt: attribute.deleteAt
+						if (media.variants.length) {
+							await tx.mediaVariant.createMany({
+								data: media.variants.map(variant => ({
+									mediaId: media.id,
+									...variant
 								}))
 							})
 						}
 					}
 
-					const productMedia = product.media
-						.map(item => {
-							const mediaId = mediaIdMap.get(item.mediaId)
-							return mediaId
-								? {
-										productId: nextProductId,
-										mediaId,
-										position: item.position,
-										kind: item.kind
-									}
-								: null
+					if (source.config) {
+						await tx.catalogConfig.update({
+							where: { catalogId: catalog.id },
+							data: {
+								about: source.config.about,
+								description: source.config.description,
+								currency: source.config.currency,
+								logoMediaId: mapNullableId(source.config.logoMediaId, mediaIdMap),
+								bgMediaId: mapNullableId(source.config.bgMediaId, mediaIdMap),
+								note: source.config.note,
+								deleteAt: source.config.deleteAt
+							}
 						})
-						.filter((item): item is NonNullable<typeof item> => item !== null)
-					if (productMedia.length) {
-						await tx.productMedia.createMany({ data: productMedia })
 					}
 
-					const categoryProducts = product.categoryProducts
-						.map(item => {
-							const categoryId = categoryIdMap.get(item.categoryId)
-							return categoryId
-								? {
-										productId: nextProductId,
-										categoryId,
-										position: item.position
-									}
-								: null
+					if (source.settings) {
+						await tx.catalogSettings.update({
+							where: { catalogId: catalog.id },
+							data: {
+								isActive: source.settings.isActive,
+								defaultMode: source.settings.defaultMode,
+								allowedModes: source.settings.allowedModes,
+								googleVerification: source.settings.googleVerification,
+								yandexVerification: source.settings.yandexVerification,
+								deleteAt: source.settings.deleteAt
+							}
 						})
-						.filter((item): item is NonNullable<typeof item> => item !== null)
-					if (categoryProducts.length) {
-						await tx.categoryProduct.createMany({ data: categoryProducts })
 					}
-				}
 
-				for (const setting of source.seoSettings) {
-					await tx.seoSetting.create({
-						data: {
-							catalogId: catalog.id,
-							entityType: setting.entityType,
-							entityId: mapSeoEntityId(setting.entityType, setting.entityId, {
-								sourceCatalogId: source.id,
-								nextCatalogId: catalog.id,
-								categoryIdMap,
-								productIdMap,
-								brandIdMap
-							}),
-							urlPath: setting.urlPath,
-							canonicalUrl: setting.canonicalUrl,
-							title: setting.title,
-							description: setting.description,
-							keywords: setting.keywords,
-							h1: setting.h1,
-							seoText: setting.seoText,
-							robots: setting.robots,
-							isIndexable: setting.isIndexable,
-							isFollowable: setting.isFollowable,
-							ogTitle: setting.ogTitle,
-							ogDescription: setting.ogDescription,
-							ogMediaId: mapNullableId(setting.ogMediaId, mediaIdMap),
-							ogType: setting.ogType,
-							ogUrl: setting.ogUrl,
-							ogSiteName: setting.ogSiteName,
-							ogLocale: setting.ogLocale,
-							twitterCard: setting.twitterCard,
-							twitterTitle: setting.twitterTitle,
-							twitterDescription: setting.twitterDescription,
-							twitterMediaId: mapNullableId(setting.twitterMediaId, mediaIdMap),
-							faviconMediaId: mapNullableId(setting.faviconMediaId, mediaIdMap),
-							twitterSite: setting.twitterSite,
-							twitterCreator: setting.twitterCreator,
-							hreflang: setting.hreflang ?? undefined,
-							structuredData: setting.structuredData ?? undefined,
-							extras: setting.extras ?? undefined,
-							sitemapPriority: setting.sitemapPriority,
-							sitemapChangeFreq: setting.sitemapChangeFreq,
-							deleteAt: setting.deleteAt
+					if (source.contacts.length) {
+						await tx.catalogContact.createMany({
+							data: source.contacts.map(contact => ({
+								catalogId: catalog.id,
+								type: contact.type,
+								position: contact.position,
+								value: contact.value,
+								deleteAt: contact.deleteAt
+							}))
+						})
+					}
+
+					const brandIdMap = new Map<string, string>()
+					for (const brand of source.brands) {
+						const nextBrandId = randomUUID()
+						brandIdMap.set(brand.id, nextBrandId)
+						await tx.brand.create({
+							data: {
+								id: nextBrandId,
+								catalogId: catalog.id,
+								name: brand.name,
+								slug: brand.slug,
+								deleteAt: brand.deleteAt
+							}
+						})
+					}
+
+					const categoryIdMap = new Map<string, string>()
+					const pendingCategories = [...source.category]
+					while (pendingCategories.length) {
+						let createdInPass = 0
+						for (let index = pendingCategories.length - 1; index >= 0; index -= 1) {
+							const category = pendingCategories[index]
+							if (category.parentId && !categoryIdMap.has(category.parentId)) {
+								continue
+							}
+
+							const nextCategoryId = randomUUID()
+							categoryIdMap.set(category.id, nextCategoryId)
+							await tx.category.create({
+								data: {
+									id: nextCategoryId,
+									catalogId: catalog.id,
+									parentId: category.parentId
+										? categoryIdMap.get(category.parentId)
+										: null,
+									position: category.position,
+									name: category.name,
+									imageMediaId: mapNullableId(category.imageMediaId, mediaIdMap),
+									descriptor: category.descriptor,
+									discount: category.discount,
+									deleteAt: category.deleteAt
+								}
+							})
+							pendingCategories.splice(index, 1)
+							createdInPass += 1
 						}
+
+						if (!createdInPass) {
+							throw new BadRequestException('Unable to duplicate category tree')
+						}
+					}
+
+					const productIdMap = new Map<string, string>()
+					for (const product of source.products) {
+						const nextProductId = randomUUID()
+						productIdMap.set(product.id, nextProductId)
+						await tx.product.create({
+							data: {
+								id: nextProductId,
+								catalogId: catalog.id,
+								brandId: product.brandId
+									? (brandIdMap.get(product.brandId) ?? null)
+									: null,
+								sku: buildDuplicatedSku(product.sku, slug),
+								name: product.name,
+								slug: product.slug,
+								price: product.price,
+								isPopular: product.isPopular,
+								status: product.status,
+								position: product.position,
+								deleteAt: product.deleteAt
+							}
+						})
+
+						if (product.productAttributes.length) {
+							await tx.productAttribute.createMany({
+								data: product.productAttributes.map(attribute => ({
+									productId: nextProductId,
+									attributeId: attribute.attributeId,
+									enumValueId: attribute.enumValueId,
+									valueString: attribute.valueString,
+									valueInteger: attribute.valueInteger,
+									valueDecimal: attribute.valueDecimal,
+									valueBoolean: attribute.valueBoolean,
+									valueDateTime: attribute.valueDateTime,
+									deleteAt: attribute.deleteAt
+								}))
+							})
+						}
+
+						for (const variant of product.variants) {
+							const nextVariantId = randomUUID()
+							await tx.productVariant.create({
+								data: {
+									id: nextVariantId,
+									productId: nextProductId,
+									sku: buildDuplicatedSku(variant.sku, slug),
+									variantKey: variant.variantKey,
+									stock: variant.stock,
+									price: variant.price,
+									status: variant.status,
+									isAvailable: variant.isAvailable,
+									deleteAt: variant.deleteAt
+								}
+							})
+
+							if (variant.attributes.length) {
+								await tx.variantAttribute.createMany({
+									data: variant.attributes.map(attribute => ({
+										variantId: nextVariantId,
+										attributeId: attribute.attributeId,
+										enumValueId: attribute.enumValueId,
+										deleteAt: attribute.deleteAt
+									}))
+								})
+							}
+						}
+
+						const productMedia = product.media
+							.map(item => {
+								const mediaId = mediaIdMap.get(item.mediaId)
+								return mediaId
+									? {
+											productId: nextProductId,
+											mediaId,
+											position: item.position,
+											kind: item.kind
+										}
+									: null
+							})
+							.filter((item): item is NonNullable<typeof item> => item !== null)
+						if (productMedia.length) {
+							await tx.productMedia.createMany({ data: productMedia })
+						}
+
+						const categoryProducts = product.categoryProducts
+							.map(item => {
+								const categoryId = categoryIdMap.get(item.categoryId)
+								return categoryId
+									? {
+											productId: nextProductId,
+											categoryId,
+											position: item.position
+										}
+									: null
+							})
+							.filter((item): item is NonNullable<typeof item> => item !== null)
+						if (categoryProducts.length) {
+							await tx.categoryProduct.createMany({ data: categoryProducts })
+						}
+					}
+
+					for (const setting of source.seoSettings) {
+						await tx.seoSetting.create({
+							data: {
+								catalogId: catalog.id,
+								entityType: setting.entityType,
+								entityId: mapSeoEntityId(setting.entityType, setting.entityId, {
+									sourceCatalogId: source.id,
+									nextCatalogId: catalog.id,
+									categoryIdMap,
+									productIdMap,
+									brandIdMap
+								}),
+								urlPath: setting.urlPath,
+								canonicalUrl: setting.canonicalUrl,
+								title: setting.title,
+								description: setting.description,
+								keywords: setting.keywords,
+								h1: setting.h1,
+								seoText: setting.seoText,
+								robots: setting.robots,
+								isIndexable: setting.isIndexable,
+								isFollowable: setting.isFollowable,
+								ogTitle: setting.ogTitle,
+								ogDescription: setting.ogDescription,
+								ogMediaId: mapNullableId(setting.ogMediaId, mediaIdMap),
+								ogType: setting.ogType,
+								ogUrl: setting.ogUrl,
+								ogSiteName: setting.ogSiteName,
+								ogLocale: setting.ogLocale,
+								twitterCard: setting.twitterCard,
+								twitterTitle: setting.twitterTitle,
+								twitterDescription: setting.twitterDescription,
+								twitterMediaId: mapNullableId(setting.twitterMediaId, mediaIdMap),
+								faviconMediaId: mapNullableId(setting.faviconMediaId, mediaIdMap),
+								twitterSite: setting.twitterSite,
+								twitterCreator: setting.twitterCreator,
+								hreflang: setting.hreflang ?? undefined,
+								structuredData: setting.structuredData ?? undefined,
+								extras: setting.extras ?? undefined,
+								sitemapPriority: setting.sitemapPriority,
+								sitemapChangeFreq: setting.sitemapChangeFreq,
+								deleteAt: setting.deleteAt
+							}
+						})
+					}
+
+					const catalogWithRelations = await tx.catalog.findUniqueOrThrow({
+						where: { id: catalog.id },
+						select: adminCatalogSelect
 					})
+
+					return { owner, catalog: catalogWithRelations }
+				},
+				{
+					timeout: DUPLICATE_CATALOG_TRANSACTION_TIMEOUT_MS
 				}
-
-				const catalogWithRelations = await tx.catalog.findUniqueOrThrow({
-					where: { id: catalog.id },
-					select: adminCatalogSelect
-				})
-
-				return { owner, catalog: catalogWithRelations }
-			})
+			)
 		} catch (error) {
 			await this.s3.deleteObjectsByKeys(copiedS3Keys).catch(() => undefined)
 			throw error

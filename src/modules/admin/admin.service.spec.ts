@@ -141,7 +141,7 @@ function createDuplicateTransactionMock() {
 			})
 		},
 		catalog: {
-			create: jest.fn().mockResolvedValue({ id: 'catalog-copy' }),
+			create: jest.fn(async ({ data }) => ({ id: data.id })),
 			findUniqueOrThrow: jest.fn().mockResolvedValue({
 				id: 'catalog-copy',
 				slug: 'catalog-copy',
@@ -580,23 +580,33 @@ describe('AdminService', () => {
 			status: CatalogStatus.OPERATIONAL
 		})
 
-		expect(s3.copyObjectToCatalog).toHaveBeenCalledWith({
+		const targetCatalogId =
+			s3.copyObjectToCatalog.mock.calls[0][0].targetCatalogId
+		expect(s3.copyObjectToCatalog).toHaveBeenNthCalledWith(1, {
 			sourceKey:
 				'catalogs/catalog-source/products/product-source/2026/05/18/raw/photo.jpg',
-			targetCatalogId: 'catalog-copy',
+			targetCatalogId,
 			path: 'products',
 			entityId: 'product-source'
 		})
-		expect(s3.copyObjectToCatalog).toHaveBeenCalledWith({
+		expect(s3.copyObjectToCatalog).toHaveBeenNthCalledWith(2, {
 			sourceKey:
 				'catalogs/catalog-source/products/product-source/2026/05/18/photo-thumb.avif',
-			targetCatalogId: 'catalog-copy',
+			targetCatalogId,
 			path: 'products',
 			entityId: 'product-source'
 		})
+		expect(s3.copyObjectToCatalog.mock.invocationCallOrder[1]).toBeLessThan(
+			prisma.$transaction.mock.invocationCallOrder[0]
+		)
+		expect(tx.catalog.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				data: expect.objectContaining({ id: targetCatalogId })
+			})
+		)
 		expect(tx.media.create).toHaveBeenCalledWith({
 			data: expect.objectContaining({
-				catalogId: 'catalog-copy',
+				catalogId: targetCatalogId,
 				key: 'catalogs/catalog-copy/products/product-source/2026/05/18/raw/photo-copy.jpg'
 			})
 		})
@@ -609,9 +619,9 @@ describe('AdminService', () => {
 				})
 			]
 		})
-		expect(
-			tx.media.create.mock.invocationCallOrder[0]
-		).toBeLessThan(tx.mediaVariant.createMany.mock.invocationCallOrder[0])
+		expect(tx.media.create.mock.invocationCallOrder[0]).toBeLessThan(
+			tx.mediaVariant.createMany.mock.invocationCallOrder[0]
+		)
 		expect(tx.productMedia.createMany).toHaveBeenCalledWith({
 			data: [
 				expect.objectContaining({
@@ -677,9 +687,14 @@ describe('AdminService', () => {
 		})
 
 		expect(s3.copyObjectToCatalog).toHaveBeenCalledTimes(2)
+		const targetCatalogId =
+			s3.copyObjectToCatalog.mock.calls[0][0].targetCatalogId
+		expect(s3.copyObjectToCatalog.mock.invocationCallOrder[1]).toBeLessThan(
+			prisma.$transaction.mock.invocationCallOrder[0]
+		)
 		expect(tx.media.create).toHaveBeenCalledWith({
 			data: expect.objectContaining({
-				catalogId: 'catalog-copy',
+				catalogId: targetCatalogId,
 				key: 'catalogs/catalog-copy/products/product-source/2026/05/18/photo-copy-thumb.avif'
 			})
 		})
@@ -730,6 +745,40 @@ describe('AdminService', () => {
 		expect(tx.media.create).not.toHaveBeenCalled()
 		expect(tx.productMedia.createMany).not.toHaveBeenCalled()
 		expect(s3.deleteObjectsByKeys).not.toHaveBeenCalled()
+	})
+
+	it('cleans copied S3 media when catalog duplicate transaction fails', async () => {
+		const tx = createDuplicateTransactionMock()
+		const { prisma, s3, service } = createService(tx as any)
+		prisma.catalog.findUnique.mockResolvedValueOnce(
+			createDuplicateSourceCatalog() as any
+		)
+		prisma.$transaction.mockRejectedValueOnce(new Error('database failed'))
+		s3.copyObjectToCatalog
+			.mockResolvedValueOnce({
+				ok: true,
+				key: 'catalogs/catalog-copy/products/product-source/2026/05/18/raw/photo-copy.jpg',
+				url: 'https://cdn.example.test/photo-copy.jpg'
+			})
+			.mockResolvedValueOnce({
+				ok: true,
+				key: 'catalogs/catalog-copy/products/product-source/2026/05/18/photo-copy-thumb.avif',
+				url: 'https://cdn.example.test/photo-copy-thumb.avif'
+			})
+
+		await expect(
+			service.duplicateCatalog('catalog-source', {
+				name: 'Catalog Copy',
+				slug: 'catalog-copy',
+				typeId: 'type-1',
+				status: CatalogStatus.OPERATIONAL
+			})
+		).rejects.toThrow('database failed')
+
+		expect(s3.deleteObjectsByKeys).toHaveBeenCalledWith([
+			'catalogs/catalog-copy/products/product-source/2026/05/18/raw/photo-copy.jpg',
+			'catalogs/catalog-copy/products/product-source/2026/05/18/photo-copy-thumb.avif'
+		])
 	})
 
 	it('soft-deletes catalog content and keeps catalog-level data intact', async () => {
