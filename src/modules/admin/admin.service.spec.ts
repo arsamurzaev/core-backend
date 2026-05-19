@@ -1,4 +1,4 @@
-import { CatalogStatus, SeoEntityType } from '@generated/enums'
+import { CatalogStatus, Role, SeoEntityType } from '@generated/enums'
 import { NotFoundException } from '@nestjs/common'
 
 import {
@@ -66,6 +66,9 @@ function createTransactionMock() {
 		},
 		payment: {
 			updateMany: jest.fn()
+		},
+		user: {
+			update: jest.fn()
 		}
 	}
 }
@@ -78,7 +81,8 @@ function createService(tx = createTransactionMock()) {
 			findFirst: jest.fn().mockResolvedValue(null)
 		},
 		user: {
-			findUnique: jest.fn().mockResolvedValue(null)
+			findUnique: jest.fn().mockResolvedValue(null),
+			findFirst: jest.fn().mockResolvedValue(null)
 		},
 		integration: {
 			findUnique: jest.fn()
@@ -138,7 +142,8 @@ function createDuplicateTransactionMock() {
 				id: 'user-copy',
 				name: 'Catalog Copy',
 				login: 'catalog-copy'
-			})
+			}),
+			update: jest.fn()
 		},
 		catalog: {
 			create: jest.fn(async ({ data }) => ({ id: data.id })),
@@ -296,6 +301,44 @@ function createDuplicateSourceCatalog() {
 			}
 		],
 		seoSettings: []
+	}
+}
+
+function createAdminCatalogRecord(overrides: Record<string, unknown> = {}) {
+	return {
+		id: 'catalog-1',
+		slug: 'catalog-one',
+		domain: null,
+		name: 'Catalog One',
+		typeId: 'type-1',
+		parentId: null,
+		userId: 'user-1',
+		promoCodeId: null,
+		subscriptionEndsAt: null,
+		metrics: [],
+		payments: [],
+		deleteAt: null,
+		createdAt: new Date('2026-05-10T00:00:00.000Z'),
+		updatedAt: new Date('2026-05-10T00:00:00.000Z'),
+		config: {
+			status: CatalogStatus.OPERATIONAL,
+			logoMedia: null
+		},
+		settings: {
+			inventoryMode: 'NONE'
+		},
+		featureEntitlements: [],
+		type: {
+			id: 'type-1',
+			code: 'shop',
+			name: 'Shop',
+			deleteAt: null,
+			createdAt: new Date('2026-05-10T00:00:00.000Z'),
+			updatedAt: new Date('2026-05-10T00:00:00.000Z')
+		},
+		promoCode: null,
+		children: [],
+		...overrides
 	}
 }
 
@@ -553,6 +596,51 @@ describe('AdminService', () => {
 		expect(
 			productMaintenance.repairDefaultVariantPriceMismatchesForCatalog
 		).toHaveBeenCalledWith('catalog-1', options)
+	})
+
+	it('updates catalog owner login when catalog slug changes', async () => {
+		const tx = createTransactionMock()
+		const { cache, prisma, service } = createService(tx)
+		prisma.catalog.findUnique.mockResolvedValueOnce({
+			id: 'catalog-1',
+			slug: 'old-slug',
+			typeId: 'type-1',
+			userId: 'user-1',
+			metrics: []
+		})
+		prisma.catalog.findFirst.mockResolvedValueOnce(null)
+		prisma.user.findFirst.mockResolvedValueOnce(null)
+		tx.catalog.update.mockResolvedValueOnce(
+			createAdminCatalogRecord({ slug: 'new-slug' })
+		)
+
+		const result = await service.updateCatalog('catalog-1', {
+			slug: 'new-slug'
+		})
+
+		expect(prisma.user.findFirst).toHaveBeenCalledWith({
+			where: {
+				login: 'new-slug',
+				role: Role.CATALOG,
+				id: { not: 'user-1' }
+			},
+			select: { id: true }
+		})
+		expect(tx.catalog.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: 'catalog-1' },
+				data: expect.objectContaining({ slug: 'new-slug' })
+			})
+		)
+		expect(tx.user.update).toHaveBeenCalledWith({
+			where: { id: 'user-1' },
+			data: { login: 'new-slug' }
+		})
+		expect(result.slug).toBe('new-slug')
+		expect(cache.bumpVersion).toHaveBeenCalledWith(
+			CATALOG_CACHE_VERSION,
+			'catalog-1'
+		)
 	})
 
 	it('duplicates catalog product media with independent S3 keys', async () => {

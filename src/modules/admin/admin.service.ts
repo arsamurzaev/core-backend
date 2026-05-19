@@ -959,6 +959,7 @@ export class AdminService {
 				id: true,
 				slug: true,
 				typeId: true,
+				userId: true,
 				metrics: {
 					where: {
 						provider: Metric.YANDEX,
@@ -971,10 +972,17 @@ export class AdminService {
 
 		if (!current) throw new NotFoundException('Catalog not found')
 
-		if (dto.slug && dto.slug !== current.slug) {
+		const slugChanged = dto.slug !== undefined && dto.slug !== current.slug
+
+		if (slugChanged) {
 			ensureCatalogSlugAllowed(dto.slug)
 			await this.ensureSlugAvailable(dto.slug, id)
 		}
+
+		const ownerLogin =
+			slugChanged && current.userId
+				? await this.generateOwnerLogin(dto.slug, current.userId)
+				: null
 
 		const data: Prisma.CatalogUpdateInput = {
 			...(dto.name !== undefined ? { name: dto.name } : {}),
@@ -1048,10 +1056,21 @@ export class AdminService {
 				: {})
 		}
 
-		const catalog = await this.prisma.catalog.update({
-			where: { id },
-			data,
-			select: adminCatalogSelect
+		const catalog = await this.prisma.$transaction(async tx => {
+			const updated = await tx.catalog.update({
+				where: { id },
+				data,
+				select: adminCatalogSelect
+			})
+
+			if (ownerLogin && current.userId) {
+				await tx.user.update({
+					where: { id: current.userId },
+					data: { login: ownerLogin }
+				})
+			}
+
+			return updated
 		})
 
 		await this.invalidateCatalogCaches(id)
@@ -2157,16 +2176,15 @@ export class AdminService {
 		throw new BadRequestException('Unable to generate catalog slug')
 	}
 
-	private async generateOwnerLogin(name: string) {
+	private async generateOwnerLogin(name: string, excludeUserId?: string) {
 		const base = slugifyCatalogValue(name) || 'catalog'
 		for (let suffix = 0; suffix < 1000; suffix += 1) {
 			const candidate = suffix === 0 ? base : `${base}-${randomLoginSuffix()}`
-			const existing = await this.prisma.user.findUnique({
+			const existing = await this.prisma.user.findFirst({
 				where: {
-					login_role: {
-						login: candidate,
-						role: Role.CATALOG
-					}
+					login: candidate,
+					role: Role.CATALOG,
+					...(excludeUserId ? { id: { not: excludeUserId } } : {})
 				},
 				select: { id: true }
 			})
