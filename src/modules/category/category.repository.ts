@@ -73,6 +73,13 @@ const productSelect = {
 			slug: true
 		}
 	},
+	productType: {
+		select: {
+			id: true,
+			code: true,
+			name: true
+		}
+	},
 	media: buildProductMediaSelect(),
 	integrationLinks: {
 		select: {

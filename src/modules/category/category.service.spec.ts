@@ -1,8 +1,10 @@
+import { ProductVariantStatus } from '@generated/enums'
 import { BadRequestException, NotFoundException } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 
 import {
 	PRODUCT_SELLABLE_READER_PORT,
+	ProductVariantCardProjectionService,
 	type ProductSellableReader
 } from '@/modules/product/public'
 import { CacheService } from '@/shared/cache/cache.service'
@@ -29,6 +31,7 @@ describe('CategoryService', () => {
 	let repo: jest.Mocked<CategoryRepository>
 	let cache: jest.Mocked<CacheService>
 	let sellableReader: jest.Mocked<ProductSellableReader>
+	let variantProjection: jest.Mocked<ProductVariantCardProjectionService>
 
 	const runWithCatalog = <T>(fn: () => Promise<T>) =>
 		RequestContext.run(
@@ -85,6 +88,12 @@ describe('CategoryService', () => {
 					}
 				},
 				{
+					provide: ProductVariantCardProjectionService,
+					useValue: {
+						resolveForProductIds: jest.fn().mockResolvedValue(new Map())
+					}
+				},
+				{
 					provide: PRODUCT_SELLABLE_READER_PORT,
 					useValue: {
 						resolveProductSellable: jest
@@ -136,6 +145,7 @@ describe('CategoryService', () => {
 		repo = module.get(CategoryRepository)
 		cache = module.get(CacheService)
 		sellableReader = module.get(PRODUCT_SELLABLE_READER_PORT)
+		variantProjection = module.get(ProductVariantCardProjectionService)
 
 		cache.buildKey.mockImplementation(parts =>
 			parts
@@ -266,7 +276,7 @@ describe('CategoryService', () => {
 		})
 	})
 
-	it('returns category product cards with product attributes and without variants', async () => {
+	it('returns category product cards with product attributes and variant picker options', async () => {
 		repo.findById.mockResolvedValue({
 			id: 'cat-1',
 			catalogId: 'catalog-1'
@@ -303,6 +313,35 @@ describe('CategoryService', () => {
 				}
 			}
 		] as any)
+		variantProjection.resolveForProductIds.mockResolvedValueOnce(
+			new Map([
+				[
+					'p1',
+					{
+						variantSummary: {
+							minPrice: '690.00',
+							maxPrice: '790.00',
+							activeCount: 2,
+							totalStock: 7,
+							singleVariantId: null
+						},
+						variantPickerOptions: [
+							{
+								id: 'variant-1',
+								label: 'S, Черный',
+								price: '690.00',
+								stock: 4,
+								status: ProductVariantStatus.ACTIVE,
+								isAvailable: true,
+								saleUnitId: null,
+								saleUnitPrice: null,
+								maxQuantity: 4
+							}
+						]
+					}
+				]
+			])
+		)
 
 		const result = await runWithCatalog(() =>
 			service.getProductCardsByCategory('cat-1', { limit: 2 })
@@ -315,8 +354,26 @@ describe('CategoryService', () => {
 			{ cursor: undefined, take: 3, includeInactive: false }
 		)
 		expect(repo.findCategoryProductsPage).not.toHaveBeenCalled()
+		expect(variantProjection.resolveForProductIds).toHaveBeenCalledWith([
+			'p1',
+			'p2',
+			'p3'
+		])
 		expect(result.items[0]?.product).toHaveProperty('productAttributes', [])
 		expect(result.items[0]?.product).not.toHaveProperty('variants')
+		expect(result.items[0]?.product).toMatchObject({
+			variantSummary: {
+				minPrice: '690.00',
+				maxPrice: '790.00',
+				activeCount: 2
+			},
+			variantPickerOptions: [
+				{
+					id: 'variant-1',
+					label: 'S, Черный'
+				}
+			]
+		})
 	})
 
 	it('adds commercial projection fields to category product cards', async () => {

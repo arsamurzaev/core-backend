@@ -9,9 +9,12 @@ import {
 
 import {
 	applyProductCommercialFields,
+	EMPTY_VARIANT_SUMMARY,
 	PRODUCT_SELLABLE_READER_PORT,
 	type ProductCommercialFields,
 	type ProductSellableReader,
+	type ProductVariantProjection,
+	ProductVariantCardProjectionService,
 	toProductCommercialFieldsMap
 } from '@/modules/product/public'
 import { CacheService } from '@/shared/cache/cache.service'
@@ -84,6 +87,7 @@ export class CategoryService {
 		private readonly mediaRepo: MediaRepository,
 		private readonly mediaUrl: MediaUrlService,
 		private readonly productMapper: ProductMediaMapper,
+		private readonly variantProjection: ProductVariantCardProjectionService,
 		@Inject(PRODUCT_SELLABLE_READER_PORT)
 		private readonly sellableReader: ProductSellableReader,
 		@Optional()
@@ -160,15 +164,19 @@ export class CategoryService {
 			take: limit + 1,
 			includeInactive
 		})
-		const commercialMap = await this.resolveCommercialProjectionMap(
-			catalogId,
-			items.map(item => item.product)
-		)
+		const products = items.map(item => item.product)
+		const [commercialMap, variantProjectionMap] = await Promise.all([
+			this.resolveCommercialProjectionMap(catalogId, products),
+			this.variantProjection.resolveForProductIds(
+				products.map(product => product.id)
+			)
+		])
 
 		const page: CategoryProductsPage = buildCategoryProductsPage(
 			items,
 			limit,
-			product => this.mapProductForCategory(commercialMap, product)
+			product =>
+				this.mapProductForCategory(commercialMap, product, variantProjectionMap)
 		)
 
 		if (cacheKey) {
@@ -211,15 +219,19 @@ export class CategoryService {
 			take: limit + 1,
 			includeInactive
 		})
-		const commercialMap = await this.resolveCommercialProjectionMap(
-			catalogId,
-			items.map(item => item.product)
-		)
+		const products = items.map(item => item.product)
+		const [commercialMap, variantProjectionMap] = await Promise.all([
+			this.resolveCommercialProjectionMap(catalogId, products),
+			this.variantProjection.resolveForProductIds(
+				products.map(product => product.id)
+			)
+		])
 
 		const page: CategoryProductsPage = buildCategoryProductsPage(
 			items,
 			limit,
-			product => this.mapProductForCategory(commercialMap, product)
+			product =>
+				this.mapProductForCategory(commercialMap, product, variantProjectionMap)
 		)
 
 		if (cacheKey) {
@@ -472,10 +484,24 @@ export class CategoryService {
 
 	private mapProductForCategory<
 		T extends ProductMappableRecord & { id: string; price?: unknown }
-	>(commercialMap: ReadonlyMap<string, ProductCommercialFields>, product: T) {
-		return this.mapProductMedia(
+	>(
+		commercialMap: ReadonlyMap<string, ProductCommercialFields>,
+		product: T,
+		variantProjectionMap?: ReadonlyMap<string, ProductVariantProjection>
+	) {
+		const mapped = this.mapProductMedia(
 			applyProductCommercialFields(product, commercialMap.get(product.id))
 		)
+		if (!variantProjectionMap) return mapped
+
+		const variantProjection = variantProjectionMap.get(product.id)
+		return {
+			...mapped,
+			variantSummary: variantProjection?.variantSummary ?? {
+				...EMPTY_VARIANT_SUMMARY
+			},
+			variantPickerOptions: variantProjection?.variantPickerOptions ?? []
+		}
 	}
 
 	private mapProductMedia<T extends ProductMappableRecord>(product: T) {

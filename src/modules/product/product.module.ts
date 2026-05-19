@@ -26,6 +26,7 @@ import { ProductSellableService } from './product-sellable.service'
 import { ProductSeoDomainEventHandler } from './product-seo-domain-event.handler'
 import { ProductSeoSyncService } from './product-seo-sync.service'
 import { ProductTypeChangeService } from './product-type-change.service'
+import { ProductVariantCardProjectionService } from './product-variant-card-projection.service'
 import { ProductVariantBuilder } from './product-variant.builder'
 import { ProductVariantService } from './product-variant.service'
 import { ProductWriteFinalizer } from './product-write-finalizer.service'
@@ -43,6 +44,7 @@ import { ProductService } from './product.service'
 		ProductMaintenanceService,
 		ProductWriteFinalizer,
 		ProductPricingService,
+		ProductVariantCardProjectionService,
 		ProductReadService,
 		ProductSellableService,
 		ProductTypeChangeService,
@@ -69,6 +71,7 @@ import { ProductService } from './product.service'
 	exports: [
 		ProductService,
 		ProductMaintenanceService,
+		ProductVariantCardProjectionService,
 		PRODUCT_COMMAND_PORT,
 		PRODUCT_EXTERNAL_SYNC_PORT,
 		PRODUCT_MAINTENANCE_PORT,

@@ -8,3 +8,8 @@ export {
 	ProductWithAttributesDto
 } from './dto/responses/product.dto.res'
 export { ProductModule } from './product.module'
+export {
+	EMPTY_VARIANT_SUMMARY,
+	type ProductVariantProjection
+} from './product-variant-card-projection'
+export { ProductVariantCardProjectionService } from './product-variant-card-projection.service'

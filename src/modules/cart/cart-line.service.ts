@@ -31,6 +31,7 @@ import {
 	MAX_CART_ITEMS,
 	MAX_ITEM_QUANTITY,
 	normalizeCartItemInput,
+	resolveCartItemBaseQuantity,
 	type NormalizedCartItemInput,
 	type UpsertCartItemInput
 } from './cart.utils'
@@ -286,11 +287,15 @@ export class CartLineService {
 			variantId,
 			variantId && canExposeSaleUnits ? featureAwareInput.saleUnitId : null
 		)
+		const commercialQuantity = resolveCartItemBaseQuantity({
+			quantity: input.quantity,
+			saleUnit
+		})
 		const commercialProjection = await this.resolveCommercialProjection(
 			productSnapshot.catalogId ?? cart.catalogId,
 			input.productId,
 			variantId,
-			input.quantity,
+			commercialQuantity,
 			usesReservationFlow ? INVENTORY_MODE_NONE : cart.inventoryMode
 		)
 		const resolvedInput: ResolvedCartItemInput = {
