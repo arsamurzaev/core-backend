@@ -1950,6 +1950,54 @@ describe('CartService', () => {
 		expect(prisma.cartItem.create).not.toHaveBeenCalled()
 	})
 
+	it('blocks out-of-stock product lines without visible variant id', async () => {
+		const currentCart = createCartEntity({
+			status: CartStatus.DRAFT,
+			catalog: {
+				parentId: null,
+				settings: { inventoryMode: INVENTORY_MODE_EXTERNAL }
+			}
+		})
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(currentCart)
+		prisma.product.findFirst.mockResolvedValueOnce({
+			id: 'product-1',
+			catalogId: 'catalog-1',
+			price: 1000,
+			productAttributes: []
+		})
+		sellableReader.resolveProductSellable
+			.mockResolvedValueOnce({
+				mode: 'SIMPLE',
+				variantId: null,
+				priceState: 'KNOWN',
+				displayPrice: '1000.00',
+				requiresVariantSelection: false,
+				availabilityState: 'OUT_OF_STOCK',
+				stock: 0
+			})
+			.mockResolvedValueOnce({
+				mode: 'SIMPLE',
+				variantId: null,
+				priceState: 'KNOWN',
+				displayPrice: '1000.00',
+				requiresVariantSelection: false,
+				availabilityState: 'OUT_OF_STOCK',
+				stock: 0
+			})
+
+		await expect(
+			service.upsertCurrentItem('catalog-1', 'token-1', {
+				productId: 'product-1',
+				quantity: 1
+			})
+		).rejects.toThrow('Недостаточно товара')
+		expect(prisma.productVariant.findFirst).not.toHaveBeenCalled()
+		expect(prisma.cartItem.create).not.toHaveBeenCalled()
+	})
+
 	it('checks sale unit stock using base quantity during cart upsert', async () => {
 		const currentCart = createCartEntity({
 			status: CartStatus.DRAFT,

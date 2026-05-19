@@ -335,12 +335,10 @@ export class CartLineService {
 				)
 			}
 
-			if (resolvedInput.variantId) {
-				this.ensureCommercialProjectionPurchasable(
-					commercialProjection,
-					usesReservationFlow ? INVENTORY_MODE_NONE : cart.inventoryMode
-				)
-			}
+			this.ensureCommercialProjectionPurchasable(
+				commercialProjection,
+				usesReservationFlow ? INVENTORY_MODE_NONE : cart.inventoryMode
+			)
 		}
 
 		const hasActiveExistingItem = existingItems.some(item => !item.deleteAt)
