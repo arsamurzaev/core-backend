@@ -294,11 +294,22 @@ export class CategoryController {
 		name: 'id',
 		description: 'ID категории'
 	})
+	@ApiQuery({
+		name: 'deleteProducts',
+		required: false,
+		type: Boolean,
+		description: 'Если true, soft-delete всех активных товаров категории'
+	})
 	@ApiOkResponse({ description: 'Категория удалена', type: OkResponseDto })
 	@ApiNotFoundResponse({ description: 'Категория не найдена' })
 	@ApiForbiddenResponse({ description: 'Доступ запрещён' })
-	async remove(@Param('id') id: string) {
-		return this.categoryService.remove(id)
+	async remove(
+		@Param('id') id: string,
+		@Query('deleteProducts') deleteProducts?: string
+	) {
+		return this.categoryService.remove(id, {
+			deleteProducts: parseBooleanQuery(deleteProducts, false)
+		})
 	}
 }
 

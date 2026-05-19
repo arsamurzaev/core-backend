@@ -3,6 +3,8 @@ import { BadRequestException, NotFoundException } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 
 import {
+	PRODUCT_COMMAND_PORT,
+	type ProductCommandPort,
 	PRODUCT_SELLABLE_READER_PORT,
 	ProductVariantCardProjectionService,
 	type ProductSellableReader
@@ -30,6 +32,7 @@ describe('CategoryService', () => {
 	}
 	let repo: jest.Mocked<CategoryRepository>
 	let cache: jest.Mocked<CacheService>
+	let productCommands: jest.Mocked<ProductCommandPort>
 	let sellableReader: jest.Mocked<ProductSellableReader>
 	let variantProjection: jest.Mocked<ProductVariantCardProjectionService>
 
@@ -58,6 +61,7 @@ describe('CategoryService', () => {
 						updatePositions: jest.fn(),
 						softDelete: jest.fn(),
 						findProductsByIds: jest.fn(),
+						findProductIdsByCategory: jest.fn(),
 						findCategoryProductPositions: jest.fn(),
 						findCategoryProductsPage: jest.fn(),
 						findCategoryProductCardsPage: jest.fn()
@@ -72,6 +76,14 @@ describe('CategoryService', () => {
 						getJson: jest.fn(),
 						setJson: jest.fn(),
 						del: jest.fn()
+					}
+				},
+				{
+					provide: PRODUCT_COMMAND_PORT,
+					useValue: {
+						create: jest.fn(),
+						update: jest.fn(),
+						remove: jest.fn()
 					}
 				},
 				{
@@ -144,6 +156,7 @@ describe('CategoryService', () => {
 		}
 		repo = module.get(CategoryRepository)
 		cache = module.get(CacheService)
+		productCommands = module.get(PRODUCT_COMMAND_PORT)
 		sellableReader = module.get(PRODUCT_SELLABLE_READER_PORT)
 		variantProjection = module.get(ProductVariantCardProjectionService)
 
@@ -751,5 +764,33 @@ describe('CategoryService', () => {
 			CATEGORY_PRODUCTS_CACHE_VERSION,
 			'catalog-1'
 		])
+	})
+
+	it('soft deletes category products before category removal when requested', async () => {
+		repo.findById.mockResolvedValue({
+			id: 'cat-2',
+			parentId: null,
+			position: 1,
+			name: 'Second'
+		} as any)
+		repo.findProductIdsByCategory.mockResolvedValue(['product-1', 'product-2'])
+		repo.softDelete.mockResolvedValue({
+			id: 'cat-2'
+		} as any)
+		repo.findAll.mockResolvedValue([
+			{ id: 'cat-1', parentId: null, position: 0, name: 'First' }
+		] as any)
+
+		await runWithCatalog(() =>
+			service.remove('cat-2', { deleteProducts: true })
+		)
+
+		expect(repo.findProductIdsByCategory).toHaveBeenCalledWith(
+			'cat-2',
+			'catalog-1'
+		)
+		expect(productCommands.remove).toHaveBeenNthCalledWith(1, 'product-1')
+		expect(productCommands.remove).toHaveBeenNthCalledWith(2, 'product-2')
+		expect(repo.softDelete).toHaveBeenCalledWith('cat-2', 'catalog-1')
 	})
 })

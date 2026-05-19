@@ -275,6 +275,20 @@ export class CategoryRepository {
 		})
 	}
 
+	async findProductIdsByCategory(categoryId: string, catalogId: string) {
+		const links = await this.prisma.categoryProduct.findMany({
+			where: {
+				categoryId,
+				category: { catalogId, deleteAt: null },
+				product: { catalogId, deleteAt: null }
+			},
+			select: { productId: true },
+			orderBy: [{ position: SortOrder.asc }, { productId: SortOrder.asc }]
+		})
+
+		return links.map(link => link.productId)
+	}
+
 	async findCategoryProductPositions(
 		categoryId: string,
 		catalogId: string,

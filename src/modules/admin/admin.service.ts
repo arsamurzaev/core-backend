@@ -624,10 +624,18 @@ export class AdminService {
 							storage: media.storage,
 							key: copiedKeys.key,
 							checksum: media.checksum,
-							status: media.status,
-							variants: variantCreates.length ? { create: variantCreates } : undefined
+							status: media.status
 						}
 					})
+
+					if (variantCreates.length) {
+						await tx.mediaVariant.createMany({
+							data: variantCreates.map(variant => ({
+								mediaId: nextMediaId,
+								...variant
+							}))
+						})
+					}
 				}
 
 				if (source.config) {

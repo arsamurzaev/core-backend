@@ -10,7 +10,9 @@ import {
 import {
 	applyProductCommercialFields,
 	EMPTY_VARIANT_SUMMARY,
+	PRODUCT_COMMAND_PORT,
 	PRODUCT_SELLABLE_READER_PORT,
+	type ProductCommandPort,
 	type ProductCommercialFields,
 	type ProductSellableReader,
 	type ProductVariantProjection,
@@ -72,6 +74,9 @@ type CategoryListOptions = {
 	includeEmpty?: boolean
 	includeInactive?: boolean
 }
+type CategoryRemoveOptions = {
+	deleteProducts?: boolean
+}
 
 @Injectable()
 export class CategoryService {
@@ -88,6 +93,8 @@ export class CategoryService {
 		private readonly mediaUrl: MediaUrlService,
 		private readonly productMapper: ProductMediaMapper,
 		private readonly variantProjection: ProductVariantCardProjectionService,
+		@Inject(PRODUCT_COMMAND_PORT)
+		private readonly productCommands: ProductCommandPort,
 		@Inject(PRODUCT_SELLABLE_READER_PORT)
 		private readonly sellableReader: ProductSellableReader,
 		@Optional()
@@ -430,10 +437,17 @@ export class CategoryService {
 		return this.getAll()
 	}
 
-	async remove(id: string) {
+	async remove(id: string, options: CategoryRemoveOptions = {}) {
 		const catalogId = mustCatalogId()
 		const categoryToRemove = await this.repo.findById(id, catalogId)
 		if (!categoryToRemove) throw new NotFoundException('Категория не найдена')
+
+		if (options.deleteProducts) {
+			const productIds = await this.repo.findProductIdsByCategory(id, catalogId)
+			for (const productId of productIds) {
+				await this.productCommands.remove(productId)
+			}
+		}
 
 		const category = await this.repo.softDelete(id, catalogId)
 		if (!category) throw new NotFoundException('Категория не найдена')

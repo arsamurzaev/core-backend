@@ -62,4 +62,14 @@ describe('CategoryController', () => {
 			position: 2
 		})
 	})
+
+	it('passes deleteProducts flag to category removal service', async () => {
+		service.remove.mockResolvedValue({ ok: true } as any)
+
+		await controller.remove('cat-1', 'true')
+
+		expect(service.remove).toHaveBeenCalledWith('cat-1', {
+			deleteProducts: true
+		})
+	})
 })

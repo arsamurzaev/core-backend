@@ -180,6 +180,9 @@ function createDuplicateTransactionMock() {
 		media: {
 			create: jest.fn().mockResolvedValue({ id: 'media-copy' })
 		},
+		mediaVariant: {
+			createMany: jest.fn()
+		},
 		catalogConfig: {
 			update: jest.fn().mockResolvedValue({}),
 			updateMany: jest.fn()
@@ -594,16 +597,21 @@ describe('AdminService', () => {
 		expect(tx.media.create).toHaveBeenCalledWith({
 			data: expect.objectContaining({
 				catalogId: 'catalog-copy',
-				key: 'catalogs/catalog-copy/products/product-source/2026/05/18/raw/photo-copy.jpg',
-				variants: {
-					create: [
-						expect.objectContaining({
-							key: 'catalogs/catalog-copy/products/product-source/2026/05/18/photo-copy-thumb.avif'
-						})
-					]
-				}
+				key: 'catalogs/catalog-copy/products/product-source/2026/05/18/raw/photo-copy.jpg'
 			})
 		})
+		const createdMediaId = tx.media.create.mock.calls[0][0].data.id
+		expect(tx.mediaVariant.createMany).toHaveBeenCalledWith({
+			data: [
+				expect.objectContaining({
+					mediaId: createdMediaId,
+					key: 'catalogs/catalog-copy/products/product-source/2026/05/18/photo-copy-thumb.avif'
+				})
+			]
+		})
+		expect(
+			tx.media.create.mock.invocationCallOrder[0]
+		).toBeLessThan(tx.mediaVariant.createMany.mock.invocationCallOrder[0])
 		expect(tx.productMedia.createMany).toHaveBeenCalledWith({
 			data: [
 				expect.objectContaining({
@@ -672,15 +680,17 @@ describe('AdminService', () => {
 		expect(tx.media.create).toHaveBeenCalledWith({
 			data: expect.objectContaining({
 				catalogId: 'catalog-copy',
-				key: 'catalogs/catalog-copy/products/product-source/2026/05/18/photo-copy-thumb.avif',
-				variants: {
-					create: [
-						expect.objectContaining({
-							key: 'catalogs/catalog-copy/products/product-source/2026/05/18/photo-copy-thumb.avif'
-						})
-					]
-				}
+				key: 'catalogs/catalog-copy/products/product-source/2026/05/18/photo-copy-thumb.avif'
 			})
+		})
+		const createdMediaId = tx.media.create.mock.calls[0][0].data.id
+		expect(tx.mediaVariant.createMany).toHaveBeenCalledWith({
+			data: [
+				expect.objectContaining({
+					mediaId: createdMediaId,
+					key: 'catalogs/catalog-copy/products/product-source/2026/05/18/photo-copy-thumb.avif'
+				})
+			]
 		})
 		expect(tx.productMedia.createMany).toHaveBeenCalledWith({
 			data: [
