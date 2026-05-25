@@ -305,6 +305,44 @@ describe('ProductRepository', () => {
 		)
 	})
 
+	it('can resolve a legacy default variant update by kind', async () => {
+		const repository = new ProductRepository({} as any)
+		const tx = {
+			productVariant: {
+				findMany: jest.fn().mockResolvedValue([
+					{
+						id: 'legacy-default-variant',
+						variantKey: 'legacy-sku',
+						kind: ProductVariantKind.DEFAULT,
+						status: ProductVariantStatus.ACTIVE
+					}
+				])
+			}
+		}
+
+		const result = await (repository as any).loadExistingVariantsForUpdate(
+			tx,
+			'product-1',
+			[{ variantKey: 'default', saleUnits: [] }]
+		)
+
+		expect(result.get('default')).toEqual(
+			expect.objectContaining({ id: 'legacy-default-variant' })
+		)
+		expect(tx.productVariant.findMany).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: expect.objectContaining({
+					productId: 'product-1',
+					deleteAt: null,
+					OR: expect.arrayContaining([
+						{ variantKey: { in: ['default'] } },
+						{ kind: ProductVariantKind.DEFAULT }
+					])
+				})
+			})
+		)
+	})
+
 	it('keeps product type filtered product pages scoped to the current catalog', async () => {
 		const prisma = {
 			$queryRaw: jest.fn().mockResolvedValue([])

@@ -1,6 +1,7 @@
-import { SeoEntityType } from '@generated/enums'
+import { ProductVariantKind, SeoEntityType } from '@generated/enums'
 import { Inject, Injectable, Optional } from '@nestjs/common'
 
+import { SeoRepository } from '@/modules/seo/public'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_TYPE_CACHE_VERSION,
@@ -19,8 +20,6 @@ import {
 	MediaUrlService
 } from '@/shared/media/media-url.service'
 import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
-
-import { SeoRepository } from '@/modules/seo/public'
 
 import { ProductSeoSyncService } from './product-seo-sync.service'
 import type { ProductDetailsItem } from './product.repository'
@@ -119,8 +118,10 @@ export class ProductWriteFinalizer {
 			SeoEntityType.PRODUCT,
 			product.id
 		)
+		const mapped = this.mapper.mapProduct(product, MEDIA_DETAIL_VARIANT_NAMES)
 		return {
-			...this.mapper.mapProduct(product, MEDIA_DETAIL_VARIANT_NAMES),
+			...mapped,
+			saleUnits: resolveDefaultVariantSaleUnits(mapped),
 			seo: this.mapSeo(seo)
 		}
 	}
@@ -186,4 +187,19 @@ export class ProductWriteFinalizer {
 				: null
 		}
 	}
+}
+
+function resolveDefaultVariantSaleUnits(product: {
+	variants?: unknown
+}): unknown[] {
+	const variants = Array.isArray(product.variants) ? product.variants : []
+	const defaultVariant = variants.find(variant => {
+		if (!variant || typeof variant !== 'object') return false
+		const row = variant as { kind?: unknown; variantKey?: unknown }
+		return row.kind === ProductVariantKind.DEFAULT || row.variantKey === 'default'
+	})
+	if (!defaultVariant || typeof defaultVariant !== 'object') return []
+
+	const saleUnits = (defaultVariant as { saleUnits?: unknown }).saleUnits
+	return Array.isArray(saleUnits) ? saleUnits : []
 }

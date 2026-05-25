@@ -15,7 +15,10 @@ import {
 } from 'class-validator'
 
 import { ProductAttributeValueDto } from './product-attribute.dto.req'
-import { ProductVariantDtoReq } from './product-variant.dto.req'
+import {
+	ProductVariantDtoReq,
+	ProductVariantSaleUnitDtoReq
+} from './product-variant.dto.req'
 
 export class CreateProductDtoReq {
 	@ApiProperty({ type: String, example: 'Basic T-Shirt' })
@@ -111,6 +114,17 @@ export class CreateProductDtoReq {
 	@ValidateNested({ each: true })
 	@Type(() => ProductAttributeValueDto)
 	attributes?: ProductAttributeValueDto[]
+
+	@ApiPropertyOptional({
+		type: [ProductVariantSaleUnitDtoReq],
+		description:
+			'Единицы продажи простого товара. Сохраняются на технический default-вариант.'
+	})
+	@IsOptional()
+	@IsArray()
+	@ValidateNested({ each: true })
+	@Type(() => ProductVariantSaleUnitDtoReq)
+	saleUnits?: ProductVariantSaleUnitDtoReq[]
 
 	@ApiPropertyOptional({ type: [ProductVariantDtoReq] })
 	@IsOptional()

@@ -75,6 +75,7 @@ const SLUG_MAX_LENGTH = 255
 const SKU_MAX_LENGTH = 100
 const PRODUCT_SLUG_FALLBACK = 'product'
 const PRODUCT_SKU_FALLBACK = 'SKU'
+const DEFAULT_VARIANT_KEY = 'default'
 const PRODUCT_DUPLICATE_SUFFIX = ' (копия)'
 
 function slugifyValue(value: string, lower: boolean): string {
@@ -371,7 +372,7 @@ export class ProductCommandService {
 		id: string,
 		dto: Pick<
 			UpdateProductDtoReq,
-			'price' | 'status' | 'variants' | 'variantMatrix'
+			'price' | 'status' | 'variants' | 'variantMatrix' | 'saleUnits'
 		>,
 		catalogId: string
 	): Promise<void> {
@@ -386,7 +387,7 @@ export class ProductCommandService {
 		const defaultVariant = await this.variants.buildDefaultVariantData(
 			product.sku,
 			price,
-			{ productStatus: status }
+			{ productStatus: status, saleUnits: dto.saleUnits }
 		)
 		await this.repo.ensureDefaultVariant(id, catalogId, defaultVariant)
 	}
@@ -416,6 +417,7 @@ export class ProductCommandService {
 			productTypeId,
 			categories,
 			variants,
+			saleUnits,
 			...rest
 		} = dto
 		const normalizedName = normalizeRequiredString(dto.name, 'name')
@@ -435,6 +437,14 @@ export class ProductCommandService {
 		}
 		if (this.variants.hasVariantAttributeInputs(variants)) {
 			await this.featureAssertions.assertCanUseProductVariants(catalogId)
+		}
+		if (saleUnits !== undefined && variants?.length) {
+			throw new BadRequestException(
+				'Use either root saleUnits for a simple product or variants with saleUnits, not both'
+			)
+		}
+		if (saleUnits !== undefined) {
+			await this.featureAssertions.assertCanUseCatalogSaleUnits(catalogId)
 		}
 		await this.variants.assertCanUseSaleUnitsFromVariantInputs(
 			catalogId,
@@ -476,7 +486,8 @@ export class ProductCommandService {
 				)
 			: [
 					await this.variants.buildDefaultVariantData(resolvedSku, rest.price, {
-						productStatus: rest.status
+						productStatus: rest.status,
+						saleUnits
 					})
 				]
 
@@ -537,9 +548,18 @@ export class ProductCommandService {
 		const hasRemovedAttributeChanges = dto.removeAttributeIds !== undefined
 		const hasVariantChanges = dto.variants !== undefined
 		const hasVariantMatrixChanges = dto.variantMatrix !== undefined
+		const hasRootSaleUnitChanges = dto.saleUnits !== undefined
 		if (hasVariantChanges && hasVariantMatrixChanges) {
 			throw new BadRequestException(
 				'Use either variants updates or variantMatrix replacement, not both'
+			)
+		}
+		if (
+			hasRootSaleUnitChanges &&
+			(hasVariantChanges || hasVariantMatrixChanges)
+		) {
+			throw new BadRequestException(
+				'Use either root saleUnits for a simple product or variant saleUnits, not both'
 			)
 		}
 		const hasMediaChanges = mediaIds !== undefined
@@ -549,7 +569,9 @@ export class ProductCommandService {
 			await this.featureAssertions.assertCanUseProductTypes(catalogId)
 		}
 		if (hasVariantChanges) {
-			await this.featureAssertions.assertCanUseProductVariants(catalogId)
+			if (this.variantUpdatesRequireProductVariants(dto.variants ?? [])) {
+				await this.featureAssertions.assertCanUseProductVariants(catalogId)
+			}
 			await this.variants.assertCanUseSaleUnitsFromVariantUpdates(
 				catalogId,
 				dto.variants ?? []
@@ -561,6 +583,9 @@ export class ProductCommandService {
 				catalogId,
 				dto.variantMatrix ?? []
 			)
+		}
+		if (hasRootSaleUnitChanges) {
+			await this.featureAssertions.assertCanUseCatalogSaleUnits(catalogId)
 		}
 		const requestedProductType = await this.resolveRequestedProductType(
 			dto.productTypeId,
@@ -615,7 +640,8 @@ export class ProductCommandService {
 			requestedProductTypeId !== currentProductTypeId
 		await this.assertIntegratedProductStructureEditable(id, catalogId, {
 			hasProductTypeChange,
-			hasVariantChanges: hasVariantChanges || hasVariantMatrixChanges
+			hasVariantChanges:
+				hasVariantChanges || hasVariantMatrixChanges || hasRootSaleUnitChanges
 		})
 		const shouldRemoveFromCurrentProductTypeScope =
 			hasRemovedAttributeChanges &&
@@ -635,6 +661,7 @@ export class ProductCommandService {
 			!hasRemovedAttributeChanges &&
 			!hasVariantChanges &&
 			!hasVariantMatrixChanges &&
+			!hasRootSaleUnitChanges &&
 			!hasMediaChanges &&
 			!hasCategoryChanges
 		) {
@@ -660,7 +687,9 @@ export class ProductCommandService {
 			: undefined
 		const variants = hasVariantChanges
 			? this.variants.prepareVariantUpdates(dto.variants ?? [])
-			: undefined
+			: hasRootSaleUnitChanges
+				? [this.buildDefaultVariantSaleUnitUpdate(dto)]
+				: undefined
 		const variantMatrix = hasVariantMatrixChanges
 			? await this.buildUpdateVariantMatrix(
 					id,
@@ -777,6 +806,32 @@ export class ProductCommandService {
 				productStatus: status
 			})
 		]
+	}
+
+	private buildDefaultVariantSaleUnitUpdate(
+		dto: Pick<UpdateProductDtoReq, 'price' | 'saleUnits'>
+	): ProductVariantUpdateData {
+		const update: ProductVariantUpdateData = {
+			variantKey: DEFAULT_VARIANT_KEY,
+			saleUnits: dto.saleUnits
+		}
+		if (dto.price !== undefined) {
+			update.price = dto.price
+		}
+		return update
+	}
+
+	private variantUpdatesRequireProductVariants(
+		variants: UpdateProductDtoReq['variants']
+	): boolean {
+		if (!variants?.length) return false
+
+		return !(
+			variants.length === 1 &&
+			variants[0]?.variantKey?.trim() === DEFAULT_VARIANT_KEY &&
+			variants[0]?.saleUnits !== undefined &&
+			variants[0]?.stock === undefined
+		)
 	}
 
 	private async assertCanDuplicateSource(

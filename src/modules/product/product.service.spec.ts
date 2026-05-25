@@ -1893,6 +1893,64 @@ describe('ProductService', () => {
 		)
 	})
 
+	it('creates simple product sale units without product variants capability', async () => {
+		const saleUnits = [
+			{
+				catalogSaleUnitId: 'catalog-sale-unit-box',
+				baseQuantity: 12,
+				price: 1000,
+				isDefault: true
+			}
+		]
+		repo.existsSlug.mockResolvedValue(false)
+		repo.existsName.mockResolvedValue(false)
+		repo.existsSku.mockResolvedValue(false)
+		repo.existsVariantSku.mockResolvedValue(false)
+		repo.create.mockResolvedValue({
+			id: 'product-1',
+			slug: 'boxed-product'
+		} as any)
+		repo.findById.mockResolvedValue({
+			id: 'product-1',
+			slug: 'boxed-product',
+			media: [],
+			productAttributes: [],
+			variants: [{ id: 'variant-1', variantKey: 'default', attributes: [] }],
+			categoryProducts: []
+		} as any)
+		attributeBuilder.buildForCreate.mockResolvedValue([])
+		capabilities.assertCanUseProductVariants.mockRejectedValue(
+			new Error('variants disabled')
+		)
+
+		await expect(
+			runWithCatalog(() =>
+				service.create({
+					name: 'Boxed Product',
+					price: 100,
+					saleUnits
+				})
+			)
+		).resolves.toMatchObject({ ok: true, id: 'product-1' })
+
+		expect(capabilities.assertCanUseCatalogSaleUnits).toHaveBeenCalledWith(
+			'catalog-1'
+		)
+		expect(capabilities.assertCanUseProductVariants).not.toHaveBeenCalled()
+		expect(repo.create).toHaveBeenCalledWith(
+			'catalog-1',
+			expect.any(Object),
+			[],
+			[
+				expect.objectContaining({
+					variantKey: 'default',
+					price: 100,
+					saleUnits
+				})
+			]
+		)
+	})
+
 	it('creates default variant when variants array is empty', async () => {
 		repo.existsSlug.mockResolvedValue(false)
 		repo.existsName.mockResolvedValue(false)
@@ -2964,6 +3022,159 @@ describe('ProductService', () => {
 			})
 		)
 		expect(repo.update).toHaveBeenCalled()
+	})
+
+	it('updates simple product sale units without product variants capability', async () => {
+		const saleUnits = [
+			{
+				catalogSaleUnitId: 'catalog-sale-unit-box',
+				baseQuantity: 12,
+				price: 1000,
+				isDefault: true
+			}
+		]
+		repo.findSkuById.mockResolvedValue({
+			id: 'product-1',
+			sku: 'LEGACY-PRODUCT',
+			price: 100,
+			status: 'ACTIVE',
+			productTypeId: null
+		} as any)
+		repo.ensureDefaultVariant.mockResolvedValue(false)
+		repo.update.mockResolvedValue({
+			id: 'product-1',
+			slug: 'legacy-product',
+			name: 'Legacy Product',
+			price: 120,
+			status: 'ACTIVE',
+			media: [],
+			productAttributes: [],
+			variants: [
+				{
+					id: 'default-variant',
+					variantKey: 'default',
+					kind: 'DEFAULT',
+					attributes: [],
+					saleUnits
+				}
+			],
+			categoryProducts: []
+		} as any)
+		capabilities.assertCanUseProductVariants.mockRejectedValue(
+			new Error('variants disabled')
+		)
+
+		await expect(
+			runWithCatalog(() =>
+				service.update('product-1', {
+					price: 120,
+					saleUnits
+				})
+			)
+		).resolves.toMatchObject({
+			ok: true,
+			id: 'product-1',
+			saleUnits
+		})
+
+		expect(capabilities.assertCanUseCatalogSaleUnits).toHaveBeenCalledWith(
+			'catalog-1'
+		)
+		expect(capabilities.assertCanUseProductVariants).not.toHaveBeenCalled()
+		expect(repo.ensureDefaultVariant).toHaveBeenCalledWith(
+			'product-1',
+			'catalog-1',
+			expect.objectContaining({
+				variantKey: 'default',
+				price: 120,
+				saleUnits
+			})
+		)
+		expect(repo.update).toHaveBeenCalledWith(
+			'product-1',
+			expect.objectContaining({ price: 120 }),
+			'catalog-1',
+			undefined,
+			undefined,
+			[
+				expect.objectContaining({
+					variantKey: 'default',
+					price: 120,
+					saleUnits
+				})
+			],
+			undefined
+		)
+	})
+
+	it('accepts legacy default variant sale unit update without product variants capability', async () => {
+		const saleUnits = [
+			{
+				catalogSaleUnitId: 'catalog-sale-unit-box',
+				baseQuantity: 12,
+				price: 1000,
+				isDefault: true
+			}
+		]
+		repo.update.mockResolvedValue({
+			id: 'product-1',
+			slug: 'legacy-product',
+			name: 'Legacy Product',
+			price: 120,
+			status: 'ACTIVE',
+			media: [],
+			productAttributes: [],
+			variants: [
+				{
+					id: 'default-variant',
+					variantKey: 'base',
+					kind: 'DEFAULT',
+					attributes: [],
+					saleUnits
+				}
+			],
+			categoryProducts: []
+		} as any)
+		capabilities.assertCanUseProductVariants.mockRejectedValue(
+			new Error('variants disabled')
+		)
+
+		await expect(
+			runWithCatalog(() =>
+				service.update('product-1', {
+					price: 120,
+					variants: [
+						{
+							variantKey: 'default',
+							price: 120,
+							status: 'ACTIVE',
+							saleUnits
+						}
+					]
+				})
+			)
+		).resolves.toMatchObject({ ok: true, id: 'product-1' })
+
+		expect(capabilities.assertCanUseCatalogSaleUnits).toHaveBeenCalledWith(
+			'catalog-1'
+		)
+		expect(capabilities.assertCanUseProductVariants).not.toHaveBeenCalled()
+		expect(repo.update).toHaveBeenCalledWith(
+			'product-1',
+			expect.objectContaining({ price: 120 }),
+			'catalog-1',
+			undefined,
+			undefined,
+			[
+				expect.objectContaining({
+					variantKey: 'default',
+					price: 120,
+					status: 'ACTIVE',
+					saleUnits
+				})
+			],
+			undefined
+		)
 	})
 
 	it('keeps existing variant attributes when product type relation is cleared', async () => {

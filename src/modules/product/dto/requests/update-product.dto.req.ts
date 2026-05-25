@@ -16,8 +16,11 @@ import {
 } from 'class-validator'
 
 import { ProductAttributeValueDto } from './product-attribute.dto.req'
-import { ProductVariantDtoReq } from './product-variant.dto.req'
 import { ProductVariantUpdateDtoReq } from './product-variant-update.dto.req'
+import {
+	ProductVariantDtoReq,
+	ProductVariantSaleUnitDtoReq
+} from './product-variant.dto.req'
 
 export class UpdateProductDtoReq {
 	@ApiPropertyOptional({ type: String, example: 'Basic T-Shirt' })
@@ -159,6 +162,17 @@ export class UpdateProductDtoReq {
 	@IsArray()
 	@IsString({ each: true })
 	removeAttributeIds?: string[]
+
+	@ApiPropertyOptional({
+		type: [ProductVariantSaleUnitDtoReq],
+		description:
+			'Единицы продажи простого товара. Сохраняются на технический default-вариант.'
+	})
+	@IsOptional()
+	@IsArray()
+	@ValidateNested({ each: true })
+	@Type(() => ProductVariantSaleUnitDtoReq)
+	saleUnits?: ProductVariantSaleUnitDtoReq[]
 
 	@ApiPropertyOptional({ type: [ProductVariantUpdateDtoReq] })
 	@IsOptional()

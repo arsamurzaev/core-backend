@@ -654,6 +654,7 @@ type ExistingVariantKeyRow = {
 type ExistingVariantUpdateRow = {
 	id: string
 	variantKey: string
+	kind: ProductVariantKind
 	status: ProductVariantStatus
 }
 
@@ -4395,12 +4396,27 @@ export class ProductRepository {
 		variants: ProductVariantUpdateData[]
 	): Promise<Map<string, ExistingVariantUpdateRow>> {
 		const variantKeys = variants.map(variant => variant.variantKey)
+		const needsDefaultVariant = variantKeys.includes(DEFAULT_VARIANT_KEY)
 		const existing = await tx.productVariant.findMany({
-			where: { productId, variantKey: { in: variantKeys }, deleteAt: null },
-			select: { id: true, variantKey: true, status: true }
+			where: {
+				productId,
+				deleteAt: null,
+				OR: [
+					{ variantKey: { in: variantKeys } },
+					...(needsDefaultVariant ? [{ kind: ProductVariantKind.DEFAULT }] : [])
+				]
+			},
+			select: { id: true, variantKey: true, kind: true, status: true }
 		})
 
-		return new Map(existing.map(variant => [variant.variantKey, variant]))
+		const byKey = new Map(existing.map(variant => [variant.variantKey, variant]))
+		if (needsDefaultVariant && !byKey.has(DEFAULT_VARIANT_KEY)) {
+			const defaultVariant = existing.find(
+				variant => variant.kind === ProductVariantKind.DEFAULT
+			)
+			if (defaultVariant) byKey.set(DEFAULT_VARIANT_KEY, defaultVariant)
+		}
+		return byKey
 	}
 
 	private assertVariantUpdateTargetsExist(
