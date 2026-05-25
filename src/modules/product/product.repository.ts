@@ -418,6 +418,34 @@ const productVariantSaleUnitSelect = {
 	updatedAt: true
 }
 
+const productListSaleUnitVariantSelect = {
+	where: {
+		deleteAt: null,
+		OR: [
+			{ kind: ProductVariantKind.DEFAULT },
+			{ variantKey: DEFAULT_VARIANT_KEY }
+		],
+		saleUnits: {
+			some: { deleteAt: null }
+		}
+	},
+	select: {
+		id: true,
+		variantKey: true,
+		kind: true,
+		saleUnits: {
+			where: { deleteAt: null },
+			select: productVariantSaleUnitSelect,
+			orderBy: [
+				{ isDefault: 'desc' as const },
+				{ displayOrder: 'asc' as const },
+				{ code: 'asc' as const }
+			]
+		}
+	},
+	orderBy: { createdAt: 'asc' as const }
+}
+
 const productVariantSelect = {
 	id: true,
 	sku: true,
@@ -508,7 +536,8 @@ const productListSelectWithAttributes = {
 		where: { deleteAt: null },
 		select: productAttributeSelect,
 		orderBy: { attributeId: 'asc' as const }
-	}
+	},
+	variants: productListSaleUnitVariantSelect
 }
 
 const productDetailSelectWithAttributes = {

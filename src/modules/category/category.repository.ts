@@ -1,5 +1,5 @@
 import { type Prisma, Prisma as PrismaSql } from '@generated/client'
-import { ProductStatus } from '@generated/enums'
+import { ProductStatus, ProductVariantKind } from '@generated/enums'
 import { SortOrder } from '@generated/internal/prismaNamespace'
 import { CategoryCreateInput, CategoryUpdateInput } from '@generated/models'
 import { Injectable } from '@nestjs/common'
@@ -15,6 +15,7 @@ import {
 
 const uuidRegex =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const DEFAULT_VARIANT_KEY = 'default'
 
 function buildCategorySelect(includeInactive = false) {
 	return {
@@ -135,13 +136,65 @@ const productAttributeSelect = {
 	}
 }
 
+const productVariantSaleUnitSelect = {
+	id: true,
+	catalogSaleUnitId: true,
+	code: true,
+	name: true,
+	baseQuantity: true,
+	price: true,
+	barcode: true,
+	isDefault: true,
+	isActive: true,
+	displayOrder: true,
+	catalogSaleUnit: {
+		select: {
+			id: true,
+			code: true,
+			name: true,
+			defaultBaseQuantity: true
+		}
+	},
+	createdAt: true,
+	updatedAt: true
+}
+
+const productSaleUnitVariantSelect = {
+	where: {
+		deleteAt: null,
+		OR: [
+			{ kind: ProductVariantKind.DEFAULT },
+			{ variantKey: DEFAULT_VARIANT_KEY }
+		],
+		saleUnits: {
+			some: { deleteAt: null }
+		}
+	},
+	select: {
+		id: true,
+		variantKey: true,
+		kind: true,
+		saleUnits: {
+			where: { deleteAt: null },
+			select: productVariantSaleUnitSelect,
+			orderBy: [
+				{ isDefault: 'desc' as const },
+				{ displayOrder: 'asc' as const },
+				{ code: 'asc' as const }
+			]
+		}
+	},
+	orderBy: { createdAt: 'asc' as const }
+}
+
 const productSelectWithAttributes = {
 	...productSelect,
 	productAttributes: {
 		where: { deleteAt: null },
 		select: productAttributeSelect,
 		orderBy: { attributeId: SortOrder.asc }
-	}
+	},
+	variants: productSaleUnitVariantSelect
 }
 
 const categorySelectWithRelations = {

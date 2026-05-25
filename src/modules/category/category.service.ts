@@ -17,6 +17,7 @@ import {
 	type ProductSellableReader,
 	type ProductVariantProjection,
 	ProductVariantCardProjectionService,
+	resolveProductSaleUnitsForRead,
 	toProductCommercialFieldsMap
 } from '@/modules/product/public'
 import { CacheService } from '@/shared/cache/cache.service'
@@ -506,11 +507,26 @@ export class CategoryService {
 		const mapped = this.mapProductMedia(
 			applyProductCommercialFields(product, commercialMap.get(product.id))
 		)
-		if (!variantProjectionMap) return mapped
+		const saleUnits = resolveProductSaleUnitsForRead(mapped, {
+			canUseCatalogSaleUnits: true,
+			shouldExposeVariants: false
+		})
+		const mappedProduct = { ...mapped } as typeof mapped & {
+			variants?: unknown
+		}
+		delete mappedProduct.variants
+
+		if (!variantProjectionMap) {
+			return {
+				...mappedProduct,
+				saleUnits
+			}
+		}
 
 		const variantProjection = variantProjectionMap.get(product.id)
 		return {
-			...mapped,
+			...mappedProduct,
+			saleUnits,
 			variantSummary: variantProjection?.variantSummary ?? {
 				...EMPTY_VARIANT_SUMMARY
 			},

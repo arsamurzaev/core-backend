@@ -71,6 +71,7 @@ import {
 	type ProductVariantPickerOptionRecord,
 	type ProductVariantSummaryRecord
 } from './product.repository'
+import { resolveProductSaleUnitsForRead } from './product-sale-units-read.utils'
 
 export type ProductReadOptions = {
 	includeInactive?: boolean
@@ -439,39 +440,6 @@ function sanitizeProductAttributesForReadFeatures(
 
 		return meta?.isHidden !== true && meta?.isVariantAttribute !== true
 	})
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function isDefaultVariantRecord(variant: Record<string, unknown>): boolean {
-	return (
-		variant.kind === ProductVariantKind.DEFAULT ||
-		variant.variantKey === DEFAULT_VARIANT_KEY
-	)
-}
-
-function resolveProductSaleUnitsForRead(
-	product: { variants?: unknown },
-	features: ProductReadFeatures,
-	shouldExposeVariants: boolean
-): unknown[] {
-	if (!features.canUseCatalogSaleUnits || shouldExposeVariants) return []
-
-	const variants = Array.isArray(product.variants)
-		? product.variants.filter(isRecord)
-		: []
-	const defaultVariant =
-		variants.find(isDefaultVariantRecord) ??
-		variants.find(
-			variant =>
-				Array.isArray(variant.attributes) && variant.attributes.length === 0
-		) ??
-		variants[0]
-	const saleUnits = defaultVariant?.saleUnits
-
-	return Array.isArray(saleUnits) ? saleUnits : []
 }
 
 function sanitizeProductForReadFeatures<T extends Record<string, unknown>>(
@@ -1342,8 +1310,10 @@ export class ProductReadService {
 				...mappedProduct,
 				saleUnits: resolveProductSaleUnitsForRead(
 					mappedProduct,
-					readFeatures,
-					shouldExposeVariants
+					{
+						canUseCatalogSaleUnits: readFeatures.canUseCatalogSaleUnits,
+						shouldExposeVariants
+					}
 				),
 				variantSummary,
 				variantPickerOptions: shouldExposeVariants
@@ -1399,15 +1369,19 @@ export class ProductReadService {
 				this.mapper.mapProduct(product, variantNames),
 				commercialMap.get(product.id)
 			)
+			const saleUnits = resolveProductSaleUnitsForRead(mappedProduct, {
+				canUseCatalogSaleUnits: readFeatures.canUseCatalogSaleUnits,
+				shouldExposeVariants
+			})
+			const mappedProductWithoutVariants = { ...mappedProduct } as typeof mappedProduct & {
+				variants?: unknown
+			}
+			delete mappedProductWithoutVariants.variants
 
 			return sanitizeProductForReadFeatures(
 				{
-					...mappedProduct,
-					saleUnits: resolveProductSaleUnitsForRead(
-						mappedProduct,
-						readFeatures,
-						shouldExposeVariants
-					),
+					...mappedProductWithoutVariants,
+					saleUnits,
 					variantSummary,
 					variantPickerOptions: variantPickerOptionsMap.get(product.id) ?? []
 				},

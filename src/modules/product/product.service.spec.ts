@@ -1274,7 +1274,31 @@ describe('ProductService', () => {
 				integrationLinks: [],
 				isPopular: true,
 				productType: { id: 'product-type-1' },
-				productAttributes: []
+				productAttributes: [],
+				variants: [
+					{
+						id: 'default-variant',
+						variantKey: 'default',
+						kind: 'DEFAULT',
+						saleUnits: [
+							{
+								id: 'sale-unit-box',
+								catalogSaleUnitId: 'catalog-sale-unit-box',
+								code: 'box',
+								name: 'Box',
+								baseQuantity: '12.0000',
+								price: '900.00',
+								barcode: null,
+								isDefault: true,
+								isActive: true,
+								displayOrder: 0,
+								createdAt: new Date('2026-03-23T15:00:00.000Z'),
+								updatedAt: new Date('2026-03-23T15:00:00.000Z'),
+								catalogSaleUnit: null
+							}
+						]
+					}
+				]
 			}
 		] as any)
 		repo.findVariantSummaries.mockResolvedValue([
@@ -1362,7 +1386,31 @@ describe('ProductService', () => {
 				integrationLinks: [],
 				isPopular: true,
 				productType: { id: 'product-type-1' },
-				productAttributes: []
+				productAttributes: [],
+				variants: [
+					{
+						id: 'default-variant',
+						variantKey: 'default',
+						kind: 'DEFAULT',
+						saleUnits: [
+							{
+								id: 'sale-unit-box',
+								catalogSaleUnitId: 'catalog-sale-unit-box',
+								code: 'box',
+								name: 'Box',
+								baseQuantity: '12.0000',
+								price: '900.00',
+								barcode: null,
+								isDefault: true,
+								isActive: true,
+								displayOrder: 0,
+								createdAt: new Date('2026-03-23T15:00:00.000Z'),
+								updatedAt: new Date('2026-03-23T15:00:00.000Z'),
+								catalogSaleUnit: null
+							}
+						]
+					}
+				]
 			}
 		] as any)
 		sellableReader.resolveProductsSellable.mockResolvedValueOnce(
@@ -1449,7 +1497,31 @@ describe('ProductService', () => {
 				integrationLinks: [],
 				isPopular: true,
 				productType: { id: 'product-type-1' },
-				productAttributes: []
+				productAttributes: [],
+				variants: [
+					{
+						id: 'default-variant',
+						variantKey: 'default',
+						kind: 'DEFAULT',
+						saleUnits: [
+							{
+								id: 'sale-unit-box',
+								catalogSaleUnitId: 'catalog-sale-unit-box',
+								code: 'box',
+								name: 'Box',
+								baseQuantity: '12.0000',
+								price: '900.00',
+								barcode: null,
+								isDefault: true,
+								isActive: true,
+								displayOrder: 0,
+								createdAt: new Date('2026-03-23T15:00:00.000Z'),
+								updatedAt: new Date('2026-03-23T15:00:00.000Z'),
+								catalogSaleUnit: null
+							}
+						]
+					}
+				]
 			}
 		] as any)
 
@@ -1487,7 +1559,31 @@ describe('ProductService', () => {
 				integrationLinks: [],
 				isPopular: true,
 				productType: { id: 'product-type-1' },
-				productAttributes: []
+				productAttributes: [],
+				variants: [
+					{
+						id: 'default-variant',
+						variantKey: 'default',
+						kind: 'DEFAULT',
+						saleUnits: [
+							{
+								id: 'sale-unit-box',
+								catalogSaleUnitId: 'catalog-sale-unit-box',
+								code: 'box',
+								name: 'Box',
+								baseQuantity: '12.0000',
+								price: '900.00',
+								barcode: null,
+								isDefault: true,
+								isActive: true,
+								displayOrder: 0,
+								createdAt: new Date('2026-03-23T15:00:00.000Z'),
+								updatedAt: new Date('2026-03-23T15:00:00.000Z'),
+								catalogSaleUnit: null
+							}
+						]
+					}
+				]
 			}
 		] as any)
 		sellableReader.resolveProductsSellable.mockResolvedValueOnce(
@@ -1528,7 +1624,15 @@ describe('ProductService', () => {
 					totalStock: 0,
 					singleVariantId: null
 				},
-				variantPickerOptions: []
+				variantPickerOptions: [],
+				saleUnits: [
+					expect.objectContaining({
+						id: 'sale-unit-box',
+						name: 'Box',
+						baseQuantity: '12.0000',
+						price: '900.00'
+					})
+				]
 			})
 		)
 	})

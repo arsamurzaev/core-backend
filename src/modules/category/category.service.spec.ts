@@ -302,7 +302,31 @@ describe('CategoryService', () => {
 					id: 'p1',
 					media: [],
 					integrationLinks: [],
-					productAttributes: []
+					productAttributes: [],
+					variants: [
+						{
+							id: 'default-variant',
+							variantKey: 'default',
+							kind: 'DEFAULT',
+							saleUnits: [
+								{
+									id: 'sale-unit-piece',
+									catalogSaleUnitId: 'catalog-sale-unit-piece',
+									code: 'piece',
+									name: 'Piece',
+									baseQuantity: '1.0000',
+									price: '690.00',
+									barcode: null,
+									isDefault: true,
+									isActive: true,
+									displayOrder: 0,
+									createdAt: new Date('2026-03-23T15:00:00.000Z'),
+									updatedAt: new Date('2026-03-23T15:00:00.000Z'),
+									catalogSaleUnit: null
+								}
+							]
+						}
+					]
 				}
 			},
 			{
@@ -374,6 +398,13 @@ describe('CategoryService', () => {
 		])
 		expect(result.items[0]?.product).toHaveProperty('productAttributes', [])
 		expect(result.items[0]?.product).not.toHaveProperty('variants')
+		expect(result.items[0]?.product).toHaveProperty('saleUnits', [
+			expect.objectContaining({
+				id: 'sale-unit-piece',
+				name: 'Piece',
+				baseQuantity: '1.0000'
+			})
+		])
 		expect(result.items[0]?.product).toMatchObject({
 			variantSummary: {
 				minPrice: '690.00',

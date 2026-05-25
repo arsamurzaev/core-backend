@@ -13,3 +13,4 @@ export {
 	type ProductVariantProjection
 } from './product-variant-card-projection'
 export { ProductVariantCardProjectionService } from './product-variant-card-projection.service'
+export { resolveProductSaleUnitsForRead } from './product-sale-units-read.utils'
