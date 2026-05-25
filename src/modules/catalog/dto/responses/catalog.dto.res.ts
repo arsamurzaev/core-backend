@@ -130,6 +130,12 @@ export class CatalogCurrentFeaturesDto {
 	canUseMoySkladIntegration: boolean
 
 	@ApiProperty({
+		type: Boolean,
+		description: 'Whether the current catalog can use iiko integration.'
+	})
+	canUseIikoIntegration: boolean
+
+	@ApiProperty({
 		type: Object,
 		additionalProperties: { type: 'boolean' },
 		description: 'Raw admin entitlements before dependency resolution.'

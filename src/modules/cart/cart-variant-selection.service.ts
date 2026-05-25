@@ -48,13 +48,7 @@ export class CartVariantSelectionService {
 
 		if (input.quantity <= 0) return input.variantId
 
-		if (!canUseVariants) {
-			return this.resolveImplicitProductVariantId(catalogId, input, inventoryMode, {
-				requireExplicitSelection: false
-			})
-		}
-
-		if (input.variantId) return input.variantId
+		if (canUseVariants && input.variantId) return input.variantId
 
 		if (input.saleUnitId) {
 			const saleUnit = await tx.productVariantSaleUnit.findFirst({
@@ -77,6 +71,12 @@ export class CartVariantSelectionService {
 			}
 
 			return saleUnit.variantId
+		}
+
+		if (!canUseVariants) {
+			return this.resolveImplicitProductVariantId(catalogId, input, inventoryMode, {
+				requireExplicitSelection: false
+			})
 		}
 
 		return this.resolveImplicitProductVariantId(catalogId, input, inventoryMode, {

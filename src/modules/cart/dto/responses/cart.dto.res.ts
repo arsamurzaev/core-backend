@@ -387,3 +387,25 @@ export class CompleteCartOrderResponseDto extends OkResponseDto {
 	@ApiProperty({ type: CompletedOrderDto })
 	order: CompletedOrderDto
 }
+
+export class HallTableLinkDto {
+	@ApiProperty({ type: String })
+	code: string
+
+	@ApiProperty({ type: String, nullable: true })
+	tableName: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	tableNumber: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	sectionId: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	sectionName: string | null
+}
+
+export class HallTableLinkResponseDto extends OkResponseDto {
+	@ApiProperty({ type: HallTableLinkDto })
+	table: HallTableLinkDto
+}

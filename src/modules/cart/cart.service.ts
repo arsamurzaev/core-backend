@@ -1,4 +1,4 @@
-import { CartStatus } from '@generated/client'
+import { CartCheckoutMethod, CartStatus, IntegrationProvider } from '@generated/client'
 import {
 	BadRequestException,
 	Inject,
@@ -8,18 +8,24 @@ import {
 	OnModuleInit
 } from '@nestjs/common'
 
+import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import type { SessionUser } from '@/modules/auth/types/auth-request'
-import { MediaUrlService } from '@/shared/media/media-url.service'
 import {
 	CAPABILITY_READER_PORT,
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
+import {
+	INTEGRATION_EXTERNAL_ITEM_TYPE_TABLE,
+	IntegrationPayloadTokenService
+} from '@/modules/integration/public'
+import { MediaUrlService } from '@/shared/media/media-url.service'
 
 import { CartCurrentService } from './cart-current.service'
 import { CartLifecycleService } from './cart-lifecycle.service'
 import { CartLineService } from './cart-line.service'
 import { CartLookupService } from './cart-lookup.service'
 import { CartManagerSessionService } from './cart-manager-session.service'
+import { CartOrderExportService } from './cart-order-export.service'
 import { type CartShareInput, CartShareService } from './cart-share.service'
 import { type CartSsePayload, CartSseService } from './cart-sse.service'
 import type { CartEntity } from './cart.selects'
@@ -40,6 +46,10 @@ const CART_DRAFT_TTL_MS =
 	7 * 24 * 60 * 60 * 1000
 const CART_DRAFT_SWEEP_MS =
 	Number(process.env.CART_DRAFT_SWEEP_MS ?? 60 * 60 * 1000) || 60 * 60 * 1000
+const HALL_ORDER_IIKO_EXPORT_WAIT_TIMEOUT_MS =
+	Number(process.env.HALL_ORDER_IIKO_EXPORT_WAIT_TIMEOUT_MS ?? 60_000) || 60_000
+const HALL_ORDER_IIKO_EXPORT_WAIT_INTERVAL_MS =
+	Number(process.env.HALL_ORDER_IIKO_EXPORT_WAIT_INTERVAL_MS ?? 500) || 500
 const TERMINAL_CART_STATUSES = new Set<CartStatus>([
 	CartStatus.CONVERTED,
 	CartStatus.CANCELLED,
@@ -67,6 +77,9 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		private readonly share: CartShareService,
 		private readonly cartSse: CartSseService,
 		private readonly orderCheckout: OrderCheckoutService,
+		private readonly orderExport: CartOrderExportService,
+		private readonly prisma: PrismaService,
+		private readonly integrationPayloadTokens: IntegrationPayloadTokenService,
 		@Inject(CAPABILITY_READER_PORT)
 		private readonly capabilities: CapabilityReaderPort
 	) {}
@@ -139,6 +152,84 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	) {
 		const result = await this.share.shareCurrentCart(catalogId, token, input)
 		return { cart: await this.mapCart(result.cart), token: result.token }
+	}
+
+	async submitCurrentHallOrder(
+		catalogId: string,
+		token?: string | null,
+		input: CartShareInput | string | null = {}
+	) {
+		const shareInput: CartShareInput =
+			typeof input === 'string' ? { comment: input } : (input ?? {})
+		const checkoutData = await this.normalizeHallCheckoutData(
+			catalogId,
+			shareInput.checkoutData
+		)
+		const shared = await this.share.shareCurrentCart(catalogId, token, {
+			...shareInput,
+			checkoutMethod: CartCheckoutMethod.PICKUP,
+			checkoutData
+		})
+		this.ensureCartIsOpen(shared.cart.status)
+
+		if (!shared.cart.items.length) {
+			throw new BadRequestException('Нельзя оформить пустую корзину')
+		}
+
+		const result = await this.orderCheckout.complete(shared.cart.id, null)
+		const exportResult = await this.orderExport.waitForIikoCompletedOrder(
+			result.order.catalogId,
+			result.order.id,
+			{
+				timeoutMs: HALL_ORDER_IIKO_EXPORT_WAIT_TIMEOUT_MS,
+				intervalMs: HALL_ORDER_IIKO_EXPORT_WAIT_INTERVAL_MS
+			}
+		)
+		if (!exportResult.ok) {
+			this.logger.warn('Hall order was completed locally but iiko export failed', {
+				orderId: result.order.id,
+				exportId: exportResult.exportId,
+				status: exportResult.status,
+				reason: exportResult.reason,
+				error: exportResult.error
+			})
+			throw new BadRequestException(
+				'Произошла ошибка при отправке заказа официантам. Позовите сотрудника или попробуйте еще раз.'
+			)
+		}
+
+		const freshCart = await this.lookup.findByIdOrThrow(result.cartId)
+		await this.broadcastCartStatusChanged(freshCart)
+
+		return { order: result.order, token: shared.token }
+	}
+
+	async getHallTableLink(catalogId: string, code: string) {
+		const normalizedCode = normalizeText(code)
+		if (!normalizedCode) {
+			throw new BadRequestException('hall table code is required')
+		}
+
+		const item = await this.findHallIntegrationExternalItemByCode(
+			catalogId,
+			normalizedCode
+		)
+		if (!item) {
+			throw new BadRequestException('iiko table link is invalid or expired')
+		}
+
+		const data = this.mapHallIntegrationExternalItem(item)
+		return {
+			code: item.publicCode,
+			tableName: normalizeText(data.tableName ?? data.hallTableName),
+			tableNumber: normalizeText(data.tableNumber ?? data.hallTableNumber),
+			sectionId: normalizeText(
+				data.iikoRestaurantSectionId ?? data.hallSectionId
+			),
+			sectionName: normalizeText(
+				data.iikoRestaurantSectionName ?? data.hallSectionName
+			)
+		}
 	}
 
 	async getPublicCart(publicKey: string) {
@@ -315,19 +406,253 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 
 	private async mapCart(cart: CartEntity) {
 		const features = await this.capabilities.getCurrentFeatures(cart.catalogId)
-		return mapCartEntity(
-			cart,
-			media => this.mediaUrl.mapMedia(media),
-			{
-				canUseProductVariants: features.canUseProductVariants,
-				canUseCatalogSaleUnits: features.canUseCatalogSaleUnits
-			}
-		)
+		return mapCartEntity(cart, media => this.mediaUrl.mapMedia(media), {
+			canUseProductVariants: features.canUseProductVariants,
+			canUseCatalogSaleUnits: features.canUseCatalogSaleUnits
+		})
 	}
 
 	private ensureCartIsOpen(status: CartStatus) {
 		if (!TERMINAL_CART_STATUSES.has(status)) return
 		throw new BadRequestException('Корзина уже закрыта')
+	}
+
+	private async normalizeHallCheckoutData(
+		catalogId: string,
+		value: unknown
+	): Promise<Record<string, unknown>> {
+		const data = isRecord(value) ? value : {}
+		const token = normalizeText(
+			data.integrationPayloadToken ??
+				data.hallPayloadToken ??
+				data.payloadToken ??
+				data.h
+		)
+		const itemCode = normalizeText(
+			data.integrationExternalItemCode ??
+				data.hallTableCode ??
+				data.tableCode ??
+				data.t
+		)
+		const tokenData = token
+			? this.resolveHallIntegrationPayloadToken(catalogId, token)
+			: {}
+		const itemData = itemCode
+			? await this.resolveHallIntegrationExternalItemCode(catalogId, itemCode)
+			: {}
+		const mergedData: Record<string, unknown> = {
+			...data,
+			...tokenData,
+			...itemData,
+			...(itemCode
+				? {
+						integrationExternalItemCode: itemCode,
+						hallTableCode: itemCode,
+						tableCode: itemCode,
+						t: itemCode
+					}
+				: {}),
+			...(token ? { integrationPayloadToken: token } : {})
+		}
+		const tableId = normalizeText(
+			mergedData.iikoTableId ?? mergedData.hallTableId ?? mergedData.tableId
+		)
+		if (!tableId) {
+			throw new BadRequestException('iiko table id is required for hall order')
+		}
+
+		return {
+			...mergedData,
+			orderMode: 'HALL',
+			iikoTableId: tableId,
+			hallTableId: normalizeText(mergedData.hallTableId) ?? tableId
+		}
+	}
+
+	private async resolveHallIntegrationExternalItemCode(
+		catalogId: string,
+		code: string
+	): Promise<Record<string, unknown>> {
+		const item = await this.findHallIntegrationExternalItemByCode(catalogId, code)
+		if (!item) {
+			throw new BadRequestException('iiko table link is invalid or expired')
+		}
+
+		return this.mapHallIntegrationExternalItem(item)
+	}
+
+	private findHallIntegrationExternalItemByCode(catalogId: string, code: string) {
+		return this.prisma.integrationExternalItem.findFirst({
+			where: {
+				catalogId,
+				provider: IntegrationProvider.IIKO,
+				type: INTEGRATION_EXTERNAL_ITEM_TYPE_TABLE,
+				publicCode: code,
+				isActive: true,
+				integration: {
+					isActive: true,
+					deleteAt: null
+				}
+			},
+			select: {
+				externalId: true,
+				externalParentId: true,
+				name: true,
+				code: true,
+				publicCode: true,
+				rawMeta: true
+			}
+		})
+	}
+
+	private mapHallIntegrationExternalItem(item: {
+		externalId: string
+		externalParentId: string | null
+		name: string | null
+		code: string | null
+		publicCode: string
+		rawMeta: unknown
+	}): Record<string, unknown> {
+		const rawMeta = isRecord(item.rawMeta) ? item.rawMeta : {}
+		const tableNumber =
+			normalizeTextOrNumber(rawMeta.iikoTableNumber) ??
+			normalizeTextOrNumber(rawMeta.displayTableNumber) ??
+			normalizeTextOrNumber(rawMeta.tableNumber) ??
+			normalizeText(item.code)
+		const tableName =
+			normalizeText(rawMeta.tableName) ??
+			normalizeText(item.name)
+		const sectionId =
+			normalizeText(rawMeta.restaurantSectionId) ??
+			normalizeText(item.externalParentId)
+		const sectionName = normalizeText(rawMeta.restaurantSectionName)
+
+		return {
+			iikoTableId: item.externalId,
+			hallTableId: item.externalId,
+			tableId: item.externalId,
+			integrationExternalItemCode: item.publicCode,
+			hallTableCode: item.publicCode,
+			tableCode: item.publicCode,
+			t: item.publicCode,
+			...(tableNumber
+				? {
+						table: tableNumber,
+						tableNumber,
+						hallTableNumber: tableNumber
+					}
+				: {}),
+			...(tableName
+				? {
+						tableName,
+						hallTableName: tableName
+					}
+				: {}),
+			...(sectionId
+				? {
+						iikoRestaurantSectionId: sectionId,
+						hallSectionId: sectionId
+					}
+				: {}),
+			...(sectionName
+				? {
+						iikoRestaurantSectionName: sectionName,
+						hallSectionName: sectionName
+					}
+				: {})
+		}
+	}
+
+	private resolveHallIntegrationPayloadToken(
+		catalogId: string,
+		token: string
+	): Record<string, unknown> {
+		const envelope = this.integrationPayloadTokens.open(token, {
+			expectedType: 'hall.table',
+			expectedCatalogId: catalogId
+		})
+		const payload = isRecord(envelope.payload) ? envelope.payload : {}
+		const iiko = isRecord(payload.iiko)
+			? payload.iiko
+			: isRecord(payload.i)
+				? payload.i
+				: {}
+		const hall = isRecord(payload.hall)
+			? payload.hall
+			: isRecord(payload.h)
+				? payload.h
+				: {}
+		const tableId = normalizeText(
+			iiko.tableId ??
+				iiko.t ??
+				iiko.iikoTableId ??
+				hall.iikoTableId ??
+				payload.iikoTableId ??
+				payload.tableId
+		)
+
+		if (!tableId) {
+			throw new BadRequestException('Integration payload token has no table id')
+		}
+
+		return {
+			iikoTableId: tableId,
+			hallTableId: tableId,
+			tableId,
+			table: normalizeText(
+				hall.tableNumber ?? hall.number ?? hall.n ?? payload.tableNumber
+			),
+			tableNumber: normalizeText(
+				hall.tableNumber ?? hall.number ?? hall.n ?? payload.tableNumber
+			),
+			hallTableNumber: normalizeText(
+				hall.tableNumber ?? hall.number ?? hall.n ?? payload.tableNumber
+			),
+			tableName: normalizeText(
+				hall.tableName ?? hall.name ?? hall.nm ?? payload.tableName
+			),
+			hallTableName: normalizeText(
+				hall.tableName ?? hall.name ?? hall.nm ?? payload.tableName
+			),
+			iikoRestaurantSectionId: normalizeText(
+				iiko.restaurantSectionId ??
+					iiko.sectionId ??
+					iiko.s ??
+					hall.restaurantSectionId ??
+					payload.iikoRestaurantSectionId ??
+					payload.iikoSectionId ??
+					payload.hallSectionId
+			),
+			hallSectionId: normalizeText(
+				iiko.restaurantSectionId ??
+					iiko.sectionId ??
+					iiko.s ??
+					hall.restaurantSectionId ??
+					payload.iikoRestaurantSectionId ??
+					payload.iikoSectionId ??
+					payload.hallSectionId
+			),
+			iikoRestaurantSectionName: normalizeText(
+				iiko.restaurantSectionName ??
+					iiko.sectionName ??
+					iiko.sn ??
+					hall.sectionName ??
+					hall.sn ??
+					payload.iikoRestaurantSectionName ??
+					payload.iikoSectionName ??
+					payload.sectionName
+			),
+			hallSectionName: normalizeText(
+				iiko.restaurantSectionName ??
+					iiko.sectionName ??
+					iiko.sn ??
+					hall.sectionName ??
+					hall.sn ??
+					payload.iikoRestaurantSectionName ??
+					payload.iikoSectionName ??
+					payload.sectionName
+			)
+		}
 	}
 
 	private async expireInactiveManagerSessions() {
@@ -350,4 +675,22 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 			`Cart draft TTL sweep: expired ${result.expiredCount} abandoned cart(s)`
 		)
 	}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeText(value: unknown): string | null {
+	if (typeof value !== 'string') return null
+	const normalized = value.trim()
+	return normalized || null
+}
+
+function normalizeTextOrNumber(value: unknown): string | null {
+	if (typeof value === 'number' && Number.isFinite(value)) {
+		return String(value)
+	}
+
+	return normalizeText(value)
 }

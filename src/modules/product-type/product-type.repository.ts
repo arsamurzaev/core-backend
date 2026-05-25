@@ -1,4 +1,5 @@
 import type { Prisma } from '@generated/client'
+import { AttributeEnumValueSource } from '@generated/enums'
 import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
@@ -254,6 +255,25 @@ export class ProductTypeRepository {
 			},
 			select: buildProductTypeMatrixEditorSchemaSelect(catalogId, id)
 		})
+	}
+
+	async findImportedEnumAttributeIds(
+		catalogId: string,
+		attributeIds: string[]
+	): Promise<string[]> {
+		if (!attributeIds.length) return []
+
+		const values = await this.prisma.attributeEnumValue.findMany({
+			where: {
+				attributeId: { in: attributeIds },
+				source: AttributeEnumValueSource.IMPORTED,
+				deleteAt: null,
+				OR: [{ catalogId }, { catalogId: null }]
+			},
+			distinct: ['attributeId'],
+			select: { attributeId: true }
+		})
+		return values.map(value => value.attributeId)
 	}
 
 	findSystemTemplates(includeArchived = false) {

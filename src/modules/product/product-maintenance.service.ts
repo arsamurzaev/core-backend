@@ -1,3 +1,4 @@
+import type { Prisma } from '@generated/client'
 import { Injectable } from '@nestjs/common'
 
 import { ProductVariantService } from './product-variant.service'
@@ -133,6 +134,36 @@ export class ProductMaintenanceService {
 			repairedProducts,
 			affectedCatalogs: repairedProducts > 0 ? 1 : 0
 		}
+	}
+
+	async repairMissingDefaultVariantForProduct(
+		catalogId: string,
+		productId: string,
+		options: { tx?: unknown } = {}
+	): Promise<boolean | null> {
+		const tx = options.tx as Prisma.TransactionClient | undefined
+		const product = await this.repo.findSkuById(productId, catalogId, tx)
+		if (!product) return null
+
+		const defaultVariant = await this.variants.buildDefaultVariantData(
+			product.sku,
+			product.price,
+			{ productStatus: product.status }
+		)
+		const repaired = await this.repo.ensureDefaultVariant(
+			product.id,
+			catalogId,
+			defaultVariant,
+			tx
+		)
+
+		if (repaired && !tx) {
+			await this.finalizer.invalidateCatalogProductsCache(catalogId)
+			await this.finalizer.invalidateCategoryProductsCache(catalogId)
+			await this.syncRepairedProductSeo(catalogId, [product.id])
+		}
+
+		return repaired
 	}
 
 	async diagnoseDefaultVariantsForCatalog(

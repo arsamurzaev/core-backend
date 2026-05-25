@@ -158,6 +158,7 @@ function createDuplicateTransactionMock() {
 				promoCodeId: null,
 				subscriptionEndsAt: null,
 				metrics: [],
+				activity: [],
 				payments: [],
 				deleteAt: null,
 				createdAt: new Date('2026-05-10T00:00:00.000Z'),
@@ -316,6 +317,7 @@ function createAdminCatalogRecord(overrides: Record<string, unknown> = {}) {
 		promoCodeId: null,
 		subscriptionEndsAt: null,
 		metrics: [],
+		activity: [],
 		payments: [],
 		deleteAt: null,
 		createdAt: new Date('2026-05-10T00:00:00.000Z'),
@@ -641,6 +643,68 @@ describe('AdminService', () => {
 			CATALOG_CACHE_VERSION,
 			'catalog-1'
 		)
+	})
+
+	it('disconnects the main metric when admin clears it', async () => {
+		const tx = createTransactionMock()
+		const { prisma, service } = createService(tx)
+		prisma.catalog.findUnique.mockResolvedValueOnce({
+			id: 'catalog-1',
+			slug: 'catalog-one',
+			typeId: 'type-1',
+			userId: 'user-1',
+			metrics: [{ id: 'metric-1', counterId: '104674685' }]
+		})
+		tx.catalog.update.mockResolvedValueOnce(createAdminCatalogRecord())
+
+		await service.updateCatalog('catalog-1', { metricId: null })
+
+		expect(tx.catalog.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: 'catalog-1' },
+				data: expect.objectContaining({
+					metrics: expect.objectContaining({
+						disconnect: [{ id: 'metric-1' }]
+					})
+				})
+			})
+		)
+	})
+
+	it('replaces catalog activities during admin edit', async () => {
+		const tx = createTransactionMock()
+		const { prisma, service } = createService(tx)
+		const activity = {
+			id: 'activity-2',
+			name: 'Cafe',
+			deleteAt: null,
+			createdAt: new Date('2026-05-10T00:00:00.000Z'),
+			updatedAt: new Date('2026-05-10T00:00:00.000Z')
+		}
+		prisma.catalog.findUnique.mockResolvedValueOnce({
+			id: 'catalog-1',
+			slug: 'catalog-one',
+			typeId: 'type-1',
+			userId: 'user-1',
+			metrics: []
+		})
+		tx.catalog.update.mockResolvedValueOnce(
+			createAdminCatalogRecord({ activity: [activity] })
+		)
+
+		const result = await service.updateCatalog('catalog-1', {
+			activityIds: ['activity-2']
+		})
+
+		expect(tx.catalog.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: 'catalog-1' },
+				data: expect.objectContaining({
+					activity: { set: [{ id: 'activity-2' }] }
+				})
+			})
+		)
+		expect(result.activities).toEqual([activity])
 	})
 
 	it('duplicates catalog product media with independent S3 keys', async () => {

@@ -3,13 +3,15 @@ export const CAPABILITY_PRODUCT_VARIANTS = 'product.variants'
 export const CAPABILITY_CATALOG_SALE_UNITS = 'catalog.sale_units'
 export const CAPABILITY_INVENTORY_INTERNAL = 'inventory.internal'
 export const CAPABILITY_INTEGRATION_MOYSKLAD = 'integration.moysklad'
+export const CAPABILITY_INTEGRATION_IIKO = 'integration.iiko'
 
 export const CATALOG_CAPABILITIES = [
 	CAPABILITY_PRODUCT_TYPES,
 	CAPABILITY_PRODUCT_VARIANTS,
 	CAPABILITY_CATALOG_SALE_UNITS,
 	CAPABILITY_INVENTORY_INTERNAL,
-	CAPABILITY_INTEGRATION_MOYSKLAD
+	CAPABILITY_INTEGRATION_MOYSKLAD,
+	CAPABILITY_INTEGRATION_IIKO
 ] as const
 
 export type CatalogCapability = (typeof CATALOG_CAPABILITIES)[number]
@@ -53,6 +55,12 @@ export const CATALOG_CAPABILITY_DEFINITIONS = [
 		title: 'МойСклад',
 		description: 'Синхронизация каталога, остатков и экспорт заказов.',
 		dependsOn: []
+	},
+	{
+		key: CAPABILITY_INTEGRATION_IIKO,
+		title: 'iiko',
+		description: 'Импорт меню iikoCloud: категории, товары, варианты и изображения.',
+		dependsOn: [CAPABILITY_PRODUCT_TYPES, CAPABILITY_PRODUCT_VARIANTS]
 	}
 ] as const satisfies CatalogCapabilityDefinition[]
 
@@ -66,4 +74,5 @@ export type CatalogCapabilityFlags = {
 	canUseCatalogSaleUnits: boolean
 	canUseInternalInventory: boolean
 	canUseMoySkladIntegration: boolean
+	canUseIikoIntegration: boolean
 }

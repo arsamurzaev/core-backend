@@ -17,6 +17,7 @@ import {
 	CAPABILITY_READER_PORT,
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
+import type { OrderExportQueueResult } from '@/modules/integration/contracts'
 import type { DomainEvent } from '@/shared/domain-events/domain-events.contract'
 
 import { CartInventoryReservationService } from './cart-inventory-reservation.service'
@@ -143,6 +144,7 @@ type CheckoutCartEntity = Prisma.CartGetPayload<{
 export type OrderCheckoutResult = {
 	cartId: string
 	order: ReturnType<CartOrderSnapshotService['mapCompletedOrder']>
+	orderExport: OrderExportQueueResult
 }
 
 @Injectable()
@@ -158,7 +160,7 @@ export class OrderCheckoutService {
 
 	async complete(
 		cartId: string,
-		actorUserId: string
+		actorUserId: string | null
 	): Promise<OrderCheckoutResult> {
 		const now = new Date()
 		const result = await this.prisma.$transaction(async tx => {
@@ -264,14 +266,15 @@ export class OrderCheckoutService {
 			result.inventoryCacheCatalogIds,
 			result.inventoryDomainEvents
 		)
-		await this.orderExport.enqueueCompletedOrderSafely(
+		const orderExport = await this.orderExport.enqueueCompletedOrderSafely(
 			result.order.catalogId,
 			result.order.id
 		)
 
 		return {
 			cartId: result.cartId,
-			order: this.orderSnapshot.mapCompletedOrder(result.order)
+			order: this.orderSnapshot.mapCompletedOrder(result.order),
+			orderExport
 		}
 	}
 

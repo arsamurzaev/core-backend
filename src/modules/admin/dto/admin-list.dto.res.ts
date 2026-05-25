@@ -1,8 +1,8 @@
 import {
 	CatalogStatus,
-	IntegrationSyncSnapshotCompleteness,
 	IntegrationSyncRunStatus,
 	IntegrationSyncRunTrigger,
+	IntegrationSyncSnapshotCompleteness,
 	PaymentKind
 } from '@generated/enums'
 import type { CatalogInventoryMode } from '@generated/enums'
@@ -367,6 +367,23 @@ export class AdminActivityListItemDto {
 	types: AdminTypeListItemDto[]
 }
 
+export class AdminCatalogActivityListItemDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	name: string
+
+	@ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+	deleteAt?: Date | null
+
+	@ApiPropertyOptional({ type: String, format: 'date-time' })
+	createdAt?: Date
+
+	@ApiPropertyOptional({ type: String, format: 'date-time' })
+	updatedAt?: Date
+}
+
 export class AdminCatalogConfigListItemDto {
 	@ApiProperty({ enum: CatalogStatus })
 	status: CatalogStatus
@@ -404,6 +421,12 @@ export class AdminCatalogConfigListItemDto {
 		description: 'Whether the catalog can use MoySklad integration.'
 	})
 	canUseMoySkladIntegration: boolean
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Whether the catalog can use iiko integration.'
+	})
+	canUseIikoIntegration: boolean
 }
 
 export class AdminCatalogFeatureEntitlementItemDto {
@@ -532,6 +555,9 @@ export class AdminCatalogListItemDto {
 
 	@ApiProperty({ type: AdminPromoCodeListItemDto, nullable: true })
 	promoCode: AdminPromoCodeListItemDto | null
+
+	@ApiProperty({ type: AdminCatalogActivityListItemDto, isArray: true })
+	activities: AdminCatalogActivityListItemDto[]
 
 	@ApiProperty({ type: AdminCatalogChildListItemDto, isArray: true })
 	children: AdminCatalogChildListItemDto[]

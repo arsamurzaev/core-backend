@@ -4,6 +4,7 @@ import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
 import {
 	CAPABILITY_CATALOG_SALE_UNITS,
+	CAPABILITY_INTEGRATION_IIKO,
 	CAPABILITY_INTEGRATION_MOYSKLAD,
 	CAPABILITY_INVENTORY_INTERNAL,
 	CAPABILITY_PRODUCT_TYPES,
@@ -105,6 +106,10 @@ export class CapabilityService {
 		return this.can(catalogId, CAPABILITY_INTEGRATION_MOYSKLAD, at)
 	}
 
+	canUseIikoIntegration(catalogId: string, at = new Date()) {
+		return this.can(catalogId, CAPABILITY_INTEGRATION_IIKO, at)
+	}
+
 	async assert(
 		catalogId: string,
 		capability: CatalogCapability,
@@ -166,6 +171,14 @@ export class CapabilityService {
 			catalogId,
 			CAPABILITY_INTEGRATION_MOYSKLAD,
 			'MoySklad integration is not enabled for this catalog'
+		)
+	}
+
+	async assertCanUseIikoIntegration(catalogId: string) {
+		await this.assert(
+			catalogId,
+			CAPABILITY_INTEGRATION_IIKO,
+			'iiko integration is not enabled for this catalog'
 		)
 	}
 
@@ -244,7 +257,8 @@ export class CapabilityService {
 			canUseProductVariants: effective[CAPABILITY_PRODUCT_VARIANTS],
 			canUseCatalogSaleUnits: effective[CAPABILITY_CATALOG_SALE_UNITS],
 			canUseInternalInventory: effective[CAPABILITY_INVENTORY_INTERNAL],
-			canUseMoySkladIntegration: effective[CAPABILITY_INTEGRATION_MOYSKLAD]
+			canUseMoySkladIntegration: effective[CAPABILITY_INTEGRATION_MOYSKLAD],
+			canUseIikoIntegration: effective[CAPABILITY_INTEGRATION_IIKO]
 		}
 	}
 }

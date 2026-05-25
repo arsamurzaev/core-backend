@@ -40,15 +40,30 @@ export type CatalogSaleUnitUpdateData = Partial<{
 	deleteAt: Date | null
 }>
 
+export type CatalogSaleUnitListOptions = {
+	includeInactive?: boolean
+	includeArchived?: boolean
+}
+
 @Injectable()
 export class CatalogSaleUnitRepository {
 	constructor(private readonly prisma: PrismaService) {}
 
-	findAll(catalogId: string, includeArchived = false) {
+	findAll(
+		catalogId: string,
+		options: CatalogSaleUnitListOptions | boolean = {}
+	) {
+		const normalizedOptions =
+			typeof options === 'boolean' ? { includeArchived: options } : options
+		const includeArchived = normalizedOptions.includeArchived === true
+		const includeInactive =
+			includeArchived || normalizedOptions.includeInactive === true
+
 		return this.prisma.catalogSaleUnit.findMany({
 			where: {
 				catalogId,
-				...(includeArchived ? {} : { deleteAt: null, isActive: true })
+				...(includeArchived ? {} : { deleteAt: null }),
+				...(includeInactive ? {} : { isActive: true })
 			},
 			select: catalogSaleUnitSelect,
 			orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }, { createdAt: 'asc' }]

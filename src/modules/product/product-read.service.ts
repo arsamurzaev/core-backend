@@ -83,6 +83,7 @@ type ProductReadFeatures = Pick<
 	| 'canUseProductVariants'
 	| 'canUseCatalogSaleUnits'
 	| 'canUseMoySkladIntegration'
+	| 'canUseIikoIntegration'
 >
 
 type ProductSeoRecord = NonNullable<
@@ -190,6 +191,53 @@ function toDecimalString(value: unknown): string | null {
 	return null
 }
 
+type SaleUnitPickerSource = {
+	id: string
+	price: unknown
+	baseQuantity: unknown
+	isDefault?: boolean | null
+	displayOrder?: number | null
+}
+
+function resolveDefaultSaleUnit(
+	variant: { saleUnits?: SaleUnitPickerSource[] | null } | null | undefined
+): SaleUnitPickerSource | null {
+	const saleUnits = Array.isArray(variant?.saleUnits)
+		? variant.saleUnits.filter(
+				(unit): unit is SaleUnitPickerSource =>
+					Boolean(unit) && typeof unit.id === 'string'
+			)
+		: []
+	if (!saleUnits.length) return null
+
+	return (
+		saleUnits
+			.slice()
+			.sort(
+				(left, right) =>
+					Number(Boolean(right.isDefault)) - Number(Boolean(left.isDefault)) ||
+					Number(left.displayOrder ?? 0) - Number(right.displayOrder ?? 0)
+			)[0] ?? null
+	)
+}
+
+function resolveVariantDisplayPrice(variant: ProductVariantPickerSource): unknown {
+	return resolveDefaultSaleUnit(variant)?.price ?? variant.price
+}
+
+function resolveVariantMaxQuantity(
+	variant: ProductVariantPickerSource,
+	saleUnit: SaleUnitPickerSource | null
+): number | null {
+	if (variant.stock === null) return null
+
+	const stock = Math.max(0, variant.stock)
+	const baseQuantity = toNumberValue(saleUnit?.baseQuantity)
+	if (baseQuantity === null || baseQuantity <= 0) return stock
+
+	return Math.floor(stock / baseQuantity)
+}
+
 function shouldBuildVariantPickerOptions(
 	summary: ProductVariantSummary
 ): boolean {
@@ -266,16 +314,19 @@ function compareVariantPickerOptions(
 function mapVariantPickerOption(
 	variant: ProductVariantPickerSource
 ): ProductVariantPickerOption {
+	const defaultSaleUnit = resolveDefaultSaleUnit(variant)
+	const displayPrice = resolveVariantDisplayPrice(variant)
+
 	return {
 		id: variant.id,
 		label: buildVariantPickerLabel(variant),
-		price: toDecimalString(variant.price),
+		price: toDecimalString(displayPrice),
 		stock: variant.stock,
 		status: variant.status,
 		isAvailable: variant.isAvailable,
-		saleUnitId: null,
-		saleUnitPrice: null,
-		maxQuantity: variant.stock === null ? null : Math.max(0, variant.stock)
+		saleUnitId: defaultSaleUnit?.id ?? null,
+		saleUnitPrice: toDecimalString(defaultSaleUnit?.price),
+		maxQuantity: resolveVariantMaxQuantity(variant, defaultSaleUnit)
 	}
 }
 
@@ -304,7 +355,7 @@ function buildVariantSummaryFromVariants(
 	}
 
 	const prices = activeVariants
-		.map(variant => toNumberValue(variant.price))
+		.map(variant => toNumberValue(resolveVariantDisplayPrice(variant)))
 		.filter((price): price is number => price !== null)
 	if (!prices.length) {
 		return {
@@ -355,7 +406,11 @@ function sanitizeVariantForReadFeatures<T extends Record<string, unknown>>(
 		sanitized.saleUnits = []
 	}
 
-	if (!features.canUseMoySkladIntegration && 'integration' in sanitized) {
+	if (
+		!features.canUseMoySkladIntegration &&
+		!features.canUseIikoIntegration &&
+		'integration' in sanitized
+	) {
 		sanitized.integration = null
 	}
 
@@ -386,6 +441,39 @@ function sanitizeProductAttributesForReadFeatures(
 	})
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isDefaultVariantRecord(variant: Record<string, unknown>): boolean {
+	return (
+		variant.kind === ProductVariantKind.DEFAULT ||
+		variant.variantKey === DEFAULT_VARIANT_KEY
+	)
+}
+
+function resolveProductSaleUnitsForRead(
+	product: { variants?: unknown },
+	features: ProductReadFeatures,
+	shouldExposeVariants: boolean
+): unknown[] {
+	if (!features.canUseCatalogSaleUnits || shouldExposeVariants) return []
+
+	const variants = Array.isArray(product.variants)
+		? product.variants.filter(isRecord)
+		: []
+	const defaultVariant =
+		variants.find(isDefaultVariantRecord) ??
+		variants.find(
+			variant =>
+				Array.isArray(variant.attributes) && variant.attributes.length === 0
+		) ??
+		variants[0]
+	const saleUnits = defaultVariant?.saleUnits
+
+	return Array.isArray(saleUnits) ? saleUnits : []
+}
+
 function sanitizeProductForReadFeatures<T extends Record<string, unknown>>(
 	product: T,
 	features: ProductReadFeatures,
@@ -403,8 +491,16 @@ function sanitizeProductForReadFeatures<T extends Record<string, unknown>>(
 		}
 	}
 
-	if (!features.canUseMoySkladIntegration && 'integration' in sanitized) {
+	if (
+		!features.canUseMoySkladIntegration &&
+		!features.canUseIikoIntegration &&
+		'integration' in sanitized
+	) {
 		sanitized.integration = null
+	}
+
+	if (!features.canUseCatalogSaleUnits && 'saleUnits' in sanitized) {
+		sanitized.saleUnits = []
 	}
 
 	if ('variantSummary' in sanitized && !shouldExposeVariants) {
@@ -956,7 +1052,8 @@ export class ProductReadService {
 			features.canUseProductTypes ? 'types-on' : 'types-off',
 			features.canUseProductVariants ? 'variants-on' : 'variants-off',
 			features.canUseCatalogSaleUnits ? 'sale-units-on' : 'sale-units-off',
-			features.canUseMoySkladIntegration ? 'moysklad-on' : 'moysklad-off'
+			features.canUseMoySkladIntegration ? 'moysklad-on' : 'moysklad-off',
+			features.canUseIikoIntegration ? 'iiko-on' : 'iiko-off'
 		].join(':')
 	}
 
@@ -1235,12 +1332,18 @@ export class ProductReadService {
 			? buildVariantSummaryFromVariants(variantSources)
 			: { ...EMPTY_VARIANT_SUMMARY }
 		const commercial = await this.resolveCommercialProjection(catalogId, product.id)
+		const mappedProduct = applyProductCommercialFields(
+			this.mapper.mapProduct(product, MEDIA_DETAIL_VARIANT_NAMES),
+			commercial
+		)
 
 		return sanitizeProductForReadFeatures(
 			{
-				...applyProductCommercialFields(
-					this.mapper.mapProduct(product, MEDIA_DETAIL_VARIANT_NAMES),
-					commercial
+				...mappedProduct,
+				saleUnits: resolveProductSaleUnitsForRead(
+					mappedProduct,
+					readFeatures,
+					shouldExposeVariants
 				),
 				variantSummary,
 				variantPickerOptions: shouldExposeVariants
@@ -1292,12 +1395,18 @@ export class ProductReadService {
 			const variantSummary = shouldExposeVariants
 				? (summaryMap.get(product.id) ?? { ...EMPTY_VARIANT_SUMMARY })
 				: { ...EMPTY_VARIANT_SUMMARY }
+			const mappedProduct = applyProductCommercialFields(
+				this.mapper.mapProduct(product, variantNames),
+				commercialMap.get(product.id)
+			)
 
 			return sanitizeProductForReadFeatures(
 				{
-					...applyProductCommercialFields(
-						this.mapper.mapProduct(product, variantNames),
-						commercialMap.get(product.id)
+					...mappedProduct,
+					saleUnits: resolveProductSaleUnitsForRead(
+						mappedProduct,
+						readFeatures,
+						shouldExposeVariants
 					),
 					variantSummary,
 					variantPickerOptions: variantPickerOptionsMap.get(product.id) ?? []

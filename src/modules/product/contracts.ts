@@ -231,6 +231,11 @@ export type ProductMaintenanceResult = {
 
 export interface ProductMaintenancePort {
 	expireScheduledDiscounts(now?: Date): Promise<ProductMaintenanceResult>
+	repairMissingDefaultVariantForProduct(
+		catalogId: string,
+		productId: string,
+		options?: { tx?: unknown }
+	): Promise<boolean | null>
 	repairMissingDefaultVariantsForCatalog(catalogId: string): Promise<unknown>
 	diagnoseDefaultVariantsForCatalog(
 		catalogId: string,

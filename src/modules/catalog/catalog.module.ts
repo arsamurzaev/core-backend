@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 
 import { CapabilityModule } from '@/modules/capability/public'
+import { CatalogSaleUnitModule } from '@/modules/catalog-sale-unit/public'
 import { IntegrationModule } from '@/modules/integration/public'
 import { S3Module } from '@/modules/s3/public'
 import { SeoRepository } from '@/modules/seo/public'
@@ -22,7 +23,7 @@ import { CatalogFeatureEntitlementGuard } from './guards/catalog-feature-entitle
 import { InternalTlsController } from './internal-tls.controller'
 
 @Module({
-	imports: [S3Module, IntegrationModule, CapabilityModule],
+	imports: [S3Module, IntegrationModule, CapabilityModule, CatalogSaleUnitModule],
 	controllers: [
 		CatalogAdvancedSettingsController,
 		CatalogController,

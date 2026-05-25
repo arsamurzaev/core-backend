@@ -58,13 +58,16 @@ export class AdminUpdateCatalogDtoReq {
 	@ApiPropertyOptional({
 		type: String,
 		example: '108517746',
+		nullable: true,
 		description: 'Yandex Metrika counter id for MAIN scope.'
 	})
-	@Transform(({ value }: { value: unknown }) => trimOptionalString(value))
+	@Transform(({ value }: { value: unknown }) =>
+		trimOptionalNullableString(value)
+	)
 	@IsOptional()
 	@Matches(METRIC_ID_PATTERN)
 	@IsString()
-	metricId?: string
+	metricId?: string | null
 
 	@ApiPropertyOptional({ enum: CatalogStatus })
 	@IsOptional()

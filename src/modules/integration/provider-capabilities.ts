@@ -40,6 +40,15 @@ export const INTEGRATION_PROVIDER_CAPABILITIES: Record<
 		orderExport: true,
 		reservation: false,
 		webhook: true
+	},
+	[IntegrationProvider.IIKO]: {
+		productImport: true,
+		variantImport: true,
+		stockImport: true,
+		imageImport: true,
+		orderExport: true,
+		reservation: false,
+		webhook: true
 	}
 }
 

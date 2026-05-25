@@ -3,7 +3,8 @@ import {
 	AuditOutcome,
 	DataType,
 	IntegrationProvider,
-	IntegrationSyncRunStatus
+	IntegrationSyncRunStatus,
+	type IntegrationWebhookEventStatus
 } from '@generated/enums'
 import {
 	BadRequestException,
@@ -39,9 +40,28 @@ import { mustCatalogId } from '@/shared/tenancy/ctx'
 import type { AuthRequest, SessionUser } from '../auth/types/auth-request'
 
 import { ApplyMoySkladMappingDtoReq } from './dto/requests/apply-moysklad-mapping.dto.req'
+import { PreviewIikoImportDtoReq } from './dto/requests/preview-iiko-import.dto.req'
+import { TestIikoConnectionDtoReq } from './dto/requests/test-iiko-connection.dto.req'
 import { TestMoySkladConnectionDtoReq } from './dto/requests/test-moysklad-connection.dto.req'
+import { UpdateIikoIntegrationDtoReq } from './dto/requests/update-iiko-integration.dto.req'
 import { UpdateMoySkladIntegrationDtoReq } from './dto/requests/update-moysklad-integration.dto.req'
+import { UpsertIikoIntegrationDtoReq } from './dto/requests/upsert-iiko-integration.dto.req'
 import { UpsertMoySkladIntegrationDtoReq } from './dto/requests/upsert-moysklad-integration.dto.req'
+import {
+	IikoImportPreviewDto,
+	IikoIntegrationDto,
+	IikoIntegrationStatusDto,
+	IikoOrderExportDto,
+	IikoOrderExportTimelineDto,
+	IikoQueuedOrderExportDto,
+	IikoQueuedSyncDto,
+	IikoRestaurantTablesDto,
+	IikoSyncProgressDto,
+	IikoSyncRunDto,
+	IikoTestConnectionDto,
+	IikoWebhookEventDto,
+	IikoWebhookSetupDto
+} from './dto/responses/iiko.dto.res'
 import {
 	MoySkladIntegrationDto,
 	MoySkladIntegrationStatusDto,
@@ -64,13 +84,39 @@ import {
 } from './dto/responses/moysklad.dto.res'
 import {
 	type IntegrationOrderExportRecord,
+	type IntegrationExternalItemRecord,
+	type IntegrationProductPreviewRecord,
 	type IntegrationRecord,
 	IntegrationRepository,
 	type IntegrationSyncRunRecord,
+	type IntegrationWebhookEventRecord,
 	type MappingPreviewAttributeRecord
 } from './integration.repository'
+import {
+	INTEGRATION_EXTERNAL_ITEM_TYPE_RESTAURANT_SECTION,
+	INTEGRATION_EXTERNAL_ITEM_TYPE_TABLE
+} from './integration-external-items'
 import { getIntegrationProviderCapabilities } from './provider-capabilities'
 import { renderSafeProviderErrorMessage } from './provider-error-redaction'
+import { IikoClient } from './providers/iiko/iiko.client'
+import type { IikoExternalMenuPreview } from './providers/iiko/iiko.external-menu-normalizer'
+import {
+	IikoMetadataCryptoService,
+	maskApiLogin
+} from './providers/iiko/iiko.metadata'
+import { IikoOrderExportQueueService } from './providers/iiko/iiko.order-export.queue.service'
+import { IikoQueueService } from './providers/iiko/iiko.queue.service'
+import { IikoSyncService } from './providers/iiko/iiko.sync.service'
+import type {
+	IikoMetadata,
+	IikoWebhookMetadata
+} from './providers/iiko/iiko.types'
+import {
+	buildIikoWebhookSettingsFilter,
+	normalizeIikoWebhookPayload,
+	resolveIikoWebhookAction,
+	resolveIikoWebhookOrderRefs
+} from './providers/iiko/iiko.webhooks'
 import {
 	MoySkladClient,
 	normalizeMoySkladStockReportUrl
@@ -148,6 +194,21 @@ type SyncRunIssue = {
 	message: string
 	externalId: string | null
 	count: number | null
+}
+
+type ExternalItemUpsertInput = {
+	catalogId: string
+	integrationId: string
+	provider: IntegrationProvider
+	type: string
+	externalId: string
+	externalParentId?: string | null
+	name?: string | null
+	code?: string | null
+	isActive?: boolean
+	rawMeta?: Prisma.InputJsonValue
+	lastSeenAt?: Date | null
+	lastSyncedAt?: Date | null
 }
 
 type SyncRunProgress = {
@@ -241,6 +302,10 @@ export class IntegrationService {
 		private readonly moySkladQueue: MoySkladQueueService,
 		private readonly moySkladOrderExportQueue: MoySkladOrderExportQueueService,
 		private readonly metadataCrypto: MoySkladMetadataCryptoService,
+		private readonly iikoSync: IikoSyncService,
+		private readonly iikoQueue: IikoQueueService,
+		private readonly iikoOrderExportQueue: IikoOrderExportQueueService,
+		private readonly iikoMetadataCrypto: IikoMetadataCryptoService,
 		@Inject(AUDIT_RECORDER_PORT)
 		private readonly audit: AuditRecorderPort,
 		@Inject(CAPABILITY_ASSERT_PORT)
@@ -277,6 +342,205 @@ export class IntegrationService {
 			integration: integration ? this.mapMoySkladIntegration(integration) : null,
 			activeRun: activeRun ? this.mapSyncRun(activeRun) : null,
 			lastRun: lastRun ? this.mapSyncRun(lastRun) : null
+		}
+	}
+
+	async getIiko(): Promise<IikoIntegrationDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const integration = await this.repo.findIiko(catalogId)
+		if (!integration) {
+			throw new NotFoundException('iiko integration is not configured')
+		}
+
+		return this.mapIikoIntegration(integration)
+	}
+
+	async getIikoStatus(): Promise<IikoIntegrationStatusDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const [integration, activeRun, lastRun] = await Promise.all([
+			this.repo.findIiko(catalogId),
+			this.repo.findLatestActiveSyncRun(catalogId, IntegrationProvider.IIKO),
+			this.repo.findLatestFinishedSyncRun(catalogId, IntegrationProvider.IIKO)
+		])
+
+		return {
+			configured: Boolean(integration),
+			integration: integration ? this.mapIikoIntegration(integration) : null,
+			activeRun: activeRun ? (this.mapSyncRun(activeRun) as IikoSyncRunDto) : null,
+			lastRun: lastRun ? (this.mapSyncRun(lastRun) as IikoSyncRunDto) : null
+		}
+	}
+
+	async getIikoRuns(limit?: number | string): Promise<IikoSyncRunDto[]> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const normalizedLimit = this.normalizeRunsLimit(limit)
+		const runs = await this.repo.findRecentSyncRuns(
+			catalogId,
+			normalizedLimit,
+			IntegrationProvider.IIKO
+		)
+		return runs.map(run => this.mapSyncRun(run) as IikoSyncRunDto)
+	}
+
+	async getIikoRunProgress(runId: string): Promise<IikoSyncProgressDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const run = await this.repo.findSyncRunById(runId)
+		if (
+			!run ||
+			run.catalogId !== catalogId ||
+			run.provider !== IntegrationProvider.IIKO
+		) {
+			throw new NotFoundException('iiko sync run not found')
+		}
+
+		const metadata = this.normalizeSyncRunMetadata(run)
+		return this.mapSyncRunProgress(run, metadata.progress) as IikoSyncProgressDto
+	}
+
+	async getIikoOrderExports(
+		limit?: number | string
+	): Promise<IikoOrderExportDto[]> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const normalizedLimit = this.normalizeRunsLimit(limit)
+		const exports = await this.repo.findOrderExportsByCatalog(
+			catalogId,
+			normalizedLimit,
+			IntegrationProvider.IIKO
+		)
+		return exports.map(item => this.mapOrderExport(item) as IikoOrderExportDto)
+	}
+
+	async getIikoWebhookEvents(
+		limit?: number | string,
+		status?: string
+	): Promise<IikoWebhookEventDto[]> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const integration = await this.repo.findIiko(catalogId)
+		if (!integration) {
+			throw new NotFoundException('iiko integration is not configured')
+		}
+
+		const events = await this.repo.findWebhookEvents({
+			integrationId: integration.id,
+			provider: IntegrationProvider.IIKO,
+			limit: this.normalizeRunsLimit(limit),
+			status: this.normalizeWebhookEventStatus(status)
+		})
+		return events.map(event => this.mapIikoWebhookEvent(event))
+	}
+
+	async retryIikoWebhookEvent(eventId: string): Promise<IikoWebhookEventDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const storedEvent = await this.repo.findWebhookEventForCatalog(
+			catalogId,
+			eventId,
+			IntegrationProvider.IIKO
+		)
+		if (!storedEvent) {
+			throw new NotFoundException('iiko webhook event not found')
+		}
+		if (storedEvent.status !== 'FAILED' && storedEvent.status !== 'SKIPPED') {
+			throw new ConflictException(
+				'Only failed or skipped iiko webhook events can be retried'
+			)
+		}
+
+		const integration = await this.repo.findIikoById(storedEvent.integrationId)
+		if (!integration || integration.catalogId !== catalogId) {
+			throw new NotFoundException('iiko integration is not configured')
+		}
+		if (!integration.isActive) {
+			throw new ConflictException('iiko integration is disabled')
+		}
+		const metadata = this.iikoMetadataCrypto.parseStoredMetadata(
+			integration.metadata
+		)
+		if (!metadata.webhook.enabled) {
+			throw new ConflictException('iiko webhook handling is disabled')
+		}
+
+		const resetEvent = await this.repo.resetWebhookEventForRetry(storedEvent.id)
+		if (!resetEvent) {
+			throw new ConflictException('iiko webhook event is not retryable now')
+		}
+		const event = normalizeIikoWebhookPayload(
+			resetEvent.payload ?? { eventType: resetEvent.reportUrl }
+		)
+		if (
+			event.organizationId &&
+			event.organizationId !== metadata.organizationId
+		) {
+			throw new ForbiddenException('Invalid iiko webhook organization')
+		}
+
+		await this.processIikoWebhookEvent({
+			integration,
+			metadata,
+			storedEvent: resetEvent,
+			event,
+			jobId: 'manual-retry'
+		})
+
+		const updated = await this.repo.findWebhookEventById(resetEvent.id)
+		return this.mapIikoWebhookEvent(updated ?? resetEvent)
+	}
+
+	async retryIikoOrderExport(
+		exportId: string,
+		reqOrActor: AuthRequest | SessionUser | null = null
+	): Promise<IikoQueuedOrderExportDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const result = await this.iikoOrderExportQueue.retryOrderExport(
+			catalogId,
+			exportId
+		)
+		await this.audit.record({
+			action: 'integration.iiko.order_export.retry',
+			category: 'integration',
+			outcome: result.queued ? AuditOutcome.SUCCESS : AuditOutcome.DENIED,
+			actor: this.resolveAuditActor(reqOrActor),
+			request: this.resolveAuditRequest(reqOrActor),
+			targetType: 'INTEGRATION_ORDER_EXPORT',
+			targetId: exportId,
+			targetCatalogId: catalogId,
+			reason: result.reason ?? null,
+			message: result.queued
+				? 'iiko order export retry queued'
+				: 'iiko order export retry skipped',
+			metadata: {
+				provider: IntegrationProvider.IIKO,
+				exportId,
+				queued: result.queued,
+				jobId: result.jobId ?? null,
+				reason: result.reason ?? null
+			}
+		})
+		return result
+	}
+
+	async getIikoOrderExportTimeline(
+		orderId: string
+	): Promise<IikoOrderExportTimelineDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const exports = await this.repo.findOrderExportsByOrderId(
+			catalogId,
+			orderId,
+			IntegrationProvider.IIKO
+		)
+		return {
+			orderId,
+			items: exports.flatMap(exportRecord =>
+				this.mapOrderExportTimelineItems(exportRecord)
+			)
 		}
 	}
 
@@ -623,10 +887,514 @@ export class IntegrationService {
 		return this.moySkladSync.testConnection(token)
 	}
 
+	async upsertIiko(
+		dto: UpsertIikoIntegrationDtoReq
+	): Promise<IikoIntegrationDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const existing = await this.repo.findIiko(catalogId)
+		const currentMetadata = existing
+			? this.iikoMetadataCrypto.parseStoredMetadata(existing.metadata)
+			: null
+		const metadata = this.iikoMetadataCrypto.buildStoredMetadata({
+			apiLogin: dto.apiLogin,
+			organizationId: dto.organizationId,
+			organizationName: dto.organizationName,
+			externalMenuId: dto.externalMenuId,
+			externalMenuName: dto.externalMenuName,
+			priceCategoryId: dto.priceCategoryId,
+			priceCategoryName: dto.priceCategoryName,
+			terminalGroupId: dto.terminalGroupId,
+			terminalGroupName: dto.terminalGroupName,
+			menuVersion: dto.menuVersion,
+			syncSource: 'external_menu',
+			importImages: dto.importImages,
+			exportOrders: dto.exportOrders,
+			orderExportServiceType: dto.orderExportServiceType,
+			orderExportSourceKey: dto.orderExportSourceKey,
+			lastRevision: currentMetadata?.lastRevision ?? null,
+			lastMenuSyncedAt: currentMetadata?.lastMenuSyncedAt ?? null,
+			lastStopListSyncedAt: currentMetadata?.lastStopListSyncedAt ?? null
+		})
+		const integration = await this.repo.upsertIiko(catalogId, {
+			metadata,
+			isActive: dto.isActive ?? true
+		})
+
+		return this.mapIikoIntegration(integration)
+	}
+
+	async updateIiko(
+		dto: UpdateIikoIntegrationDtoReq
+	): Promise<IikoIntegrationDto> {
+		this.assertHasIikoUpdateFields(dto)
+
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const existing = await this.repo.findIiko(catalogId)
+		if (!existing) {
+			throw new NotFoundException('iiko integration is not configured')
+		}
+
+		const currentMetadata = this.iikoMetadataCrypto.parseStoredMetadata(
+			existing.metadata
+		)
+		const metadata = this.iikoMetadataCrypto.buildStoredMetadata({
+			apiLogin: dto.apiLogin ?? currentMetadata.apiLogin,
+			organizationId: dto.organizationId ?? currentMetadata.organizationId,
+			organizationName:
+				dto.organizationName !== undefined
+					? dto.organizationName
+					: dto.organizationId !== undefined
+						? null
+						: currentMetadata.organizationName,
+			externalMenuId:
+				dto.externalMenuId !== undefined
+					? dto.externalMenuId
+					: currentMetadata.externalMenuId,
+			externalMenuName:
+				dto.externalMenuName !== undefined
+					? dto.externalMenuName
+					: dto.externalMenuId !== undefined
+						? null
+						: currentMetadata.externalMenuName,
+			priceCategoryId:
+				dto.priceCategoryId !== undefined
+					? dto.priceCategoryId
+					: currentMetadata.priceCategoryId,
+			priceCategoryName:
+				dto.priceCategoryName !== undefined
+					? dto.priceCategoryName
+					: dto.priceCategoryId !== undefined
+						? null
+						: currentMetadata.priceCategoryName,
+			terminalGroupId:
+				dto.terminalGroupId !== undefined
+					? dto.terminalGroupId
+					: currentMetadata.terminalGroupId,
+			terminalGroupName:
+				dto.terminalGroupName !== undefined
+					? dto.terminalGroupName
+					: dto.terminalGroupId !== undefined
+						? null
+						: currentMetadata.terminalGroupName,
+			menuVersion: dto.menuVersion ?? currentMetadata.menuVersion,
+			syncSource: 'external_menu',
+			importImages: dto.importImages ?? currentMetadata.importImages,
+			exportOrders: dto.exportOrders ?? currentMetadata.exportOrders,
+			orderExportServiceType:
+				dto.orderExportServiceType !== undefined
+					? dto.orderExportServiceType
+					: currentMetadata.orderExportServiceType,
+			orderExportSourceKey:
+				dto.orderExportSourceKey !== undefined
+					? dto.orderExportSourceKey
+					: currentMetadata.orderExportSourceKey,
+			lastRevision: currentMetadata.lastRevision,
+			lastMenuSyncedAt: currentMetadata.lastMenuSyncedAt,
+			lastStopListSyncedAt: currentMetadata.lastStopListSyncedAt
+		})
+		const integration = await this.repo.updateIiko(catalogId, {
+			metadata,
+			isActive: dto.isActive
+		})
+		if (!integration) {
+			throw new NotFoundException('iiko integration is not configured')
+		}
+
+		return this.mapIikoIntegration(integration)
+	}
+
+	async removeIiko(): Promise<OkResponseDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const integration = await this.repo.softDeleteIiko(catalogId)
+		if (!integration) {
+			throw new NotFoundException('iiko integration is not configured')
+		}
+
+		return { ok: true }
+	}
+
+	async testIikoConnection(
+		dto: TestIikoConnectionDtoReq = {}
+	): Promise<IikoTestConnectionDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+
+		const requestApiLogin = dto.apiLogin?.trim()
+		if (requestApiLogin) {
+			return this.iikoSync.testConnection(requestApiLogin)
+		}
+
+		const existing = await this.repo.findIiko(catalogId)
+		const metadata = existing
+			? this.iikoMetadataCrypto.parseStoredMetadata(existing.metadata)
+			: null
+		const storedApiLogin = metadata?.apiLogin?.trim()
+		if (!storedApiLogin) {
+			throw new BadRequestException('iiko apiLogin is required')
+		}
+
+		return this.iikoSync.testConnection(storedApiLogin)
+	}
+
+	async getIikoTables(): Promise<IikoRestaurantTablesDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const integration = await this.repo.findIiko(catalogId)
+		if (!integration) {
+			throw new NotFoundException('iiko integration is not configured')
+		}
+		if (!integration.isActive) {
+			throw new ConflictException('iiko integration is disabled')
+		}
+
+		const metadata = this.iikoMetadataCrypto.parseStoredMetadata(
+			integration.metadata
+		)
+		if (!metadata.terminalGroupId) {
+			throw new BadRequestException('iiko terminal group is required')
+		}
+
+		const client = new IikoClient({
+			apiLogin: metadata.apiLogin,
+			baseUrl: this.resolveIikoApiBaseUrl()
+		})
+		const response = await client.getRestaurantSections({
+			terminalGroupIds: [metadata.terminalGroupId],
+			returnSchema: false
+		})
+		const now = new Date()
+		const seenSectionIds: string[] = []
+		const tableInputs = (response.restaurantSections ?? []).flatMap(section => {
+			const sectionId = normalizeOptionalString(section.id)
+			const sectionName = normalizeOptionalString(section.name)
+			const terminalGroupId = normalizeOptionalString(section.terminalGroupId)
+
+			if (sectionId) {
+				seenSectionIds.push(sectionId)
+			}
+
+			return (section.tables ?? [])
+				.filter(table => !table.isDeleted)
+				.map(table => {
+					const number = normalizeNullableNumber(table.number)
+					const name = normalizeOptionalString(table.name)
+					return {
+						id: normalizeOptionalString(table.id) ?? '',
+						publicCode: null as string | null,
+						number,
+						displayNumber: resolveIikoTableDisplayNumber(name, number),
+						name,
+						seatingCapacity: normalizeNullableNumber(table.seatingCapacity),
+						sectionId,
+						sectionName,
+						terminalGroupId
+					}
+				})
+				.filter(table => table.id)
+		})
+		const seenTableIds = tableInputs.map(table => table.id)
+
+		await Promise.all(
+			(response.restaurantSections ?? [])
+				.map(section => {
+					const sectionId = normalizeOptionalString(section.id)
+					if (!sectionId) return null
+					const sectionName = normalizeOptionalString(section.name)
+					const terminalGroupId = normalizeOptionalString(section.terminalGroupId)
+					return this.upsertExternalItemWithGeneratedCode({
+						catalogId,
+						integrationId: integration.id,
+						provider: IntegrationProvider.IIKO,
+						type: INTEGRATION_EXTERNAL_ITEM_TYPE_RESTAURANT_SECTION,
+						externalId: sectionId,
+						name: sectionName,
+						rawMeta: {
+							provider: 'iiko',
+							source: 'restaurantSections',
+							terminalGroupId,
+							revision: normalizeNullableNumber(response.revision)
+						},
+						lastSeenAt: now,
+						lastSyncedAt: now
+					})
+				})
+				.filter(
+					(promise): promise is Promise<IntegrationExternalItemRecord> =>
+						Boolean(promise)
+				)
+		)
+
+		const tables = await Promise.all(
+			tableInputs.map(async table => {
+				const externalItem = await this.upsertExternalItemWithGeneratedCode({
+					catalogId,
+					integrationId: integration.id,
+					provider: IntegrationProvider.IIKO,
+					type: INTEGRATION_EXTERNAL_ITEM_TYPE_TABLE,
+					externalId: table.id,
+					externalParentId: table.sectionId,
+					name:
+						table.name ??
+						(table.displayNumber ? `Стол ${table.displayNumber}` : null),
+					code: table.displayNumber,
+					rawMeta: {
+						provider: 'iiko',
+						source: 'restaurantSections',
+						terminalGroupId: table.terminalGroupId,
+						restaurantSectionId: table.sectionId,
+						restaurantSectionName: table.sectionName,
+						iikoTableNumber: table.number,
+						tableNumber: table.displayNumber,
+						displayTableNumber: table.displayNumber,
+						tableName: table.name,
+						seatingCapacity: table.seatingCapacity,
+						revision: normalizeNullableNumber(response.revision)
+					},
+					lastSeenAt: now,
+					lastSyncedAt: now
+				})
+
+				return {
+					...table,
+					publicCode: externalItem.publicCode
+				}
+			})
+		)
+
+		await Promise.all([
+			this.repo.deactivateMissingExternalItems({
+				integrationId: integration.id,
+				type: INTEGRATION_EXTERNAL_ITEM_TYPE_RESTAURANT_SECTION,
+				externalIds: seenSectionIds
+			}),
+			this.repo.deactivateMissingExternalItems({
+				integrationId: integration.id,
+				type: INTEGRATION_EXTERNAL_ITEM_TYPE_TABLE,
+				externalIds: seenTableIds
+			})
+		])
+
+		return {
+			ok: true,
+			tables,
+			revision: normalizeNullableNumber(response.revision)
+		}
+	}
+
+	async previewIikoImport(
+		dto: PreviewIikoImportDtoReq
+	): Promise<IikoImportPreviewDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const existing = await this.repo.findIiko(catalogId)
+		const metadata = existing
+			? this.iikoMetadataCrypto.parseStoredMetadata(existing.metadata)
+			: null
+
+		const apiLogin = dto.apiLogin?.trim() || metadata?.apiLogin
+		const organizationId = dto.organizationId?.trim() || metadata?.organizationId
+		const externalMenuId = dto.externalMenuId?.trim() || metadata?.externalMenuId
+
+		if (!apiLogin) {
+			throw new BadRequestException('iiko apiLogin is required')
+		}
+		if (!organizationId) {
+			throw new BadRequestException('iiko organization is required')
+		}
+		if (!externalMenuId) {
+			throw new BadRequestException('iiko external menu is required')
+		}
+
+		const preview = await this.iikoSync.previewExternalMenu({
+			apiLogin,
+			organizationId,
+			externalMenuId,
+			externalMenuName:
+				dto.externalMenuName !== undefined
+					? dto.externalMenuName
+					: metadata?.externalMenuName,
+			priceCategoryId:
+				dto.priceCategoryId !== undefined
+					? dto.priceCategoryId
+					: metadata?.priceCategoryId,
+			menuVersion: dto.menuVersion ?? metadata?.menuVersion ?? 4
+		})
+
+		return this.enrichIikoImportPreviewDiff(existing, preview)
+	}
+
 	async syncMoySkladCatalog(): Promise<MoySkladQueuedSyncDto> {
 		const catalogId = mustCatalogId()
 		await this.featureAssertions.assertCanUseMoySkladIntegration(catalogId)
 		return this.moySkladQueue.enqueueCatalogSync(catalogId)
+	}
+
+	async syncIikoCatalog(): Promise<IikoQueuedSyncDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		return this.iikoQueue.enqueueCatalogSync(catalogId)
+	}
+
+	async syncIikoStock(): Promise<IikoQueuedSyncDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		return this.iikoQueue.enqueueStockSync(catalogId)
+	}
+
+	async syncIikoProduct(productId: string): Promise<IikoQueuedSyncDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		return this.iikoQueue.enqueueProductSync(catalogId, productId)
+	}
+
+	async setupIikoWebhooks(): Promise<IikoWebhookSetupDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const integration = await this.repo.findIiko(catalogId)
+		if (!integration) {
+			throw new NotFoundException('iiko integration is not configured')
+		}
+		if (!integration.isActive) {
+			throw new ConflictException('iiko integration is disabled')
+		}
+
+		const metadata = this.iikoMetadataCrypto.parseStoredMetadata(
+			integration.metadata
+		)
+		const baseUrl = this.resolveIikoWebhookBaseUrl()
+		const secret = this.generateWebhookSecret()
+		const webHooksUri = this.buildIikoWebhookUrl(baseUrl, integration.id, secret)
+		const urlPreview = this.buildIikoWebhookUrl(baseUrl, integration.id, '***')
+		const client = new IikoClient({
+			apiLogin: metadata.apiLogin,
+			baseUrl: this.resolveIikoApiBaseUrl()
+		})
+		const response = await client.updateWebhookSettings({
+			organizationId: metadata.organizationId,
+			webHooksUri,
+			authToken: secret,
+			webHooksFilter: buildIikoWebhookSettingsFilter()
+		})
+		const nextWebhook: IikoWebhookMetadata = {
+			...metadata.webhook,
+			enabled: true,
+			urlPreview,
+			secretHash: this.hashWebhookSecret(secret),
+			lastConfiguredAt: new Date().toISOString(),
+			lastError: null
+		}
+		await this.updateStoredIikoMetadata(integration, {
+			...metadata,
+			webhook: nextWebhook
+		})
+		const updated = await this.repo.findIikoById(integration.id)
+		if (!updated) {
+			throw new NotFoundException('iiko integration is not configured')
+		}
+
+		return {
+			ok: true,
+			enabled: true,
+			correlationId: response.correlationId ?? null,
+			webhook: this.mapIikoWebhookStatus(
+				this.iikoMetadataCrypto.parseStoredMetadata(updated.metadata).webhook
+			)
+		}
+	}
+
+	async disableIikoWebhooks(): Promise<OkResponseDto> {
+		const catalogId = mustCatalogId()
+		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
+		const integration = await this.repo.findIiko(catalogId)
+		if (!integration) {
+			throw new NotFoundException('iiko integration is not configured')
+		}
+		const metadata = this.iikoMetadataCrypto.parseStoredMetadata(
+			integration.metadata
+		)
+		let lastError: string | null = null
+		if (metadata.organizationId && metadata.apiLogin) {
+			try {
+				const client = new IikoClient({
+					apiLogin: metadata.apiLogin,
+					baseUrl: this.resolveIikoApiBaseUrl()
+				})
+				await client.updateWebhookSettings({
+					organizationId: metadata.organizationId,
+					webHooksUri: '',
+					authToken: null,
+					webHooksFilter: null
+				})
+			} catch (error) {
+				lastError = renderSafeProviderErrorMessage(error)
+				this.logger.warn(`Failed to disable iiko webhooks remotely: ${lastError}`)
+			}
+		}
+		await this.updateStoredIikoMetadata(integration, {
+			...metadata,
+			webhook: {
+				...metadata.webhook,
+				enabled: false,
+				urlPreview: null,
+				secretHash: null,
+				lastConfiguredAt: new Date().toISOString(),
+				lastError
+			}
+		})
+
+		return { ok: true }
+	}
+
+	async receiveIikoWebhook(params: {
+		integrationId: string
+		secret: string
+		payload: unknown
+		headers?: Record<string, unknown>
+	}): Promise<void> {
+		const integration = await this.repo.findIikoById(params.integrationId)
+		if (!integration) {
+			throw new NotFoundException('iiko integration is not configured')
+		}
+		const metadata = this.iikoMetadataCrypto.parseStoredMetadata(
+			integration.metadata
+		)
+		this.assertIikoWebhookSecret(metadata.webhook, params.secret)
+
+		if (!metadata.webhook.enabled) {
+			await this.touchIikoWebhook(integration, metadata, {
+				lastError: 'iiko webhook is disabled locally'
+			})
+			return
+		}
+
+		const event = normalizeIikoWebhookPayload(params.payload)
+		if (
+			event.organizationId &&
+			event.organizationId !== metadata.organizationId
+		) {
+			throw new ForbiddenException('Invalid iiko webhook organization')
+		}
+
+		const { event: storedEvent, created } =
+			await this.repo.createWebhookEventIfNew({
+				integrationId: integration.id,
+				provider: IntegrationProvider.IIKO,
+				requestId: event.requestId,
+				reportUrl: event.eventType,
+				payload: event.payload as Prisma.InputJsonValue
+			})
+		if (!created) return
+
+		await this.processIikoWebhookEvent({
+			integration,
+			metadata,
+			storedEvent,
+			event,
+			jobId: 'inline'
+		})
 	}
 
 	async syncMoySkladProduct(productId: string): Promise<MoySkladQueuedSyncDto> {
@@ -1688,7 +2456,7 @@ export class IntegrationService {
 		const baseUrl = this.getMoySkladWebhookBaseUrl()
 		if (!baseUrl) {
 			throw new BadRequestException(
-				'MOYSKLAD_WEBHOOK_BASE_URL is required to enable MoySklad stock webhook'
+				'INTEGRATION_WEBHOOK_BASE_URL or MOYSKLAD_WEBHOOK_BASE_URL is required to enable MoySklad stock webhook'
 			)
 		}
 
@@ -1782,7 +2550,7 @@ export class IntegrationService {
 		const baseUrl = this.getMoySkladWebhookBaseUrl()
 		if (!baseUrl) {
 			this.logger.warn(
-				`MOYSKLAD_WEBHOOK_BASE_URL is required to enable MoySklad product change webhook for integration ${integration.id}`
+				`INTEGRATION_WEBHOOK_BASE_URL or MOYSKLAD_WEBHOOK_BASE_URL is required to enable MoySklad product change webhook for integration ${integration.id}`
 			)
 			return integration
 		}
@@ -1870,7 +2638,7 @@ export class IntegrationService {
 		const baseUrl = this.getMoySkladWebhookBaseUrl()
 		if (!baseUrl) {
 			this.logger.warn(
-				`MOYSKLAD_WEBHOOK_BASE_URL is required to enable MoySklad productfolder webhook for integration ${integration.id}`
+				`INTEGRATION_WEBHOOK_BASE_URL or MOYSKLAD_WEBHOOK_BASE_URL is required to enable MoySklad productfolder webhook for integration ${integration.id}`
 			)
 			return integration
 		}
@@ -1956,7 +2724,7 @@ export class IntegrationService {
 		const baseUrl = this.getMoySkladWebhookBaseUrl()
 		if (!baseUrl) {
 			this.logger.warn(
-				`MOYSKLAD_WEBHOOK_BASE_URL is required to enable MoySklad product delete webhook for integration ${integration.id}`
+				`INTEGRATION_WEBHOOK_BASE_URL or MOYSKLAD_WEBHOOK_BASE_URL is required to enable MoySklad product delete webhook for integration ${integration.id}`
 			)
 			return integration
 		}
@@ -2280,6 +3048,191 @@ export class IntegrationService {
 		}
 	}
 
+	private async processIikoWebhookEvent(params: {
+		integration: IntegrationRecord
+		metadata: IikoMetadata
+		storedEvent: IntegrationWebhookEventRecord
+		event: ReturnType<typeof normalizeIikoWebhookPayload>
+		jobId: string
+	}): Promise<void> {
+		await this.repo.markWebhookEventsProcessing(
+			[params.storedEvent.id],
+			params.jobId
+		)
+		try {
+			const action = resolveIikoWebhookAction(params.event.eventType)
+			if (action === 'stock-sync') {
+				const queued = await this.iikoQueue.enqueueStockWebhookSync(
+					params.integration
+				)
+				await this.repo.markWebhookEventProcessed(params.storedEvent.id)
+				if (!queued.queued) {
+					this.logger.log('iiko stop-list webhook accepted without queue', {
+						integrationId: params.integration.id,
+						reason: 'reason' in queued ? queued.reason : 'not_queued'
+					})
+				}
+			} else if (action === 'catalog-sync') {
+				const queued = await this.iikoQueue.enqueueCatalogWebhookSync(
+					params.integration
+				)
+				await this.repo.markWebhookEventProcessed(params.storedEvent.id)
+				if (!queued.queued) {
+					this.logger.log('iiko menu webhook accepted without queue', {
+						integrationId: params.integration.id,
+						reason: 'reason' in queued ? queued.reason : 'not_queued'
+					})
+				}
+			} else if (action === 'order-update') {
+				await this.applyIikoOrderWebhook(params.integration, params.event)
+				await this.repo.markWebhookEventProcessed(params.storedEvent.id)
+			} else {
+				await this.repo.markWebhookEventsSkipped(
+					[params.storedEvent.id],
+					`iiko webhook event ${params.event.eventType} does not require local action`
+				)
+			}
+
+			await this.touchIikoWebhook(params.integration, params.metadata, {
+				lastReceivedAt: new Date().toISOString(),
+				lastEventType: params.event.eventType,
+				lastError: null
+			})
+		} catch (error) {
+			const message = renderSafeProviderErrorMessage(error)
+			await this.repo.markWebhookEventFailed(params.storedEvent.id, message)
+			await this.touchIikoWebhook(params.integration, params.metadata, {
+				lastReceivedAt: new Date().toISOString(),
+				lastEventType: params.event.eventType,
+				lastError: message
+			})
+			throw error
+		}
+	}
+
+	private async applyIikoOrderWebhook(
+		integration: IntegrationRecord,
+		event: ReturnType<typeof normalizeIikoWebhookPayload>
+	): Promise<void> {
+		const refs = resolveIikoWebhookOrderRefs(event)
+		const exportRecord = refs.localOrderId
+			? await this.repo.findOrderExportByOrderId(integration.id, refs.localOrderId)
+			: refs.iikoOrderId
+				? await this.repo.findOrderExportByExternalId(
+						integration.id,
+						refs.iikoOrderId,
+						IntegrationProvider.IIKO
+					)
+				: null
+
+		if (!exportRecord) {
+			this.logger.warn('iiko order webhook did not match a local export', {
+				integrationId: integration.id,
+				eventType: event.eventType,
+				iikoOrderId: refs.iikoOrderId,
+				localOrderId: refs.localOrderId,
+				externalNumber: refs.externalNumber
+			})
+			return
+		}
+
+		const response = {
+			eventType: event.eventType,
+			eventTime: event.eventTime,
+			correlationId: event.correlationId,
+			eventInfo: event.eventInfo
+		}
+
+		if (
+			event.eventType === 'DeliveryOrderError' ||
+			refs.creationStatus === 'Error'
+		) {
+			await this.repo.markOrderExportError(
+				exportRecord.id,
+				`iiko webhook ${event.eventType}: ${renderSafeProviderErrorMessage(
+					JSON.stringify(refs.errorInfo ?? response)
+				)}`
+			)
+			return
+		}
+
+		if (refs.iikoOrderId) {
+			await this.repo.markOrderExportSuccess(exportRecord.id, {
+				externalId: refs.iikoOrderId,
+				response: response as Prisma.InputJsonValue
+			})
+		}
+	}
+
+	private async updateStoredIikoMetadata(
+		integration: IntegrationRecord,
+		metadata: IikoMetadata
+	): Promise<void> {
+		const stored = this.iikoMetadataCrypto.buildStoredMetadata(metadata)
+		await this.repo.updateIikoMetadataById(integration.id, stored)
+	}
+
+	private async touchIikoWebhook(
+		integration: IntegrationRecord,
+		metadata: IikoMetadata,
+		patch: Partial<IikoWebhookMetadata>
+	): Promise<void> {
+		await this.updateStoredIikoMetadata(integration, {
+			...metadata,
+			webhook: {
+				...metadata.webhook,
+				...patch
+			}
+		})
+	}
+
+	private async upsertExternalItemWithGeneratedCode(
+		params: ExternalItemUpsertInput
+	): Promise<IntegrationExternalItemRecord> {
+		let lastError: unknown = null
+		for (let attempt = 0; attempt < 5; attempt += 1) {
+			try {
+				return await this.repo.upsertExternalItem({
+					...params,
+					publicCode: generateIntegrationExternalItemCode()
+				})
+			} catch (error) {
+				lastError = error
+				if (!isPrismaUniqueConstraintError(error)) {
+					throw error
+				}
+			}
+		}
+
+		throw lastError
+	}
+
+	private resolveIikoApiBaseUrl(): string {
+		const config = this.configService.get('integration', { infer: true })
+		return config?.iikoApiBaseUrl ?? 'https://api-ru.iiko.services'
+	}
+
+	private resolveIikoWebhookBaseUrl(): string {
+		const raw = this.configService
+			.get('integration', { infer: true })
+			?.iikoWebhookBaseUrl?.trim()
+		if (!raw) {
+			throw new BadRequestException(
+				'INTEGRATION_WEBHOOK_BASE_URL or IIKO_WEBHOOK_BASE_URL is required to enable iiko webhooks'
+			)
+		}
+
+		return raw.replace(/\/+$/g, '')
+	}
+
+	private buildIikoWebhookUrl(
+		baseUrl: string,
+		integrationId: string,
+		secret: string
+	): string {
+		return `${baseUrl}/integration/webhooks/iiko/${encodeURIComponent(integrationId)}/${encodeURIComponent(secret)}`
+	}
+
 	private buildMoySkladStockWebhookUrl(
 		integrationId: string,
 		secret: string,
@@ -2334,6 +3287,22 @@ export class IntegrationService {
 		const expected = Buffer.from(expectedHash, 'hex')
 		if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
 			throw new ForbiddenException(`Invalid ${label} secret`)
+		}
+	}
+
+	private assertIikoWebhookSecret(
+		webhook: { secretHash: string | null },
+		secret: string
+	): void {
+		const expectedHash = webhook.secretHash
+		if (!expectedHash) {
+			throw new ForbiddenException('iiko webhook is not registered')
+		}
+
+		const actual = Buffer.from(this.hashWebhookSecret(secret), 'hex')
+		const expected = Buffer.from(expectedHash, 'hex')
+		if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+			throw new ForbiddenException('Invalid iiko webhook secret')
 		}
 	}
 
@@ -2776,6 +3745,244 @@ export class IntegrationService {
 		}
 	}
 
+	private mapIikoIntegration(
+		integration: IntegrationRecord
+	): IikoIntegrationDto {
+		const metadata = this.iikoMetadataCrypto.parseStoredMetadata(
+			integration.metadata
+		)
+
+		return {
+			provider: integration.provider,
+			capabilities: getIntegrationProviderCapabilities(integration.provider),
+			isActive: integration.isActive,
+			hasApiLogin: Boolean(metadata.apiLogin),
+			apiLoginPreview: maskApiLogin(metadata.apiLogin),
+			organizationId: metadata.organizationId,
+			organizationName: metadata.organizationName,
+			externalMenuId: metadata.externalMenuId,
+			externalMenuName: metadata.externalMenuName,
+			priceCategoryId: metadata.priceCategoryId,
+			priceCategoryName: metadata.priceCategoryName,
+			terminalGroupId: metadata.terminalGroupId,
+			terminalGroupName: metadata.terminalGroupName,
+			menuVersion: metadata.menuVersion,
+			syncSource: metadata.syncSource,
+			importImages: metadata.importImages,
+			exportOrders: metadata.exportOrders,
+			webhook: this.mapIikoWebhookStatus(metadata.webhook),
+			orderExportServiceType: metadata.orderExportServiceType,
+			orderExportSourceKey: metadata.orderExportSourceKey,
+			lastRevision: metadata.lastRevision,
+			lastMenuSyncedAt: metadata.lastMenuSyncedAt,
+			lastStopListSyncedAt: metadata.lastStopListSyncedAt,
+			lastSyncStatus: integration.lastSyncStatus,
+			syncStartedAt: integration.syncStartedAt,
+			lastSyncAt: integration.lastSyncAt,
+			lastSyncError: integration.lastSyncError
+				? renderSafeProviderErrorMessage(integration.lastSyncError)
+				: null,
+			totalProducts: integration.totalProducts,
+			createdProducts: integration.createdProducts,
+			updatedProducts: integration.updatedProducts,
+			deletedProducts: integration.deletedProducts,
+			createdAt: integration.createdAt,
+			updatedAt: integration.updatedAt
+		}
+	}
+
+	private async enrichIikoImportPreviewDiff(
+		integration: IntegrationRecord | null,
+		preview: IikoExternalMenuPreview
+	): Promise<IikoImportPreviewDto> {
+		let links: IntegrationProductPreviewRecord[] = []
+		if (
+			integration &&
+			typeof this.repo.findProductPreviewLinksByIntegration === 'function'
+		) {
+			links = await this.repo.findProductPreviewLinksByIntegration(integration.id)
+		}
+		const linksByExternalId = new Map(
+			links.map(link => [link.externalId, link] as const)
+		)
+		const previewExternalIds = new Set<string>()
+		let newItems = 0
+		let matchedItems = 0
+		let changedItems = 0
+		let priceChanges = 0
+		let nameChanges = 0
+		let unchangedItems = 0
+
+		const items = preview.items.map(item => {
+			previewExternalIds.add(item.id)
+			if (!item.willImport) {
+				return {
+					...item,
+					diffStatus: 'skipped',
+					localProductId: null,
+					localName: null,
+					localPrice: null
+				}
+			}
+
+			const link = linksByExternalId.get(item.id)
+			if (!link || link.product.deleteAt) {
+				newItems += 1
+				return {
+					...item,
+					diffStatus: 'new',
+					localProductId: link?.productId ?? null,
+					localName: null,
+					localPrice: null
+				}
+			}
+
+			matchedItems += 1
+			const localPrice = this.numberOrNull(link.product.price)
+			const priceChanged = !this.sameMoney(localPrice, item.price)
+			const nameChanged = link.product.name.trim() !== item.name.trim()
+			if (priceChanged) priceChanges += 1
+			if (nameChanged) nameChanges += 1
+
+			const diffStatus =
+				priceChanged && nameChanged
+					? 'changed'
+					: priceChanged
+						? 'price_changed'
+						: nameChanged
+							? 'name_changed'
+							: 'unchanged'
+
+			if (diffStatus === 'unchanged') {
+				unchangedItems += 1
+			} else {
+				changedItems += 1
+			}
+
+			return {
+				...item,
+				diffStatus,
+				localProductId: link.productId,
+				localName: link.product.name,
+				localPrice
+			}
+		})
+		const missingLinkedItems = links.filter(
+			link => !previewExternalIds.has(link.externalId)
+		).length
+
+		return {
+			...preview,
+			diff: {
+				newItems,
+				matchedItems,
+				changedItems,
+				priceChanges,
+				nameChanges,
+				unchangedItems,
+				missingLinkedItems
+			},
+			items
+		}
+	}
+
+	private numberOrNull(value: unknown): number | null {
+		if (value === null || value === undefined) return null
+		const numberValue = Number(value)
+		return Number.isFinite(numberValue) ? numberValue : null
+	}
+
+	private sameMoney(left: number | null, right: number | null): boolean {
+		if (left === null || right === null) return left === right
+		return Math.round(left * 100) === Math.round(right * 100)
+	}
+
+	private mapIikoWebhookStatus(webhook?: IikoWebhookMetadata | null) {
+		const safeWebhook = webhook ?? {
+			enabled: false,
+			urlPreview: null,
+			secretHash: null,
+			lastConfiguredAt: null,
+			lastReceivedAt: null,
+			lastEventType: null,
+			lastError: null
+		}
+		return {
+			enabled: safeWebhook.enabled,
+			urlPreview: safeWebhook.urlPreview,
+			hasSecret: Boolean(safeWebhook.secretHash),
+			lastConfiguredAt: safeWebhook.lastConfiguredAt,
+			lastReceivedAt: safeWebhook.lastReceivedAt,
+			lastEventType: safeWebhook.lastEventType,
+			lastError: safeWebhook.lastError
+				? renderSafeProviderErrorMessage(safeWebhook.lastError)
+				: null
+		}
+	}
+
+	private mapIikoWebhookEvent(
+		event: IntegrationWebhookEventRecord
+	): IikoWebhookEventDto {
+		const payload = this.asRecord(event.payload)
+		const eventInfo = this.asRecord(payload?.eventInfo)
+		const order = this.asRecord(eventInfo?.order)
+
+		return {
+			id: event.id,
+			provider: event.provider,
+			requestId: event.requestId,
+			eventType:
+				this.readString(payload?.eventType) ??
+				this.readString(event.reportUrl) ??
+				'iiko',
+			status: event.status,
+			jobId: event.jobId,
+			error: event.error ? renderSafeProviderErrorMessage(event.error) : null,
+			details: this.compactWebhookDetails({
+				organizationId:
+					this.readString(payload?.organizationId) ??
+					this.readString(eventInfo?.organizationId),
+				correlationId: this.readString(payload?.correlationId),
+				eventTime: this.readString(payload?.eventTime),
+				iikoOrderId: this.readString(eventInfo?.id) ?? this.readString(order?.id),
+				externalNumber:
+					this.readString(eventInfo?.externalNumber) ??
+					this.readString(order?.externalNumber),
+				creationStatus: this.readString(eventInfo?.creationStatus),
+				orderStatus: this.readString(order?.status),
+				errorCode: this.readString(this.asRecord(eventInfo?.errorInfo)?.code)
+			}),
+			receivedAt: event.receivedAt,
+			processedAt: event.processedAt,
+			createdAt: event.createdAt,
+			updatedAt: event.updatedAt
+		}
+	}
+
+	private compactWebhookDetails(
+		details: Record<string, string | null | undefined>
+	): Record<string, string | null> {
+		return Object.fromEntries(
+			Object.entries(details).filter(([, value]) => value !== undefined)
+		) as Record<string, string | null>
+	}
+
+	private asRecord(value: unknown): Record<string, unknown> | null {
+		if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+		return value as Record<string, unknown>
+	}
+
+	private readString(value: unknown): string | null {
+		if (typeof value === 'string') {
+			const trimmed = value.trim()
+			return trimmed || null
+		}
+		if (typeof value === 'number' || typeof value === 'boolean') {
+			return String(value)
+		}
+		return null
+	}
+
 	private mapSyncRun(run: IntegrationSyncRunRecord): MoySkladSyncRunDto {
 		const metadata = this.normalizeSyncRunMetadata(run)
 
@@ -2850,6 +4057,85 @@ export class IntegrationService {
 			createdAt: exportRecord.createdAt,
 			updatedAt: exportRecord.updatedAt
 		}
+	}
+
+	private mapOrderExportTimelineItems(
+		exportRecord: IntegrationOrderExportRecord
+	) {
+		const items = [
+			{
+				id: `${exportRecord.id}:requested`,
+				provider: exportRecord.provider,
+				exportId: exportRecord.id,
+				type: 'queued',
+				status: 'PENDING',
+				title: 'Экспорт поставлен в очередь',
+				detail: `Попыток: ${exportRecord.attempts}`,
+				externalId: exportRecord.externalId,
+				error: null,
+				attempts: exportRecord.attempts,
+				occurredAt: exportRecord.requestedAt
+			}
+		]
+
+		if (exportRecord.startedAt) {
+			items.push({
+				id: `${exportRecord.id}:started`,
+				provider: exportRecord.provider,
+				exportId: exportRecord.id,
+				type: 'started',
+				status: 'RUNNING',
+				title: 'Отправка в iiko началась',
+				detail: null,
+				externalId: exportRecord.externalId,
+				error: null,
+				attempts: exportRecord.attempts,
+				occurredAt: exportRecord.startedAt
+			})
+		}
+
+		if (exportRecord.exportedAt) {
+			items.push({
+				id: `${exportRecord.id}:exported`,
+				provider: exportRecord.provider,
+				exportId: exportRecord.id,
+				type: 'exported',
+				status: 'SUCCESS',
+				title: 'Заказ принят iiko',
+				detail: exportRecord.externalId ? `iiko: ${exportRecord.externalId}` : null,
+				externalId: exportRecord.externalId,
+				error: null,
+				attempts: exportRecord.attempts,
+				occurredAt: exportRecord.exportedAt
+			})
+		}
+
+		if (exportRecord.status === 'ERROR' || exportRecord.status === 'SKIPPED') {
+			items.push({
+				id: `${exportRecord.id}:final`,
+				provider: exportRecord.provider,
+				exportId: exportRecord.id,
+				type: exportRecord.status.toLowerCase(),
+				status: exportRecord.status,
+				title:
+					exportRecord.status === 'ERROR'
+						? 'Экспорт завершился ошибкой'
+						: 'Экспорт пропущен',
+				detail: exportRecord.lastError
+					? renderSafeProviderErrorMessage(exportRecord.lastError)
+					: null,
+				externalId: exportRecord.externalId,
+				error: exportRecord.lastError
+					? renderSafeProviderErrorMessage(exportRecord.lastError)
+					: null,
+				attempts: exportRecord.attempts,
+				occurredAt: exportRecord.updatedAt
+			})
+		}
+
+		return items.sort(
+			(left, right) => right.occurredAt.getTime() - left.occurredAt.getTime()
+		)
 	}
 
 	private mapMoySkladRefOptions(
@@ -3103,6 +4389,28 @@ export class IntegrationService {
 		}
 	}
 
+	private assertHasIikoUpdateFields(dto: UpdateIikoIntegrationDtoReq): void {
+		if (
+			dto.apiLogin === undefined &&
+			dto.organizationId === undefined &&
+			dto.organizationName === undefined &&
+			dto.externalMenuId === undefined &&
+			dto.externalMenuName === undefined &&
+			dto.priceCategoryId === undefined &&
+			dto.priceCategoryName === undefined &&
+			dto.terminalGroupId === undefined &&
+			dto.terminalGroupName === undefined &&
+			dto.menuVersion === undefined &&
+			dto.importImages === undefined &&
+			dto.exportOrders === undefined &&
+			dto.orderExportServiceType === undefined &&
+			dto.orderExportSourceKey === undefined &&
+			dto.isActive === undefined
+		) {
+			throw new BadRequestException('No iiko fields provided for update')
+		}
+	}
+
 	private normalizeRunsLimit(limit?: number | string): number {
 		if (limit === undefined || limit === null) {
 			return 20
@@ -3113,6 +4421,25 @@ export class IntegrationService {
 			throw new BadRequestException('limit должен быть положительным целым числом')
 		}
 		return Math.min(normalizedLimit, 100)
+	}
+
+	private normalizeWebhookEventStatus(
+		status?: string
+	): IntegrationWebhookEventStatus | null {
+		if (!status) return null
+		const normalized = status.trim().toUpperCase()
+		if (!normalized) return null
+		const allowed: IntegrationWebhookEventStatus[] = [
+			'PENDING',
+			'PROCESSING',
+			'PROCESSED',
+			'FAILED',
+			'SKIPPED'
+		]
+		if (!allowed.includes(normalized as IntegrationWebhookEventStatus)) {
+			throw new BadRequestException('Invalid webhook event status')
+		}
+		return normalized as IntegrationWebhookEventStatus
 	}
 
 	private async resolveToken(explicitToken?: string): Promise<string> {
@@ -3184,6 +4511,44 @@ function readNonEmptyString(value: unknown): string | null {
 	if (typeof value !== 'string') return null
 	const normalized = value.trim()
 	return normalized || null
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+	return readNonEmptyString(value)
+}
+
+function normalizeNullableNumber(value: unknown): number | null {
+	const number =
+		typeof value === 'number'
+			? value
+			: typeof value === 'string'
+				? Number(value.trim())
+				: Number.NaN
+	return Number.isFinite(number) ? number : null
+}
+
+function resolveIikoTableDisplayNumber(
+	tableName: string | null,
+	iikoNumber: number | null
+): string | null {
+	if (iikoNumber !== null) return String(iikoNumber)
+
+	const nameNumber = tableName?.match(/\d+/)?.[0]?.trim()
+	if (nameNumber) return nameNumber
+	return null
+}
+
+function generateIntegrationExternalItemCode(): string {
+	return randomBytes(6).toString('base64url')
+}
+
+function isPrismaUniqueConstraintError(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		'code' in error &&
+		(error as { code?: unknown }).code === 'P2002'
+	)
 }
 
 function readStockApplySource(value: unknown): 'FULL_SYNC' | 'WEBHOOK' | null {

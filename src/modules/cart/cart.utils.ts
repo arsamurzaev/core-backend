@@ -356,7 +356,7 @@ export function mapCartEntity(
 ) {
 	const canUseProductVariants = options.canUseProductVariants ?? true
 	const canUseCatalogSaleUnits = options.canUseCatalogSaleUnits ?? true
-	const canExposeSaleUnits = canUseProductVariants && canUseCatalogSaleUnits
+	const canExposeSaleUnits = canUseCatalogSaleUnits
 	const cartItems = mergeDuplicateCartItems(cart.items, {
 		canExposeSaleUnits,
 		canUseProductVariants

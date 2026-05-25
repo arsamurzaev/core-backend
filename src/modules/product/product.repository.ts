@@ -9,7 +9,6 @@ import {
 } from '@generated/enums'
 import { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import { BadRequestException, Injectable } from '@nestjs/common'
-import slugify from 'slugify'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { buildMediaSelect } from '@/shared/media/media-select'
@@ -688,6 +687,16 @@ function escapeLikePattern(value: string): string {
 export class ProductRepository {
 	constructor(private readonly prisma: PrismaService) {}
 
+	async hasCatalogIntegrations(catalogId: string): Promise<boolean> {
+		const count = await this.prisma.integration.count({
+			where: {
+				catalogId,
+				deleteAt: null
+			}
+		})
+		return count > 0
+	}
+
 	findAll(
 		catalogId: string,
 		includeInactive = false
@@ -846,11 +855,27 @@ export class ProductRepository {
 					WHEN COUNT(*) = 1 THEN (ARRAY_AGG(id::text ORDER BY id::text))[1]
 					ELSE NULL
 				END as "singleVariantId"
-			FROM product_variants
-			WHERE delete_at IS NULL
-				AND status::text <> ${ProductVariantStatus.DISABLED}
-				AND NOT (kind::text = ${ProductVariantKind.DEFAULT} OR variant_key = ${DEFAULT_VARIANT_KEY})
-				AND product_id IN (${PrismaSql.join(ids.map(id => PrismaSql.sql`${id}::uuid`))})
+			FROM (
+				SELECT
+					pv.product_id,
+					pv.id,
+					pv.stock,
+					COALESCE(default_sale_unit.price, pv.price) AS price
+				FROM product_variants pv
+				LEFT JOIN LATERAL (
+					SELECT pvsu.price
+					FROM product_variant_sale_units pvsu
+					WHERE pvsu.variant_id = pv.id
+						AND pvsu.delete_at IS NULL
+						AND pvsu.is_active = TRUE
+					ORDER BY pvsu.is_default DESC, pvsu.display_order ASC, pvsu.created_at ASC
+					LIMIT 1
+				) default_sale_unit ON TRUE
+				WHERE pv.delete_at IS NULL
+					AND pv.status::text <> ${ProductVariantStatus.DISABLED}
+					AND NOT (pv.kind::text = ${ProductVariantKind.DEFAULT} OR pv.variant_key = ${DEFAULT_VARIANT_KEY})
+					AND pv.product_id IN (${PrismaSql.join(ids.map(id => PrismaSql.sql`${id}::uuid`))})
+			) variant_price
 			GROUP BY product_id
 		`)
 
@@ -953,41 +978,16 @@ export class ProductRepository {
 			where: {
 				catalogId,
 				deleteAt: null,
-				AND: [
-					{
-						variants: {
-							none: {
-								deleteAt: null,
-								OR: [
-									{
-										status: ProductVariantStatus.ACTIVE,
-										isAvailable: true
-									},
-									{
-										OR: [
-											{ kind: ProductVariantKind.DEFAULT },
-											{ variantKey: DEFAULT_VARIANT_KEY }
-										],
-										status: { not: ProductVariantStatus.DISABLED }
-									}
-								]
-							}
-						}
-					},
-					{
-						variants: {
-							none: {
-								deleteAt: null,
-								NOT: {
-									OR: [
-										{ kind: ProductVariantKind.DEFAULT },
-										{ variantKey: DEFAULT_VARIANT_KEY }
-									]
-								}
-							}
-						}
+				variants: {
+					none: {
+						deleteAt: null,
+						OR: [
+							{ kind: ProductVariantKind.DEFAULT },
+							{ variantKey: DEFAULT_VARIANT_KEY }
+						],
+						status: { not: ProductVariantStatus.DISABLED }
 					}
-				]
+				}
 			},
 			select: {
 				id: true,
@@ -1319,8 +1319,12 @@ export class ProductRepository {
 		)
 	}
 
-	findSkuById(id: string, catalogId: string) {
-		return this.prisma.product.findFirst({
+	findSkuById(
+		id: string,
+		catalogId: string,
+		db: ProductReadExecutor = this.prisma
+	) {
+		return db.product.findFirst({
 			where: { id, catalogId, deleteAt: null },
 			select: {
 				id: true,
@@ -1350,6 +1354,32 @@ export class ProductRepository {
 			where: { id, catalogId, deleteAt: null },
 			select: productTypeCompatibilityPreviewSelect
 		})
+	}
+
+	async hasIntegrationProductOwnership(
+		id: string,
+		catalogId: string
+	): Promise<boolean> {
+		const product = await this.prisma.product.findFirst({
+			where: {
+				id,
+				catalogId,
+				deleteAt: null,
+				OR: [
+					{ integrationLinks: { some: {} } },
+					{
+						variants: {
+							some: {
+								deleteAt: null,
+								integrationLinks: { some: {} }
+							}
+						}
+					}
+				]
+			},
+			select: productIdSelect
+		})
+		return Boolean(product)
 	}
 
 	findBrandById(id: string, catalogId: string) {
@@ -1729,22 +1759,22 @@ export class ProductRepository {
 	async ensureDefaultVariant(
 		id: string,
 		catalogId: string,
-		variant: ProductVariantData
+		variant: ProductVariantData,
+		tx?: Prisma.TransactionClient
 	): Promise<boolean | null> {
-		return this.prisma.$transaction(async tx => {
-			const existing = await this.findActiveProductRef(tx, id, catalogId)
+		const ensure = async (db: Prisma.TransactionClient) => {
+			const existing = await this.findActiveProductRef(db, id, catalogId)
 			if (!existing) return null
 
-			const validVariant = await this.findActiveOrDefaultProductVariant(tx, id)
-			if (validVariant) return false
+			const technicalDefault = await this.findUsableTechnicalDefaultVariant(db, id)
+			if (technicalDefault) return false
 
-			const customVariant = await this.findCustomProductVariant(tx, id)
-			if (customVariant) return false
-
-			await this.restoreOrCreateDefaultVariant(tx, catalogId, id, variant)
-			await this.assertProductVariantStructuralInvariants(tx, id)
+			await this.restoreOrCreateDefaultVariant(db, catalogId, id, variant)
+			await this.assertProductVariantStructuralInvariants(db, id)
 			return true
-		})
+		}
+
+		return tx ? ensure(tx) : this.prisma.$transaction(ensure)
 	}
 
 	async softDelete(id: string, catalogId: string) {
@@ -2244,11 +2274,29 @@ export class ProductRepository {
 		})
 	}
 
-	private findCustomProductVariant(
+	private findUsableTechnicalDefaultVariant(
 		db: ProductVariantInvariantExecutor,
 		productId: string
 	): Promise<{ id: string } | null> {
 		return db.productVariant.findFirst({
+			where: {
+				productId,
+				deleteAt: null,
+				OR: [
+					{ kind: ProductVariantKind.DEFAULT },
+					{ variantKey: DEFAULT_VARIANT_KEY }
+				],
+				status: { not: ProductVariantStatus.DISABLED }
+			},
+			select: { id: true }
+		})
+	}
+
+	private findLegacyUnattributedVariant(
+		tx: Prisma.TransactionClient,
+		productId: string
+	): Promise<{ id: string } | null> {
+		return tx.productVariant.findFirst({
 			where: {
 				productId,
 				deleteAt: null,
@@ -2257,8 +2305,10 @@ export class ProductRepository {
 						{ kind: ProductVariantKind.DEFAULT },
 						{ variantKey: DEFAULT_VARIANT_KEY }
 					]
-				}
+				},
+				attributes: { none: { deleteAt: null } }
 			},
+			orderBy: { createdAt: 'asc' },
 			select: { id: true }
 		})
 	}
@@ -2284,6 +2334,29 @@ export class ProductRepository {
 		})
 
 		if (!existingDefault) {
+			const legacyDefault = await this.findLegacyUnattributedVariant(tx, productId)
+			if (legacyDefault) {
+				await tx.productVariant.update({
+					where: { id: legacyDefault.id },
+					data: {
+						variantKey: DEFAULT_VARIANT_KEY,
+						kind: ProductVariantKind.DEFAULT,
+						stock: variant.stock,
+						price: variant.price,
+						status: variant.status,
+						isAvailable: variant.status === ProductVariantStatus.ACTIVE,
+						deleteAt: null
+					}
+				})
+				await this.syncVariantSaleUnits(
+					tx,
+					catalogId,
+					legacyDefault.id,
+					variant.saleUnits
+				)
+				return
+			}
+
 			await this.createVariant(tx, catalogId, productId, variant, [])
 			return
 		}
@@ -2293,6 +2366,7 @@ export class ProductRepository {
 			where: { id: existingDefault.id },
 			data: {
 				kind: ProductVariantKind.DEFAULT,
+				variantKey: DEFAULT_VARIANT_KEY,
 				stock: variant.stock,
 				price: variant.price,
 				status: variant.status,
@@ -3197,12 +3271,21 @@ export class ProductRepository {
 				EXISTS (
 					SELECT 1
 					FROM (
-						SELECT pv.price
+						SELECT COALESCE(default_sale_unit.price, pv.price) AS price
 						FROM product_variants pv
+						LEFT JOIN LATERAL (
+							SELECT pvsu.price
+							FROM product_variant_sale_units pvsu
+							WHERE pvsu.variant_id = pv.id
+								AND pvsu.delete_at IS NULL
+								AND pvsu.is_active = TRUE
+							ORDER BY pvsu.is_default DESC, pvsu.display_order ASC, pvsu.created_at ASC
+							LIMIT 1
+						) default_sale_unit ON TRUE
 						WHERE pv.product_id = p.id
 							AND pv.delete_at IS NULL
 							AND pv.status::text <> ${ProductVariantStatus.DISABLED}
-							AND pv.price IS NOT NULL
+							AND COALESCE(default_sale_unit.price, pv.price) IS NOT NULL
 							AND (
 								(
 									EXISTS (
@@ -3250,10 +3333,19 @@ export class ProductRepository {
 							AND NOT EXISTS (
 								SELECT 1
 								FROM product_variants fallback_pv
+								LEFT JOIN LATERAL (
+									SELECT pvsu.price
+									FROM product_variant_sale_units pvsu
+									WHERE pvsu.variant_id = fallback_pv.id
+										AND pvsu.delete_at IS NULL
+										AND pvsu.is_active = TRUE
+									ORDER BY pvsu.is_default DESC, pvsu.display_order ASC, pvsu.created_at ASC
+									LIMIT 1
+								) fallback_sale_unit ON TRUE
 								WHERE fallback_pv.product_id = p.id
 									AND fallback_pv.delete_at IS NULL
 									AND fallback_pv.status::text <> ${ProductVariantStatus.DISABLED}
-									AND fallback_pv.price IS NOT NULL
+									AND COALESCE(fallback_sale_unit.price, fallback_pv.price) IS NOT NULL
 							)
 					) commercial_price
 					WHERE ${PrismaSql.join(priceClauses, ' AND ')}
@@ -3850,9 +3942,7 @@ export class ProductRepository {
 				unit,
 				index
 			)
-			const baseQuantity = Number(
-				unit.baseQuantity ?? catalogSaleUnit.defaultBaseQuantity
-			)
+			const baseQuantity = Number(unit.baseQuantity)
 			const price = Number(unit.price)
 			const barcode =
 				unit.barcode === undefined
@@ -3941,69 +4031,9 @@ export class ProductRepository {
 			return found
 		}
 
-		const name = String(unit.name ?? '').trim()
-		if (!name) {
-			throw new BadRequestException(
-				'Выберите единицу продажи из справочника каталога или укажите название'
-			)
-		}
-
-		const code = this.normalizeSaleUnitCode(unit.code, name, index, new Set())
-		const existing = await tx.catalogSaleUnit.findUnique({
-			where: { catalogId_code: { catalogId, code } },
-			select: {
-				id: true,
-				code: true,
-				name: true,
-				defaultBaseQuantity: true,
-				barcode: true,
-				deleteAt: true
-			}
-		})
-
-		if (existing) {
-			if (existing.deleteAt) {
-				await tx.catalogSaleUnit.update({
-					where: { id: existing.id },
-					data: { deleteAt: null, isActive: true, name }
-				})
-			}
-			return {
-				id: existing.id,
-				code: existing.code,
-				name: existing.deleteAt ? name : existing.name,
-				defaultBaseQuantity: existing.defaultBaseQuantity,
-				barcode: existing.barcode
-			}
-		}
-
-		return tx.catalogSaleUnit.create({
-			data: {
-				catalogId,
-				code,
-				name,
-				defaultBaseQuantity: this.resolveCatalogSaleUnitDefaultQuantity(unit),
-				barcode:
-					unit.barcode === undefined || unit.barcode === null
-						? null
-						: String(unit.barcode).trim() || null,
-				displayOrder: index
-			},
-			select: {
-				id: true,
-				code: true,
-				name: true,
-				defaultBaseQuantity: true,
-				barcode: true
-			}
-		})
-	}
-
-	private resolveCatalogSaleUnitDefaultQuantity(
-		unit: ProductVariantSaleUnitInput
-	): number {
-		const quantity = Number(unit.baseQuantity ?? 1)
-		return Number.isFinite(quantity) && quantity > 0 ? quantity : 1
+		throw new BadRequestException(
+			`Для единицы продажи #${index + 1} нужен catalogSaleUnitId из справочника текущего каталога`
+		)
 	}
 
 	private async buildDefaultVariantDiagnosticCheck(
@@ -4317,31 +4347,6 @@ export class ProductRepository {
 
 	private readDiagnosticCount(rows: Array<{ count?: number | string }>): number {
 		return Number(rows[0]?.count ?? 0)
-	}
-
-	private normalizeSaleUnitCode(
-		code: string | undefined,
-		name: string,
-		index: number,
-		seenCodes: Set<string>
-	): string {
-		const rawCode = code?.trim()
-		const rawName = name.trim()
-		const base =
-			(rawCode
-				? slugify(rawCode, { lower: true, strict: true, trim: true })
-				: slugify(rawName, { lower: true, strict: true, trim: true })) ||
-			`unit-${index + 1}`
-
-		let candidate = base.slice(0, 100)
-		let suffix = 2
-		while (seenCodes.has(candidate)) {
-			const suffixText = `-${suffix}`
-			candidate = `${base.slice(0, 100 - suffixText.length)}${suffixText}`
-			suffix += 1
-		}
-		seenCodes.add(candidate)
-		return candidate
 	}
 
 	private async createVariant(

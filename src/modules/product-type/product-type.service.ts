@@ -205,6 +205,13 @@ export class ProductTypeService {
 				: undefined
 
 		this.assertHasProductTypeUpdate(data, attributes)
+		if (attributes !== undefined) {
+			await this.assertImportedAttributeSchemaEditable(
+				current.attributes,
+				attributes,
+				catalogId
+			)
+		}
 		if (
 			attributes !== undefined &&
 			this.isProductTypeSchemaShapeChanged(current.attributes, attributes)
@@ -383,6 +390,71 @@ export class ProductTypeService {
 	): void {
 		if (attributes !== undefined) return
 		assertHasUpdateFields(data)
+	}
+
+	private async assertImportedAttributeSchemaEditable(
+		currentAttributes: ProductTypeRecord['attributes'],
+		nextAttributes: NormalizedProductTypeAttribute[],
+		catalogId: string
+	): Promise<void> {
+		const attributeIds = Array.from(
+			new Set([
+				...currentAttributes.map(attribute => attribute.attributeId),
+				...nextAttributes.map(attribute => attribute.attributeId)
+			])
+		)
+		const importedAttributeIds = new Set(
+			await this.repo.findImportedEnumAttributeIds(catalogId, attributeIds)
+		)
+		if (!importedAttributeIds.size) return
+
+		const currentById = this.buildProductTypeAttributeMap(
+			currentAttributes.map(attribute => ({
+				attributeId: attribute.attributeId,
+				isVariant: attribute.isVariant,
+				isRequired: attribute.isRequired,
+				displayOrder: attribute.displayOrder
+			}))
+		)
+		const nextById = this.buildProductTypeAttributeMap(nextAttributes)
+
+		const changedAttributeIds = Array.from(importedAttributeIds).filter(
+			attributeId => {
+				const current = currentById.get(attributeId)
+				const next = nextById.get(attributeId)
+				if (!current || !next) return true
+				return (
+					Boolean(current.isVariant) !== Boolean(next.isVariant) ||
+					Boolean(current.isRequired) !== Boolean(next.isRequired)
+				)
+			}
+		)
+		if (!changedAttributeIds.length) return
+
+		throw new BadRequestException({
+			message:
+				'Imported integration variation attributes cannot be changed; only display order is allowed',
+			attributeIds: changedAttributeIds
+		})
+	}
+
+	private buildProductTypeAttributeMap(
+		attributes: Pick<
+			NormalizedProductTypeAttribute,
+			'attributeId' | 'isRequired' | 'isVariant' | 'displayOrder'
+		>[]
+	): Map<string, NormalizedProductTypeAttribute> {
+		return new Map(
+			attributes.map(attribute => [
+				attribute.attributeId,
+				{
+					attributeId: attribute.attributeId,
+					isVariant: Boolean(attribute.isVariant),
+					isRequired: Boolean(attribute.isRequired),
+					displayOrder: attribute.displayOrder ?? 0
+				}
+			])
+		)
 	}
 
 	private async assertCatalogTypeSchemaCanChange(

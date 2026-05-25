@@ -146,6 +146,94 @@ describe('CartOrderSnapshotService', () => {
 		)
 	})
 
+	it('keeps sale unit snapshot when product variants are disabled but sale units are enabled', async () => {
+		sellableReader.resolveVariantSellable.mockResolvedValue({
+			catalogId: 'catalog-1',
+			productId: 'product-1',
+			mode: 'SIMPLE',
+			variantId: 'default-variant',
+			defaultVariantId: 'default-variant',
+			requiresVariantSelection: false,
+			priceState: 'KNOWN',
+			displayPrice: '500.00',
+			minPrice: '500.00',
+			maxPrice: '500.00',
+			availabilityState: 'AVAILABLE',
+			stock: 30
+		})
+
+		const [item] = await service.buildSnapshotItems(
+			tx as never,
+			'catalog-1',
+			[
+				{
+					id: 'cart-item-1',
+					productId: 'product-1',
+					variantId: 'default-variant',
+					saleUnitId: 'sale-unit-box',
+					quantity: 2,
+					baseQuantity: 24,
+					unitPriceSnapshot: 1000,
+					product: {
+						id: 'product-1',
+						catalogId: 'catalog-1',
+						name: 'Product',
+						slug: 'product',
+						price: 500,
+						productAttributes: []
+					},
+					variant: {
+						id: 'default-variant',
+						sku: 'SKU-1',
+						variantKey: 'default',
+						price: 500,
+						stock: 30,
+						status: 'ACTIVE',
+						isAvailable: true,
+						attributes: []
+					},
+					saleUnit: {
+						id: 'sale-unit-box',
+						variantId: 'default-variant',
+						code: 'box',
+						name: 'Box',
+						baseQuantity: 12,
+						price: 1000,
+						isDefault: true,
+						isActive: true,
+						displayOrder: 0
+					}
+				}
+			],
+			{ canUseProductVariants: false, canUseCatalogSaleUnits: true }
+		)
+
+		expect(item).toEqual(
+			expect.objectContaining({
+				variantId: 'default-variant',
+				variantHidden: true,
+				variant: null,
+				saleUnitId: 'sale-unit-box',
+				saleUnitHidden: false,
+				saleUnit: expect.objectContaining({
+					name: 'Box',
+					baseQuantity: 12,
+					price: 1000
+				}),
+				baseQuantity: 24,
+				displayPrice: '1000.00',
+				unitPrice: 1000,
+				lineTotal: 2000
+			})
+		)
+		expect(sellableReader.resolveVariantSellable).toHaveBeenCalledWith(
+			'catalog-1',
+			'product-1',
+			'default-variant',
+			{ quantity: 24, enforceStock: false }
+		)
+	})
+
 	it('ignores hidden sale unit pricing and quantity when sale units are disabled', async () => {
 		sellableReader.resolveVariantSellable.mockResolvedValue({
 			catalogId: 'catalog-1',

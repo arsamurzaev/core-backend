@@ -116,7 +116,7 @@ export class CartOrderSnapshotService {
 	) {
 		const canUseProductVariants = options.canUseProductVariants ?? true
 		const canUseCatalogSaleUnits = options.canUseCatalogSaleUnits ?? true
-		const canExposeSaleUnits = canUseProductVariants && canUseCatalogSaleUnits
+		const canExposeSaleUnits = canUseCatalogSaleUnits
 		const snapshotSources = await Promise.all(
 			items.map(async item => {
 				const commercialProjection = await this.resolveCommercialProjection(
@@ -319,18 +319,11 @@ export class CartOrderSnapshotService {
 		options: CartOrderSnapshotOptions
 	): Promise<ProductSellableProjection> {
 		const productCatalogId = item.product.catalogId ?? catalogId
-		const canUseProductVariants = options.canUseProductVariants ?? true
 		const canUseCatalogSaleUnits = options.canUseCatalogSaleUnits ?? true
 		const quantity = resolveCartItemBaseQuantity({
 			quantity: item.quantity,
-			baseQuantity:
-				canUseProductVariants && canUseCatalogSaleUnits
-					? item.baseQuantity
-					: null,
-			saleUnit:
-				canUseProductVariants && canUseCatalogSaleUnits
-					? (item.saleUnit ?? null)
-					: null
+			baseQuantity: canUseCatalogSaleUnits ? item.baseQuantity : null,
+			saleUnit: canUseCatalogSaleUnits ? (item.saleUnit ?? null) : null
 		})
 		const resolveOptions = {
 			quantity,

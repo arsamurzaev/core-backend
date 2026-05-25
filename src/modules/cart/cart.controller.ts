@@ -51,6 +51,7 @@ import {
 import {
 	CartResponseDto,
 	CompleteCartOrderResponseDto,
+	HallTableLinkResponseDto,
 	ShareCartResponseDto
 } from './dto/responses/cart.dto.res'
 
@@ -161,6 +162,44 @@ export class CartController {
 			publicKey: result.cart.publicKey,
 			cart: result.cart
 		}
+	}
+
+	@Post('current/hall-order')
+	@ApiOperation({ summary: 'Submit the current cart as a hall table order' })
+	@ApiBody({ type: ShareCurrentCartDtoReq, required: false })
+	@ApiOkResponse({ type: CompleteCartOrderResponseDto })
+	async submitCurrentHallOrder(
+		@Req() req: Request,
+		@Res({ passthrough: true }) res: Response,
+		@Body() dto: ShareCurrentCartDtoReq = {}
+	) {
+		const token = this.readTokenFromRequest(req)
+		const catalogId = mustCatalogId()
+		const result = await this.cartService.submitCurrentHallOrder(
+			catalogId,
+			token,
+			{
+				checkoutData: dto.checkoutData,
+				checkoutMethod: dto.checkoutMethod,
+				comment: dto.comment
+			}
+		)
+		this.setTokenCookie(req, res, result.token)
+		return { ok: true, order: result.order }
+	}
+
+	@Get('hall-table/:code')
+	@ApiOperation({ summary: 'Resolve a short hall table code for display' })
+	@ApiParam({
+		name: 'code',
+		description: 'Short backend-stored hall table code',
+		example: 'Ab7Kp92x'
+	})
+	@ApiOkResponse({ type: HallTableLinkResponseDto })
+	async getHallTableLink(@Param('code') code: string) {
+		const catalogId = mustCatalogId()
+		const table = await this.cartService.getHallTableLink(catalogId, code)
+		return { ok: true, table }
 	}
 
 	@Put('current/items')

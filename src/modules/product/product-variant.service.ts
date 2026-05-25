@@ -14,12 +14,11 @@ import {
 	CAPABILITY_ASSERT_PORT,
 	type CapabilityAssertPort
 } from '@/modules/capability/contracts'
-import { normalizeRequiredString } from '@/shared/utils'
-
 import {
 	assertProductTypeVariantCombinations,
 	type ProductTypeVariantCombinationInput
 } from '@/modules/product-type/public'
+import { normalizeRequiredString } from '@/shared/utils'
 
 import { ProductVariantUpdateDtoReq } from './dto/requests/product-variant-update.dto.req'
 import { ProductVariantDtoReq } from './dto/requests/product-variant.dto.req'
@@ -249,9 +248,8 @@ export class ProductVariantService {
 		}
 
 		const sourceDefaultVariant =
-			source.variants.find(
-				variant => isDefaultVariant(variant)
-			) ?? source.variants[0]
+			source.variants.find(variant => isDefaultVariant(variant)) ??
+			source.variants[0]
 
 		return [
 			await this.buildDefaultVariantData(
@@ -274,6 +272,8 @@ export class ProductVariantService {
 	): Promise<ProductVariantReplacementResult> {
 		const product = await this.repo.findSkuById(id, catalogId)
 		if (!product) throw new NotFoundException('Товар не найден')
+
+		await this.assertIntegratedProductVariantsEditable(id, catalogId)
 
 		const productPrice =
 			product.price === null
@@ -335,6 +335,21 @@ export class ProductVariantService {
 			hasCustomVariantValues,
 			product: updated
 		}
+	}
+
+	private async assertIntegratedProductVariantsEditable(
+		id: string,
+		catalogId: string
+	): Promise<void> {
+		const isIntegrated = await this.repo.hasIntegrationProductOwnership(
+			id,
+			catalogId
+		)
+		if (!isIntegrated) return
+
+		throw new BadRequestException(
+			'Integrated product variants are managed by integration; variants cannot be changed manually'
+		)
 	}
 
 	private buildValidationScope(
@@ -450,9 +465,7 @@ export class ProductVariantService {
 		if (price === null || price === undefined) return null
 		const value = Number(price)
 		if (!Number.isFinite(value) || value < 0) {
-			throw new BadRequestException(
-				'Некорректная цена варианта'
-			)
+			throw new BadRequestException('Некорректная цена варианта')
 		}
 		return value
 	}

@@ -77,6 +77,63 @@ function toDecimalString(value: unknown): string | null {
 	return null
 }
 
+function toNumberValue(value: unknown): number | null {
+	if (value === null || value === undefined) return null
+	if (typeof value === 'number') {
+		return Number.isFinite(value) ? value : null
+	}
+
+	const parsed = Number(toSafeString(value))
+	return Number.isFinite(parsed) ? parsed : null
+}
+
+type SaleUnitPickerSource = {
+	id: string
+	price: unknown
+	baseQuantity: unknown
+	isDefault?: boolean | null
+	displayOrder?: number | null
+}
+
+function resolveDefaultSaleUnit(
+	variant: { saleUnits?: SaleUnitPickerSource[] | null } | null | undefined
+): SaleUnitPickerSource | null {
+	const saleUnits = Array.isArray(variant?.saleUnits)
+		? variant.saleUnits.filter(
+				(unit): unit is SaleUnitPickerSource =>
+					Boolean(unit) && typeof unit.id === 'string'
+			)
+		: []
+	if (!saleUnits.length) return null
+
+	return (
+		saleUnits
+			.slice()
+			.sort(
+				(left, right) =>
+					Number(Boolean(right.isDefault)) - Number(Boolean(left.isDefault)) ||
+					Number(left.displayOrder ?? 0) - Number(right.displayOrder ?? 0)
+			)[0] ?? null
+	)
+}
+
+function resolveVariantDisplayPrice(variant: ProductVariantPickerSource): unknown {
+	return resolveDefaultSaleUnit(variant)?.price ?? variant.price
+}
+
+function resolveVariantMaxQuantity(
+	variant: ProductVariantPickerSource,
+	saleUnit: SaleUnitPickerSource | null
+): number | null {
+	if (variant.stock === null) return null
+
+	const stock = Math.max(0, variant.stock)
+	const baseQuantity = toNumberValue(saleUnit?.baseQuantity)
+	if (baseQuantity === null || baseQuantity <= 0) return stock
+
+	return Math.floor(stock / baseQuantity)
+}
+
 export function shouldBuildVariantPickerOptions(
 	summary: ProductVariantSummary
 ): boolean {
@@ -136,16 +193,19 @@ export function compareVariantPickerOptions(
 export function mapVariantPickerOption(
 	variant: ProductVariantPickerSource
 ): ProductVariantPickerOption {
+	const defaultSaleUnit = resolveDefaultSaleUnit(variant)
+	const displayPrice = resolveVariantDisplayPrice(variant)
+
 	return {
 		id: variant.id,
 		label: buildVariantPickerLabel(variant),
-		price: toDecimalString(variant.price),
+		price: toDecimalString(displayPrice),
 		stock: variant.stock,
 		status: variant.status,
 		isAvailable: variant.isAvailable,
-		saleUnitId: null,
-		saleUnitPrice: null,
-		maxQuantity: variant.stock === null ? null : Math.max(0, variant.stock)
+		saleUnitId: defaultSaleUnit?.id ?? null,
+		saleUnitPrice: toDecimalString(defaultSaleUnit?.price),
+		maxQuantity: resolveVariantMaxQuantity(variant, defaultSaleUnit)
 	}
 }
 

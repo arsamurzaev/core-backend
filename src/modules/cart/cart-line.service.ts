@@ -13,7 +13,9 @@ import {
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
 import {
+	PRODUCT_MAINTENANCE_PORT,
 	PRODUCT_SELLABLE_READER_PORT,
+	type ProductMaintenancePort,
 	type ProductSellableProjection,
 	type ProductSellableReader
 } from '@/modules/product/contracts'
@@ -143,6 +145,8 @@ export class CartLineService {
 		private readonly variantSelection: CartVariantSelectionService,
 		@Inject(CAPABILITY_READER_PORT)
 		private readonly capabilities: CapabilityReaderPort,
+		@Inject(PRODUCT_MAINTENANCE_PORT)
+		private readonly productMaintenance: ProductMaintenancePort,
 		@Inject(PRODUCT_SELLABLE_READER_PORT)
 		private readonly sellableReader: ProductSellableReader
 	) {}
@@ -261,13 +265,19 @@ export class CartLineService {
 			cart,
 			input.productId
 		)
+		if (input.quantity > 0) {
+			await this.productMaintenance.repairMissingDefaultVariantForProduct(
+				productSnapshot.catalogId ?? cart.catalogId,
+				input.productId,
+				{ tx }
+			)
+		}
 		const usesReservationFlow = this.inventoryReservation.shouldReserveCartStock(
 			cart.status,
 			cart.inventoryMode
 		)
 		const features = await this.capabilities.getCurrentFeatures(cart.catalogId)
-		const canExposeSaleUnits =
-			features.canUseProductVariants && features.canUseCatalogSaleUnits
+		const canExposeSaleUnits = features.canUseCatalogSaleUnits
 		const featureAwareInput = canExposeSaleUnits
 			? input
 			: { ...input, saleUnitId: null }
@@ -285,7 +295,8 @@ export class CartLineService {
 		const saleUnit = await this.linePricing.resolveSaleUnit(
 			tx,
 			variantId,
-			variantId && canExposeSaleUnits ? featureAwareInput.saleUnitId : null
+			variantId && canExposeSaleUnits ? featureAwareInput.saleUnitId : null,
+			{ useDefaultWhenMissing: Boolean(variantId && canExposeSaleUnits) }
 		)
 		const commercialQuantity = resolveCartItemBaseQuantity({
 			quantity: input.quantity,

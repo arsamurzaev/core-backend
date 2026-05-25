@@ -73,11 +73,21 @@ export class ProductTypeChangeService {
 			id,
 			catalogId
 		)
-		const requestedProductType =
+		const requestedProductTypeId =
 			dto.productTypeId === null
 				? null
+				: normalizeRequiredString(dto.productTypeId, 'productTypeId')
+		await this.assertIntegratedProductTypeEditable(
+			product,
+			catalogId,
+			requestedProductTypeId,
+			false
+		)
+		const requestedProductType =
+			requestedProductTypeId === null
+				? null
 				: await this.loadActiveProductTypeValidationSchema(
-						normalizeRequiredString(dto.productTypeId, 'productTypeId'),
+						requestedProductTypeId,
 						catalogId
 					)
 
@@ -110,12 +120,22 @@ export class ProductTypeChangeService {
 			catalogId
 		)
 		this.assertExpectedProductType(product, dto.expectedCurrentProductTypeId)
-
-		const requestedProductType =
+		const requestedProductTypeId =
 			dto.productTypeId === null
 				? null
+				: normalizeRequiredString(dto.productTypeId, 'productTypeId')
+		await this.assertIntegratedProductTypeEditable(
+			product,
+			catalogId,
+			requestedProductTypeId,
+			dto.items !== undefined
+		)
+
+		const requestedProductType =
+			requestedProductTypeId === null
+				? null
 				: await this.loadActiveProductTypeValidationSchema(
-						normalizeRequiredString(dto.productTypeId, 'productTypeId'),
+						requestedProductTypeId,
 						catalogId
 					)
 		if (this.variants.hasProductTypeVariantAttributes(requestedProductType)) {
@@ -216,6 +236,27 @@ export class ProductTypeChangeService {
 		)
 		if (!product) throw new NotFoundException('Product not found')
 		return product
+	}
+
+	private async assertIntegratedProductTypeEditable(
+		product: ProductTypeCompatibilityPreviewRef,
+		catalogId: string,
+		requestedProductTypeId: string | null,
+		hasVariantReplacement: boolean
+	): Promise<void> {
+		const hasProductTypeChange =
+			(product.productTypeId ?? null) !== requestedProductTypeId
+		if (!hasProductTypeChange && !hasVariantReplacement) return
+
+		const isIntegrated = await this.repo.hasIntegrationProductOwnership(
+			product.id,
+			catalogId
+		)
+		if (!isIntegrated) return
+
+		throw new BadRequestException(
+			'Integrated product structure is managed by integration; product type and variants cannot be changed manually'
+		)
 	}
 
 	private hasScopedProductData(product: ScopedProductDataRef): boolean {

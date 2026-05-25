@@ -346,6 +346,9 @@ export class ProductDto {
 	@ApiProperty({ type: String, nullable: true })
 	defaultVariantId: string | null
 
+	@ApiProperty({ type: [ProductVariantSaleUnitDto] })
+	saleUnits: ProductVariantSaleUnitDto[]
+
 	@ApiProperty({ type: Boolean })
 	requiresVariantSelection: boolean
 

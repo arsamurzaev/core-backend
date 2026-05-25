@@ -187,6 +187,97 @@ describe('IntegrationRepository', () => {
 		})
 	})
 
+	it('applies iiko stop-list by hiding default-only products from storefront', async () => {
+		const at = new Date('2026-05-21T06:00:00.000Z')
+		const defaultVariant = {
+			id: 'variant-1',
+			productId: 'product-1',
+			sku: 'SKU-1',
+			variantKey: 'default',
+			kind: ProductVariantKind.DEFAULT,
+			stock: null,
+			price: 100,
+			status: ProductVariantStatus.ACTIVE,
+			isAvailable: true,
+			deleteAt: null
+		}
+		const db = {
+			integrationProductLink: {
+				findMany: jest.fn().mockResolvedValue([
+					{
+						id: 'product-link-1',
+						productId: 'product-1',
+						externalId: 'iiko-product-1',
+						product: {
+							id: 'product-1',
+							variants: [defaultVariant]
+						}
+					}
+				]),
+				update: jest.fn()
+			},
+			integrationVariantLink: {
+				findMany: jest.fn().mockResolvedValue([]),
+				update: jest.fn()
+			},
+			productVariant: {
+				update: jest.fn(),
+				count: jest.fn().mockResolvedValue(0)
+			},
+			product: {
+				findFirst: jest.fn().mockResolvedValue({
+					id: 'product-1',
+					status: ProductStatus.ACTIVE
+				}),
+				update: jest.fn()
+			}
+		}
+		const repo = new IntegrationRepository({} as any)
+
+		const result = await repo.applyIikoStopListAvailability(
+			{
+				catalogId: 'catalog-1',
+				integrationId: 'integration-1',
+				syncedAt: at,
+				items: [
+					{
+						productId: 'iiko-product-1',
+						sizeId: null,
+						balance: 0
+					}
+				]
+			},
+			db as any
+		)
+
+		expect(result).toEqual(
+			expect.objectContaining({
+				stoppedVariants: 1,
+				changedVariants: 1,
+				changedProducts: 1
+			})
+		)
+		expect(db.productVariant.update).toHaveBeenCalledWith({
+			where: { id: 'variant-1' },
+			data: {
+				stock: 0,
+				status: ProductVariantStatus.OUT_OF_STOCK,
+				isAvailable: false
+			}
+		})
+		expect(db.product.update).toHaveBeenCalledWith({
+			where: { id: 'product-1' },
+			data: { status: ProductStatus.HIDDEN }
+		})
+		expect(db.integrationProductLink.update).toHaveBeenCalledWith({
+			where: { id: 'product-link-1' },
+			data: expect.objectContaining({
+				lastSeenAt: at,
+				lastStockSyncAt: at
+			})
+		})
+	})
+
 	it('creates and assigns a MoySklad-managed product type for variant attributes', async () => {
 		const db = {
 			product: {

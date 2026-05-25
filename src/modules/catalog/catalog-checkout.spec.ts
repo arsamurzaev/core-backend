@@ -119,11 +119,19 @@ describe('catalog checkout helpers', () => {
 				catalogAddress: 'Main street, 1',
 				config,
 				method: CartCheckoutMethod.DELIVERY,
-				data: { address: 'Client street, 2' }
+				data: {
+					address: 'Client street, 2',
+					customerName: 'Ivan',
+					phone: '+79990000000'
+				}
 			})
 		).toEqual({
 			checkoutMethod: CartCheckoutMethod.DELIVERY,
-			checkoutData: { address: 'Client street, 2' }
+			checkoutData: {
+				address: 'Client street, 2',
+				customerName: 'Ivan',
+				phone: '+79990000000'
+			}
 		})
 	})
 
@@ -137,6 +145,7 @@ describe('catalog checkout helpers', () => {
 			normalizeCartCheckoutData({
 				catalogAddress: 'Main street, 1',
 				config,
+				data: { customerName: 'Ivan', phone: '+79990000000' },
 				mapUrl: 'https://yandex.ru/maps/-/test',
 				method: CartCheckoutMethod.PICKUP
 			})
@@ -144,6 +153,8 @@ describe('catalog checkout helpers', () => {
 			checkoutMethod: CartCheckoutMethod.PICKUP,
 			checkoutData: {
 				address: 'Main street, 1',
+				customerName: 'Ivan',
+				phone: '+79990000000',
 				mapUrl: 'https://yandex.ru/maps/-/test'
 			}
 		})
@@ -167,11 +178,74 @@ describe('catalog checkout helpers', () => {
 			normalizeCartCheckoutData({
 				config,
 				method: CartCheckoutMethod.PREORDER,
-				data: { personsCount: '4', visitTime: '19:30' }
+				data: {
+					customerName: 'Ivan',
+					personsCount: '4',
+					phone: '+79990000000',
+					visitTime: '19:30'
+				}
 			})
 		).toEqual({
 			checkoutMethod: CartCheckoutMethod.PREORDER,
-			checkoutData: { personsCount: 4, visitTime: '19:30' }
+			checkoutData: {
+				customerName: 'Ivan',
+				guestsCount: 4,
+				personsCount: 4,
+				phone: '+79990000000',
+				visitTime: '19:30'
+			}
+		})
+	})
+
+	it('accepts hall checkout with protected integration payload token', () => {
+		const config = resolveCatalogCheckoutConfig({ typeCode: 'restaurant' })
+
+		expect(
+			normalizeCartCheckoutData({
+				config,
+				data: {
+					customerName: 'Ivan',
+					h: 'ip1.test.encrypted',
+					integrationPayloadToken: 'ip1.test.encrypted',
+					orderMode: 'HALL',
+					table: '11',
+					tableName: 'Table 11'
+				}
+			})
+		).toEqual({
+			checkoutMethod: CartCheckoutMethod.PICKUP,
+			checkoutData: {
+				customerName: 'Ivan',
+				h: 'ip1.test.encrypted',
+				integrationPayloadToken: 'ip1.test.encrypted',
+				orderMode: 'HALL',
+				table: '11',
+				tableName: 'Table 11'
+			}
+		})
+	})
+
+	it('accepts hall checkout with backend-stored table code', () => {
+		const config = resolveCatalogCheckoutConfig({ typeCode: 'restaurant' })
+
+		expect(
+			normalizeCartCheckoutData({
+				config,
+				data: {
+					customerName: 'Ivan',
+					orderMode: 'HALL',
+					t: 'Ab7Kp92x',
+					table: '11'
+				}
+			})
+		).toEqual({
+			checkoutMethod: CartCheckoutMethod.PICKUP,
+			checkoutData: {
+				customerName: 'Ivan',
+				orderMode: 'HALL',
+				t: 'Ab7Kp92x',
+				table: '11'
+			}
 		})
 	})
 
@@ -181,12 +255,34 @@ describe('catalog checkout helpers', () => {
 		expect(
 			normalizeCartCheckoutData({
 				config,
-				method: CartCheckoutMethod.DELIVERY,
 				data: { address: 'Client street, 2' }
 			})
 		).toEqual({
 			checkoutMethod: null,
 			checkoutData: {}
+		})
+	})
+
+	it('accepts explicit available method for integration checkout when all methods are disabled', () => {
+		const config = resolveCatalogCheckoutConfig({ typeCode: 'wholesale' })
+
+		expect(
+			normalizeCartCheckoutData({
+				config,
+				method: CartCheckoutMethod.DELIVERY,
+				data: {
+					address: 'Client street, 2',
+					customerName: 'Ivan',
+					phone: '+79990000000'
+				}
+			})
+		).toEqual({
+			checkoutMethod: CartCheckoutMethod.DELIVERY,
+			checkoutData: {
+				address: 'Client street, 2',
+				customerName: 'Ivan',
+				phone: '+79990000000'
+			}
 		})
 	})
 

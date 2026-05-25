@@ -33,6 +33,40 @@ describe('CartLinePricingService', () => {
 		})
 	})
 
+	it('selects default active sale unit when sale unit id is omitted', async () => {
+		tx.productVariantSaleUnit.findFirst.mockResolvedValue({
+			id: 'sale-unit-default',
+			variantId: 'variant-1',
+			baseQuantity: 12,
+			price: 900
+		})
+
+		await expect(
+			service.resolveSaleUnit(tx as never, 'variant-1', null, {
+				useDefaultWhenMissing: true
+			})
+		).resolves.toEqual({
+			id: 'sale-unit-default',
+			variantId: 'variant-1',
+			baseQuantity: 12,
+			price: 900
+		})
+		expect(tx.productVariantSaleUnit.findFirst).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: expect.objectContaining({
+					variantId: 'variant-1',
+					isActive: true,
+					deleteAt: null
+				}),
+				orderBy: [
+					{ isDefault: 'desc' },
+					{ displayOrder: 'asc' },
+					{ createdAt: 'asc' }
+				]
+			})
+		)
+	})
+
 	it('builds line snapshot from sale unit price and base quantity', () => {
 		const snapshot = service.resolveLineSnapshot({
 			variantId: 'variant-1',

@@ -3,6 +3,7 @@ import { ForbiddenException } from '@nestjs/common'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
 import {
+	CAPABILITY_INTEGRATION_IIKO,
 	CAPABILITY_PRODUCT_TYPES,
 	CAPABILITY_PRODUCT_VARIANTS
 } from './capability.constants'
@@ -74,5 +75,21 @@ describe('CapabilityService', () => {
 		await expect(
 			service.assertCanUseProductVariants('catalog-1')
 		).rejects.toThrow(ForbiddenException)
+	})
+
+	it('requires product structure for iiko integration capability', async () => {
+		prisma.catalogFeatureEntitlement.findMany.mockResolvedValue([
+			{
+				feature: CAPABILITY_INTEGRATION_IIKO,
+				enabled: true,
+				expiresAt: null
+			}
+		])
+
+		const result = await service.getCatalogCapabilities('catalog-1')
+
+		expect(result.raw[CAPABILITY_INTEGRATION_IIKO]).toBe(true)
+		expect(result.effective[CAPABILITY_INTEGRATION_IIKO]).toBe(false)
+		expect(result.flags.canUseIikoIntegration).toBe(false)
 	})
 })

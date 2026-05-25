@@ -31,6 +31,25 @@ const productSellableSelect = {
 			stock: true,
 			status: true,
 			isAvailable: true,
+			saleUnits: {
+				where: {
+					deleteAt: null,
+					isActive: true
+				},
+				select: {
+					id: true,
+					price: true,
+					baseQuantity: true,
+					isDefault: true,
+					displayOrder: true,
+					createdAt: true
+				},
+				orderBy: [
+					{ isDefault: 'desc' as const },
+					{ displayOrder: 'asc' as const },
+					{ createdAt: 'asc' as const }
+				]
+			},
 			attributes: {
 				where: { deleteAt: null },
 				select: { id: true }
@@ -136,7 +155,7 @@ export class ProductSellableService implements ProductSellableReader {
 			defaultVariant
 		)
 		const prices = priceCandidates
-			.map(variant => this.toNumber(variant.price))
+			.map(variant => this.resolveDisplayPrice(variant))
 			.filter((price): price is number => price !== null)
 		const legacyPrice = this.toNumber(product.price)
 		const canUseLegacyPrice = this.canUseLegacyProductPrice(
@@ -234,6 +253,15 @@ export class ProductSellableService implements ProductSellableReader {
 			variant.kind === ProductVariantKind.DEFAULT ||
 			variant.variantKey === DEFAULT_VARIANT_KEY
 		)
+	}
+
+	private resolveDisplayPrice(variant: ProductVariantRow): number | null {
+		const defaultSaleUnit = this.resolveDefaultSaleUnit(variant)
+		return this.toNumber(defaultSaleUnit?.price ?? variant.price)
+	}
+
+	private resolveDefaultSaleUnit(variant: ProductVariantRow) {
+		return variant.saleUnits?.[0] ?? null
 	}
 
 	private resolvePriceState(minPrice: number | null, maxPrice: number | null) {

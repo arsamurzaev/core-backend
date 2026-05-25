@@ -26,8 +26,32 @@ export type CatalogCheckoutSettingsInput = {
 
 export type CatalogCheckoutData = {
 	address?: string
+	customerName?: string
+	guestsCount?: number
+	h?: string
+	hallSectionId?: string
+	hallSectionName?: string
+	hallTableCode?: string
+	hallPayloadToken?: string
+	hallTableId?: string
+	hallTableName?: string
+	hallTableNumber?: string
+	iikoRestaurantSectionId?: string
+	iikoRestaurantSectionName?: string
+	iikoTableId?: string
+	integrationExternalItemCode?: string
+	integrationPayloadToken?: string
 	mapUrl?: string
+	orderMode?: string
+	payloadToken?: string
+	phone?: string
 	personsCount?: number
+	t?: string
+	table?: string
+	tableCode?: string
+	tableId?: string
+	tableName?: string
+	tableNumber?: string
 	visitTime?: string
 }
 
@@ -190,22 +214,44 @@ export function normalizeCartCheckoutData(params: {
 	checkoutData: CatalogCheckoutData
 	checkoutMethod: CartCheckoutMethod | null
 } {
-	if (params.config.enabledMethods.length === 0) {
+	const explicitMethod = normalizeCheckoutMethod(params.method)
+	if (params.config.enabledMethods.length === 0 && !explicitMethod) {
 		return { checkoutMethod: null, checkoutData: {} }
 	}
 
-	const method = resolveCartCheckoutMethod(params.method, params.config)
-	if (!params.config.enabledMethods.includes(method)) {
+	const rawData = isRecord(params.data) ? params.data : {}
+	if (isHallCheckoutData(rawData)) {
+		return {
+			checkoutMethod: CartCheckoutMethod.PICKUP,
+			checkoutData: normalizeHallCheckoutData({
+				catalogAddress: params.catalogAddress,
+				mapUrl: params.mapUrl,
+				rawData
+			})
+		}
+	}
+
+	const method =
+		explicitMethod ?? resolveCartCheckoutMethod(params.method, params.config)
+	const allowedMethods =
+		params.config.enabledMethods.length > 0
+			? params.config.enabledMethods
+			: params.config.availableMethods
+	if (!allowedMethods.includes(method)) {
 		throw new BadRequestException('checkoutMethod is not enabled')
 	}
 
-	const rawData = isRecord(params.data) ? params.data : {}
+	const customerData = normalizeCustomerCheckoutData(rawData)
+	const integrationData = normalizeIntegrationCheckoutData(rawData)
 	if (method === CartCheckoutMethod.DELIVERY) {
 		const address = normalizeString(rawData.address)
 		if (!address) {
 			throw new BadRequestException('address is required for delivery')
 		}
-		return { checkoutMethod: method, checkoutData: { address } }
+		return {
+			checkoutMethod: method,
+			checkoutData: { ...customerData, ...integrationData, address }
+		}
 	}
 
 	if (method === CartCheckoutMethod.PICKUP) {
@@ -214,6 +260,8 @@ export function normalizeCartCheckoutData(params: {
 		return {
 			checkoutMethod: method,
 			checkoutData: {
+				...customerData,
+				...integrationData,
 				...(address ? { address } : {}),
 				...(mapUrl ? { mapUrl } : {})
 			}
@@ -229,6 +277,8 @@ export function normalizeCartCheckoutData(params: {
 		return {
 			checkoutMethod: method,
 			checkoutData: {
+				...customerData,
+				...integrationData,
 				personsCount,
 				...(visitTime ? { visitTime } : {})
 			}
@@ -236,6 +286,117 @@ export function normalizeCartCheckoutData(params: {
 	}
 
 	return { checkoutMethod: method, checkoutData: {} }
+}
+
+function normalizeCustomerCheckoutData(
+	rawData: Record<string, unknown>
+): Pick<CatalogCheckoutData, 'customerName' | 'phone'> {
+	const customerName =
+		normalizeString(rawData.customerName) || normalizeString(rawData.name)
+	const phone = normalizeString(rawData.phone)
+
+	return {
+		...(customerName ? { customerName } : {}),
+		...(phone ? { phone } : {})
+	}
+}
+
+function isHallCheckoutData(rawData: Record<string, unknown>): boolean {
+	return (
+		normalizeString(rawData.orderMode).toUpperCase() === 'HALL' ||
+		Boolean(
+			normalizeString(
+				rawData.iikoTableId ??
+					rawData.hallTableId ??
+					rawData.integrationExternalItemCode ??
+					rawData.hallTableCode ??
+					rawData.tableCode ??
+					rawData.t ??
+					rawData.integrationPayloadToken ??
+					rawData.hallPayloadToken ??
+					rawData.payloadToken ??
+					rawData.h
+			)
+		)
+	)
+}
+
+function normalizeHallCheckoutData(params: {
+	catalogAddress?: unknown
+	mapUrl?: unknown
+	rawData: Record<string, unknown>
+}): CatalogCheckoutData {
+	const integrationData = normalizeIntegrationCheckoutData(params.rawData)
+	const customerData = normalizeCustomerCheckoutData(params.rawData)
+	const catalogAddress = normalizeString(params.catalogAddress)
+	const mapUrl = normalizeString(params.mapUrl)
+	const tableId =
+		integrationData.iikoTableId ??
+		integrationData.hallTableId ??
+		integrationData.tableId
+	const token =
+		integrationData.integrationPayloadToken ??
+		integrationData.hallPayloadToken ??
+		integrationData.payloadToken ??
+		integrationData.h
+	const tableCode =
+		integrationData.integrationExternalItemCode ??
+		integrationData.hallTableCode ??
+		integrationData.tableCode ??
+		integrationData.t
+	if (!tableId && !token && !tableCode) {
+		throw new BadRequestException('iiko table id is required for hall order')
+	}
+
+	return {
+		...customerData,
+		...integrationData,
+		orderMode: 'HALL',
+		...(catalogAddress ? { address: catalogAddress } : {}),
+		...(mapUrl ? { mapUrl } : {})
+	}
+}
+
+function normalizeIntegrationCheckoutData(
+	rawData: Record<string, unknown>
+): CatalogCheckoutData {
+	const guestsCount = normalizePositiveInt(
+		rawData.guestsCount ?? rawData.personsCount
+	)
+	const textFields = {
+		h: normalizeString(rawData.h),
+		hallSectionId: normalizeString(rawData.hallSectionId),
+		hallSectionName: normalizeString(rawData.hallSectionName),
+		hallTableCode: normalizeString(rawData.hallTableCode),
+		hallPayloadToken: normalizeString(rawData.hallPayloadToken),
+		hallTableId: normalizeString(rawData.hallTableId),
+		hallTableName: normalizeString(rawData.hallTableName),
+		hallTableNumber: normalizeString(rawData.hallTableNumber),
+		iikoRestaurantSectionId: normalizeString(rawData.iikoRestaurantSectionId),
+		iikoRestaurantSectionName: normalizeString(rawData.iikoRestaurantSectionName),
+		iikoTableId: normalizeString(rawData.iikoTableId),
+		integrationExternalItemCode: normalizeString(
+			rawData.integrationExternalItemCode
+		),
+		integrationPayloadToken: normalizeString(rawData.integrationPayloadToken),
+		orderMode: normalizeString(rawData.orderMode),
+		payloadToken: normalizeString(rawData.payloadToken),
+		t: normalizeString(rawData.t),
+		table: normalizeString(rawData.table),
+		tableCode: normalizeString(rawData.tableCode),
+		tableId: normalizeString(rawData.tableId),
+		tableName: normalizeString(rawData.tableName),
+		tableNumber: normalizeString(rawData.tableNumber)
+	}
+
+	return {
+		...Object.fromEntries(
+			Object.entries(textFields).filter((entry): entry is [string, string] =>
+				Boolean(entry[1])
+			)
+		),
+		...(guestsCount ? { guestsCount, personsCount: guestsCount } : {})
+	} as CatalogCheckoutData
 }
 
 export function resolveCheckoutContactsSnapshot(params: {

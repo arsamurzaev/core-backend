@@ -48,10 +48,19 @@ export class CatalogSaleUnitController {
 		required: false,
 		schema: { type: 'boolean' }
 	})
+	@ApiQuery({
+		name: 'includeInactive',
+		required: false,
+		schema: { type: 'boolean' }
+	})
 	@ApiOkResponse({ type: CatalogSaleUnitDto, isArray: true })
-	getAll(@Query('includeArchived') includeArchived?: string) {
+	getAll(
+		@Query('includeArchived') includeArchived?: string,
+		@Query('includeInactive') includeInactive?: string
+	) {
 		return this.service.getAll({
-			includeArchived: this.parseBooleanQuery(includeArchived)
+			includeArchived: this.parseBooleanQuery(includeArchived, 'includeArchived'),
+			includeInactive: this.parseBooleanQuery(includeInactive, 'includeInactive')
 		})
 	}
 
@@ -104,11 +113,11 @@ export class CatalogSaleUnitController {
 		return this.service.archive(id)
 	}
 
-	private parseBooleanQuery(value?: string): boolean {
+	private parseBooleanQuery(value: string | undefined, name: string): boolean {
 		if (!value) return false
 		const normalized = value.trim().toLowerCase()
 		if (['1', 'true', 'yes'].includes(normalized)) return true
 		if (['0', 'false', 'no'].includes(normalized)) return false
-		throw new BadRequestException('includeArchived must be a boolean value')
+		throw new BadRequestException(`${name} must be a boolean value`)
 	}
 }

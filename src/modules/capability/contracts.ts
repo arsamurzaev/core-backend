@@ -26,6 +26,7 @@ export interface CapabilityReaderPort {
 	canUseCatalogSaleUnits(catalogId: string, at?: Date): Promise<boolean>
 	canUseInternalInventory(catalogId: string, at?: Date): Promise<boolean>
 	canUseMoySkladIntegration(catalogId: string, at?: Date): Promise<boolean>
+	canUseIikoIntegration(catalogId: string, at?: Date): Promise<boolean>
 }
 
 export interface CapabilityAssertPort {
@@ -39,4 +40,5 @@ export interface CapabilityAssertPort {
 	assertCanUseCatalogSaleUnits(catalogId: string): Promise<void>
 	assertCanUseInternalInventory(catalogId: string): Promise<void>
 	assertCanUseMoySkladIntegration(catalogId: string): Promise<void>
+	assertCanUseIikoIntegration(catalogId: string): Promise<void>
 }

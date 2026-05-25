@@ -47,6 +47,7 @@ describe('ProductTypeService', () => {
 			updateCatalogType: jest.fn(),
 			updateSystemTemplate: jest.fn(),
 			getCatalogTypeSchemaUpdateImpact: jest.fn(),
+			findImportedEnumAttributeIds: jest.fn(),
 			archiveCatalogType: jest.fn(),
 			archiveSystemTemplate: jest.fn(),
 			existsCode: jest.fn(),
@@ -89,6 +90,7 @@ describe('ProductTypeService', () => {
 			typeId: catalogTypeId
 		} as any)
 		repo.findAttributesByIds.mockResolvedValue([enumAttribute] as any)
+		repo.findImportedEnumAttributeIds.mockResolvedValue([])
 		repo.getCatalogTypeSchemaUpdateImpact.mockResolvedValue({
 			boundProductCount: 0,
 			conflictingProductCount: 0,
@@ -305,6 +307,73 @@ describe('ProductTypeService', () => {
 		expect(repo.getCatalogTypeSchemaUpdateImpact).not.toHaveBeenCalled()
 		expect(repo.updateCatalogType).toHaveBeenCalled()
 		expectCatalogProductTypeInvalidation()
+	})
+
+	it('allows display order changes for imported integration attributes', async () => {
+		repo.findCatalogTypeById.mockResolvedValue({
+			id: 'product-type-id',
+			code: 'mens-shoes',
+			name: 'Mens shoes',
+			attributes: [
+				{
+					attributeId: enumAttribute.id,
+					isVariant: true,
+					isRequired: false,
+					displayOrder: 0
+				}
+			]
+		} as any)
+		repo.findImportedEnumAttributeIds.mockResolvedValue([enumAttribute.id])
+		repo.updateCatalogType.mockResolvedValue({ id: 'product-type-id' } as any)
+
+		await runWithCatalog(() =>
+			service.update('product-type-id', {
+				attributes: [
+					{
+						attributeId: enumAttribute.id,
+						isVariant: true,
+						displayOrder: 10
+					}
+				]
+			})
+		)
+
+		expect(repo.getCatalogTypeSchemaUpdateImpact).not.toHaveBeenCalled()
+		expect(repo.updateCatalogType).toHaveBeenCalled()
+	})
+
+	it('rejects structural changes for imported integration attributes', async () => {
+		repo.findCatalogTypeById.mockResolvedValue({
+			id: 'product-type-id',
+			code: 'mens-shoes',
+			name: 'Mens shoes',
+			attributes: [
+				{
+					attributeId: enumAttribute.id,
+					isVariant: true,
+					isRequired: false,
+					displayOrder: 0
+				}
+			]
+		} as any)
+		repo.findImportedEnumAttributeIds.mockResolvedValue([enumAttribute.id])
+
+		await expect(
+			runWithCatalog(() =>
+				service.update('product-type-id', {
+					attributes: [
+						{
+							attributeId: enumAttribute.id,
+							isVariant: false,
+							displayOrder: 10
+						}
+					]
+				})
+			)
+		).rejects.toBeInstanceOf(BadRequestException)
+
+		expect(repo.getCatalogTypeSchemaUpdateImpact).not.toHaveBeenCalled()
+		expect(repo.updateCatalogType).not.toHaveBeenCalled()
 	})
 
 	it('invalidates product type dependent caches after scalar update', async () => {

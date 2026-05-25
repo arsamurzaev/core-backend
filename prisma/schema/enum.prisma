@@ -6,6 +6,7 @@ enum Role {
 
 enum IntegrationProvider {
   MOYSKLAD
+  IIKO
 }
 
 enum IntegrationSyncStatus {

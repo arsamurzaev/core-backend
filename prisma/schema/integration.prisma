@@ -26,6 +26,7 @@ model Integration {
   syncRuns           IntegrationSyncRun[]
   orderExports       IntegrationOrderExport[]
   webhookEvents      IntegrationWebhookEvent[]
+  externalItems      IntegrationExternalItem[]
   inventoryMovements InventoryMovement[]
 
   deleteAt  DateTime? @map("delete_at") // Дата удаления
@@ -38,13 +39,44 @@ model Integration {
   @@map("integrations")
 }
 
+model IntegrationExternalItem {
+  id String @id @default(uuid()) @db.Uuid
+
+  catalogId     String              @map("catalog_id") @db.Uuid
+  integrationId String              @map("integration_id") @db.Uuid
+  provider      IntegrationProvider
+
+  type             String  @db.VarChar(64)
+  externalId       String  @map("external_id") @db.VarChar(128)
+  externalParentId String? @map("external_parent_id") @db.VarChar(128)
+  publicCode       String  @unique @map("public_code") @db.VarChar(32)
+  name             String? @db.VarChar(255)
+  code             String? @db.VarChar(128)
+  isActive         Boolean @default(true) @map("is_active")
+  rawMeta          Json?   @map("raw_meta")
+
+  lastSeenAt   DateTime? @map("last_seen_at")
+  lastSyncedAt DateTime? @map("last_synced_at")
+
+  catalog     Catalog     @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([integrationId, type, externalId])
+  @@index([catalogId, provider, type])
+  @@index([integrationId, type, externalParentId])
+  @@map("integration_external_items")
+}
+
 model IntegrationProductLink {
   id String @id @default(uuid()) @db.Uuid
 
   integrationId String @map("integration_id") @db.Uuid
   productId     String @map("product_id") @db.Uuid
 
-  externalId        String    @map("external_id") @db.VarChar(64)
+  externalId        String    @map("external_id") @db.VarChar(128)
   externalCode      String?   @map("external_code") @db.VarChar(100)
   externalUpdatedAt DateTime? @map("external_updated_at")
   lastSyncedAt      DateTime? @map("last_synced_at")
@@ -76,7 +108,7 @@ model IntegrationVariantLink {
   integrationId String @map("integration_id") @db.Uuid
   variantId     String @map("variant_id") @db.Uuid
 
-  externalId        String    @map("external_id") @db.VarChar(64)
+  externalId        String    @map("external_id") @db.VarChar(128)
   externalCode      String?   @map("external_code") @db.VarChar(100)
   externalUpdatedAt DateTime? @map("external_updated_at")
   lastSyncedAt      DateTime? @map("last_synced_at")

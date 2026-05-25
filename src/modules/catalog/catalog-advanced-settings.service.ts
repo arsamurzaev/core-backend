@@ -14,6 +14,11 @@ import {
 	type ActiveSessionEntry,
 	SessionService
 } from '@/modules/auth/public'
+import {
+	CatalogSaleUnitService,
+	CreateCatalogSaleUnitDtoReq,
+	UpdateCatalogSaleUnitDtoReq
+} from '@/modules/catalog-sale-unit/public'
 import { IntegrationService } from '@/modules/integration/public'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
@@ -34,6 +39,7 @@ export class CatalogAdvancedSettingsService {
 		private readonly sessions: SessionService,
 		private readonly domains: CatalogDomainService,
 		private readonly integration: IntegrationService,
+		private readonly saleUnits: CatalogSaleUnitService,
 		private readonly prisma: PrismaService
 	) {}
 
@@ -96,6 +102,32 @@ export class CatalogAdvancedSettingsService {
 
 	disableDomain(id: string): Promise<CatalogDomainDto> {
 		return this.domains.disableCurrent(id) as Promise<CatalogDomainDto>
+	}
+
+	listSaleUnits(options: {
+		includeInactive?: boolean
+		includeArchived?: boolean
+	}) {
+		return this.saleUnits.getAll(options)
+	}
+
+	getSaleUnit(id: string) {
+		return this.saleUnits.getById(id)
+	}
+
+	createSaleUnit(dto: CreateCatalogSaleUnitDtoReq) {
+		return this.saleUnits.create(dto)
+	}
+
+	updateSaleUnit(
+		id: string,
+		dto: UpdateCatalogSaleUnitDtoReq
+	) {
+		return this.saleUnits.update(id, dto)
+	}
+
+	archiveSaleUnit(id: string): Promise<OkResponseDto> {
+		return this.saleUnits.archive(id)
 	}
 
 	async getYandexMetrika(): Promise<CatalogYandexMetrikaDto> {
@@ -206,6 +238,74 @@ export class CatalogAdvancedSettingsService {
 	async cancelMoySkladSync(): Promise<OkResponseDto> {
 		await this.integration.cancelMoySkladSync()
 		return { ok: true }
+	}
+
+	getIikoStatus() {
+		return this.integration.getIikoStatus()
+	}
+
+	getIiko() {
+		return this.integration.getIiko()
+	}
+
+	getIikoRuns(limit?: number) {
+		return this.integration.getIikoRuns(limit)
+	}
+
+	getIikoWebhookEvents(limit?: number, status?: string) {
+		return this.integration.getIikoWebhookEvents(limit, status)
+	}
+
+	retryIikoWebhookEvent(eventId: string) {
+		return this.integration.retryIikoWebhookEvent(eventId)
+	}
+
+	getIikoRunProgress(runId: string) {
+		return this.integration.getIikoRunProgress(runId)
+	}
+
+	upsertIiko(dto: Parameters<IntegrationService['upsertIiko']>[0]) {
+		return this.integration.upsertIiko(dto)
+	}
+
+	updateIiko(dto: Parameters<IntegrationService['updateIiko']>[0]) {
+		return this.integration.updateIiko(dto)
+	}
+
+	removeIiko() {
+		return this.integration.removeIiko()
+	}
+
+	testIikoConnection(
+		dto: Parameters<IntegrationService['testIikoConnection']>[0]
+	) {
+		return this.integration.testIikoConnection(dto)
+	}
+
+	previewIikoImport(
+		dto: Parameters<IntegrationService['previewIikoImport']>[0]
+	) {
+		return this.integration.previewIikoImport(dto)
+	}
+
+	syncIikoCatalog() {
+		return this.integration.syncIikoCatalog()
+	}
+
+	syncIikoStock() {
+		return this.integration.syncIikoStock()
+	}
+
+	syncIikoProduct(productId: string) {
+		return this.integration.syncIikoProduct(productId)
+	}
+
+	setupIikoWebhooks() {
+		return this.integration.setupIikoWebhooks()
+	}
+
+	disableIikoWebhooks() {
+		return this.integration.disableIikoWebhooks()
 	}
 
 	private async findCurrentCatalogMetrikaMetric(): Promise<{

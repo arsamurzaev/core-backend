@@ -19,12 +19,12 @@ import { MediaRepository } from '@/shared/media/media.repository'
 import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
+import { PRODUCT_SELLABLE_READER_PORT } from './contracts'
 import type { ProductAttributeValueDto } from './dto/requests/product-attribute.dto.req'
 import { ProductAttributeBuilder } from './product-attribute.builder'
 import type { ProductAttributeValueData } from './product-attribute.builder'
 import { ProductCommandService } from './product-command.service'
 import { ProductMaintenanceService } from './product-maintenance.service'
-import { PRODUCT_SELLABLE_READER_PORT } from './contracts'
 import {
 	encodeProductDefaultCursor,
 	encodeProductSeedCursor
@@ -137,6 +137,8 @@ describe('ProductService', () => {
 						findProductTypeValidationSchemaById: jest.fn(),
 						findProductValidationRef: jest.fn(),
 						findProductTypeCompatibilityPreviewRef: jest.fn(),
+						hasCatalogIntegrations: jest.fn(),
+						hasIntegrationProductOwnership: jest.fn(),
 						findSkuById: jest.fn(),
 						findCategoryById: jest.fn(),
 						findCategoriesByIds: jest.fn(),
@@ -277,6 +279,8 @@ describe('ProductService', () => {
 		repo.existsVariantSku.mockResolvedValue(false)
 		repo.findVariantPickerOptions.mockResolvedValue([])
 		repo.findVariantSummaries.mockResolvedValue([])
+		repo.hasCatalogIntegrations.mockResolvedValue(false)
+		repo.hasIntegrationProductOwnership.mockResolvedValue(false)
 		repo.findProductTypeValidationSchemaById.mockResolvedValue({
 			id: 'product-type-1',
 			catalogId: 'catalog-1',
@@ -1335,13 +1339,13 @@ describe('ProductService', () => {
 			{
 				id: 'variant-1',
 				label: 'M',
-				price: '150.00',
+				price: '140.00',
 				stock: 7,
 				status: 'ACTIVE',
 				isAvailable: true,
-				saleUnitId: null,
-				saleUnitPrice: null,
-				maxQuantity: 7
+				saleUnitId: 'sale-unit-1',
+				saleUnitPrice: '140.00',
+				maxQuantity: 3
 			}
 		])
 		expect(result[0]).not.toHaveProperty('variants')
@@ -1517,6 +1521,91 @@ describe('ProductService', () => {
 				maxPrice: '1200.00',
 				defaultVariantId: 'default-variant',
 				requiresVariantSelection: false,
+				variantSummary: {
+					minPrice: null,
+					maxPrice: null,
+					activeCount: 0,
+					totalStock: 0,
+					singleVariantId: null
+				},
+				variantPickerOptions: []
+			})
+		)
+	})
+
+	it('exposes hidden default variant sale units on simple product details', async () => {
+		capabilities.getCurrentFeatures.mockResolvedValueOnce({
+			canUseProductTypes: true,
+			canUseProductVariants: false,
+			canUseCatalogSaleUnits: true,
+			canUseInternalInventory: false,
+			canUseMoySkladIntegration: true
+		})
+		repo.findPublicById.mockResolvedValue({
+			id: 'product-1',
+			price: null,
+			media: [],
+			productType: { id: 'product-type-1', code: 'simple', name: 'Simple' },
+			productAttributes: [],
+			variants: [
+				{
+					id: 'default-variant',
+					sku: 'SKU-1',
+					variantKey: 'default',
+					kind: 'DEFAULT',
+					stock: 24,
+					price: 100,
+					status: 'ACTIVE',
+					isAvailable: true,
+					createdAt: new Date('2026-03-23T15:00:00.000Z'),
+					updatedAt: new Date('2026-03-23T15:00:00.000Z'),
+					attributes: [],
+					saleUnits: [
+						{
+							id: 'sale-unit-box',
+							catalogSaleUnitId: 'catalog-sale-unit-box',
+							code: 'box',
+							name: 'Box',
+							baseQuantity: '12.0000',
+							price: '1000.00',
+							barcode: null,
+							isDefault: true,
+							isActive: true,
+							displayOrder: 0,
+							createdAt: new Date('2026-03-23T15:00:00.000Z'),
+							updatedAt: new Date('2026-03-23T15:00:00.000Z'),
+							catalogSaleUnit: null
+						}
+					]
+				}
+			],
+			categoryProducts: [],
+			integrationLinks: []
+		} as any)
+		sellableReader.resolveProductSellable.mockResolvedValueOnce({
+			priceState: 'KNOWN',
+			displayPrice: '1000.00',
+			minPrice: '1000.00',
+			maxPrice: '1000.00',
+			availabilityState: 'AVAILABLE',
+			stock: 24,
+			defaultVariantId: 'default-variant',
+			requiresVariantSelection: false
+		})
+
+		const result = await runWithCatalog(() => service.getById('product-1'))
+
+		expect(result).toEqual(
+			expect.objectContaining({
+				variants: [],
+				saleUnits: [
+					expect.objectContaining({
+						id: 'sale-unit-box',
+						name: 'Box',
+						baseQuantity: '12.0000',
+						price: '1000.00'
+					})
+				],
 				variantSummary: {
 					minPrice: null,
 					maxPrice: null,
@@ -1738,6 +1827,24 @@ describe('ProductService', () => {
 		).resolves.toMatchObject({ ok: true, id: 'product-2', slug: 'second' })
 
 		expect(repo.findBrandById.mock.calls).toHaveLength(2)
+	})
+
+	it('rejects manual product creation when catalog has integrations', async () => {
+		repo.hasCatalogIntegrations.mockResolvedValue(true)
+
+		await expect(
+			runWithCatalog(() =>
+				service.create({
+					name: 'Manual Product',
+					price: 100
+				})
+			)
+		).rejects.toThrow(
+			'Создание товаров вручную отключено: каталог управляется интеграцией.'
+		)
+
+		expect(attributeBuilder.buildForCreate).not.toHaveBeenCalled()
+		expect(repo.create).not.toHaveBeenCalled()
 	})
 
 	it('creates default variant when variants are not passed', async () => {
@@ -2353,6 +2460,38 @@ describe('ProductService', () => {
 		expect(result).toMatchObject({ ok: true, id: 'product-1' })
 	})
 
+	it('rejects manual variant matrix replacement for integrated products', async () => {
+		repo.findSkuById.mockResolvedValue({
+			id: 'product-1',
+			sku: 'TYPED-PRODUCT',
+			price: 120,
+			status: 'ACTIVE',
+			productTypeId: 'product-type-1'
+		} as any)
+		repo.hasIntegrationProductOwnership.mockResolvedValue(true)
+
+		await expect(
+			runWithCatalog(() =>
+				service.setVariantMatrix('product-1', {
+					items: [
+						{
+							price: 130,
+							attributes: [
+								{
+									attributeId: 'size-attribute',
+									enumValueId: 'size-s'
+								}
+							]
+						}
+					]
+				})
+			)
+		).rejects.toThrow('Integrated product variants are managed by integration')
+
+		expect(variantBuilder.build).not.toHaveBeenCalled()
+		expect(repo.setVariants).not.toHaveBeenCalled()
+	})
+
 	it('falls back to a technical default variant when clearing matrix variants', async () => {
 		const updatedProduct = {
 			id: 'product-1',
@@ -2783,12 +2922,12 @@ describe('ProductService', () => {
 		)
 	})
 
-	it('repairs a missing default variant before legacy product update when variants are disabled', async () => {
-		capabilities.canUseProductVariants.mockResolvedValue(false)
+	it('repairs a missing default variant before legacy product update when variants are enabled and type is cleared', async () => {
 		repo.findSkuById.mockResolvedValue({
 			id: 'product-1',
 			sku: 'LEGACY-PRODUCT',
 			price: 100,
+			status: 'ACTIVE',
 			productTypeId: null
 		} as any)
 		repo.ensureDefaultVariant.mockResolvedValue(true)
@@ -2807,7 +2946,8 @@ describe('ProductService', () => {
 		await runWithCatalog(() =>
 			service.update('product-1', {
 				name: 'Legacy Product',
-				price: 120
+				price: 120,
+				productTypeId: null
 			})
 		)
 
@@ -2921,6 +3061,26 @@ describe('ProductService', () => {
 			undefined,
 			undefined
 		)
+	})
+
+	it('rejects product type changes for integrated products', async () => {
+		repo.findProductValidationRef.mockResolvedValue({
+			id: 'product-1',
+			productTypeId: 'product-type-old',
+			productAttributes: [],
+			variants: []
+		} as any)
+		repo.hasIntegrationProductOwnership.mockResolvedValue(true)
+
+		await expect(
+			runWithCatalog(() =>
+				service.update('product-1', {
+					productTypeId: 'product-type-1'
+				})
+			)
+		).rejects.toThrow('Integrated product structure is managed by integration')
+
+		expect(repo.update).not.toHaveBeenCalled()
 	})
 
 	it('allows assigning product type with variant attributes without immediate matrix replacement', async () => {
@@ -3728,6 +3888,19 @@ describe('ProductService', () => {
 		).rejects.toThrow('Товар не найден')
 	})
 
+	it('rejects product duplication when catalog has integrations', async () => {
+		repo.hasCatalogIntegrations.mockResolvedValue(true)
+
+		await expect(
+			runWithCatalog(() => service.duplicate('product-1'))
+		).rejects.toThrow(
+			'Создание товаров вручную отключено: каталог управляется интеграцией.'
+		)
+
+		expect(repo.findById).not.toHaveBeenCalled()
+		expect(repo.create).not.toHaveBeenCalled()
+	})
+
 	it('allows duplicate product name in catalog', async () => {
 		repo.existsName.mockResolvedValue(true)
 		repo.existsSlug.mockResolvedValue(false)
@@ -4146,6 +4319,19 @@ describe('ProductService', () => {
 			PRODUCTS_CACHE_VERSION,
 			'catalog-1'
 		])
+	})
+
+	it('rejects deleting integration-managed product', async () => {
+		repo.hasIntegrationProductOwnership.mockResolvedValue(true)
+
+		await expect(
+			runWithCatalog(() => service.remove('product-1'))
+		).rejects.toThrow(
+			'Integrated product deletion is disabled; the product is managed by integration'
+		)
+
+		expect(repo.softDelete).not.toHaveBeenCalled()
+		expect(productSeoSync.removeProduct).not.toHaveBeenCalled()
 	})
 
 	it('does not delete shared media files on remove', async () => {

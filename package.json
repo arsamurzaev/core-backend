@@ -27,6 +27,8 @@
 		"db:nullify-zero-prices": "bun run scripts/nullify-zero-product-prices.ts",
 		"openapi:export": "bun run scripts/export-openapi.ts",
 		"prod:check": "bun run scripts/prod-quality-gate.ts",
+		"iiko:smoke": "bun run scripts/iiko-external-menu-smoke.ts",
+		"iiko:sync-once": "bun run scripts/iiko-sync-once.ts",
 		"admin:create": "bun run scripts/create-admin.ts",
 		"legacy:migrate": "tsc -p migration/tsconfig.json && node migration/dist/migration/scripts/migrate-legacy.js",
 		"legacy:migrate:all": "tsc -p migration/tsconfig.json && node migration/dist/migration/scripts/migrate-legacy.js --phase=all --apply",

@@ -16,22 +16,21 @@ import {
 } from 'class-validator'
 
 export class ProductVariantSaleUnitDtoReq {
-	@ApiPropertyOptional({
+	@ApiProperty({
 		type: String,
 		example: 'catalog-sale-unit-id',
 		description:
-			'Ссылка на формат продажи из справочника текущего каталога. Если не передать, backend создаст/найдет формат по name.'
+			'Ссылка на активную единицу продажи из справочника текущего каталога.'
 	})
-	@IsOptional()
 	@IsString()
 	@IsNotEmpty()
-	catalogSaleUnitId?: string
+	catalogSaleUnitId: string
 
 	@ApiPropertyOptional({
 		type: String,
 		example: 'box-12',
 		description:
-			'Технический код можно не передавать: backend сгенерирует его из названия.'
+			'Не используется для создания справочника: локальная привязка берет код из catalogSaleUnitId.'
 	})
 	@IsOptional()
 	@IsString()
@@ -48,7 +47,7 @@ export class ProductVariantSaleUnitDtoReq {
 		type: String,
 		example: 'Короб',
 		description:
-			'Название формата продажи. Не нужно, если передан catalogSaleUnitId.'
+			'Не используется для создания справочника: локальная привязка берет название из catalogSaleUnitId.'
 	})
 	@IsOptional()
 	@IsString()
@@ -61,16 +60,15 @@ export class ProductVariantSaleUnitDtoReq {
 	})
 	name?: string
 
-	@ApiPropertyOptional({
+	@ApiProperty({
 		type: Number,
 		example: 12,
 		description: 'Сколько базовых единиц внутри для конкретного товара/варианта.'
 	})
-	@IsOptional()
 	@Type(() => Number)
 	@IsNumber()
 	@Min(0.0001)
-	baseQuantity?: number
+	baseQuantity: number
 
 	@ApiProperty({ type: Number, example: 999 })
 	@Type(() => Number)

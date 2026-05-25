@@ -27,6 +27,7 @@ import {
 } from '@/modules/capability/contracts'
 import {
 	CAPABILITY_CATALOG_SALE_UNITS,
+	CAPABILITY_INTEGRATION_IIKO,
 	CAPABILITY_INTEGRATION_MOYSKLAD,
 	CAPABILITY_INVENTORY_INTERNAL,
 	CAPABILITY_PRODUCT_TYPES,
@@ -154,6 +155,16 @@ const adminCatalogSelect = {
 			counterId: true
 		},
 		take: 1
+	},
+	activity: {
+		select: {
+			id: true,
+			name: true,
+			deleteAt: true,
+			createdAt: true,
+			updatedAt: true
+		},
+		orderBy: { name: 'asc' }
 	},
 	payments: {
 		where: {
@@ -1024,6 +1035,8 @@ export class AdminService {
 				: {})
 		}
 
+		const metricIdProvided = dto.metricId !== undefined
+
 		data.metrics = {
 			connectOrCreate: [
 				{
@@ -1047,10 +1060,12 @@ export class AdminService {
 						]
 					: [])
 			],
-			...(dto.metricId
+			...(metricIdProvided
 				? {
 						disconnect: current.metrics
-							.filter(metric => metric.counterId !== dto.metricId)
+							.filter(
+								metric => dto.metricId === null || metric.counterId !== dto.metricId
+							)
 							.map(metric => ({ id: metric.id }))
 					}
 				: {})
@@ -2051,8 +2066,15 @@ export class AdminService {
 	}
 
 	private mapAdminCatalog(catalog: AdminCatalogRecord) {
-		const { config, featureEntitlements, metrics, payments, settings, ...rest } =
-			catalog
+		const {
+			activity,
+			config,
+			featureEntitlements,
+			metrics,
+			payments,
+			settings,
+			...rest
+		} = catalog
 		const promoCodePaid = Boolean(
 			rest.promoCodeId &&
 			payments.some(payment => payment.promoCodeId === rest.promoCodeId)
@@ -2061,6 +2083,7 @@ export class AdminService {
 
 		return {
 			...rest,
+			activities: activity,
 			metricId: metrics[0]?.counterId ?? null,
 			promoCodePaid,
 			subscriptionDaysLeft: buildSubscriptionDaysLeft(catalog.subscriptionEndsAt),
@@ -2115,7 +2138,11 @@ export class AdminService {
 			canUseInternalInventory: enabledFeatures.has(CAPABILITY_INVENTORY_INTERNAL),
 			canUseMoySkladIntegration: enabledFeatures.has(
 				CAPABILITY_INTEGRATION_MOYSKLAD
-			)
+			),
+			canUseIikoIntegration:
+				enabledFeatures.has(CAPABILITY_INTEGRATION_IIKO) &&
+				enabledFeatures.has(CAPABILITY_PRODUCT_TYPES) &&
+				enabledFeatures.has(CAPABILITY_PRODUCT_VARIANTS)
 		}
 	}
 

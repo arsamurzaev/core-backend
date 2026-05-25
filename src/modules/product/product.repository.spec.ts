@@ -217,7 +217,11 @@ describe('ProductRepository', () => {
 		expect(clauses).toHaveLength(1)
 		const text = clauses[0].strings.join(' ')
 		expect(text).toContain('FROM product_variants pv')
-		expect(text).toContain('pv.price IS NOT NULL')
+		expect(text).toContain('FROM product_variant_sale_units pvsu')
+		expect(text).toContain('COALESCE(default_sale_unit.price, pv.price)')
+		expect(text).toContain(
+			'COALESCE(fallback_sale_unit.price, fallback_pv.price)'
+		)
 		expect(text).toContain('UNION ALL')
 		expect(text).toContain('SELECT p.price')
 		expect(text).toContain('NOT EXISTS')
@@ -232,6 +236,72 @@ describe('ProductRepository', () => {
 				100,
 				500
 			])
+		)
+	})
+
+	it('requires existing catalog sale unit id for variant sale unit bindings', async () => {
+		const repository = new ProductRepository({} as any)
+		const tx = {
+			catalogSaleUnit: {
+				findFirst: jest.fn()
+			}
+		}
+
+		await expect(
+			(repository as any).normalizeVariantSaleUnits(tx, 'catalog-1', [
+				{
+					name: 'Box',
+					baseQuantity: 12,
+					price: 500
+				}
+			])
+		).rejects.toThrow('catalogSaleUnitId')
+		expect(tx.catalogSaleUnit.findFirst).not.toHaveBeenCalled()
+	})
+
+	it('normalizes variant sale unit bindings from active catalog sale units', async () => {
+		const repository = new ProductRepository({} as any)
+		const tx = {
+			catalogSaleUnit: {
+				findFirst: jest.fn().mockResolvedValue({
+					id: 'catalog-sale-unit-1',
+					code: 'box',
+					name: 'Box',
+					defaultBaseQuantity: 1,
+					barcode: '4601234567890'
+				})
+			}
+		}
+
+		await expect(
+			(repository as any).normalizeVariantSaleUnits(tx, 'catalog-1', [
+				{
+					catalogSaleUnitId: 'catalog-sale-unit-1',
+					baseQuantity: 12,
+					price: 500,
+					isDefault: true
+				}
+			])
+		).resolves.toEqual([
+			expect.objectContaining({
+				catalogSaleUnitId: 'catalog-sale-unit-1',
+				code: 'box',
+				name: 'Box',
+				baseQuantity: 12,
+				price: 500,
+				barcode: '4601234567890',
+				isDefault: true
+			})
+		])
+		expect(tx.catalogSaleUnit.findFirst).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: expect.objectContaining({
+					id: 'catalog-sale-unit-1',
+					catalogId: 'catalog-1',
+					isActive: true,
+					deleteAt: null
+				})
+			})
 		)
 	})
 
@@ -281,7 +351,7 @@ describe('ProductRepository', () => {
 		expect(sql.values).toContain('product-type-from-catalog-2')
 	})
 
-	it('finds only simple products that need a technical default variant repair', async () => {
+	it('finds products that need a technical default variant repair', async () => {
 		const prisma = {
 			product: {
 				findMany: jest.fn().mockResolvedValue([])
@@ -300,25 +370,13 @@ describe('ProductRepository', () => {
 				where: expect.objectContaining({
 					catalogId: 'catalog-1',
 					deleteAt: null,
-					AND: expect.arrayContaining([
-						expect.objectContaining({
-							variants: expect.objectContaining({
-								none: expect.objectContaining({
-									OR: expect.any(Array)
-								})
-							})
-						}),
-						expect.objectContaining({
-							variants: {
-								none: {
-									deleteAt: null,
-									NOT: {
-										OR: [{ kind: ProductVariantKind.DEFAULT }, { variantKey: 'default' }]
-									}
-								}
-							}
-						})
-					])
+					variants: {
+						none: {
+							deleteAt: null,
+							OR: [{ kind: ProductVariantKind.DEFAULT }, { variantKey: 'default' }],
+							status: { not: ProductVariantStatus.DISABLED }
+						}
+					}
 				}),
 				select: {
 					id: true,
@@ -933,7 +991,7 @@ describe('ProductRepository', () => {
 		})
 	})
 
-	it('does not repair default variant when product has custom variants', async () => {
+	it('creates a technical default variant alongside matrix variants', async () => {
 		const tx = {
 			product: {
 				findFirst: jest.fn().mockResolvedValue({ id: 'product-1' })
@@ -942,8 +1000,25 @@ describe('ProductRepository', () => {
 				findFirst: jest
 					.fn()
 					.mockResolvedValueOnce(null)
-					.mockResolvedValueOnce({ id: 'variant-custom' }),
-				create: jest.fn()
+					.mockResolvedValueOnce(null)
+					.mockResolvedValueOnce(null),
+				create: jest.fn().mockResolvedValue({ id: 'variant-default' }),
+				findMany: jest.fn().mockResolvedValue([
+					{
+						id: 'variant-default',
+						sku: 'CUSTOM-PRODUCT-DEFAULT',
+						variantKey: 'default',
+						kind: ProductVariantKind.DEFAULT,
+						attributes: []
+					},
+					{
+						id: 'variant-custom',
+						sku: 'CUSTOM-PRODUCT-S',
+						variantKey: 'size=s',
+						kind: ProductVariantKind.MATRIX,
+						attributes: [{ id: 'attribute-size-s' }]
+					}
+				])
 			}
 		}
 		const prisma = {
@@ -960,8 +1035,67 @@ describe('ProductRepository', () => {
 				status: 'OUT_OF_STOCK',
 				attributes: []
 			} as any)
-		).resolves.toBe(false)
+		).resolves.toBe(true)
 
+		expect(tx.productVariant.create).toHaveBeenCalledWith({
+			data: expect.objectContaining({
+				productId: 'product-1',
+				variantKey: 'default',
+				kind: ProductVariantKind.DEFAULT
+			})
+		})
+	})
+
+	it('converts an unattributed legacy variant into the technical default', async () => {
+		const tx = {
+			product: {
+				findFirst: jest.fn().mockResolvedValue({ id: 'product-1' })
+			},
+			productVariant: {
+				findFirst: jest
+					.fn()
+					.mockResolvedValueOnce(null)
+					.mockResolvedValueOnce(null)
+					.mockResolvedValueOnce({ id: 'legacy-variant' }),
+				update: jest.fn(),
+				create: jest.fn(),
+				findMany: jest.fn().mockResolvedValue([
+					{
+						id: 'legacy-variant',
+						sku: 'LEGACY-PRODUCT',
+						variantKey: 'default',
+						kind: ProductVariantKind.DEFAULT,
+						attributes: []
+					}
+				])
+			}
+		}
+		const prisma = {
+			$transaction: jest.fn(async callback => callback(tx))
+		}
+		const repository = new ProductRepository(prisma as any)
+
+		await expect(
+			repository.ensureDefaultVariant('product-1', 'catalog-1', {
+				sku: 'LEGACY-PRODUCT-DEFAULT',
+				variantKey: 'default',
+				price: 120,
+				stock: 0,
+				status: 'OUT_OF_STOCK',
+				attributes: []
+			} as any)
+		).resolves.toBe(true)
+
+		expect(tx.productVariant.update).toHaveBeenCalledWith({
+			where: { id: 'legacy-variant' },
+			data: expect.objectContaining({
+				variantKey: 'default',
+				kind: ProductVariantKind.DEFAULT,
+				price: 120,
+				stock: 0,
+				status: 'OUT_OF_STOCK'
+			})
+		})
 		expect(tx.productVariant.create).not.toHaveBeenCalled()
 	})
 

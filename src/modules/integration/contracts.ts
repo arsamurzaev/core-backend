@@ -24,11 +24,28 @@ export type OrderExportQueueResult = {
 	reason?: string
 }
 
+export type OrderExportWaitResult = {
+	ok: boolean
+	status: 'SUCCESS' | 'ERROR' | 'SKIPPED' | 'TIMEOUT' | 'NOT_QUEUED'
+	exportId?: string
+	error?: string | null
+	reason?: string
+}
+
 export interface OrderExportPort {
 	enqueueCompletedOrder(
 		catalogId: string,
 		orderId: string
 	): Promise<OrderExportQueueResult>
+	waitForCompletedOrderExport?(
+		catalogId: string,
+		orderId: string,
+		params?: {
+			provider?: IntegrationProvider
+			timeoutMs?: number
+			intervalMs?: number
+		}
+	): Promise<OrderExportWaitResult>
 }
 
 export interface CatalogSyncPort {

@@ -170,8 +170,72 @@ describe('AttributeService', () => {
 		})
 	})
 
+	it('allows only display order updates for imported enum values', async () => {
+		repo.findById.mockResolvedValue(enumAttribute as any)
+		repo.findEnumValue.mockResolvedValue({
+			id: 'enum-id',
+			source: 'IMPORTED'
+		} as any)
+		repo.updateEnumValue.mockResolvedValue({
+			id: 'enum-id',
+			displayOrder: 5,
+			source: 'IMPORTED'
+		} as any)
+
+		await service.updateEnumValue('attribute-id', 'enum-id', {
+			displayOrder: 5
+		})
+
+		expect(repo.updateEnumValue).toHaveBeenCalledWith(
+			'enum-id',
+			'attribute-id',
+			{ displayOrder: 5 },
+			null
+		)
+	})
+
+	it('rejects content updates for imported enum values', async () => {
+		repo.findById.mockResolvedValue(enumAttribute as any)
+		repo.findEnumValue.mockResolvedValue({
+			id: 'enum-id',
+			source: 'IMPORTED'
+		} as any)
+
+		await expect(
+			service.updateEnumValue('attribute-id', 'enum-id', {
+				displayName: 'Manual name'
+			})
+		).rejects.toBeInstanceOf(BadRequestException)
+
+		expect(repo.updateEnumValue).not.toHaveBeenCalled()
+	})
+
+	it('rejects destructive actions for imported enum values', async () => {
+		repo.findById.mockResolvedValue(enumAttribute as any)
+		repo.findEnumValue.mockResolvedValue({
+			id: 'enum-id',
+			source: 'IMPORTED'
+		} as any)
+
+		await expect(
+			service.removeEnumValue('attribute-id', 'enum-id')
+		).rejects.toBeInstanceOf(BadRequestException)
+
+		await expect(
+			service.createEnumValueAlias('attribute-id', 'enum-id', {
+				value: 'alias'
+			})
+		).rejects.toBeInstanceOf(BadRequestException)
+
+		expect(repo.softDeleteEnumValue).not.toHaveBeenCalled()
+		expect(repo.createEnumValueAlias).not.toHaveBeenCalled()
+	})
+
 	it('merges enum values through repository and rejects self-merge', async () => {
 		repo.findById.mockResolvedValue(enumAttribute as any)
+		repo.findEnumValue.mockImplementation(
+			async (_attributeId, id) => ({ id, source: 'MANUAL' }) as any
+		)
 		repo.mergeEnumValues.mockResolvedValue({ id: 'target-id' } as any)
 
 		await expect(
@@ -190,5 +254,20 @@ describe('AttributeService', () => {
 			'target-id',
 			null
 		)
+	})
+
+	it('rejects merge when either enum value is imported', async () => {
+		repo.findById.mockResolvedValue(enumAttribute as any)
+		repo.findEnumValue
+			.mockResolvedValueOnce({ id: 'source-id', source: 'MANUAL' } as any)
+			.mockResolvedValueOnce({ id: 'target-id', source: 'IMPORTED' } as any)
+
+		await expect(
+			service.mergeEnumValues('attribute-id', 'source-id', {
+				targetId: 'target-id'
+			})
+		).rejects.toBeInstanceOf(BadRequestException)
+
+		expect(repo.mergeEnumValues).not.toHaveBeenCalled()
 	})
 })

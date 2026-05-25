@@ -142,6 +142,41 @@ describe('CartVariantSelectionService', () => {
 		)
 	})
 
+	it('resolves selected sale unit even when product variants are disabled', async () => {
+		capabilities.canUseProductVariants.mockResolvedValue(false)
+		tx.productVariantSaleUnit.findFirst.mockResolvedValue({
+			variantId: 'default-variant'
+		})
+
+		await expect(
+			service.resolveCartVariantId(
+				tx as never,
+				'catalog-1',
+				{
+					productId: 'product-1',
+					variantId: null,
+					saleUnitId: 'sale-unit-1',
+					quantity: 1
+				},
+				'NONE'
+			)
+		).resolves.toBe('default-variant')
+		expect(tx.productVariantSaleUnit.findFirst).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: expect.objectContaining({
+					id: 'sale-unit-1',
+					isActive: true,
+					deleteAt: null,
+					variant: expect.objectContaining({
+						productId: 'product-1',
+						deleteAt: null
+					})
+				})
+			})
+		)
+		expect(sellableReader.resolveProductSellable).not.toHaveBeenCalled()
+	})
+
 	it('does not auto-select matrix variants when product variants are disabled', async () => {
 		capabilities.canUseProductVariants.mockResolvedValue(false)
 		sellableReader.resolveProductSellable.mockResolvedValue({

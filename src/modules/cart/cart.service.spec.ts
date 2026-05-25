@@ -14,8 +14,12 @@ import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { RedisService } from '@/infrastructure/redis/redis.service'
 import { CAPABILITY_READER_PORT } from '@/modules/capability/contracts'
 import { ORDER_EXPORT_PORT } from '@/modules/integration/contracts'
+import { IntegrationPayloadTokenService } from '@/modules/integration/integration-payload-token.service'
 import { INVENTORY_RESERVATION_PORT } from '@/modules/inventory/contracts'
-import { PRODUCT_SELLABLE_READER_PORT } from '@/modules/product/contracts'
+import {
+	PRODUCT_MAINTENANCE_PORT,
+	PRODUCT_SELLABLE_READER_PORT
+} from '@/modules/product/contracts'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 
 import { CartCurrentService } from './cart-current.service'
@@ -165,6 +169,9 @@ describe('CartService', () => {
 		integrationVariantLink: {
 			findMany: jest.Mock
 		}
+		integrationExternalItem: {
+			findFirst: jest.Mock
+		}
 		$queryRaw: jest.Mock
 		$transaction: jest.Mock
 	}
@@ -177,6 +184,9 @@ describe('CartService', () => {
 	}
 	let orderExportQueue: {
 		enqueueCompletedOrder: jest.Mock
+	}
+	let integrationPayloadTokens: {
+		open: jest.Mock
 	}
 	let inventory: {
 		consumeCompletedOrderStockTx: jest.Mock
@@ -192,6 +202,9 @@ describe('CartService', () => {
 	let sellableReader: {
 		resolveProductSellable: jest.Mock
 		resolveVariantSellable: jest.Mock
+	}
+	let productMaintenance: {
+		repairMissingDefaultVariantForProduct: jest.Mock
 	}
 
 	beforeEach(async () => {
@@ -233,6 +246,9 @@ describe('CartService', () => {
 			integrationVariantLink: {
 				findMany: jest.fn().mockResolvedValue([])
 			},
+			integrationExternalItem: {
+				findFirst: jest.fn().mockResolvedValue(null)
+			},
 			$queryRaw: jest.fn().mockResolvedValue([{ id: 'cart-1' }]),
 			$transaction: jest.fn(async callback => callback(prisma))
 		}
@@ -254,6 +270,9 @@ describe('CartService', () => {
 				queued: false,
 				reason: 'order_export_disabled'
 			})
+		}
+		integrationPayloadTokens = {
+			open: jest.fn()
 		}
 		inventory = {
 			consumeCompletedOrderStockTx: jest.fn().mockResolvedValue([]),
@@ -299,6 +318,9 @@ describe('CartService', () => {
 				})
 			)
 		}
+		productMaintenance = {
+			repairMissingDefaultVariantForProduct: jest.fn()
+		}
 
 		const module: TestingModule = await Test.createTestingModule({
 			providers: [
@@ -335,12 +357,20 @@ describe('CartService', () => {
 					useValue: orderExportQueue
 				},
 				{
+					provide: IntegrationPayloadTokenService,
+					useValue: integrationPayloadTokens
+				},
+				{
 					provide: INVENTORY_RESERVATION_PORT,
 					useValue: inventory
 				},
 				{
 					provide: CAPABILITY_READER_PORT,
 					useValue: capabilities
+				},
+				{
+					provide: PRODUCT_MAINTENANCE_PORT,
+					useValue: productMaintenance
 				},
 				{
 					provide: PRODUCT_SELLABLE_READER_PORT,
@@ -1424,6 +1454,15 @@ describe('CartService', () => {
 		})
 
 		expect(prisma.productVariant.findMany).not.toHaveBeenCalled()
+		expect(
+			productMaintenance.repairMissingDefaultVariantForProduct
+		).toHaveBeenCalledWith('catalog-1', 'product-1', { tx: prisma })
+		expect(
+			productMaintenance.repairMissingDefaultVariantForProduct.mock
+				.invocationCallOrder[0]
+		).toBeLessThan(
+			sellableReader.resolveProductSellable.mock.invocationCallOrder[0]
+		)
 		expect(sellableReader.resolveProductSellable).toHaveBeenCalledWith(
 			'catalog-1',
 			'product-1',
@@ -1602,9 +1641,9 @@ describe('CartService', () => {
 		expect(result.cart.items[0].product.price).toBeNull()
 	})
 
-	it('ignores selected sale unit when product variants are disabled', async () => {
+	it('uses selected sale unit when product variants are disabled', async () => {
 		capabilities.canUseProductVariants.mockResolvedValueOnce(false)
-		capabilities.getCurrentFeatures.mockResolvedValueOnce({
+		capabilities.getCurrentFeatures.mockResolvedValue({
 			canUseProductTypes: false,
 			canUseProductVariants: false,
 			canUseCatalogSaleUnits: true,
@@ -1616,11 +1655,23 @@ describe('CartService', () => {
 			status: CartStatus.DRAFT,
 			items: [
 				createCartItem({
-					variantId: null,
-					saleUnitId: null,
-					variant: null,
-					saleUnit: null,
+					variantId: 'variant-1',
+					saleUnitId: 'sale-unit-hidden',
+					variant: createVariant({ id: 'variant-1', price: 1000 }),
+					saleUnit: {
+						id: 'sale-unit-hidden',
+						variantId: 'variant-1',
+						code: 'box',
+						name: 'Box',
+						baseQuantity: 12,
+						price: 500,
+						isDefault: true,
+						isActive: true,
+						displayOrder: 0
+					},
 					quantity: 1,
+					baseQuantity: 12,
+					unitPriceSnapshot: 500,
 					product: {
 						id: 'product-1',
 						name: 'Product 1',
@@ -1641,6 +1692,18 @@ describe('CartService', () => {
 			price: 1000,
 			productAttributes: []
 		})
+		prisma.productVariantSaleUnit.findFirst
+			.mockResolvedValueOnce({ variantId: 'variant-1' })
+			.mockResolvedValueOnce({
+				id: 'sale-unit-hidden',
+				variantId: 'variant-1',
+				baseQuantity: 12,
+				price: 500
+			})
+		prisma.productVariant.findFirst.mockResolvedValueOnce({
+			id: 'variant-1',
+			price: 1000
+		})
 		prisma.cartItem.findFirst.mockResolvedValueOnce(null)
 		prisma.cartItem.count.mockResolvedValueOnce(0)
 		prisma.cartItem.create.mockResolvedValueOnce({ id: 'cart-item-1' })
@@ -1652,18 +1715,31 @@ describe('CartService', () => {
 			quantity: 1
 		})
 
-		expect(prisma.productVariantSaleUnit.findFirst).not.toHaveBeenCalled()
 		expect(prisma.cartItem.create).toHaveBeenCalledWith(
 			expect.objectContaining({
 				data: expect.objectContaining({
-					variantId: null,
-					saleUnitId: null,
-					baseQuantity: 1
+					variantId: 'variant-1',
+					saleUnitId: 'sale-unit-hidden',
+					baseQuantity: 12,
+					unitPriceSnapshot: 500
 				})
 			})
 		)
-		expect(result.cart.items[0].saleUnitId).toBeNull()
-		expect(result.cart.items[0].saleUnit).toBeNull()
+		expect(result.cart.items[0].variantId).toBeNull()
+		expect(result.cart.items[0].saleUnitId).toBe('sale-unit-hidden')
+		expect(result.cart.items[0].saleUnit).toEqual(
+			expect.objectContaining({
+				name: 'Box',
+				baseQuantity: 12,
+				price: 500
+			})
+		)
+		expect(sellableReader.resolveVariantSellable).toHaveBeenCalledWith(
+			'catalog-1',
+			'product-1',
+			'variant-1',
+			{ quantity: 12, enforceStock: false }
+		)
 	})
 
 	it('stores discounted variant price snapshot when adding an item', async () => {

@@ -26,6 +26,10 @@ import { RequestContext } from '@/shared/tenancy/request-context'
 
 import { IntegrationRepository } from './integration.repository'
 import { IntegrationService } from './integration.service'
+import { IikoMetadataCryptoService } from './providers/iiko/iiko.metadata'
+import { IikoOrderExportQueueService } from './providers/iiko/iiko.order-export.queue.service'
+import { IikoQueueService } from './providers/iiko/iiko.queue.service'
+import { IikoSyncService } from './providers/iiko/iiko.sync.service'
 import { MoySkladClient } from './providers/moysklad/moysklad.client'
 import {
 	buildMoySkladMetadata,
@@ -97,6 +101,10 @@ describe('IntegrationService', () => {
 	let queue: jest.Mocked<MoySkladQueueService>
 	let orderExportQueue: jest.Mocked<MoySkladOrderExportQueueService>
 	let metadataCrypto: jest.Mocked<MoySkladMetadataCryptoService>
+	let iikoSync: jest.Mocked<IikoSyncService>
+	let iikoQueue: jest.Mocked<IikoQueueService>
+	let iikoOrderExportQueue: jest.Mocked<IikoOrderExportQueueService>
+	let iikoMetadataCrypto: jest.Mocked<IikoMetadataCryptoService>
 	let audit: jest.Mocked<AuditService>
 	let products: jest.Mocked<ProductExternalSyncPort>
 
@@ -204,6 +212,7 @@ describe('IntegrationService', () => {
 					provide: IntegrationRepository,
 					useValue: {
 						findMoySklad: jest.fn(),
+						findIiko: jest.fn(),
 						findLatestActiveSyncRun: jest.fn(),
 						findLatestFinishedSyncRun: jest.fn(),
 						findSyncRunById: jest.fn(),
@@ -216,9 +225,13 @@ describe('IntegrationService', () => {
 						upsertMoySkladEnumValueAlias: jest.fn(),
 						upsertMoySkladAttributeMappings: jest.fn(),
 						upsertMoySklad: jest.fn(),
+						upsertIiko: jest.fn(),
 						updateMoySklad: jest.fn(),
+						updateIiko: jest.fn(),
 						findMoySkladById: jest.fn(),
+						findIikoById: jest.fn(),
 						updateMoySkladMetadataById: jest.fn(),
+						updateIikoMetadataById: jest.fn(),
 						patchMoySkladStockWebhookMetadata: jest.fn(),
 						patchMoySkladProductDeleteWebhookMetadata: jest.fn(),
 						patchMoySkladProductChangeWebhookMetadata: jest.fn(),
@@ -228,6 +241,7 @@ describe('IntegrationService', () => {
 						recomputeProductStatusFromVariants: jest.fn(),
 						createWebhookEventIfNew: jest.fn(),
 						softDeleteMoySklad: jest.fn(),
+						softDeleteIiko: jest.fn(),
 						failMoySkladSync: jest.fn()
 					}
 				},
@@ -354,6 +368,56 @@ describe('IntegrationService', () => {
 					}
 				},
 				{
+					provide: IikoSyncService,
+					useValue: {
+						testConnection: jest.fn(),
+						previewExternalMenu: jest.fn(),
+						syncCatalog: jest.fn()
+					}
+				},
+				{
+					provide: IikoQueueService,
+					useValue: {
+						enqueueCatalogSync: jest.fn(),
+						enqueueProductSync: jest.fn(),
+						enqueueStockSync: jest.fn()
+					}
+				},
+				{
+					provide: IikoOrderExportQueueService,
+					useValue: {
+						retryOrderExport: jest.fn()
+					}
+				},
+				{
+					provide: IikoMetadataCryptoService,
+					useValue: {
+						buildStoredMetadata: jest.fn((input: any) => input),
+						parseStoredMetadata: jest.fn((metadata: any) => ({
+							apiLogin: metadata?.apiLogin ?? 'iiko-login',
+							organizationId: metadata?.organizationId ?? 'organization-1',
+							organizationName: metadata?.organizationName ?? null,
+							externalMenuId: metadata?.externalMenuId ?? null,
+							externalMenuName: metadata?.externalMenuName ?? null,
+							priceCategoryId: metadata?.priceCategoryId ?? null,
+							priceCategoryName: metadata?.priceCategoryName ?? null,
+							terminalGroupId: metadata?.terminalGroupId ?? null,
+							terminalGroupName: metadata?.terminalGroupName ?? null,
+							menuVersion: metadata?.menuVersion ?? 4,
+							syncSource: metadata?.syncSource ?? 'external_menu',
+							importImages: metadata?.importImages ?? true,
+							exportOrders: metadata?.exportOrders ?? false,
+							orderExportServiceType:
+								metadata?.orderExportServiceType ?? null,
+							orderExportSourceKey: metadata?.orderExportSourceKey ?? null,
+							lastRevision: metadata?.lastRevision ?? null,
+							lastMenuSyncedAt: metadata?.lastMenuSyncedAt ?? null,
+							lastStopListSyncedAt:
+								metadata?.lastStopListSyncedAt ?? null
+						}))
+					}
+				},
+				{
 					provide: ConfigService,
 					useValue: {
 						get: jest.fn((key: string) => {
@@ -380,9 +444,11 @@ describe('IntegrationService', () => {
 					provide: CapabilityService,
 					useValue: {
 						assertCanUseMoySkladIntegration: jest.fn().mockResolvedValue(undefined),
+						assertCanUseIikoIntegration: jest.fn().mockResolvedValue(undefined),
 						assertCanUseProductTypes: jest.fn().mockResolvedValue(undefined),
 						assertCanUseProductVariants: jest.fn().mockResolvedValue(undefined),
-						canUseMoySkladIntegration: jest.fn().mockResolvedValue(true)
+						canUseMoySkladIntegration: jest.fn().mockResolvedValue(true),
+						canUseIikoIntegration: jest.fn().mockResolvedValue(true)
 					}
 				},
 				{
@@ -402,6 +468,10 @@ describe('IntegrationService', () => {
 		queue = module.get(MoySkladQueueService)
 		orderExportQueue = module.get(MoySkladOrderExportQueueService)
 		metadataCrypto = module.get(MoySkladMetadataCryptoService)
+		iikoSync = module.get(IikoSyncService)
+		iikoQueue = module.get(IikoQueueService)
+		iikoOrderExportQueue = module.get(IikoOrderExportQueueService)
+		iikoMetadataCrypto = module.get(IikoMetadataCryptoService)
 		audit = module.get(AuditService)
 		products = module.get(PRODUCT_EXTERNAL_SYNC_PORT)
 		jest.spyOn(MoySkladClient.prototype, 'createWebhook').mockResolvedValue({
@@ -445,6 +515,238 @@ describe('IntegrationService', () => {
 
 	it('should be defined', () => {
 		expect(service).toBeDefined()
+	})
+
+	it('returns iiko configured false when integration is missing', async () => {
+		repo.findIiko.mockResolvedValue(null)
+		repo.findLatestActiveSyncRun.mockResolvedValue(null)
+		repo.findLatestFinishedSyncRun.mockResolvedValue(null)
+
+		const result = await runWithCatalog(() => service.getIikoStatus())
+
+		expect(result).toEqual({
+			configured: false,
+			integration: null,
+			activeRun: null,
+			lastRun: null
+		})
+		expect(repo.findLatestActiveSyncRun).toHaveBeenCalledWith(
+			'catalog-1',
+			IntegrationProvider.IIKO
+		)
+	})
+
+	it('upserts iiko integration with encrypted apiLogin metadata', async () => {
+		const iikoRecord = {
+			...integrationRecord,
+			provider: IntegrationProvider.IIKO,
+			metadata: {
+				apiLogin: 'iiko-login',
+				organizationId: 'organization-1',
+				organizationName: 'Demo',
+				externalMenuId: '81651',
+				externalMenuName: 'Main menu',
+				priceCategoryId: 'price-1',
+				priceCategoryName: 'Base',
+				menuVersion: 4,
+				importImages: true
+			}
+		}
+		repo.findIiko.mockResolvedValue(null)
+		repo.upsertIiko.mockResolvedValue(iikoRecord as any)
+
+		const result = await runWithCatalog(() =>
+			service.upsertIiko({
+				apiLogin: 'iiko-login',
+				organizationId: 'organization-1',
+				organizationName: 'Demo',
+				externalMenuId: '81651',
+				externalMenuName: 'Main menu',
+				priceCategoryId: 'price-1',
+				priceCategoryName: 'Base',
+				importImages: true
+			})
+		)
+
+		expect(iikoMetadataCrypto.buildStoredMetadata).toHaveBeenCalledWith(
+			expect.objectContaining({
+				apiLogin: 'iiko-login',
+				organizationId: 'organization-1',
+				organizationName: 'Demo',
+				externalMenuId: '81651',
+				externalMenuName: 'Main menu',
+				priceCategoryId: 'price-1',
+				priceCategoryName: 'Base',
+				importImages: true
+			})
+		)
+		expect(repo.upsertIiko).toHaveBeenCalledWith(
+			'catalog-1',
+			expect.objectContaining({
+				isActive: true
+			})
+		)
+		expect(result.provider).toBe(IntegrationProvider.IIKO)
+		expect(result.organizationId).toBe('organization-1')
+	})
+
+	it('tests iiko connection through sync service', async () => {
+		iikoSync.testConnection.mockResolvedValue({
+			ok: true,
+			organizations: [{ id: 'org-1', name: 'Demo', isActive: true }],
+			externalMenus: [{ id: '81651', name: 'Main menu' }],
+			priceCategories: [{ id: 'price-1', name: 'Base' }],
+			terminalGroups: [
+				{
+					id: 'terminal-1',
+					name: 'Main terminal',
+					organizationId: 'org-1',
+					isActive: true,
+					isAlive: true
+				}
+			]
+		})
+
+		const result = await runWithCatalog(() =>
+			service.testIikoConnection({ apiLogin: 'iiko-login' })
+		)
+
+		expect(iikoSync.testConnection).toHaveBeenCalledWith('iiko-login')
+		expect(result.organizations).toHaveLength(1)
+		expect(result.externalMenus).toHaveLength(1)
+	})
+
+	it('tests iiko connection with stored apiLogin when omitted', async () => {
+		repo.findIiko.mockResolvedValue({
+			...integrationRecord,
+			provider: IntegrationProvider.IIKO,
+			metadata: {
+				apiLogin: 'stored-iiko-login',
+				organizationId: 'organization-1'
+			}
+		} as any)
+		iikoSync.testConnection.mockResolvedValue({
+			ok: true,
+			organizations: [{ id: 'org-1', name: 'Demo', isActive: true }],
+			externalMenus: [{ id: '81651', name: 'Main menu' }],
+			priceCategories: [{ id: 'price-1', name: 'Base' }],
+			terminalGroups: [
+				{
+					id: 'terminal-1',
+					name: 'Main terminal',
+					organizationId: 'org-1',
+					isActive: true,
+					isAlive: true
+				}
+			]
+		})
+
+		const result = await runWithCatalog(() => service.testIikoConnection({}))
+
+		expect(repo.findIiko).toHaveBeenCalledWith('catalog-1')
+		expect(iikoMetadataCrypto.parseStoredMetadata).toHaveBeenCalledWith({
+			apiLogin: 'stored-iiko-login',
+			organizationId: 'organization-1'
+		})
+		expect(iikoSync.testConnection).toHaveBeenCalledWith('stored-iiko-login')
+		expect(result.terminalGroups).toHaveLength(1)
+	})
+
+	it('previews iiko external menu import', async () => {
+		repo.findIiko.mockResolvedValue({
+			...integrationRecord,
+			provider: IntegrationProvider.IIKO,
+			metadata: {
+				apiLogin: 'iiko-login',
+				organizationId: 'organization-1',
+				externalMenuId: '81651',
+				priceCategoryId: 'price-1'
+			}
+		} as any)
+		iikoSync.previewExternalMenu.mockResolvedValue({
+			ok: true,
+			source: 'external_menu',
+			revision: 1,
+			externalMenuId: '81651',
+			externalMenuName: 'Main menu',
+			stats: {
+				categories: 1,
+				items: 1,
+				visibleItems: 1,
+				hiddenItems: 0,
+				itemsWithoutPrice: 0,
+				itemsWithModifiers: 0,
+				combos: 0,
+				variants: 1
+			},
+			categories: [],
+			items: []
+		})
+
+		const result = await runWithCatalog(() => service.previewIikoImport({}))
+
+		expect(iikoSync.previewExternalMenu).toHaveBeenCalledWith(
+			expect.objectContaining({
+				apiLogin: 'iiko-login',
+				organizationId: 'organization-1',
+				externalMenuId: '81651',
+				priceCategoryId: 'price-1'
+			})
+		)
+		expect(result.stats.visibleItems).toBe(1)
+	})
+
+	it('queues iiko catalog sync', async () => {
+		iikoQueue.enqueueCatalogSync.mockResolvedValue({
+			ok: true,
+			queued: true,
+			runId: 'run-iiko',
+			jobId: 'job-iiko',
+			mode: IntegrationSyncRunMode.FULL,
+			trigger: IntegrationSyncRunTrigger.MANUAL
+		})
+
+		const result = await runWithCatalog(() => service.syncIikoCatalog())
+
+		expect(iikoQueue.enqueueCatalogSync).toHaveBeenCalledWith('catalog-1')
+		expect(result.runId).toBe('run-iiko')
+	})
+
+	it('queues iiko stock sync', async () => {
+		iikoQueue.enqueueStockSync.mockResolvedValue({
+			ok: true,
+			queued: true,
+			runId: 'run-iiko-stock',
+			jobId: 'job-iiko-stock',
+			mode: IntegrationSyncRunMode.STOCK,
+			trigger: IntegrationSyncRunTrigger.MANUAL
+		})
+
+		const result = await runWithCatalog(() => service.syncIikoStock())
+
+		expect(iikoQueue.enqueueStockSync).toHaveBeenCalledWith('catalog-1')
+		expect(result.mode).toBe(IntegrationSyncRunMode.STOCK)
+	})
+
+	it('queues iiko product sync', async () => {
+		iikoQueue.enqueueProductSync.mockResolvedValue({
+			ok: true,
+			queued: true,
+			runId: 'run-iiko-product',
+			jobId: 'job-iiko-product',
+			mode: IntegrationSyncRunMode.PRODUCT,
+			trigger: IntegrationSyncRunTrigger.MANUAL
+		})
+
+		const result = await runWithCatalog(() =>
+			service.syncIikoProduct('product-1')
+		)
+
+		expect(iikoQueue.enqueueProductSync).toHaveBeenCalledWith(
+			'catalog-1',
+			'product-1'
+		)
+		expect(result.mode).toBe(IntegrationSyncRunMode.PRODUCT)
 	})
 
 	it('returns configured false when integration is missing', async () => {
@@ -690,6 +992,39 @@ describe('IntegrationService', () => {
 				status: 'ERROR',
 				attempts: 2,
 				lastError: 'MoySklad API error'
+			})
+		])
+		expect(result[0]).not.toHaveProperty('payload')
+		expect(result[0]).not.toHaveProperty('response')
+	})
+
+	it('returns iiko order export history without payloads', async () => {
+		repo.findOrderExportsByCatalog.mockResolvedValue([
+			{
+				...orderExportRecord,
+				provider: IntegrationProvider.IIKO,
+				idempotencyKey: 'IIKO:integration-1:order-1',
+				lastError: 'iiko API error'
+			} as any
+		])
+
+		const result = await runWithCatalog(() =>
+			service.getIikoOrderExports('10')
+		)
+
+		expect(repo.findOrderExportsByCatalog).toHaveBeenCalledWith(
+			'catalog-1',
+			10,
+			IntegrationProvider.IIKO
+		)
+		expect(result).toEqual([
+			expect.objectContaining({
+				id: 'export-1',
+				provider: IntegrationProvider.IIKO,
+				orderId: 'order-1',
+				status: 'ERROR',
+				attempts: 2,
+				lastError: 'iiko API error'
 			})
 		])
 		expect(result[0]).not.toHaveProperty('payload')
@@ -1086,6 +1421,42 @@ describe('IntegrationService', () => {
 				targetId: 'export-1',
 				targetCatalogId: 'catalog-1',
 				metadata: expect.objectContaining({
+					queued: true,
+					jobId: 'job-1'
+				})
+			})
+		)
+	})
+
+	it('queues manual iiko order export retry', async () => {
+		iikoOrderExportQueue.retryOrderExport.mockResolvedValue({
+			ok: true,
+			queued: true,
+			exportId: 'export-1',
+			jobId: 'job-1'
+		})
+
+		const result = await runWithCatalog(() =>
+			service.retryIikoOrderExport('export-1')
+		)
+
+		expect(iikoOrderExportQueue.retryOrderExport).toHaveBeenCalledWith(
+			'catalog-1',
+			'export-1'
+		)
+		expect(result).toEqual({
+			ok: true,
+			queued: true,
+			exportId: 'export-1',
+			jobId: 'job-1'
+		})
+		expect(audit.record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				action: 'integration.iiko.order_export.retry',
+				targetId: 'export-1',
+				targetCatalogId: 'catalog-1',
+				metadata: expect.objectContaining({
+					provider: IntegrationProvider.IIKO,
 					queued: true,
 					jobId: 'job-1'
 				})

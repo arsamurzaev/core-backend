@@ -33,6 +33,18 @@ describe('integration provider capabilities', () => {
 		})
 	})
 
+	it('describes iiko MVP supported features', () => {
+		expect(INTEGRATION_PROVIDER_CAPABILITIES[IntegrationProvider.IIKO]).toEqual({
+			productImport: true,
+			variantImport: true,
+			stockImport: true,
+			imageImport: true,
+			orderExport: true,
+			reservation: false,
+			webhook: true
+		})
+	})
+
 	it('returns a copy so callers cannot mutate the source matrix', () => {
 		const capabilities = getIntegrationProviderCapabilities(
 			IntegrationProvider.MOYSKLAD

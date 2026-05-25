@@ -38,6 +38,10 @@ const DEFAULT_VARIANT_SKU_SUFFIX = 'DEFAULT'
 const VARIANT_SKU_MAX_LENGTH = 100
 const MOVED_VARIANT_SKU_SUFFIX = 'MOVED'
 const MOYSKLAD_PRODUCT_TYPE_CODE_PREFIX = 'moysklad-'
+const IIKO_SIZE_ATTRIBUTE_KEY = 'iiko_size'
+const IIKO_SIZE_ATTRIBUTE_NAME = 'Size'
+const IIKO_SIZE_PRODUCT_TYPE_CODE = 'iiko-size'
+const IIKO_SIZE_PRODUCT_TYPE_NAME = 'iiko: Size'
 const PRODUCT_TYPE_SCOPE_CATALOG = 'CATALOG'
 const PRODUCT_TYPE_CODE_MAX_LENGTH = 100
 const PRODUCT_TYPE_NAME_MAX_LENGTH = 255
@@ -61,6 +65,29 @@ function readRawMetaType(value: unknown): string | null {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return null
 	const type = (value as Record<string, unknown>).type
 	return typeof type === 'string' ? type : null
+}
+
+function isIikoStopListItemStopped(item: IikoStopListAvailabilityItem): boolean {
+	return item.balance === null || item.balance <= 0
+}
+
+function buildIikoVariantExternalId(productId: string, sizeId: string): string {
+	return `${productId}:${sizeId}`
+}
+
+function resolveDefaultProductVariant(
+	variants: ProductVariantSyncRecord[]
+): ProductVariantSyncRecord | null {
+	return (
+		variants.find(
+			variant =>
+				variant.kind === ProductVariantKind.DEFAULT ||
+				variant.variantKey === DEFAULT_VARIANT_KEY
+		) ??
+		variants.find(variant => variant.status !== ProductVariantStatus.DISABLED) ??
+		variants[0] ??
+		null
+	)
 }
 
 function emptyVariantStockUpdateResult(): IntegrationVariantStockUpdateResult {
@@ -135,6 +162,22 @@ const productLinkSelect = {
 	rawMeta: true,
 	createdAt: true,
 	updatedAt: true
+}
+
+const productLinkPreviewSelect = {
+	id: true,
+	integrationId: true,
+	productId: true,
+	externalId: true,
+	product: {
+		select: {
+			id: true,
+			name: true,
+			price: true,
+			status: true,
+			deleteAt: true
+		}
+	}
 }
 
 const variantLinkSelect = {
@@ -248,6 +291,25 @@ const categoryLinkSelect = {
 	category: {
 		select: categorySyncSelect
 	},
+	createdAt: true,
+	updatedAt: true
+}
+
+const externalItemSelect = {
+	id: true,
+	catalogId: true,
+	integrationId: true,
+	provider: true,
+	type: true,
+	externalId: true,
+	externalParentId: true,
+	publicCode: true,
+	name: true,
+	code: true,
+	isActive: true,
+	rawMeta: true,
+	lastSeenAt: true,
+	lastSyncedAt: true,
 	createdAt: true,
 	updatedAt: true
 }
@@ -405,6 +467,11 @@ export type IntegrationProductLinkRecord =
 		select: typeof productLinkSelect
 	}>
 
+export type IntegrationProductPreviewRecord =
+	Prisma.IntegrationProductLinkGetPayload<{
+		select: typeof productLinkPreviewSelect
+	}>
+
 export type IntegrationVariantLinkRecord =
 	Prisma.IntegrationVariantLinkGetPayload<{
 		select: typeof variantLinkSelect
@@ -442,6 +509,25 @@ export type IntegrationVariantStockUpdateResult = {
 	nextStock: number | null
 }
 
+export type IikoStopListAvailabilityItem = {
+	productId: string
+	sizeId: string | null
+	balance: number | null
+	rawMeta?: Prisma.InputJsonValue
+}
+
+export type IikoStopListAvailabilityResult = {
+	totalStopListItems: number
+	stoppedStopListItems: number
+	matchedStopListItems: number
+	unmatchedStopListItems: number
+	totalVariants: number
+	stoppedVariants: number
+	restoredVariants: number
+	changedVariants: number
+	changedProducts: number
+}
+
 export type VariantAttributeDefinitionRecord = Prisma.AttributeGetPayload<{
 	select: typeof variantAttributeDefinitionSelect
 }>
@@ -474,6 +560,11 @@ export type CategorySyncRecord = Prisma.CategoryGetPayload<{
 export type IntegrationCategoryLinkRecord =
 	Prisma.IntegrationCategoryLinkGetPayload<{
 		select: typeof categoryLinkSelect
+	}>
+
+export type IntegrationExternalItemRecord =
+	Prisma.IntegrationExternalItemGetPayload<{
+		select: typeof externalItemSelect
 	}>
 
 export type IntegrationSyncRunRecord = Prisma.IntegrationSyncRunGetPayload<{
@@ -522,6 +613,122 @@ export class IntegrationRepository {
 				deleteAt: null
 			},
 			select: integrationSelect
+		})
+	}
+
+	findIiko(catalogId: string): Promise<IntegrationRecord | null> {
+		return this.prisma.integration.findFirst({
+			where: {
+				catalogId,
+				provider: IntegrationProvider.IIKO,
+				deleteAt: null
+			},
+			select: integrationSelect
+		})
+	}
+
+	findIikoById(integrationId: string): Promise<IntegrationRecord | null> {
+		return this.prisma.integration.findFirst({
+			where: {
+				id: integrationId,
+				provider: IntegrationProvider.IIKO,
+				deleteAt: null
+			},
+			select: integrationSelect
+		})
+	}
+
+	findExternalItemByPublicCode(params: {
+		catalogId: string
+		provider: IntegrationProvider
+		type: string
+		publicCode: string
+		activeOnly?: boolean
+	}): Promise<IntegrationExternalItemRecord | null> {
+		return this.prisma.integrationExternalItem.findFirst({
+			where: {
+				catalogId: params.catalogId,
+				provider: params.provider,
+				type: params.type,
+				publicCode: params.publicCode,
+				...(params.activeOnly === false ? {} : { isActive: true }),
+				integration: {
+					deleteAt: null,
+					...(params.activeOnly === false ? {} : { isActive: true })
+				}
+			},
+			select: externalItemSelect
+		})
+	}
+
+	upsertExternalItem(params: {
+		catalogId: string
+		integrationId: string
+		provider: IntegrationProvider
+		type: string
+		externalId: string
+		publicCode: string
+		externalParentId?: string | null
+		name?: string | null
+		code?: string | null
+		isActive?: boolean
+		rawMeta?: Prisma.InputJsonValue
+		lastSeenAt?: Date | null
+		lastSyncedAt?: Date | null
+	}): Promise<IntegrationExternalItemRecord> {
+		return this.prisma.integrationExternalItem.upsert({
+			where: {
+				integrationId_type_externalId: {
+					integrationId: params.integrationId,
+					type: params.type,
+					externalId: params.externalId
+				}
+			},
+			create: {
+				catalogId: params.catalogId,
+				integrationId: params.integrationId,
+				provider: params.provider,
+				type: params.type,
+				externalId: params.externalId,
+				externalParentId: params.externalParentId ?? null,
+				publicCode: params.publicCode,
+				name: params.name ?? null,
+				code: params.code ?? null,
+				isActive: params.isActive ?? true,
+				rawMeta: params.rawMeta,
+				lastSeenAt: params.lastSeenAt ?? null,
+				lastSyncedAt: params.lastSyncedAt ?? null
+			},
+			update: {
+				externalParentId: params.externalParentId ?? null,
+				name: params.name ?? null,
+				code: params.code ?? null,
+				isActive: params.isActive ?? true,
+				...(params.rawMeta === undefined ? {} : { rawMeta: params.rawMeta }),
+				lastSeenAt: params.lastSeenAt ?? null,
+				lastSyncedAt: params.lastSyncedAt ?? null
+			},
+			select: externalItemSelect
+		})
+	}
+
+	deactivateMissingExternalItems(params: {
+		integrationId: string
+		type: string
+		externalIds: string[]
+	}): Promise<{ count: number }> {
+		return this.prisma.integrationExternalItem.updateMany({
+			where: {
+				integrationId: params.integrationId,
+				type: params.type,
+				isActive: true,
+				...(params.externalIds.length
+					? { externalId: { notIn: params.externalIds } }
+					: {})
+			},
+			data: {
+				isActive: false
+			}
 		})
 	}
 
@@ -574,6 +781,35 @@ export class IntegrationRepository {
 		})
 	}
 
+	upsertIiko(
+		catalogId: string,
+		params: {
+			metadata: Prisma.InputJsonValue
+			isActive: boolean
+		}
+	): Promise<IntegrationRecord> {
+		return this.prisma.integration.upsert({
+			where: {
+				catalogId_provider: {
+					catalogId,
+					provider: IntegrationProvider.IIKO
+				}
+			},
+			create: {
+				catalogId,
+				provider: IntegrationProvider.IIKO,
+				metadata: params.metadata,
+				isActive: params.isActive
+			},
+			update: {
+				metadata: params.metadata,
+				isActive: params.isActive,
+				deleteAt: null
+			},
+			select: integrationSelect
+		})
+	}
+
 	async updateMoySklad(
 		catalogId: string,
 		params: {
@@ -593,6 +829,44 @@ export class IntegrationRepository {
 		})
 
 		return this.findMoySklad(catalogId)
+	}
+
+	async updateIiko(
+		catalogId: string,
+		params: {
+			metadata?: Prisma.InputJsonValue
+			isActive?: boolean
+		}
+	): Promise<IntegrationRecord | null> {
+		const existing = await this.findIiko(catalogId)
+		if (!existing) return null
+
+		await this.prisma.integration.update({
+			where: { id: existing.id },
+			data: {
+				...(params.metadata !== undefined ? { metadata: params.metadata } : {}),
+				...(params.isActive !== undefined ? { isActive: params.isActive } : {})
+			}
+		})
+
+		return this.findIiko(catalogId)
+	}
+
+	async updateIikoMetadataById(
+		integrationId: string,
+		metadata: Prisma.InputJsonValue
+	): Promise<IntegrationRecord | null> {
+		const updated = await this.prisma.integration.updateMany({
+			where: {
+				id: integrationId,
+				provider: IntegrationProvider.IIKO,
+				deleteAt: null
+			},
+			data: { metadata }
+		})
+
+		if (!updated.count) return null
+		return this.findIikoById(integrationId)
 	}
 
 	async updateMoySkladMetadataById(
@@ -747,6 +1021,23 @@ export class IntegrationRepository {
 		return existing
 	}
 
+	async softDeleteIiko(catalogId: string): Promise<IntegrationRecord | null> {
+		const existing = await this.findIiko(catalogId)
+		if (!existing) return null
+
+		await this.prisma.integration.update({
+			where: { id: existing.id },
+			data: {
+				deleteAt: new Date(),
+				isActive: false,
+				lastSyncStatus: IntegrationSyncStatus.IDLE,
+				syncStartedAt: null
+			}
+		})
+
+		return existing
+	}
+
 	async beginMoySkladSync(
 		catalogId: string,
 		staleBefore: Date
@@ -772,6 +1063,33 @@ export class IntegrationRepository {
 
 		if (!updated.count) return null
 		return this.findMoySklad(catalogId)
+	}
+
+	async beginIikoSync(
+		catalogId: string,
+		staleBefore: Date
+	): Promise<IntegrationRecord | null> {
+		const updated = await this.prisma.integration.updateMany({
+			where: {
+				catalogId,
+				provider: IntegrationProvider.IIKO,
+				deleteAt: null,
+				isActive: true,
+				OR: [
+					{ lastSyncStatus: { not: IntegrationSyncStatus.SYNCING } },
+					{ syncStartedAt: null },
+					{ syncStartedAt: { lt: staleBefore } }
+				]
+			},
+			data: {
+				lastSyncStatus: IntegrationSyncStatus.SYNCING,
+				syncStartedAt: new Date(),
+				lastSyncError: null
+			}
+		})
+
+		if (!updated.count) return null
+		return this.findIiko(catalogId)
 	}
 
 	async finishMoySkladSync(
@@ -814,6 +1132,79 @@ export class IntegrationRepository {
 		return this.findMoySklad(catalogId)
 	}
 
+	async finishIikoSync(
+		catalogId: string,
+		stats: {
+			totalProducts: number
+			createdProducts: number
+			updatedProducts: number
+			deletedProducts: number
+			syncedAt: Date
+			lastRevision?: number | null
+			lastStopListSyncedAt?: Date | null
+		},
+		tx?: Prisma.TransactionClient
+	): Promise<IntegrationRecord | null> {
+		const db = tx || this.prisma
+		const existing = await this.findIiko(catalogId)
+		if (!existing) return null
+
+		await db.integration.update({
+			where: { id: existing.id },
+			data: {
+				syncStartedAt: null,
+				lastSyncAt: stats.syncedAt,
+				lastSyncStatus: IntegrationSyncStatus.SUCCESS,
+				lastSyncError: null,
+				totalProducts: stats.totalProducts,
+				createdProducts: stats.createdProducts,
+				updatedProducts: stats.updatedProducts,
+				deletedProducts: stats.deletedProducts,
+				metadata: mergeJsonObject(existing.metadata, {
+					lastMenuSyncedAt: stats.syncedAt.toISOString(),
+					...(stats.lastRevision !== undefined
+						? { lastRevision: stats.lastRevision }
+						: {}),
+					...(stats.lastStopListSyncedAt
+						? {
+								lastStopListSyncedAt:
+									stats.lastStopListSyncedAt.toISOString()
+							}
+						: {})
+				})
+			}
+		})
+
+		return this.findIiko(catalogId)
+	}
+
+	async finishIikoStockSync(
+		catalogId: string,
+		stats: {
+			syncedAt: Date
+		},
+		tx?: Prisma.TransactionClient
+	): Promise<IntegrationRecord | null> {
+		const db = tx || this.prisma
+		const existing = await this.findIiko(catalogId)
+		if (!existing) return null
+
+		await db.integration.update({
+			where: { id: existing.id },
+			data: {
+				syncStartedAt: null,
+				lastSyncAt: stats.syncedAt,
+				lastSyncStatus: IntegrationSyncStatus.SUCCESS,
+				lastSyncError: null,
+				metadata: mergeJsonObject(existing.metadata, {
+					lastStopListSyncedAt: stats.syncedAt.toISOString()
+				})
+			}
+		})
+
+		return this.findIiko(catalogId)
+	}
+
 	async failMoySkladSync(
 		catalogId: string,
 		error: string,
@@ -837,6 +1228,29 @@ export class IntegrationRepository {
 		return this.findMoySklad(catalogId)
 	}
 
+	async failIikoSync(
+		catalogId: string,
+		error: string,
+		tx?: Prisma.TransactionClient
+	): Promise<IntegrationRecord | null> {
+		const db = tx || this.prisma
+		const existing = await this.findIiko(catalogId)
+		if (!existing) return null
+		const safeError = renderSafeProviderErrorMessage(error)
+
+		await db.integration.update({
+			where: { id: existing.id },
+			data: {
+				syncStartedAt: null,
+				lastSyncAt: new Date(),
+				lastSyncStatus: IntegrationSyncStatus.ERROR,
+				lastSyncError: safeError
+			}
+		})
+
+		return this.findIiko(catalogId)
+	}
+
 	findSyncRunById(runId: string): Promise<IntegrationSyncRunRecord | null> {
 		return this.prisma.integrationSyncRun.findUnique({
 			where: { id: runId },
@@ -845,12 +1259,13 @@ export class IntegrationRepository {
 	}
 
 	findLatestActiveSyncRun(
-		catalogId: string
+		catalogId: string,
+		provider: IntegrationProvider = IntegrationProvider.MOYSKLAD
 	): Promise<IntegrationSyncRunRecord | null> {
 		return this.prisma.integrationSyncRun.findFirst({
 			where: {
 				catalogId,
-				provider: IntegrationProvider.MOYSKLAD,
+				provider,
 				status: {
 					in: [IntegrationSyncRunStatus.PENDING, IntegrationSyncRunStatus.RUNNING]
 				}
@@ -861,12 +1276,13 @@ export class IntegrationRepository {
 	}
 
 	findLatestFinishedSyncRun(
-		catalogId: string
+		catalogId: string,
+		provider: IntegrationProvider = IntegrationProvider.MOYSKLAD
 	): Promise<IntegrationSyncRunRecord | null> {
 		return this.prisma.integrationSyncRun.findFirst({
 			where: {
 				catalogId,
-				provider: IntegrationProvider.MOYSKLAD,
+				provider,
 				status: {
 					in: [
 						IntegrationSyncRunStatus.SUCCESS,
@@ -882,12 +1298,13 @@ export class IntegrationRepository {
 
 	findRecentSyncRuns(
 		catalogId: string,
-		take: number
+		take: number,
+		provider: IntegrationProvider = IntegrationProvider.MOYSKLAD
 	): Promise<IntegrationSyncRunRecord[]> {
 		return this.prisma.integrationSyncRun.findMany({
 			where: {
 				catalogId,
-				provider: IntegrationProvider.MOYSKLAD
+				provider
 			},
 			orderBy: [{ requestedAt: 'desc' }, { createdAt: 'desc' }],
 			take,
@@ -898,6 +1315,7 @@ export class IntegrationRepository {
 	createSyncRun(params: {
 		integrationId: string
 		catalogId: string
+		provider?: IntegrationProvider
 		mode: IntegrationSyncRunMode
 		trigger: IntegrationSyncRunTrigger
 		status?: IntegrationSyncRunStatus
@@ -911,7 +1329,7 @@ export class IntegrationRepository {
 			data: {
 				integrationId: params.integrationId,
 				catalogId: params.catalogId,
-				provider: IntegrationProvider.MOYSKLAD,
+				provider: params.provider ?? IntegrationProvider.MOYSKLAD,
 				mode: params.mode,
 				trigger: params.trigger,
 				status: params.status ?? IntegrationSyncRunStatus.PENDING,
@@ -1067,10 +1485,12 @@ export class IntegrationRepository {
 
 	async createWebhookEventIfNew(params: {
 		integrationId: string
+		provider?: IntegrationProvider
 		requestId: string
 		reportUrl: string
 		payload: Prisma.InputJsonValue
 	}): Promise<{ event: IntegrationWebhookEventRecord; created: boolean }> {
+		const provider = params.provider ?? IntegrationProvider.MOYSKLAD
 		const existing = await this.findWebhookEventByRequestId(
 			params.integrationId,
 			params.requestId
@@ -1081,7 +1501,7 @@ export class IntegrationRepository {
 			const event = await this.prisma.integrationWebhookEvent.create({
 				data: {
 					integrationId: params.integrationId,
-					provider: IntegrationProvider.MOYSKLAD,
+					provider,
 					requestId: params.requestId,
 					reportUrl: params.reportUrl,
 					payload: params.payload,
@@ -1119,18 +1539,86 @@ export class IntegrationRepository {
 
 	async findPendingWebhookEvents(
 		integrationId: string,
-		limit = 50
+		limit = 50,
+		provider: IntegrationProvider = IntegrationProvider.MOYSKLAD
 	): Promise<IntegrationWebhookEventRecord[]> {
 		return this.prisma.integrationWebhookEvent.findMany({
 			where: {
 				integrationId,
-				provider: IntegrationProvider.MOYSKLAD,
+				provider,
 				status: WEBHOOK_EVENT_STATUS_PENDING
 			},
 			orderBy: [{ receivedAt: 'asc' }, { createdAt: 'asc' }],
 			take: limit,
 			select: webhookEventSelect
 		})
+	}
+
+	async findWebhookEvents(params: {
+		integrationId: string
+		provider: IntegrationProvider
+		limit: number
+		status?: IntegrationWebhookEventStatus | null
+	}): Promise<IntegrationWebhookEventRecord[]> {
+		return this.prisma.integrationWebhookEvent.findMany({
+			where: {
+				integrationId: params.integrationId,
+				provider: params.provider,
+				...(params.status ? { status: params.status } : {})
+			},
+			orderBy: [{ receivedAt: 'desc' }, { createdAt: 'desc' }],
+			take: params.limit,
+			select: webhookEventSelect
+		})
+	}
+
+	findWebhookEventById(
+		eventId: string
+	): Promise<IntegrationWebhookEventRecord | null> {
+		return this.prisma.integrationWebhookEvent.findUnique({
+			where: { id: eventId },
+			select: webhookEventSelect
+		})
+	}
+
+	findWebhookEventForCatalog(
+		catalogId: string,
+		eventId: string,
+		provider: IntegrationProvider
+	): Promise<IntegrationWebhookEventRecord | null> {
+		return this.prisma.integrationWebhookEvent.findFirst({
+			where: {
+				id: eventId,
+				provider,
+				integration: {
+					catalogId,
+					provider,
+					deleteAt: null
+				}
+			},
+			select: webhookEventSelect
+		})
+	}
+
+	async resetWebhookEventForRetry(
+		eventId: string
+	): Promise<IntegrationWebhookEventRecord | null> {
+		const updated = await this.prisma.integrationWebhookEvent.updateMany({
+			where: {
+				id: eventId,
+				status: {
+					in: [WEBHOOK_EVENT_STATUS_FAILED, WEBHOOK_EVENT_STATUS_SKIPPED]
+				}
+			},
+			data: {
+				status: WEBHOOK_EVENT_STATUS_PENDING,
+				jobId: null,
+				error: null,
+				processedAt: null
+			}
+		})
+		if (!updated.count) return null
+		return this.findWebhookEventById(eventId)
 	}
 
 	async markWebhookEventsProcessing(
@@ -1227,17 +1715,34 @@ export class IntegrationRepository {
 		})
 	}
 
+	findOrderExportByExternalId(
+		integrationId: string,
+		externalId: string,
+		provider: IntegrationProvider = IntegrationProvider.MOYSKLAD
+	): Promise<IntegrationOrderExportRecord | null> {
+		return this.prisma.integrationOrderExport.findFirst({
+			where: {
+				integrationId,
+				provider,
+				externalId
+			},
+			orderBy: { requestedAt: 'desc' },
+			select: orderExportSelect
+		})
+	}
+
 	findOrderExportForCatalog(
 		catalogId: string,
-		exportId: string
+		exportId: string,
+		provider: IntegrationProvider = IntegrationProvider.MOYSKLAD
 	): Promise<IntegrationOrderExportRecord | null> {
 		return this.prisma.integrationOrderExport.findFirst({
 			where: {
 				id: exportId,
-				provider: IntegrationProvider.MOYSKLAD,
+				provider,
 				integration: {
 					catalogId,
-					provider: IntegrationProvider.MOYSKLAD,
+					provider,
 					deleteAt: null
 				}
 			},
@@ -1247,14 +1752,15 @@ export class IntegrationRepository {
 
 	findOrderExportsByCatalog(
 		catalogId: string,
-		limit: number
+		limit: number,
+		provider: IntegrationProvider = IntegrationProvider.MOYSKLAD
 	): Promise<IntegrationOrderExportRecord[]> {
 		return this.prisma.integrationOrderExport.findMany({
 			where: {
-				provider: IntegrationProvider.MOYSKLAD,
+				provider,
 				integration: {
 					catalogId,
-					provider: IntegrationProvider.MOYSKLAD,
+					provider,
 					deleteAt: null
 				}
 			},
@@ -1264,15 +1770,37 @@ export class IntegrationRepository {
 		})
 	}
 
+	findOrderExportsByOrderId(
+		catalogId: string,
+		orderId: string,
+		provider?: IntegrationProvider
+	): Promise<IntegrationOrderExportRecord[]> {
+		return this.prisma.integrationOrderExport.findMany({
+			where: {
+				orderId,
+				...(provider ? { provider } : {}),
+				integration: {
+					catalogId,
+					...(provider ? { provider } : {}),
+					deleteAt: null
+				}
+			},
+			orderBy: { requestedAt: 'desc' },
+			select: orderExportSelect
+		})
+	}
+
 	findRunnableOrderExports(params: {
 		limit: number
 		staleRunningBefore: Date
+		provider?: IntegrationProvider
 	}): Promise<IntegrationOrderExportWithIntegrationRecord[]> {
+		const provider = params.provider ?? IntegrationProvider.MOYSKLAD
 		return this.prisma.integrationOrderExport.findMany({
 			where: {
-				provider: IntegrationProvider.MOYSKLAD,
+				provider,
 				integration: {
-					provider: IntegrationProvider.MOYSKLAD,
+					provider,
 					isActive: true,
 					deleteAt: null
 				},
@@ -1310,15 +1838,21 @@ export class IntegrationRepository {
 		params: {
 			integrationId: string
 			orderId: string
+			provider?: IntegrationProvider
 			idempotencyKey?: string
 			payload?: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput
 		},
 		tx?: Prisma.TransactionClient
 	): Promise<IntegrationOrderExportRecord> {
 		const db = tx || this.prisma
+		const provider = params.provider ?? IntegrationProvider.MOYSKLAD
 		const idempotencyKey =
 			params.idempotencyKey ??
-			this.buildOrderExportIdempotencyKey(params.integrationId, params.orderId)
+			this.buildOrderExportIdempotencyKey(
+				provider,
+				params.integrationId,
+				params.orderId
+			)
 
 		return db.integrationOrderExport.upsert({
 			where: {
@@ -1330,7 +1864,7 @@ export class IntegrationRepository {
 			create: {
 				integrationId: params.integrationId,
 				orderId: params.orderId,
-				provider: IntegrationProvider.MOYSKLAD,
+				provider,
 				idempotencyKey,
 				status: ORDER_EXPORT_STATUS_PENDING,
 				...(params.payload !== undefined ? { payload: params.payload } : {})
@@ -1516,6 +2050,15 @@ export class IntegrationRepository {
 		return this.prisma.integrationProductLink.findMany({
 			where: { integrationId },
 			select: productLinkSelect
+		})
+	}
+
+	findProductPreviewLinksByIntegration(
+		integrationId: string
+	): Promise<IntegrationProductPreviewRecord[]> {
+		return this.prisma.integrationProductLink.findMany({
+			where: { integrationId },
+			select: productLinkPreviewSelect
 		})
 	}
 
@@ -2101,6 +2644,20 @@ export class IntegrationRepository {
 		return result.attribute
 	}
 
+	async upsertIikoSizeVariantAttribute(
+		catalogId: string,
+		tx?: Prisma.TransactionClient
+	): Promise<VariantAttributeDefinitionRecord> {
+		return this.upsertMoySkladVariantAttribute(
+			catalogId,
+			{
+				key: IIKO_SIZE_ATTRIBUTE_KEY,
+				displayName: IIKO_SIZE_ATTRIBUTE_NAME
+			},
+			tx
+		)
+	}
+
 	async findMoySkladEnumValueById(
 		catalogId: string,
 		attributeId: string,
@@ -2416,6 +2973,161 @@ export class IntegrationRepository {
 				created: ensured.created,
 				assigned: shouldAssign,
 				changed: ensured.created || ensured.attributesChanged || shouldAssign
+			}
+		}
+
+		if (tx) return run(tx)
+		return this.prisma.$transaction(run)
+	}
+
+	async ensureIikoSizeProductTypeForProduct(
+		params: {
+			catalogId: string
+			productId: string
+			attributeId: string
+		},
+		tx?: Prisma.TransactionClient
+	): Promise<{
+		productTypeId: string | null
+		created: boolean
+		assigned: boolean
+		changed: boolean
+	}> {
+		const run = async (db: Prisma.TransactionClient | PrismaService) => {
+			const product = await db.product.findFirst({
+				where: {
+					id: params.productId,
+					catalogId: params.catalogId,
+					deleteAt: null
+				},
+				select: {
+					id: true,
+					productTypeId: true,
+					productType: {
+						select: {
+							id: true,
+							code: true,
+							attributes: {
+								select: {
+									attributeId: true,
+									isVariant: true
+								}
+							}
+						}
+					}
+				}
+			})
+			if (!product) {
+				return {
+					productTypeId: null,
+					created: false,
+					assigned: false,
+					changed: false
+				}
+			}
+
+			const existing = await db.productType.findFirst({
+				where: {
+					catalogId: params.catalogId,
+					scope: PRODUCT_TYPE_SCOPE_CATALOG,
+					code: IIKO_SIZE_PRODUCT_TYPE_CODE,
+					isArchived: false
+				},
+				select: {
+					id: true,
+					attributes: {
+						select: {
+							attributeId: true,
+							isVariant: true,
+							isRequired: true,
+							displayOrder: true
+						}
+					}
+				}
+			})
+
+			let productTypeId: string
+			let created = false
+			let attributesChanged = false
+			if (!existing) {
+				const productType = await db.productType.create({
+					data: {
+						catalogId: params.catalogId,
+						scope: PRODUCT_TYPE_SCOPE_CATALOG,
+						code: IIKO_SIZE_PRODUCT_TYPE_CODE,
+						name: IIKO_SIZE_PRODUCT_TYPE_NAME,
+						description: 'Automatically created by iiko integration',
+						attributes: {
+							create: {
+								attribute: { connect: { id: params.attributeId } },
+								isVariant: true,
+								isRequired: true,
+								displayOrder: 0
+							}
+						}
+					},
+					select: { id: true }
+				})
+				productTypeId = productType.id
+				created = true
+				attributesChanged = true
+			} else {
+				productTypeId = existing.id
+				const sizeAttribute = existing.attributes.find(
+					attribute => attribute.attributeId === params.attributeId
+				)
+				if (
+					!sizeAttribute ||
+					!sizeAttribute.isVariant ||
+					!sizeAttribute.isRequired ||
+					sizeAttribute.displayOrder !== 0
+				) {
+					await db.productTypeAttribute.upsert({
+						where: {
+							productTypeId_attributeId: {
+								productTypeId,
+								attributeId: params.attributeId
+							}
+						},
+						create: {
+							productTypeId,
+							attributeId: params.attributeId,
+							isVariant: true,
+							isRequired: true,
+							displayOrder: 0
+						},
+						update: {
+							isVariant: true,
+							isRequired: true,
+							displayOrder: 0
+						}
+					})
+					attributesChanged = true
+				}
+			}
+
+			const currentSupportsSize = (product.productType?.attributes ?? []).some(
+				attribute =>
+					attribute.attributeId === params.attributeId && attribute.isVariant
+			)
+			const shouldAssign =
+				product.productTypeId !== productTypeId &&
+				(!product.productTypeId ||
+					product.productType?.code === IIKO_SIZE_PRODUCT_TYPE_CODE ||
+					!currentSupportsSize)
+
+			if (shouldAssign) {
+				await db.product.update({
+					where: { id: params.productId },
+					data: { productTypeId }
+				})
+			}
+
+			return {
+				productTypeId,
+				created,
+				assigned: shouldAssign,
+				changed: created || attributesChanged || shouldAssign
 			}
 		}
 
@@ -2845,6 +3557,223 @@ export class IntegrationRepository {
 			data: { status: nextStatus }
 		})
 		return true
+	}
+
+	async applyIikoStopListAvailability(
+		params: {
+			catalogId: string
+			integrationId: string
+			items: IikoStopListAvailabilityItem[]
+			syncedAt?: Date
+		},
+		tx?: Prisma.TransactionClient
+	): Promise<IikoStopListAvailabilityResult> {
+		const run = async (
+			db: Prisma.TransactionClient | PrismaService
+		): Promise<IikoStopListAvailabilityResult> => {
+			const syncedAt = params.syncedAt ?? new Date()
+			const stoppedItems = params.items.filter(isIikoStopListItemStopped)
+			const productLinks = await db.integrationProductLink.findMany({
+				where: {
+					integrationId: params.integrationId,
+					product: {
+						catalogId: params.catalogId,
+						deleteAt: null
+					}
+				},
+				select: {
+					id: true,
+					productId: true,
+					externalId: true,
+					product: {
+						select: {
+							id: true,
+							variants: {
+								where: { deleteAt: null },
+								select: productVariantSyncSelect
+							}
+						}
+					}
+				}
+			})
+			const variantLinks = await db.integrationVariantLink.findMany({
+				where: {
+					integrationId: params.integrationId,
+					variant: {
+						deleteAt: null,
+						product: {
+							catalogId: params.catalogId,
+							deleteAt: null
+						}
+					}
+				},
+				select: {
+					id: true,
+					variantId: true,
+					externalId: true,
+					variant: {
+						select: productVariantSyncSelect
+					}
+				}
+			})
+
+			const productLinksByExternalId = new Map(
+				productLinks.map(link => [link.externalId, link])
+			)
+			const variantLinksByExternalId = new Map(
+				variantLinks.map(link => [link.externalId, link])
+			)
+			const variantLinksByProductId = new Map<string, typeof variantLinks>()
+			for (const link of variantLinks) {
+				const bucket = variantLinksByProductId.get(link.variant.productId) ?? []
+				bucket.push(link)
+				variantLinksByProductId.set(link.variant.productId, bucket)
+			}
+
+			const managedVariants = new Map<string, ProductVariantSyncRecord>()
+			const variantSourceLinks = new Map<
+				string,
+				{ productLinkId?: string; variantLinkId?: string }
+			>()
+			for (const link of variantLinks) {
+				managedVariants.set(link.variant.id, link.variant)
+				variantSourceLinks.set(link.variant.id, { variantLinkId: link.id })
+			}
+			for (const link of productLinks) {
+				if (variantLinksByProductId.has(link.productId)) continue
+				const defaultVariant = resolveDefaultProductVariant(
+					link.product.variants
+				)
+				if (!defaultVariant) continue
+				managedVariants.set(defaultVariant.id, defaultVariant)
+				variantSourceLinks.set(defaultVariant.id, { productLinkId: link.id })
+			}
+
+			const stoppedVariantIds = new Set<string>()
+			let matchedStopListItems = 0
+			let unmatchedStopListItems = 0
+
+			for (const item of stoppedItems) {
+				const productLink = productLinksByExternalId.get(item.productId)
+				if (!productLink) {
+					unmatchedStopListItems += 1
+					continue
+				}
+
+				const matchedVariantIds = new Set<string>()
+				if (item.sizeId) {
+					const exactVariantLink = variantLinksByExternalId.get(
+						buildIikoVariantExternalId(item.productId, item.sizeId)
+					)
+					if (exactVariantLink) {
+						matchedVariantIds.add(exactVariantLink.variant.id)
+					}
+				}
+
+				const productVariantLinks =
+					variantLinksByProductId.get(productLink.productId) ?? []
+				if (!matchedVariantIds.size && !item.sizeId) {
+					for (const link of productVariantLinks) {
+						matchedVariantIds.add(link.variant.id)
+					}
+				}
+				if (!matchedVariantIds.size && !productVariantLinks.length) {
+					const defaultVariant = resolveDefaultProductVariant(
+						productLink.product.variants
+					)
+					if (defaultVariant) {
+						matchedVariantIds.add(defaultVariant.id)
+					}
+				}
+
+				if (!matchedVariantIds.size) {
+					unmatchedStopListItems += 1
+					continue
+				}
+
+				matchedStopListItems += 1
+				for (const variantId of matchedVariantIds) {
+					stoppedVariantIds.add(variantId)
+				}
+			}
+
+			let stoppedVariants = 0
+			let restoredVariants = 0
+			let changedVariants = 0
+			const affectedProductIds = new Set<string>()
+
+			for (const variant of managedVariants.values()) {
+				const isStopped = stoppedVariantIds.has(variant.id)
+				if (isStopped) {
+					stoppedVariants += 1
+				} else {
+					restoredVariants += 1
+				}
+
+				const changed = await this.applyIikoVariantAvailability(db, {
+					variant,
+					isStopped
+				})
+				if (changed) changedVariants += 1
+				affectedProductIds.add(variant.productId)
+
+				const source = variantSourceLinks.get(variant.id)
+				if (source?.variantLinkId) {
+					await db.integrationVariantLink.update({
+						where: { id: source.variantLinkId },
+						data: {
+							lastSeenAt: syncedAt,
+							lastStockSyncAt: syncedAt,
+							missingSince: null,
+							missingSyncCount: 0,
+							skippedReason: null,
+							lastExternalError: null
+						}
+					})
+				}
+				if (source?.productLinkId) {
+					await db.integrationProductLink.update({
+						where: { id: source.productLinkId },
+						data: {
+							lastSeenAt: syncedAt,
+							lastStockSyncAt: syncedAt,
+							missingSince: null,
+							missingSyncCount: 0,
+							skippedReason: null,
+							lastExternalError: null
+						}
+					})
+				}
+			}
+
+			let changedProducts = 0
+			for (const productId of affectedProductIds) {
+				if (
+					await this.recomputeProductStatusFromVariants(
+						params.catalogId,
+						productId,
+						db
+					)
+				) {
+					changedProducts += 1
+				}
+			}
+
+			return {
+				totalStopListItems: params.items.length,
+				stoppedStopListItems: stoppedItems.length,
+				matchedStopListItems,
+				unmatchedStopListItems,
+				totalVariants: managedVariants.size,
+				stoppedVariants,
+				restoredVariants,
+				changedVariants,
+				changedProducts
+			}
+		}
+
+		if (tx) return run(tx)
+		return this.prisma.$transaction(run)
 	}
 
 	findProductById(
@@ -3973,6 +4902,47 @@ export class IntegrationRepository {
 		}
 	}
 
+	private async applyIikoVariantAvailability(
+		db: Prisma.TransactionClient | PrismaService,
+		params: {
+			variant: ProductVariantSyncRecord
+			isStopped: boolean
+		}
+	): Promise<boolean> {
+		const nextStock =
+			params.variant.status === ProductVariantStatus.DISABLED &&
+			!params.isStopped
+				? params.variant.stock
+				: params.isStopped
+					? 0
+					: null
+		const nextStatus =
+			params.variant.status === ProductVariantStatus.DISABLED
+				? ProductVariantStatus.DISABLED
+				: params.isStopped
+					? ProductVariantStatus.OUT_OF_STOCK
+					: ProductVariantStatus.ACTIVE
+		const nextIsAvailable = nextStatus === ProductVariantStatus.ACTIVE
+		const data: Prisma.ProductVariantUpdateInput = {}
+
+		if (params.variant.stock !== nextStock) {
+			data.stock = nextStock
+		}
+		if (params.variant.status !== nextStatus) {
+			data.status = nextStatus
+		}
+		if (params.variant.isAvailable !== nextIsAvailable) {
+			data.isAvailable = nextIsAvailable
+		}
+		if (!Object.keys(data).length) return false
+
+		await db.productVariant.update({
+			where: { id: params.variant.id },
+			data
+		})
+		return true
+	}
+
 	private async disableUnlinkedDefaultVariantForProduct(
 		db: Prisma.TransactionClient | PrismaService,
 		productId: string,
@@ -4199,9 +5169,10 @@ export class IntegrationRepository {
 	}
 
 	private buildOrderExportIdempotencyKey(
+		provider: IntegrationProvider,
 		integrationId: string,
 		orderId: string
 	): string {
-		return `${IntegrationProvider.MOYSKLAD}:${integrationId}:${orderId}`
+		return `${provider}:${integrationId}:${orderId}`
 	}
 }

@@ -10,6 +10,11 @@ import {
 	CAPABILITY_ASSERT_PORT,
 	type CapabilityAssertPort
 } from '@/modules/capability/contracts'
+import { CacheService } from '@/shared/cache/cache.service'
+import {
+	CATEGORY_PRODUCTS_CACHE_VERSION,
+	PRODUCTS_CACHE_VERSION
+} from '@/shared/cache/catalog-cache.constants'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import {
 	assertHasUpdateFields,
@@ -47,14 +52,20 @@ function buildCodeBase(value: string): string {
 export class CatalogSaleUnitService {
 	constructor(
 		private readonly repo: CatalogSaleUnitRepository,
+		private readonly cache: CacheService,
 		@Inject(CAPABILITY_ASSERT_PORT)
 		private readonly featureEntitlements: CapabilityAssertPort
 	) {}
 
-	async getAll(options: { includeArchived?: boolean } = {}) {
+	async getAll(
+		options: { includeArchived?: boolean; includeInactive?: boolean } = {}
+	) {
 		const catalogId = mustCatalogId()
 		await this.featureEntitlements.assertCanUseCatalogSaleUnits(catalogId)
-		return this.repo.findAll(catalogId, options.includeArchived === true)
+		return this.repo.findAll(catalogId, {
+			includeArchived: options.includeArchived === true,
+			includeInactive: options.includeInactive === true
+		})
 	}
 
 	async getById(id: string) {
@@ -72,7 +83,7 @@ export class CatalogSaleUnitService {
 		const existing = await this.repo.findByCode(catalogId, code)
 
 		if (existing) {
-			if (explicitCode && !existing.deleteAt) {
+			if (!existing.deleteAt) {
 				throw new BadRequestException('Единица продажи с таким кодом уже есть')
 			}
 
@@ -131,6 +142,10 @@ export class CatalogSaleUnitService {
 		if (dto.displayOrder !== undefined) {
 			data.displayOrder = dto.displayOrder
 		}
+		if (dto.isActive !== undefined) {
+			data.isActive = dto.isActive
+			if (dto.isActive) data.deleteAt = null
+		}
 
 		assertHasUpdateFields(data)
 		const updated = this.requireUpdated(
@@ -140,6 +155,7 @@ export class CatalogSaleUnitService {
 			...(data.code !== undefined ? { code: updated.code } : {}),
 			...(data.name !== undefined ? { name: updated.name } : {})
 		})
+		await this.invalidateProductReadCaches(catalogId)
 		return updated
 	}
 
@@ -152,7 +168,13 @@ export class CatalogSaleUnitService {
 				isActive: false
 			})
 		)
+		await this.invalidateProductReadCaches(catalogId)
 		return { ok: Boolean(archived) }
+	}
+
+	private async invalidateProductReadCaches(catalogId: string): Promise<void> {
+		await this.cache.bumpVersion(PRODUCTS_CACHE_VERSION, catalogId)
+		await this.cache.bumpVersion(CATEGORY_PRODUCTS_CACHE_VERSION, catalogId)
 	}
 
 	private normalizeDefaultBaseQuantity(value?: number, fallback = 1): number {

@@ -31,12 +31,17 @@ export type CartResolvedLineSnapshot = {
 	unitPriceSnapshot: Prisma.Decimal | number | null
 }
 
+type ResolveSaleUnitOptions = {
+	useDefaultWhenMissing?: boolean
+}
+
 @Injectable()
 export class CartLinePricingService {
 	async resolveSaleUnit(
 		tx: Prisma.TransactionClient,
 		variantId: string | null,
-		saleUnitId: string | null
+		saleUnitId: string | null,
+		options: ResolveSaleUnitOptions = {}
 	): Promise<CartSaleUnitSelection> {
 		if (!variantId) {
 			if (saleUnitId) {
@@ -72,7 +77,26 @@ export class CartLinePricingService {
 			return saleUnit
 		}
 
-		return null
+		if (!options.useDefaultWhenMissing) return null
+
+		return tx.productVariantSaleUnit.findFirst({
+			where: {
+				variantId,
+				isActive: true,
+				deleteAt: null
+			},
+			select: {
+				id: true,
+				variantId: true,
+				baseQuantity: true,
+				price: true
+			},
+			orderBy: [
+				{ isDefault: 'desc' as const },
+				{ displayOrder: 'asc' as const },
+				{ createdAt: 'asc' as const }
+			]
+		})
 	}
 
 	resolveLineSnapshot(params: {

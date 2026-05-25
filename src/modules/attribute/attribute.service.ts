@@ -1,4 +1,4 @@
-﻿import { DataType } from '@generated/enums'
+﻿import { AttributeEnumValueSource, DataType } from '@generated/enums'
 import {
 	AttributeCreateInput,
 	AttributeEnumValueCreateInput,
@@ -173,6 +173,8 @@ export class AttributeService {
 		const data: AttributeEnumValueUpdateInput =
 			buildAttributeEnumValueUpdateInput(dto)
 		assertHasUpdateFields(data)
+		const currentEnumValue = await this.requireEnumValue(attributeId, id)
+		this.assertImportedEnumValueUpdateAllowed(currentEnumValue, dto)
 		if (dto.value !== undefined) {
 			await this.ensureEnumValueAvailable(
 				attributeId,
@@ -197,6 +199,8 @@ export class AttributeService {
 
 	async removeEnumValue(attributeId: string, id: string) {
 		const attribute = await this.requireEnumAttribute(attributeId)
+		const currentEnumValue = await this.requireEnumValue(attributeId, id)
+		this.assertEnumValueIsNotImported(currentEnumValue)
 
 		const enumValue = await this.repo.softDeleteEnumValue(
 			id,
@@ -226,7 +230,8 @@ export class AttributeService {
 		dto: CreateAttributeEnumAliasDtoReq
 	) {
 		const attribute = await this.requireEnumAttribute(attributeId)
-		await this.requireEnumValue(attributeId, id)
+		const currentEnumValue = await this.requireEnumValue(attributeId, id)
+		this.assertEnumValueIsNotImported(currentEnumValue)
 		const catalogId = this.currentCatalogId()
 
 		const value = normalizeAttributeEnumValue(dto.value)
@@ -247,7 +252,8 @@ export class AttributeService {
 
 	async removeEnumValueAlias(attributeId: string, id: string, aliasId: string) {
 		const attribute = await this.requireEnumAttribute(attributeId)
-		await this.requireEnumValue(attributeId, id)
+		const currentEnumValue = await this.requireEnumValue(attributeId, id)
+		this.assertEnumValueIsNotImported(currentEnumValue)
 
 		const alias = await this.repo.softDeleteEnumValueAlias(
 			attributeId,
@@ -270,6 +276,10 @@ export class AttributeService {
 		if (sourceId === dto.targetId) {
 			throw new BadRequestException('Source and target enum values must differ')
 		}
+		const sourceEnumValue = await this.requireEnumValue(attributeId, sourceId)
+		const targetEnumValue = await this.requireEnumValue(attributeId, dto.targetId)
+		this.assertEnumValueIsNotImported(sourceEnumValue)
+		this.assertEnumValueIsNotImported(targetEnumValue)
 
 		const enumValue = await this.repo.mergeEnumValues(
 			attributeId,
@@ -311,6 +321,36 @@ export class AttributeService {
 		)
 		if (!enumValue) throw new NotFoundException('Enum value not found')
 		return enumValue
+	}
+
+	private assertImportedEnumValueUpdateAllowed(
+		enumValue: { source?: AttributeEnumValueSource | string | null },
+		dto: UpdateAttributeEnumDtoReq
+	): void {
+		if (enumValue.source !== AttributeEnumValueSource.IMPORTED) return
+
+		const forbiddenFields = [
+			dto.value !== undefined ? 'value' : null,
+			dto.displayName !== undefined ? 'displayName' : null,
+			dto.businessId !== undefined ? 'businessId' : null,
+			dto.source !== undefined ? 'source' : null
+		].filter((field): field is string => field !== null)
+
+		if (!forbiddenFields.length) return
+
+		throw new BadRequestException(
+			`Imported enum values are managed by integration; only displayOrder can be changed manually (${forbiddenFields.join(', ')})`
+		)
+	}
+
+	private assertEnumValueIsNotImported(enumValue: {
+		source?: AttributeEnumValueSource | string | null
+	}): void {
+		if (enumValue.source !== AttributeEnumValueSource.IMPORTED) return
+
+		throw new BadRequestException(
+			'Imported enum values are managed by integration; only displayOrder can be changed manually'
+		)
 	}
 
 	private async invalidateTypeCache(typeIds: string[]): Promise<void> {

@@ -1,5 +1,5 @@
-import type { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import type { ProductStatus } from '@generated/enums'
+import type { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
 	Inject,
@@ -15,6 +15,7 @@ import {
 	type CapabilityAssertPort,
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
+import { S3Service } from '@/modules/s3/public'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { mustCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
 import {
@@ -22,8 +23,6 @@ import {
 	normalizeNullableTrimmedString,
 	normalizeRequiredString
 } from '@/shared/utils'
-
-import { S3Service } from '@/modules/s3/public'
 
 import { CreateProductDtoReq } from './dto/requests/create-product.dto.req'
 import {
@@ -139,6 +138,7 @@ export class ProductCommandService {
 		const { mediaIds, attributes, brandId, categories, variants, ...rest } = dto
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
+		await this.assertManualProductCreateAllowed(catalogId)
 		const payload = await this.prepareCreatePayload(
 			{ mediaIds, attributes, brandId, categories, variants, ...rest },
 			catalogId,
@@ -158,10 +158,7 @@ export class ProductCommandService {
 		)
 
 		const created = await this.repo.findById(product.id, catalogId, true)
-		if (!created)
-			throw new NotFoundException(
-				'Товар не найден'
-			)
+		if (!created) throw new NotFoundException('Товар не найден')
 
 		const hasCustomVariantValues = payload.variants?.some(variant =>
 			variant.attributes.some(attribute => Boolean(attribute.value))
@@ -206,10 +203,7 @@ export class ProductCommandService {
 						payload.removeVariantAttributeIds,
 						payload.variantMatrix
 					)
-		if (!updated)
-			throw new NotFoundException(
-				'Товар не найден'
-			)
+		if (!updated) throw new NotFoundException('Товар не найден')
 
 		if (payload.categoryIds !== undefined) {
 			await this.repo.syncProductCategories(id, catalogId, payload.categoryIds)
@@ -228,10 +222,7 @@ export class ProductCommandService {
 			payload.categoryIds !== undefined || payload.categoryId
 				? await this.repo.findById(id, catalogId, true)
 				: updated
-		if (!product)
-			throw new NotFoundException(
-				'Товар не найден'
-			)
+		if (!product) throw new NotFoundException('Товар не найден')
 
 		return this.finalizer.finalizeProduct(product, catalogId, {
 			bumpCatalogTypeId: payload.hasCustomVariantValues ? typeId : null,
@@ -265,10 +256,7 @@ export class ProductCommandService {
 		const catalogId = mustCatalogId()
 		await this.ensureDefaultVariantForLegacyUpdate(id, {}, catalogId)
 		const product = await this.repo.toggleStatus(id, catalogId)
-		if (!product)
-			throw new NotFoundException(
-				'Товар не найден'
-			)
+		if (!product) throw new NotFoundException('Товар не найден')
 
 		return this.finalizer.finalizeProduct(product, catalogId, {
 			invalidateCatalogProducts: true,
@@ -280,10 +268,7 @@ export class ProductCommandService {
 	async togglePopular(id: string) {
 		const catalogId = mustCatalogId()
 		const product = await this.repo.togglePopular(id, catalogId)
-		if (!product)
-			throw new NotFoundException(
-				'Товар не найден'
-			)
+		if (!product) throw new NotFoundException('Товар не найден')
 
 		return this.finalizer.finalizeProduct(product, catalogId, {
 			invalidateCatalogProducts: true,
@@ -294,11 +279,9 @@ export class ProductCommandService {
 	async duplicate(id: string) {
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
+		await this.assertManualProductCreateAllowed(catalogId)
 		const source = await this.repo.findById(id, catalogId, true)
-		if (!source)
-			throw new NotFoundException(
-				'Товар не найден'
-			)
+		if (!source) throw new NotFoundException('Товар не найден')
 
 		await this.assertCanDuplicateSource(source, catalogId)
 		const duplicatedName = await this.generateDuplicatedProductName(
@@ -346,10 +329,7 @@ export class ProductCommandService {
 		)
 
 		const duplicated = await this.repo.findById(product.id, catalogId, true)
-		if (!duplicated)
-			throw new NotFoundException(
-				'Товар не найден'
-			)
+		if (!duplicated) throw new NotFoundException('Товар не найден')
 
 		return this.finalizer.finalizeProduct(duplicated, catalogId, {
 			invalidateCatalogProducts: true,
@@ -360,11 +340,9 @@ export class ProductCommandService {
 
 	async remove(id: string) {
 		const catalogId = mustCatalogId()
+		await this.assertManualProductDeleteAllowed(id, catalogId)
 		const product = await this.repo.softDelete(id, catalogId)
-		if (!product)
-			throw new NotFoundException(
-				'Товар не найден'
-			)
+		if (!product) throw new NotFoundException('Товар не найден')
 		await this.finalizer.removeProductSeo(id, catalogId)
 
 		if (product.mediaIds.length) {
@@ -391,20 +369,24 @@ export class ProductCommandService {
 
 	private async ensureDefaultVariantForLegacyUpdate(
 		id: string,
-		dto: Pick<UpdateProductDtoReq, 'price' | 'status' | 'variants'>,
+		dto: Pick<
+			UpdateProductDtoReq,
+			'price' | 'status' | 'variants' | 'variantMatrix'
+		>,
 		catalogId: string
 	): Promise<void> {
 		if (dto.variants !== undefined) return
-		if (await this.featureReader.canUseProductVariants(catalogId)) return
+		if (dto.variantMatrix !== undefined) return
 
 		const product = await this.repo.findSkuById(id, catalogId)
 		if (!product) return
 
 		const price = Object.hasOwn(dto, 'price') ? dto.price : product.price
+		const status = Object.hasOwn(dto, 'status') ? dto.status : product.status
 		const defaultVariant = await this.variants.buildDefaultVariantData(
 			product.sku,
 			price,
-			{ productStatus: dto.status }
+			{ productStatus: status }
 		)
 		await this.repo.ensureDefaultVariant(id, catalogId, defaultVariant)
 	}
@@ -631,6 +613,10 @@ export class ProductCommandService {
 		const hasProductTypeChange =
 			requestedProductTypeId !== undefined &&
 			requestedProductTypeId !== currentProductTypeId
+		await this.assertIntegratedProductStructureEditable(id, catalogId, {
+			hasProductTypeChange,
+			hasVariantChanges: hasVariantChanges || hasVariantMatrixChanges
+		})
 		const shouldRemoveFromCurrentProductTypeScope =
 			hasRemovedAttributeChanges &&
 			hasProductTypeChange &&
@@ -710,6 +696,50 @@ export class ProductCommandService {
 		productTypeId?: string | null
 	): ProductValidationScopeInput {
 		return { catalogTypeId, catalogId, productTypeId }
+	}
+
+	private async assertManualProductCreateAllowed(
+		catalogId: string
+	): Promise<void> {
+		const hasIntegrations = await this.repo.hasCatalogIntegrations(catalogId)
+		if (!hasIntegrations) return
+
+		throw new BadRequestException(
+			'Создание товаров вручную отключено: каталог управляется интеграцией.'
+		)
+	}
+
+	private async assertManualProductDeleteAllowed(
+		id: string,
+		catalogId: string
+	): Promise<void> {
+		const isIntegrated = await this.repo.hasIntegrationProductOwnership(
+			id,
+			catalogId
+		)
+		if (!isIntegrated) return
+
+		throw new BadRequestException(
+			'Integrated product deletion is disabled; the product is managed by integration'
+		)
+	}
+
+	private async assertIntegratedProductStructureEditable(
+		id: string,
+		catalogId: string,
+		options: { hasProductTypeChange: boolean; hasVariantChanges: boolean }
+	): Promise<void> {
+		if (!options.hasProductTypeChange && !options.hasVariantChanges) return
+
+		const isIntegrated = await this.repo.hasIntegrationProductOwnership(
+			id,
+			catalogId
+		)
+		if (!isIntegrated) return
+
+		throw new BadRequestException(
+			'Integrated product structure is managed by integration; product type and variants cannot be changed manually'
+		)
 	}
 
 	private async buildUpdateVariantMatrix(
@@ -979,10 +1009,7 @@ export class ProductCommandService {
 		catalogId: string
 	): Promise<ProductValidationRef> {
 		const product = await this.repo.findProductValidationRef(id, catalogId)
-		if (!product)
-			throw new NotFoundException(
-				'Товар не найден'
-			)
+		if (!product) throw new NotFoundException('Товар не найден')
 		return product
 	}
 

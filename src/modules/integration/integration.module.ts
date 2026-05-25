@@ -9,8 +9,16 @@ import { S3Module } from '@/modules/s3/public'
 
 import { ORDER_EXPORT_PORT } from './contracts'
 import { IntegrationController } from './integration.controller'
+import { IntegrationOrderExportDispatcherService } from './integration-order-export-dispatcher.service'
+import { IntegrationPayloadTokenService } from './integration-payload-token.service'
 import { IntegrationRepository } from './integration.repository'
 import { IntegrationService } from './integration.service'
+import { IikoImageImportService } from './providers/iiko/iiko.image-import.service'
+import { IikoMetadataCryptoService } from './providers/iiko/iiko.metadata'
+import { IikoOrderExportQueueService } from './providers/iiko/iiko.order-export.queue.service'
+import { IikoOrderExportService } from './providers/iiko/iiko.order-export.service'
+import { IikoQueueService } from './providers/iiko/iiko.queue.service'
+import { IikoSyncService } from './providers/iiko/iiko.sync.service'
 import { MoySkladImageImportService } from './providers/moysklad/moysklad.image-import.service'
 import { MoySkladMetadataCryptoService } from './providers/moysklad/moysklad.metadata'
 import { MoySkladMissingProductSyncService } from './providers/moysklad/moysklad.missing-product-sync.service'
@@ -32,7 +40,15 @@ import { MoySkladVariantSyncService } from './providers/moysklad/moysklad.varian
 	controllers: [IntegrationController],
 	providers: [
 		IntegrationService,
+		IntegrationOrderExportDispatcherService,
+		IntegrationPayloadTokenService,
 		IntegrationRepository,
+		IikoImageImportService,
+		IikoMetadataCryptoService,
+		IikoOrderExportQueueService,
+		IikoOrderExportService,
+		IikoQueueService,
+		IikoSyncService,
 		MoySkladImageImportService,
 		MoySkladMetadataCryptoService,
 		MoySkladMissingProductSyncService,
@@ -49,7 +65,10 @@ import { MoySkladVariantSyncService } from './providers/moysklad/moysklad.varian
 		MoySkladVariantAttributeResolverService,
 		MoySkladVariantSyncService,
 		MediaRepository,
-		{ provide: ORDER_EXPORT_PORT, useExisting: MoySkladOrderExportQueueService },
+		{
+			provide: ORDER_EXPORT_PORT,
+			useExisting: IntegrationOrderExportDispatcherService
+		},
 		{
 			provide: INVENTORY_EXTERNAL_STOCK_PORT,
 			useExisting: MoySkladStockSyncService
@@ -57,6 +76,9 @@ import { MoySkladVariantSyncService } from './providers/moysklad/moysklad.varian
 	],
 	exports: [
 		IntegrationService,
+		IntegrationPayloadTokenService,
+		IikoQueueService,
+		IikoOrderExportQueueService,
 		MoySkladQueueService,
 		MoySkladOrderExportQueueService,
 		ORDER_EXPORT_PORT,
