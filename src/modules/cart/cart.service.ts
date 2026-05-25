@@ -15,8 +15,7 @@ import {
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
 import {
-	INTEGRATION_EXTERNAL_ITEM_TYPE_TABLE,
-	IntegrationPayloadTokenService
+	INTEGRATION_EXTERNAL_ITEM_TYPE_TABLE
 } from '@/modules/integration/public'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 
@@ -79,7 +78,6 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		private readonly orderCheckout: OrderCheckoutService,
 		private readonly orderExport: CartOrderExportService,
 		private readonly prisma: PrismaService,
-		private readonly integrationPayloadTokens: IntegrationPayloadTokenService,
 		@Inject(CAPABILITY_READER_PORT)
 		private readonly capabilities: CapabilityReaderPort
 	) {}
@@ -422,27 +420,17 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		value: unknown
 	): Promise<Record<string, unknown>> {
 		const data = isRecord(value) ? value : {}
-		const token = normalizeText(
-			data.integrationPayloadToken ??
-				data.hallPayloadToken ??
-				data.payloadToken ??
-				data.h
-		)
 		const itemCode = normalizeText(
 			data.integrationExternalItemCode ??
 				data.hallTableCode ??
 				data.tableCode ??
 				data.t
 		)
-		const tokenData = token
-			? this.resolveHallIntegrationPayloadToken(catalogId, token)
-			: {}
 		const itemData = itemCode
 			? await this.resolveHallIntegrationExternalItemCode(catalogId, itemCode)
 			: {}
 		const mergedData: Record<string, unknown> = {
 			...data,
-			...tokenData,
 			...itemData,
 			...(itemCode
 				? {
@@ -451,8 +439,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 						tableCode: itemCode,
 						t: itemCode
 					}
-				: {}),
-			...(token ? { integrationPayloadToken: token } : {})
+				: {})
 		}
 		const tableId = normalizeText(
 			mergedData.iikoTableId ?? mergedData.hallTableId ?? mergedData.tableId
@@ -560,98 +547,6 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 						hallSectionName: sectionName
 					}
 				: {})
-		}
-	}
-
-	private resolveHallIntegrationPayloadToken(
-		catalogId: string,
-		token: string
-	): Record<string, unknown> {
-		const envelope = this.integrationPayloadTokens.open(token, {
-			expectedType: 'hall.table',
-			expectedCatalogId: catalogId
-		})
-		const payload = isRecord(envelope.payload) ? envelope.payload : {}
-		const iiko = isRecord(payload.iiko)
-			? payload.iiko
-			: isRecord(payload.i)
-				? payload.i
-				: {}
-		const hall = isRecord(payload.hall)
-			? payload.hall
-			: isRecord(payload.h)
-				? payload.h
-				: {}
-		const tableId = normalizeText(
-			iiko.tableId ??
-				iiko.t ??
-				iiko.iikoTableId ??
-				hall.iikoTableId ??
-				payload.iikoTableId ??
-				payload.tableId
-		)
-
-		if (!tableId) {
-			throw new BadRequestException('Integration payload token has no table id')
-		}
-
-		return {
-			iikoTableId: tableId,
-			hallTableId: tableId,
-			tableId,
-			table: normalizeText(
-				hall.tableNumber ?? hall.number ?? hall.n ?? payload.tableNumber
-			),
-			tableNumber: normalizeText(
-				hall.tableNumber ?? hall.number ?? hall.n ?? payload.tableNumber
-			),
-			hallTableNumber: normalizeText(
-				hall.tableNumber ?? hall.number ?? hall.n ?? payload.tableNumber
-			),
-			tableName: normalizeText(
-				hall.tableName ?? hall.name ?? hall.nm ?? payload.tableName
-			),
-			hallTableName: normalizeText(
-				hall.tableName ?? hall.name ?? hall.nm ?? payload.tableName
-			),
-			iikoRestaurantSectionId: normalizeText(
-				iiko.restaurantSectionId ??
-					iiko.sectionId ??
-					iiko.s ??
-					hall.restaurantSectionId ??
-					payload.iikoRestaurantSectionId ??
-					payload.iikoSectionId ??
-					payload.hallSectionId
-			),
-			hallSectionId: normalizeText(
-				iiko.restaurantSectionId ??
-					iiko.sectionId ??
-					iiko.s ??
-					hall.restaurantSectionId ??
-					payload.iikoRestaurantSectionId ??
-					payload.iikoSectionId ??
-					payload.hallSectionId
-			),
-			iikoRestaurantSectionName: normalizeText(
-				iiko.restaurantSectionName ??
-					iiko.sectionName ??
-					iiko.sn ??
-					hall.sectionName ??
-					hall.sn ??
-					payload.iikoRestaurantSectionName ??
-					payload.iikoSectionName ??
-					payload.sectionName
-			),
-			hallSectionName: normalizeText(
-				iiko.restaurantSectionName ??
-					iiko.sectionName ??
-					iiko.sn ??
-					hall.sectionName ??
-					hall.sn ??
-					payload.iikoRestaurantSectionName ??
-					payload.iikoSectionName ??
-					payload.sectionName
-			)
 		}
 	}
 

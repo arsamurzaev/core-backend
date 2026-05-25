@@ -1023,7 +1023,7 @@ export class MoySkladSyncService {
 			if (options.action === 'DELETE') {
 				await progress.report({
 					phase: 'ARCHIVING_MISSING',
-					message: 'РЈРґР°Р»СЏРµРј РєР°С‚РµРіРѕСЂРёСЋ MoySklad',
+					message: 'Удаляем категорию MoySklad',
 					processed: 0,
 					total: 1,
 					force: true
@@ -1038,7 +1038,7 @@ export class MoySkladSyncService {
 			} else {
 				await progress.report({
 					phase: 'FETCHING_PRODUCT',
-					message: 'РџРѕР»СѓС‡Р°РµРј РєР°С‚РµРіРѕСЂРёСЋ MoySklad',
+					message: 'Получаем категорию MoySklad',
 					processed: 0,
 					total: 1,
 					force: true
@@ -1083,7 +1083,7 @@ export class MoySkladSyncService {
 			await progress.report({
 				phase: 'COMPLETED',
 				message:
-					'РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ РєР°С‚РµРіРѕСЂРёРё MoySklad Р·Р°РІРµСЂС€РµРЅР°',
+					'Синхронизация категории MoySklad завершена',
 				processed: 1,
 				total: 1,
 				force: true
@@ -1383,7 +1383,7 @@ export class MoySkladSyncService {
 	}): Promise<SyncProductResult> {
 		await params.progress.report({
 			phase: 'FETCHING_PRODUCT',
-			message: 'РџРѕР»СѓС‡Р°РµРј С‚РѕРІР°СЂ РёР· MoySklad',
+			message: 'Получаем товар из MoySklad',
 			processed: 0,
 			total: null,
 			force: true
@@ -1414,7 +1414,7 @@ export class MoySkladSyncService {
 		const totalSyncItems = 1 + externalVariants.length
 		await params.progress.report({
 			phase: 'SYNCING_PRODUCTS',
-			message: 'РЎРёРЅС…СЂРѕРЅРёР·РёСЂСѓРµРј РєР°СЂС‚РѕС‡РєСѓ С‚РѕРІР°СЂР°',
+			message: 'Синхронизируем карточку товара',
 			processed: 0,
 			total: totalSyncItems,
 			force: true
@@ -1438,7 +1438,7 @@ export class MoySkladSyncService {
 		})
 		await params.progress.report({
 			phase: 'SYNCING_PRODUCTS',
-			message: 'РљР°СЂС‚РѕС‡РєР° С‚РѕРІР°СЂР° СЃРёРЅС…СЂРѕРЅРёР·РёСЂРѕРІР°РЅР°',
+			message: 'Карточка товара синхронизирована',
 			processed: 1,
 			total: totalSyncItems,
 			force: true
@@ -1509,7 +1509,7 @@ export class MoySkladSyncService {
 		const durationMs = Date.now() - params.startedAt
 		await params.progress.report({
 			phase: 'COMPLETED',
-			message: 'РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ С‚РѕРІР°СЂР° Р·Р°РІРµСЂС€РµРЅР°',
+			message: 'Синхронизация товара завершена',
 			processed: totalSyncItems,
 			total: totalSyncItems,
 			force: true
@@ -1552,7 +1552,7 @@ export class MoySkladSyncService {
 	}): Promise<SyncProductResult> {
 		await params.progress.report({
 			phase: 'FETCHING_PRODUCT',
-			message: 'РџРѕР»СѓС‡Р°РµРј РјРѕРґРёС„РёРєР°С†РёСЋ РёР· MoySklad',
+			message: 'Получаем модификацию из MoySklad',
 			processed: 0,
 			total: null,
 			force: true
@@ -1589,7 +1589,7 @@ export class MoySkladSyncService {
 			await params.progress.report({
 				phase: 'FETCHING_PRODUCT',
 				message:
-					'РџРѕР»СѓС‡Р°РµРј СЂРѕРґРёС‚РµР»СЊСЃРєРёР№ С‚РѕРІР°СЂ РёР· MoySklad',
+					'Получаем родительский товар из MoySklad',
 				processed: 0,
 				total: totalSyncItems,
 				force: true
@@ -1627,7 +1627,7 @@ export class MoySkladSyncService {
 			await params.progress.report({
 				phase: 'SYNCING_PRODUCTS',
 				message:
-					'Р РѕРґРёС‚РµР»СЊСЃРєРёР№ С‚РѕРІР°СЂ СЃРёРЅС…СЂРѕРЅРёР·РёСЂРѕРІР°РЅ',
+					'Родительский товар синхронизирован',
 				processed: 1,
 				total: totalSyncItems,
 				force: true
@@ -1642,7 +1642,7 @@ export class MoySkladSyncService {
 
 		await params.progress.report({
 			phase: 'SYNCING_VARIANTS',
-			message: 'РЎРёРЅС…СЂРѕРЅРёР·РёСЂСѓРµРј РјРѕРґРёС„РёРєР°С†РёСЋ',
+			message: 'Синхронизируем модификацию',
 			processed: needsParentSync ? 1 : 0,
 			total: totalSyncItems,
 			force: true
@@ -1677,7 +1677,7 @@ export class MoySkladSyncService {
 		await params.progress.report({
 			phase: 'COMPLETED',
 			message:
-				'РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ РјРѕРґРёС„РёРєР°С†РёРё Р·Р°РІРµСЂС€РµРЅР°',
+				'Синхронизация модификации завершена',
 			processed: totalSyncItems,
 			total: totalSyncItems,
 			force: true

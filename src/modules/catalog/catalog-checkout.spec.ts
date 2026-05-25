@@ -197,32 +197,20 @@ describe('catalog checkout helpers', () => {
 		})
 	})
 
-	it('accepts hall checkout with protected integration payload token', () => {
+	it('rejects hall checkout without table id or backend-stored table code', () => {
 		const config = resolveCatalogCheckoutConfig({ typeCode: 'restaurant' })
 
 		expect(
-			normalizeCartCheckoutData({
+			() => normalizeCartCheckoutData({
 				config,
 				data: {
 					customerName: 'Ivan',
-					h: 'ip1.test.encrypted',
-					integrationPayloadToken: 'ip1.test.encrypted',
 					orderMode: 'HALL',
 					table: '11',
 					tableName: 'Table 11'
 				}
 			})
-		).toEqual({
-			checkoutMethod: CartCheckoutMethod.PICKUP,
-			checkoutData: {
-				customerName: 'Ivan',
-				h: 'ip1.test.encrypted',
-				integrationPayloadToken: 'ip1.test.encrypted',
-				orderMode: 'HALL',
-				table: '11',
-				tableName: 'Table 11'
-			}
-		})
+		).toThrow('iiko table id is required for hall order')
 	})
 
 	it('accepts hall checkout with backend-stored table code', () => {

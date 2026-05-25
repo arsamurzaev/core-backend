@@ -10,7 +10,6 @@ import { S3Module } from '@/modules/s3/public'
 import { ORDER_EXPORT_PORT } from './contracts'
 import { IntegrationController } from './integration.controller'
 import { IntegrationOrderExportDispatcherService } from './integration-order-export-dispatcher.service'
-import { IntegrationPayloadTokenService } from './integration-payload-token.service'
 import { IntegrationRepository } from './integration.repository'
 import { IntegrationService } from './integration.service'
 import { IikoImageImportService } from './providers/iiko/iiko.image-import.service'
@@ -41,7 +40,6 @@ import { MoySkladVariantSyncService } from './providers/moysklad/moysklad.varian
 	providers: [
 		IntegrationService,
 		IntegrationOrderExportDispatcherService,
-		IntegrationPayloadTokenService,
 		IntegrationRepository,
 		IikoImageImportService,
 		IikoMetadataCryptoService,
@@ -76,7 +74,6 @@ import { MoySkladVariantSyncService } from './providers/moysklad/moysklad.varian
 	],
 	exports: [
 		IntegrationService,
-		IntegrationPayloadTokenService,
 		IikoQueueService,
 		IikoOrderExportQueueService,
 		MoySkladQueueService,

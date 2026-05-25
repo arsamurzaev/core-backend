@@ -55,7 +55,6 @@ import {
 	IikoWebhookEventDto,
 	IikoWebhookSetupDto
 } from './dto/responses/iiko.dto.res'
-import { IntegrationPayloadTokenService } from './integration-payload-token.service'
 import {
 	MoySkladIntegrationDto,
 	MoySkladIntegrationStatusDto,
@@ -74,22 +73,7 @@ import { IntegrationService } from './integration.service'
 @ApiTags('Integration')
 @Controller('integration')
 export class IntegrationController {
-	constructor(
-		private readonly integrationService: IntegrationService,
-		private readonly payloadTokens: IntegrationPayloadTokenService
-	) {}
-
-	@Get('/payload/public-key')
-	@ApiOperation({ summary: 'Get public key for integration payload tokens' })
-	@ApiSecurity('csrf')
-	@UseGuards(SessionGuard, CatalogAccessGuard)
-	@Roles(Role.CATALOG)
-	async getIntegrationPayloadPublicKey() {
-		return {
-			ok: true,
-			...this.payloadTokens.getPublicKey()
-		}
-	}
+	constructor(private readonly integrationService: IntegrationService) {}
 
 	@Get('/moysklad')
 	@ApiOperation({ summary: 'Получить настройки интеграции MoySklad' })

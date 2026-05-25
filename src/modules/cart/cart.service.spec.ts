@@ -14,7 +14,6 @@ import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { RedisService } from '@/infrastructure/redis/redis.service'
 import { CAPABILITY_READER_PORT } from '@/modules/capability/contracts'
 import { ORDER_EXPORT_PORT } from '@/modules/integration/contracts'
-import { IntegrationPayloadTokenService } from '@/modules/integration/integration-payload-token.service'
 import { INVENTORY_RESERVATION_PORT } from '@/modules/inventory/contracts'
 import {
 	PRODUCT_MAINTENANCE_PORT,
@@ -185,9 +184,6 @@ describe('CartService', () => {
 	let orderExportQueue: {
 		enqueueCompletedOrder: jest.Mock
 	}
-	let integrationPayloadTokens: {
-		open: jest.Mock
-	}
 	let inventory: {
 		consumeCompletedOrderStockTx: jest.Mock
 		reserveCartStockTx: jest.Mock
@@ -271,9 +267,6 @@ describe('CartService', () => {
 				reason: 'order_export_disabled'
 			})
 		}
-		integrationPayloadTokens = {
-			open: jest.fn()
-		}
 		inventory = {
 			consumeCompletedOrderStockTx: jest.fn().mockResolvedValue([]),
 			reserveCartStockTx: jest.fn().mockResolvedValue([]),
@@ -355,10 +348,6 @@ describe('CartService', () => {
 				{
 					provide: ORDER_EXPORT_PORT,
 					useValue: orderExportQueue
-				},
-				{
-					provide: IntegrationPayloadTokenService,
-					useValue: integrationPayloadTokens
 				},
 				{
 					provide: INVENTORY_RESERVATION_PORT,

@@ -7,7 +7,6 @@ import { Test, TestingModule } from '@nestjs/testing'
 import { overrideControllerAuthGuards } from '@/shared/testing/controller-guards.testing'
 
 import { IntegrationController } from './integration.controller'
-import { IntegrationPayloadTokenService } from './integration-payload-token.service'
 import { IntegrationService } from './integration.service'
 
 describe('IntegrationController', () => {
@@ -54,12 +53,6 @@ describe('IntegrationController', () => {
 							retryIikoOrderExport: jest.fn(),
 							retryMoySkladOrderExport: jest.fn(),
 							cancelMoySkladSync: jest.fn()
-						}
-					},
-					{
-						provide: IntegrationPayloadTokenService,
-						useValue: {
-							getPublicKey: jest.fn()
 						}
 					}
 				]

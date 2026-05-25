@@ -895,7 +895,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 			(action !== 'CREATE' && action !== 'UPDATE')
 		) {
 			throw new InternalServerErrorException(
-				'Р”Р»СЏ webhook-СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёРё С‚РѕРІР°СЂР° MoySklad РЅРµ СѓРєР°Р·Р°РЅС‹ integrationId, entityType, externalId РёР»Рё action'
+				'Для webhook-синхронизации товара MoySklad не указаны integrationId, entityType, externalId или action'
 			)
 		}
 
@@ -936,7 +936,7 @@ export class MoySkladQueueService implements OnModuleInit, OnModuleDestroy {
 		const runningRun = await this.syncRuns.markRunning(run.id, jobId)
 		if (!runningRun) {
 			throw new InternalServerErrorException(
-				`РќРµ РЅР°Р№РґРµРЅ Р·Р°РїСѓСЃРє webhook-СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёРё С‚РѕРІР°СЂР° MoySklad ${run.id}`
+				`Не найден запуск webhook-синхронизации товара MoySklad ${run.id}`
 			)
 		}
 

@@ -5,7 +5,6 @@ export {
 } from './integration-external-items'
 export * from './provider-adapter.contract'
 export { IntegrationModule } from './integration.module'
-export { IntegrationPayloadTokenService } from './integration-payload-token.service'
 export { IntegrationService } from './integration.service'
 export { renderSafeProviderErrorMessage } from './provider-error-redaction'
 export { PreviewIikoImportDtoReq } from './dto/requests/preview-iiko-import.dto.req'

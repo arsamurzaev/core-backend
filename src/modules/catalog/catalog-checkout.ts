@@ -28,11 +28,9 @@ export type CatalogCheckoutData = {
 	address?: string
 	customerName?: string
 	guestsCount?: number
-	h?: string
 	hallSectionId?: string
 	hallSectionName?: string
 	hallTableCode?: string
-	hallPayloadToken?: string
 	hallTableId?: string
 	hallTableName?: string
 	hallTableNumber?: string
@@ -40,10 +38,8 @@ export type CatalogCheckoutData = {
 	iikoRestaurantSectionName?: string
 	iikoTableId?: string
 	integrationExternalItemCode?: string
-	integrationPayloadToken?: string
 	mapUrl?: string
 	orderMode?: string
-	payloadToken?: string
 	phone?: string
 	personsCount?: number
 	t?: string
@@ -311,11 +307,7 @@ function isHallCheckoutData(rawData: Record<string, unknown>): boolean {
 					rawData.integrationExternalItemCode ??
 					rawData.hallTableCode ??
 					rawData.tableCode ??
-					rawData.t ??
-					rawData.integrationPayloadToken ??
-					rawData.hallPayloadToken ??
-					rawData.payloadToken ??
-					rawData.h
+					rawData.t
 			)
 		)
 	)
@@ -334,17 +326,12 @@ function normalizeHallCheckoutData(params: {
 		integrationData.iikoTableId ??
 		integrationData.hallTableId ??
 		integrationData.tableId
-	const token =
-		integrationData.integrationPayloadToken ??
-		integrationData.hallPayloadToken ??
-		integrationData.payloadToken ??
-		integrationData.h
 	const tableCode =
 		integrationData.integrationExternalItemCode ??
 		integrationData.hallTableCode ??
 		integrationData.tableCode ??
 		integrationData.t
-	if (!tableId && !token && !tableCode) {
+	if (!tableId && !tableCode) {
 		throw new BadRequestException('iiko table id is required for hall order')
 	}
 
@@ -364,11 +351,9 @@ function normalizeIntegrationCheckoutData(
 		rawData.guestsCount ?? rawData.personsCount
 	)
 	const textFields = {
-		h: normalizeString(rawData.h),
 		hallSectionId: normalizeString(rawData.hallSectionId),
 		hallSectionName: normalizeString(rawData.hallSectionName),
 		hallTableCode: normalizeString(rawData.hallTableCode),
-		hallPayloadToken: normalizeString(rawData.hallPayloadToken),
 		hallTableId: normalizeString(rawData.hallTableId),
 		hallTableName: normalizeString(rawData.hallTableName),
 		hallTableNumber: normalizeString(rawData.hallTableNumber),
@@ -378,9 +363,7 @@ function normalizeIntegrationCheckoutData(
 		integrationExternalItemCode: normalizeString(
 			rawData.integrationExternalItemCode
 		),
-		integrationPayloadToken: normalizeString(rawData.integrationPayloadToken),
 		orderMode: normalizeString(rawData.orderMode),
-		payloadToken: normalizeString(rawData.payloadToken),
 		t: normalizeString(rawData.t),
 		table: normalizeString(rawData.table),
 		tableCode: normalizeString(rawData.tableCode),
