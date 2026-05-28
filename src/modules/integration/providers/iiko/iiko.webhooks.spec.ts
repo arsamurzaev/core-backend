@@ -36,6 +36,33 @@ describe('iiko webhooks helpers', () => {
 		expect(resolveIikoWebhookAction(event.eventType)).toBe('stock-sync')
 	})
 
+	it('accepts webhook JSON received as text', () => {
+		const event = normalizeIikoWebhookPayload(
+			JSON.stringify({
+				eventType: 'StopListUpdate',
+				eventTime: '2026-05-21 12:00:00.000',
+				organizationId: 'org-1',
+				correlationId: 'corr-1',
+				eventInfo: {}
+			})
+		)
+
+		expect(event.requestId).toBe('iiko:StopListUpdate:corr-1')
+		expect(event.organizationId).toBe('org-1')
+	})
+
+	it('rejects invalid webhook payload as a bad request', () => {
+		expect(() => normalizeIikoWebhookPayload('')).toThrow(
+			'iiko webhook payload must not be empty'
+		)
+		expect(() => normalizeIikoWebhookPayload('not-json')).toThrow(
+			'iiko webhook payload must be valid JSON'
+		)
+		expect(() => normalizeIikoWebhookPayload([])).toThrow(
+			'iiko webhook payload must be a JSON object'
+		)
+	})
+
 	it('routes catalog and order events', () => {
 		expect(resolveIikoWebhookAction('NomenclatureUpdate')).toBe('catalog-sync')
 		expect(resolveIikoWebhookAction('BusinessHoursAndMappingUpdate')).toBe(

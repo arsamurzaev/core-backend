@@ -68,6 +68,10 @@ async function bootstrap() {
 
 	expressApp.set('trust proxy', 1)
 
+	app.use(
+		'/integration/webhooks/iiko',
+		express.text({ type: '*/*', limit: '2mb' })
+	)
 	app.use(express.json({ limit: '2mb' }))
 	app.use(express.urlencoded({ extended: true, limit: '2mb' }))
 	app.use(compression())

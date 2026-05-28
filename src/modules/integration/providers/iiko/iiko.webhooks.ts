@@ -1,5 +1,7 @@
 import { createHash } from 'crypto'
 
+import { BadRequestException } from '@nestjs/common'
+
 import type {
 	IikoWebhookEventType,
 	IikoWebhookSettingsFilter
@@ -86,15 +88,18 @@ export function buildIikoWebhookSettingsFilter(): IikoWebhookSettingsFilter {
 export function normalizeIikoWebhookPayload(
 	payload: unknown
 ): NormalizedIikoWebhookEvent {
-	if (!isRecord(payload)) {
-		throw new Error('iiko webhook payload must be an object')
+	const normalizedPayload = normalizeWebhookPayloadJson(payload)
+	if (!isRecord(normalizedPayload)) {
+		throw new BadRequestException('iiko webhook payload must be a JSON object')
 	}
 
-	const eventType = readString(payload.eventType) || 'Unknown'
-	const eventTime = readString(payload.eventTime)
-	const organizationId = readString(payload.organizationId)
-	const correlationId = readString(payload.correlationId)
-	const eventInfo = isRecord(payload.eventInfo) ? payload.eventInfo : null
+	const eventType = readString(normalizedPayload.eventType) || 'Unknown'
+	const eventTime = readString(normalizedPayload.eventTime)
+	const organizationId = readString(normalizedPayload.organizationId)
+	const correlationId = readString(normalizedPayload.correlationId)
+	const eventInfo = isRecord(normalizedPayload.eventInfo)
+		? normalizedPayload.eventInfo
+		: null
 	const requestId = buildIikoWebhookRequestId({
 		eventType,
 		eventTime,
@@ -109,7 +114,7 @@ export function normalizeIikoWebhookPayload(
 		organizationId,
 		correlationId,
 		eventInfo,
-		payload,
+		payload: normalizedPayload,
 		requestId
 	}
 }
@@ -212,4 +217,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown): string | null {
 	return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function normalizeWebhookPayloadJson(payload: unknown): unknown {
+	const raw = Buffer.isBuffer(payload) ? payload.toString('utf8') : payload
+	if (typeof raw !== 'string') return raw
+
+	const trimmed = raw.trim()
+	if (!trimmed) {
+		throw new BadRequestException('iiko webhook payload must not be empty')
+	}
+
+	try {
+		return JSON.parse(trimmed)
+	} catch {
+		throw new BadRequestException('iiko webhook payload must be valid JSON')
+	}
 }
