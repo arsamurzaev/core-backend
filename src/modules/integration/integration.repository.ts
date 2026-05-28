@@ -661,6 +661,30 @@ export class IntegrationRepository {
 		})
 	}
 
+	findExternalItemsByType(params: {
+		catalogId?: string
+		integrationId?: string
+		provider: IntegrationProvider
+		type: string
+		activeOnly?: boolean
+	}): Promise<IntegrationExternalItemRecord[]> {
+		return this.prisma.integrationExternalItem.findMany({
+			where: {
+				...(params.catalogId ? { catalogId: params.catalogId } : {}),
+				...(params.integrationId ? { integrationId: params.integrationId } : {}),
+				provider: params.provider,
+				type: params.type,
+				...(params.activeOnly === false ? {} : { isActive: true }),
+				integration: {
+					deleteAt: null,
+					...(params.activeOnly === false ? {} : { isActive: true })
+				}
+			},
+			select: externalItemSelect,
+			orderBy: [{ code: 'asc' }, { name: 'asc' }, { createdAt: 'asc' }]
+		})
+	}
+
 	upsertExternalItem(params: {
 		catalogId: string
 		integrationId: string

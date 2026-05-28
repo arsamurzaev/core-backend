@@ -376,12 +376,18 @@ export class CartController {
 		description: 'Public cart key',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
+	@ApiBody({ type: ShareCurrentCartDtoReq, required: false })
 	@ApiOkResponse({ type: CompleteCartOrderResponseDto })
 	async completeManagerOrder(
 		@Param('publicKey') publicKey: string,
-		@User() user: SessionUser
+		@User() user: SessionUser,
+		@Body() dto: ShareCurrentCartDtoReq = {}
 	) {
-		const result = await this.cartService.completeManagerOrder(publicKey, user)
+		const result = await this.cartService.completeManagerOrder(publicKey, user, {
+			checkoutData: dto.checkoutData,
+			checkoutMethod: dto.checkoutMethod,
+			comment: dto.comment
+		})
 		return { ok: true, order: result.order }
 	}
 

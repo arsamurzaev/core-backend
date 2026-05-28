@@ -55,6 +55,10 @@ import {
 } from '@/shared/domain-events/domain-events.contract'
 import { buildMediaSelect } from '@/shared/media/media-select'
 import { MediaUrlService } from '@/shared/media/media-url.service'
+import {
+	getInclusiveCalendarDaysUntilExpiry,
+	isInclusiveExpiryActive
+} from '@/shared/utils'
 
 import {
 	applyCatalogSlugSuffix,
@@ -2055,8 +2059,7 @@ export class AdminService {
 				return {
 					feature,
 					enabled: Boolean(
-						entitlement?.enabled &&
-						(!entitlement.expiresAt || entitlement.expiresAt > new Date())
+						entitlement?.enabled && isInclusiveExpiryActive(entitlement.expiresAt)
 					),
 					expiresAt: entitlement?.expiresAt ?? null,
 					metadata: entitlement?.metadata ?? null
@@ -2123,8 +2126,7 @@ export class AdminService {
 			entitlements
 				.filter(
 					entitlement =>
-						entitlement.enabled &&
-						(!entitlement.expiresAt || entitlement.expiresAt > now)
+						entitlement.enabled && isInclusiveExpiryActive(entitlement.expiresAt, now)
 				)
 				.map(entitlement => entitlement.feature)
 		)
@@ -2365,7 +2367,7 @@ function addDays(date: Date, days: number) {
 
 function buildSubscriptionDaysLeft(subscriptionEndsAt?: Date | null) {
 	if (!subscriptionEndsAt) return null
-	return Math.ceil((subscriptionEndsAt.getTime() - Date.now()) / MS_PER_DAY)
+	return getInclusiveCalendarDaysUntilExpiry(subscriptionEndsAt)
 }
 
 type AdminCatalogSortValue = string | number | Date | null | undefined

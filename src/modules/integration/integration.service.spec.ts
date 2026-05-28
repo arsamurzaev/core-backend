@@ -240,6 +240,14 @@ describe('IntegrationService', () => {
 						softDeleteIntegratedVariantByExternalId: jest.fn(),
 						recomputeProductStatusFromVariants: jest.fn(),
 						createWebhookEventIfNew: jest.fn(),
+						markWebhookEventsProcessing: jest.fn(),
+						markWebhookEventProcessed: jest.fn(),
+						markWebhookEventFailed: jest.fn(),
+						markWebhookEventsSkipped: jest.fn(),
+						findOrderExportByOrderId: jest.fn(),
+						findOrderExportByExternalId: jest.fn(),
+						markOrderExportSuccess: jest.fn(),
+						markOrderExportError: jest.fn(),
 						softDeleteMoySklad: jest.fn(),
 						softDeleteIiko: jest.fn(),
 						failMoySkladSync: jest.fn()
@@ -379,8 +387,10 @@ describe('IntegrationService', () => {
 					provide: IikoQueueService,
 					useValue: {
 						enqueueCatalogSync: jest.fn(),
+						enqueueCatalogWebhookSync: jest.fn(),
 						enqueueProductSync: jest.fn(),
-						enqueueStockSync: jest.fn()
+						enqueueStockSync: jest.fn(),
+						enqueueStockWebhookSync: jest.fn()
 					}
 				},
 				{
@@ -413,7 +423,16 @@ describe('IntegrationService', () => {
 							lastRevision: metadata?.lastRevision ?? null,
 							lastMenuSyncedAt: metadata?.lastMenuSyncedAt ?? null,
 							lastStopListSyncedAt:
-								metadata?.lastStopListSyncedAt ?? null
+								metadata?.lastStopListSyncedAt ?? null,
+							webhook: metadata?.webhook ?? {
+								enabled: false,
+								urlPreview: null,
+								secretHash: null,
+								lastConfiguredAt: null,
+								lastReceivedAt: null,
+								lastEventType: null,
+								lastError: null
+							}
 						}))
 					}
 				},
@@ -423,7 +442,9 @@ describe('IntegrationService', () => {
 						get: jest.fn((key: string) => {
 							if (key === 'integration') {
 								return {
-									moySkladWebhookBaseUrl: 'https://api.example.test'
+									moySkladWebhookBaseUrl: 'https://api.example.test',
+									iikoWebhookBaseUrl: 'https://api.example.test',
+									iikoApiBaseUrl: 'https://iiko.example'
 								}
 							}
 							return undefined
@@ -1029,6 +1050,97 @@ describe('IntegrationService', () => {
 		])
 		expect(result[0]).not.toHaveProperty('payload')
 		expect(result[0]).not.toHaveProperty('response')
+	})
+
+	it('stores iiko stop-list webhook event and queues stock sync', async () => {
+		const secret = 'iiko-secret-1'
+		const iikoRecord = {
+			...integrationRecord,
+			id: 'iiko-integration-1',
+			provider: IntegrationProvider.IIKO,
+			metadata: {
+				apiLogin: 'iiko-login',
+				organizationId: 'organization-1',
+				webhook: {
+					enabled: true,
+					urlPreview:
+						'https://api.example.test/integration/webhooks/iiko/iiko-integration-1/***',
+					secretHash: hashWebhookSecret(secret),
+					lastConfiguredAt: '2026-05-28T09:00:00.000Z',
+					lastReceivedAt: null,
+					lastEventType: null,
+					lastError: null
+				}
+			}
+		}
+		const storedEvent = {
+			id: 'webhook-event-1',
+			integrationId: 'iiko-integration-1',
+			provider: IntegrationProvider.IIKO,
+			requestId: 'iiko:StopListUpdate:corr-1',
+			reportUrl: 'StopListUpdate',
+			payload: {},
+			status: 'PENDING',
+			attempts: 0,
+			lastError: null,
+			jobId: null,
+			receivedAt: new Date('2026-05-28T09:10:00.000Z'),
+			processedAt: null,
+			createdAt: new Date('2026-05-28T09:10:00.000Z'),
+			updatedAt: new Date('2026-05-28T09:10:00.000Z')
+		}
+		repo.findIikoById.mockResolvedValue(iikoRecord as any)
+		repo.createWebhookEventIfNew.mockResolvedValue({
+			event: storedEvent,
+			created: true
+		} as any)
+		iikoQueue.enqueueStockWebhookSync.mockResolvedValue({
+			ok: true,
+			queued: true,
+			runId: 'run-iiko-webhook',
+			jobId: 'job-iiko-webhook',
+			mode: IntegrationSyncRunMode.STOCK,
+			trigger: IntegrationSyncRunTrigger.WEBHOOK
+		} as any)
+
+		await service.receiveIikoWebhook({
+			integrationId: 'iiko-integration-1',
+			secret,
+			payload: {
+				eventType: 'StopListUpdate',
+				eventTime: '2026-05-28 12:10:00.000',
+				organizationId: 'organization-1',
+				correlationId: 'corr-1',
+				eventInfo: {}
+			}
+		})
+
+		expect(repo.createWebhookEventIfNew).toHaveBeenCalledWith(
+			expect.objectContaining({
+				integrationId: 'iiko-integration-1',
+				provider: IntegrationProvider.IIKO,
+				requestId: 'iiko:StopListUpdate:corr-1',
+				reportUrl: 'StopListUpdate'
+			})
+		)
+		expect(repo.markWebhookEventsProcessing).toHaveBeenCalledWith(
+			['webhook-event-1'],
+			'inline'
+		)
+		expect(iikoQueue.enqueueStockWebhookSync).toHaveBeenCalledWith(iikoRecord)
+		expect(repo.markWebhookEventProcessed).toHaveBeenCalledWith(
+			'webhook-event-1'
+		)
+		expect(repo.updateIikoMetadataById).toHaveBeenCalledWith(
+			'iiko-integration-1',
+			expect.objectContaining({
+				webhook: expect.objectContaining({
+					enabled: true,
+					lastEventType: 'StopListUpdate',
+					lastError: null
+				})
+			})
+		)
 	})
 
 	it('loads MoySklad order export reference options from provider', async () => {

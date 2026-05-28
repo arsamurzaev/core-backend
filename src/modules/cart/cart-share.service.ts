@@ -53,7 +53,7 @@ export class CartShareService {
 		const now = new Date()
 		const data: Prisma.CartUpdateInput = {}
 		const normalizedComment = this.normalizeCartComment(shareInput.comment)
-		const checkout = await this.resolveCheckoutForShare(catalogId, shareInput)
+		const checkout = await this.resolveCheckoutSnapshot(catalogId, shareInput)
 
 		if (!publicKey) {
 			publicKey = await this.generateUniquePublicKey()
@@ -109,7 +109,7 @@ export class CartShareService {
 		}
 	}
 
-	private async resolveCheckoutForShare(
+	async resolveCheckoutSnapshot(
 		catalogId: string,
 		input: CartShareInput
 	): Promise<{

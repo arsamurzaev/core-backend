@@ -33,7 +33,11 @@ export class ShareCurrentCartDtoReq {
 
 	@ApiPropertyOptional({
 		type: Object,
-		example: { personsCount: 4, visitTime: '19:30' }
+		example: {
+			personsCount: 4,
+			visitDate: '2026-05-26',
+			visitTime: '19:30'
+		}
 	})
 	@IsOptional()
 	@IsObject()

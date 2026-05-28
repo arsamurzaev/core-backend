@@ -160,10 +160,15 @@ export type IikoStopListItem = {
 	dateAdd?: string | null
 }
 
+export type IikoTerminalGroupStopListItemsGroup = {
+	terminalGroupId?: string | null
+	items?: IikoStopListItem[] | null
+}
+
 export type IikoTerminalGroupStopList = {
 	organizationId?: string | null
 	terminalGroupId?: string | null
-	items?: IikoStopListItem[] | null
+	items?: Array<IikoStopListItem | IikoTerminalGroupStopListItemsGroup> | null
 }
 
 export type IikoStopListsResponse = {
@@ -491,6 +496,7 @@ export type IikoCreateDeliveryOrderPayload = {
 		phone: string
 		orderServiceType?: IikoDeliveryOrderServiceType | null
 		orderTypeId?: string | null
+		completeBefore?: string | null
 		menuId?: string | null
 		priceCategoryId?: string | null
 		comment?: string | null
@@ -520,6 +526,57 @@ export type IikoCreateDeliveryOrderResponse = {
 		creationStatus: IikoOpenString<'Success' | 'InProgress' | 'Error'>
 		errorInfo?: unknown
 		order?: unknown
+	}
+}
+
+export type IikoCreateReservePayload = {
+	organizationId: string
+	terminalGroupId?: string | null
+	id?: string | null
+	externalNumber?: string | null
+	order?: {
+		menuId?: string | null
+		items: IikoCreateDeliveryOrderItem[]
+		sourceKey?: string | null
+		orderTypeId?: string | null
+		externalData?: Array<{
+			key: string
+			value: string
+			isPublic?: boolean
+		}> | null
+	} | null
+	customer: {
+		type: 'regular'
+		id?: string | null
+		name?: string | null
+	}
+	phone: string
+	comment?: string | null
+	durationInMinutes: number
+	shouldRemind: boolean
+	tableIds: string[]
+	estimatedStartTime: string
+	guests?: {
+		count: number
+	} | null
+	eventType?: string | null
+	createReserveSettings?: {
+		transportToFrontTimeout?: number | null
+		checkStopList?: boolean
+	} | null
+}
+
+export type IikoCreateReserveResponse = {
+	correlationId: string
+	reserveInfo: {
+		id: string
+		externalNumber?: string | null
+		organizationId: string
+		timestamp: number
+		creationStatus: IikoOpenString<'Success' | 'InProgress' | 'Error'>
+		errorInfo?: unknown
+		isDeleted?: boolean
+		reserve?: unknown
 	}
 }
 

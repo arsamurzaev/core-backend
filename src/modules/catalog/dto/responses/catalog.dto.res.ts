@@ -47,11 +47,19 @@ export class CatalogCheckoutFieldDto {
 	@ApiProperty({ type: String })
 	label: string
 
-	@ApiProperty({ type: String, enum: ['text', 'number', 'time'] })
-	type: 'text' | 'number' | 'time'
+	@ApiProperty({ type: String, enum: ['date', 'text', 'number', 'time'] })
+	type: 'date' | 'text' | 'number' | 'time'
 
 	@ApiProperty({ type: Boolean })
 	required: boolean
+}
+
+export class CatalogCheckoutPreorderSettingsDto {
+	@ApiProperty({ type: Number, example: 30 })
+	minLeadTimeMinutes: number
+
+	@ApiProperty({ type: Number, example: 14 })
+	maxAdvanceDays: number
 }
 
 export class CatalogCheckoutConfigDto {
@@ -66,6 +74,9 @@ export class CatalogCheckoutConfigDto {
 
 	@ApiProperty({ type: Object })
 	methodFields: Record<string, CatalogCheckoutFieldDto[]>
+
+	@ApiProperty({ type: CatalogCheckoutPreorderSettingsDto })
+	preorder: CatalogCheckoutPreorderSettingsDto
 }
 
 export class CatalogSettingsDto {

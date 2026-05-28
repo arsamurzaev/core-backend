@@ -460,10 +460,14 @@ describe('IikoSyncService', () => {
 			terminalGroupStopLists: [
 				{
 					organizationId: 'org-1',
-					terminalGroupId: 'terminal-1',
 					items: [
-						{ productId: 'product-1', sizeId: 'size-small', balance: 0 },
-						{ productId: 'product-2', sizeId: null, balance: 3 }
+						{
+							terminalGroupId: 'terminal-1',
+							items: [
+								{ productId: 'product-1', sizeId: 'size-small', balance: 0 },
+								{ productId: 'product-2', sizeId: null, balance: 3 }
+							]
+						}
 					]
 				}
 			]

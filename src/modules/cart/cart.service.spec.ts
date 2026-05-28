@@ -2198,6 +2198,139 @@ describe('CartService', () => {
 		expect(inventory.consumeCompletedOrderStockTx).not.toHaveBeenCalled()
 	})
 
+	it('applies manager checkout data before converting a preorder cart', async () => {
+		const preorderCheckoutData = {
+			customerName: 'Ivan',
+			hallTableId: 'table-11',
+			hallTableName: 'Стол 11',
+			hallTableNumber: '11',
+			iikoTableId: 'table-11',
+			phone: '+7 (988) 111-22-33',
+			personsCount: 2,
+			tableNumber: '11',
+			visitDate: '2026-06-01',
+			visitTime: '19:30'
+		}
+		const cartWithItems = createCartEntity({
+			status: CartStatus.IN_PROGRESS,
+			assignedManagerId: 'manager-1',
+			items: [
+				{
+					id: 'cart-item-1',
+					productId: 'product-1',
+					variantId: null,
+					quantity: 1,
+					createdAt: new Date('2026-03-25T09:00:00.000Z'),
+					updatedAt: new Date('2026-03-25T09:00:00.000Z'),
+					product: {
+						id: 'product-1',
+						name: 'Product 1',
+						slug: 'product-1',
+						price: 1999
+					}
+				}
+			]
+		})
+		const updatedCart = createCartEntity({
+			...cartWithItems,
+			checkoutMethod: CartCheckoutMethod.PREORDER,
+			checkoutData: {
+				...preorderCheckoutData,
+				guestsCount: 2,
+				scheduledAt: '2026-06-01T19:30:00.000'
+			},
+			checkoutContacts: { PHONE: '+7 (999) 000-00-00' }
+		})
+		const convertedCart = createCartEntity({
+			...updatedCart,
+			status: CartStatus.CONVERTED,
+			publicKey: null,
+			checkoutKey: null,
+			closedAt: new Date('2026-03-25T09:10:00.000Z')
+		})
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(cartWithItems)
+			.mockResolvedValueOnce(updatedCart)
+			.mockResolvedValueOnce(convertedCart)
+		prisma.catalog.findFirst
+			.mockResolvedValueOnce({
+				id: 'catalog-1',
+				userId: 'manager-1'
+			})
+			.mockResolvedValueOnce({
+				type: { code: 'restaurant' },
+				settings: {
+					address: 'Cafe address',
+					checkout: {
+						enabledMethods: [
+							CartCheckoutMethod.DELIVERY,
+							CartCheckoutMethod.PICKUP,
+							CartCheckoutMethod.PREORDER
+						],
+						preorder: {
+							minLeadTimeMinutes: 0,
+							maxAdvanceDays: 365
+						}
+					}
+				},
+				contacts: [
+					{
+						type: ContactType.PHONE,
+						value: '+7 (999) 000-00-00'
+					}
+				]
+			})
+		prisma.order.create.mockResolvedValue(
+			createCompletedOrderEntity({
+				checkoutMethod: CartCheckoutMethod.PREORDER,
+				checkoutData: updatedCart.checkoutData,
+				checkoutContacts: updatedCart.checkoutContacts
+			})
+		)
+
+		await service.completeManagerOrder(
+			'public-1',
+			{
+				id: 'manager-1',
+				role: Role.CATALOG
+			},
+			{
+				checkoutMethod: CartCheckoutMethod.PREORDER,
+				checkoutData: preorderCheckoutData
+			}
+		)
+
+		expect(prisma.cart.update).toHaveBeenCalledWith({
+			where: { id: 'cart-1' },
+			data: expect.objectContaining({
+				checkoutMethod: CartCheckoutMethod.PREORDER,
+				checkoutData: expect.objectContaining({
+					customerName: 'Ivan',
+					hallTableId: 'table-11',
+					hallTableName: 'Стол 11',
+					hallTableNumber: '11',
+					iikoTableId: 'table-11',
+					phone: '+7 (988) 111-22-33',
+					personsCount: 2,
+					tableNumber: '11',
+					visitDate: '2026-06-01',
+					visitTime: '19:30'
+				}),
+				checkoutContacts: { PHONE: '+7 (999) 000-00-00' }
+			})
+		})
+		expect(prisma.order.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				data: expect.objectContaining({
+					checkoutMethod: CartCheckoutMethod.PREORDER,
+					checkoutData: updatedCart.checkoutData,
+					checkoutContacts: updatedCart.checkoutContacts
+				})
+			})
+		)
+	})
+
 	it('stores discounted final price and base price in order snapshot', async () => {
 		const cartWithItems = createCartEntity({
 			status: CartStatus.IN_PROGRESS,

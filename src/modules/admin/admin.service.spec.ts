@@ -410,6 +410,27 @@ describe('AdminService', () => {
 		})
 	})
 
+	it('counts catalog subscription end dates inclusively', async () => {
+		const { prisma, service } = createService()
+		prisma.catalog.findMany.mockResolvedValue([
+			createAdminCatalogRecord({
+				subscriptionEndsAt: new Date(2026, 4, 28)
+			})
+		])
+
+		jest.useFakeTimers().setSystemTime(new Date(2026, 4, 28, 12))
+		try {
+			const [catalogOnEndDate] = await service.getCatalogs()
+			expect(catalogOnEndDate.subscriptionDaysLeft).toBe(1)
+
+			jest.setSystemTime(new Date(2026, 4, 29))
+			const [catalogAfterEndDate] = await service.getCatalogs()
+			expect(catalogAfterEndDate.subscriptionDaysLeft).toBe(0)
+		} finally {
+			jest.useRealTimers()
+		}
+	})
+
 	it('returns MoySklad stock diagnostics without leaking provider secrets', async () => {
 		const { prisma, service } = createService()
 		prisma.integration.findUnique.mockResolvedValue({

@@ -1,4 +1,9 @@
-import { CartCheckoutMethod, CartStatus, IntegrationProvider } from '@generated/client'
+import {
+	CartCheckoutMethod,
+	CartStatus,
+	IntegrationProvider,
+	Prisma
+} from '@generated/client'
 import {
 	BadRequestException,
 	Inject,
@@ -326,7 +331,13 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		return cart
 	}
 
-	async completeManagerOrder(publicKey: string, user: SessionUser) {
+	async completeManagerOrder(
+		publicKey: string,
+		user: SessionUser,
+		input: CartShareInput | string | null = {}
+	) {
+		const shareInput: CartShareInput =
+			typeof input === 'string' ? { comment: input } : (input ?? {})
 		const cart = await this.managerSession.findManageableCartByPublicKeyOrThrow(
 			publicKey,
 			user
@@ -337,11 +348,49 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 			throw new BadRequestException('Нельзя оформить пустую корзину')
 		}
 
+		await this.applyManagerCheckoutInput(cart, shareInput)
+
 		const result = await this.orderCheckout.complete(cart.id, user.id)
 		const freshCart = await this.lookup.findByIdOrThrow(result.cartId)
 		await this.broadcastCartStatusChanged(freshCart)
 
 		return { order: result.order }
+	}
+
+	private async applyManagerCheckoutInput(
+		cart: CartEntity,
+		input: CartShareInput
+	) {
+		const data: Prisma.CartUpdateInput = {}
+		const hasCheckoutUpdate =
+			input.checkoutData !== undefined || input.checkoutMethod !== undefined
+		const comment = normalizeCartComment(input.comment)
+
+		if (input.comment !== undefined && comment !== cart.comment) {
+			data.comment = comment
+		}
+
+		if (hasCheckoutUpdate) {
+			const checkoutData =
+				input.checkoutData !== undefined
+					? mergeCheckoutData(cart.checkoutData, input.checkoutData)
+					: cart.checkoutData
+			const checkout = await this.share.resolveCheckoutSnapshot(cart.catalogId, {
+				checkoutData,
+				checkoutMethod: input.checkoutMethod ?? cart.checkoutMethod ?? undefined
+			})
+
+			data.checkoutMethod = checkout.checkoutMethod
+			data.checkoutData = checkout.checkoutData as Prisma.InputJsonValue
+			data.checkoutContacts = checkout.checkoutContacts as Prisma.InputJsonValue
+		}
+
+		if (Object.keys(data).length === 0) return
+
+		await this.prisma.cart.update({
+			where: { id: cart.id },
+			data
+		})
 	}
 
 	async connectCurrentSse(
@@ -588,4 +637,20 @@ function normalizeTextOrNumber(value: unknown): string | null {
 	}
 
 	return normalizeText(value)
+}
+
+function normalizeCartComment(comment?: string | null): string | null {
+	const normalized = comment?.trim()
+	return normalized ? normalized : null
+}
+
+function mergeCheckoutData(
+	existing: unknown,
+	incoming: unknown
+): Record<string, unknown> | unknown {
+	if (!isRecord(incoming)) return incoming
+	return {
+		...(isRecord(existing) ? existing : {}),
+		...incoming
+	}
 }

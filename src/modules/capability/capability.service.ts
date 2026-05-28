@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import { isInclusiveExpiryActive } from '@/shared/utils'
 
 import {
 	CAPABILITY_CATALOG_SALE_UNITS,
@@ -201,8 +202,7 @@ export class CapabilityService {
 			entitlements
 				.filter(
 					entitlement =>
-						entitlement.enabled &&
-						(!entitlement.expiresAt || entitlement.expiresAt > at)
+						entitlement.enabled && isInclusiveExpiryActive(entitlement.expiresAt, at)
 				)
 				.map(entitlement => entitlement.feature)
 		)

@@ -77,6 +77,23 @@ describe('CapabilityService', () => {
 		).rejects.toThrow(ForbiddenException)
 	})
 
+	it('treats entitlement expiry dates as inclusive calendar dates', async () => {
+		prisma.catalogFeatureEntitlement.findMany.mockResolvedValue([
+			{
+				feature: CAPABILITY_PRODUCT_TYPES,
+				enabled: true,
+				expiresAt: new Date(2026, 4, 28)
+			}
+		])
+
+		await expect(
+			service.canUseProductTypes('catalog-1', new Date(2026, 4, 28, 23))
+		).resolves.toBe(true)
+		await expect(
+			service.canUseProductTypes('catalog-1', new Date(2026, 4, 29))
+		).resolves.toBe(false)
+	})
+
 	it('requires product structure for iiko integration capability', async () => {
 		prisma.catalogFeatureEntitlement.findMany.mockResolvedValue([
 			{

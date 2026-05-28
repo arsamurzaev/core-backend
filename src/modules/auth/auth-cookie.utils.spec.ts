@@ -1,6 +1,20 @@
 import { getSessionCookieNames, resolveCookieDomain } from './auth-cookie.utils'
 
 describe('auth cookie utils', () => {
+	const originalBaseDomains = process.env.CATALOG_BASE_DOMAINS
+	const originalPlatformCookieSubdomains =
+		process.env.PLATFORM_COOKIE_SUBDOMAINS
+
+	beforeEach(() => {
+		process.env.CATALOG_BASE_DOMAINS = 'myctlg.ru,myctlg-update.ru'
+		process.env.PLATFORM_COOKIE_SUBDOMAINS = 'www,api,admin,app,shtab'
+	})
+
+	afterEach(() => {
+		restoreEnv('CATALOG_BASE_DOMAINS', originalBaseDomains)
+		restoreEnv('PLATFORM_COOKIE_SUBDOMAINS', originalPlatformCookieSubdomains)
+	})
+
 	it('does not set a cookie domain for localhost hosts', () => {
 		expect(resolveCookieDomain('localhost')).toBeUndefined()
 		expect(resolveCookieDomain('localhost:4000')).toBeUndefined()
@@ -31,3 +45,12 @@ describe('auth cookie utils', () => {
 		})
 	})
 })
+
+function restoreEnv(name: string, value: string | undefined): void {
+	if (value === undefined) {
+		delete process.env[name]
+		return
+	}
+
+	process.env[name] = value
+}

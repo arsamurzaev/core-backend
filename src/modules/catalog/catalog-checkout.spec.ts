@@ -9,6 +9,16 @@ import {
 	resolveCheckoutContactsSnapshot
 } from './catalog-checkout'
 
+function futureVisit(daysFromNow = 1): { visitDate: string; visitTime: string } {
+	const date = new Date()
+	date.setDate(date.getDate() + daysFromNow)
+	date.setHours(19, 30, 0, 0)
+	return {
+		visitDate: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
+		visitTime: '19:30'
+	}
+}
+
 describe('catalog checkout helpers', () => {
 	it('resolves checkout method presets by catalog type', () => {
 		expect(resolveCheckoutAvailableMethods('restaurant')).toEqual([
@@ -35,6 +45,10 @@ describe('catalog checkout helpers', () => {
 		expect(
 			resolveCatalogCheckoutConfig({ typeCode: 'restaurant' }).enabledMethods
 		).toEqual([CartCheckoutMethod.DELIVERY, CartCheckoutMethod.PICKUP])
+		expect(resolveCatalogCheckoutConfig({ typeCode: 'restaurant' }).preorder).toEqual({
+			minLeadTimeMinutes: 30,
+			maxAdvanceDays: 14
+		})
 		expect(
 			resolveCatalogCheckoutConfig({ typeCode: 'cafe' }).enabledMethods
 		).toEqual([CartCheckoutMethod.DELIVERY, CartCheckoutMethod.PICKUP])
@@ -58,6 +72,42 @@ describe('catalog checkout helpers', () => {
 				checkout: { enabledMethods: [] }
 			}).enabledMethods
 		).toEqual([])
+	})
+
+	it('normalizes preorder checkout settings', () => {
+		expect(
+			normalizeCatalogCheckoutSettings(
+				{
+					enabledMethods: [CartCheckoutMethod.PREORDER],
+					preorder: {
+						minLeadTimeMinutes: '45',
+						maxAdvanceDays: '21'
+					}
+				},
+				'restaurant'
+			)
+		).toEqual({
+			enabledMethods: [CartCheckoutMethod.PREORDER],
+			preorder: {
+				minLeadTimeMinutes: 45,
+				maxAdvanceDays: 21
+			}
+		})
+
+		expect(
+			resolveCatalogCheckoutConfig({
+				typeCode: 'restaurant',
+				checkout: {
+					preorder: {
+						minLeadTimeMinutes: 60,
+						maxAdvanceDays: 2
+					}
+				}
+			}).preorder
+		).toEqual({
+			minLeadTimeMinutes: 60,
+			maxAdvanceDays: 2
+		})
 	})
 
 	it('uses catalog contacts unless a method has custom checkout contacts', () => {
@@ -160,11 +210,12 @@ describe('catalog checkout helpers', () => {
 		})
 	})
 
-	it('requires persons count and keeps optional visit time for preorder', () => {
+	it('requires persons count and normalizes preorder date and time', () => {
 		const config = resolveCatalogCheckoutConfig({
 			typeCode: 'restaurant',
 			checkout: { enabledMethods: [CartCheckoutMethod.PREORDER] }
 		})
+		const visit = futureVisit()
 
 		expect(() =>
 			normalizeCartCheckoutData({
@@ -182,7 +233,7 @@ describe('catalog checkout helpers', () => {
 					customerName: 'Ivan',
 					personsCount: '4',
 					phone: '+79990000000',
-					visitTime: '19:30'
+					...visit
 				}
 			})
 		).toEqual({
@@ -192,9 +243,103 @@ describe('catalog checkout helpers', () => {
 				guestsCount: 4,
 				personsCount: 4,
 				phone: '+79990000000',
+				scheduledAt: `${visit.visitDate}T19:30:00.000`,
+				visitDate: visit.visitDate,
 				visitTime: '19:30'
 			}
 		})
+	})
+
+	it('keeps explicit preorder method when iiko table id is provided', () => {
+		const config = resolveCatalogCheckoutConfig({
+			typeCode: 'restaurant',
+			checkout: { enabledMethods: [CartCheckoutMethod.PREORDER] }
+		})
+		const visit = futureVisit()
+
+		expect(
+			normalizeCartCheckoutData({
+				config,
+				method: CartCheckoutMethod.PREORDER,
+				data: {
+					customerName: 'Ivan',
+					iikoTableId: 'table-11',
+					hallTableId: 'table-11',
+					hallTableName: 'Стол 11',
+					hallTableNumber: '11',
+					personsCount: 2,
+					phone: '+79990000000',
+					...visit
+				}
+			})
+		).toEqual({
+			checkoutMethod: CartCheckoutMethod.PREORDER,
+			checkoutData: {
+				customerName: 'Ivan',
+				guestsCount: 2,
+				hallTableId: 'table-11',
+				hallTableName: 'Стол 11',
+				hallTableNumber: '11',
+				iikoTableId: 'table-11',
+				personsCount: 2,
+				phone: '+79990000000',
+				scheduledAt: `${visit.visitDate}T19:30:00.000`,
+				visitDate: visit.visitDate,
+				visitTime: '19:30'
+			}
+		})
+	})
+
+	it('rejects preorder without schedule and past schedule', () => {
+		const config = resolveCatalogCheckoutConfig({
+			typeCode: 'restaurant',
+			checkout: { enabledMethods: [CartCheckoutMethod.PREORDER] }
+		})
+
+		expect(() =>
+			normalizeCartCheckoutData({
+				config,
+				method: CartCheckoutMethod.PREORDER,
+				data: { personsCount: 4 }
+			})
+		).toThrow('visitDate and visitTime are required for preorder')
+
+		expect(() =>
+			normalizeCartCheckoutData({
+				config,
+				method: CartCheckoutMethod.PREORDER,
+				data: {
+					personsCount: 4,
+					visitDate: '2020-01-01',
+					visitTime: '19:30'
+				}
+			})
+		).toThrow('preorder time must be at least 30 minutes in the future')
+	})
+
+	it('rejects preorder beyond configured max advance window', () => {
+		const config = resolveCatalogCheckoutConfig({
+			typeCode: 'restaurant',
+			checkout: {
+				enabledMethods: [CartCheckoutMethod.PREORDER],
+				preorder: {
+					minLeadTimeMinutes: 0,
+					maxAdvanceDays: 1
+				}
+			}
+		})
+		const visit = futureVisit(3)
+
+		expect(() =>
+			normalizeCartCheckoutData({
+				config,
+				method: CartCheckoutMethod.PREORDER,
+				data: {
+					personsCount: 4,
+					...visit
+				}
+			})
+		).toThrow('preorder time must be within 1 days')
 	})
 
 	it('rejects hall checkout without table id or backend-stored table code', () => {

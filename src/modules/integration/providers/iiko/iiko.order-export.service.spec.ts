@@ -100,7 +100,8 @@ describe('IikoOrderExportService', () => {
 						findIiko: jest.fn(),
 						setOrderExportPayload: jest.fn(),
 						findVariantLinkByVariantId: jest.fn(),
-						findProductLinkByProductId: jest.fn()
+						findProductLinkByProductId: jest.fn(),
+						findExternalItemsByType: jest.fn()
 					}
 				},
 				{
@@ -164,6 +165,7 @@ describe('IikoOrderExportService', () => {
 		repo.setOrderExportPayload.mockResolvedValue(exportRecord as any)
 		repo.findVariantLinkByVariantId.mockResolvedValue(null)
 		repo.findProductLinkByProductId.mockResolvedValue(null)
+		repo.findExternalItemsByType.mockResolvedValue([])
 
 		jest.spyOn(IikoClient.prototype, 'createDeliveryOrder').mockResolvedValue({
 			correlationId: 'corr-1',
@@ -181,6 +183,16 @@ describe('IikoOrderExportService', () => {
 				organizationId: 'org-1',
 				timestamp: 1,
 				creationStatus: 'InProgress'
+			}
+		})
+		jest.spyOn(IikoClient.prototype, 'createReserve').mockResolvedValue({
+			correlationId: 'reserve-corr-1',
+			reserveInfo: {
+				id: 'iiko-reserve-1',
+				organizationId: 'org-1',
+				timestamp: 1,
+				creationStatus: 'InProgress',
+				isDeleted: false
 			}
 		})
 		jest
@@ -267,6 +279,178 @@ describe('IikoOrderExportService', () => {
 		const payload = repo.setOrderExportPayload.mock.calls[0]?.[1] as any
 
 		expect(payload.order.phone).toBe('+79881112233')
+	})
+
+	it('creates iiko reserve for preorder with table and visit date/time', async () => {
+		repo.findOrderForExport.mockResolvedValueOnce({
+			...order,
+			checkoutMethod: CartCheckoutMethod.PREORDER,
+			checkoutData: {
+				customerName: 'Ivan',
+				phone: '+7 (988) 111-22-33',
+				personsCount: 4,
+				iikoTableId: 'table-1',
+				hallTableNumber: '11',
+				visitDate: '2026-05-26',
+				visitTime: '19:30'
+			}
+		} as any)
+
+		const result = await service.exportOrder(exportRecord as any)
+		const payload = repo.setOrderExportPayload.mock.calls[0]?.[1] as any
+
+		expect(payload).toEqual(
+			expect.objectContaining({
+				organizationId: 'org-1',
+				terminalGroupId: 'terminal-1',
+				id: '11111111-1111-1111-1111-111111111111',
+				externalNumber: 'ctlg-11111111-1111-1111-1111-111111111111',
+				phone: '+79881112233',
+				customer: {
+					type: 'regular',
+					name: 'Ivan'
+				},
+				durationInMinutes: 120,
+				shouldRemind: true,
+				tableIds: ['table-1'],
+				estimatedStartTime: '2026-05-26 19:30:00.000',
+				guests: { count: 4 },
+				eventType: 'Banquet',
+				createReserveSettings: {
+					transportToFrontTimeout: 8,
+					checkStopList: true
+				}
+			})
+		)
+		expect(payload.order).toEqual(
+			expect.objectContaining({
+				menuId: '81651',
+				sourceKey: 'catalog-api',
+				items: [
+					{
+						type: 'Product',
+						productId: 'iiko-product-1',
+						productSizeId: 'size-small',
+						amount: 2,
+						price: 490
+					}
+				]
+			})
+		)
+		expect(payload.order.orderServiceType).toBeUndefined()
+		expect(payload.order.deliveryPoint).toBeUndefined()
+		expect(IikoClient.prototype.createReserve).toHaveBeenCalledWith(payload)
+		expect(IikoClient.prototype.createDeliveryOrder).not.toHaveBeenCalled()
+		expect(IikoClient.prototype.createTableOrder).not.toHaveBeenCalled()
+		expect(result).toEqual(
+			expect.objectContaining({
+				externalId: 'iiko-reserve-1',
+				correlationId: 'reserve-corr-1',
+				created: true
+			})
+		)
+	})
+
+	it('uses next local occurrence when preorder only has visit time', async () => {
+		repo.findOrderForExport.mockResolvedValueOnce({
+			...order,
+			checkoutMethod: CartCheckoutMethod.PREORDER,
+			checkoutData: {
+				customerName: 'Ivan',
+				phone: '+7 (988) 111-22-33',
+				personsCount: 2,
+				iikoTableId: 'table-1',
+				visitTime: '08:30'
+			},
+			createdAt: new Date(2026, 4, 21, 12, 10, 0)
+		} as any)
+
+		await service.exportOrder(exportRecord as any)
+		const payload = repo.setOrderExportPayload.mock.calls[0]?.[1] as any
+
+		expect(payload.estimatedStartTime).toBe('2026-05-22 08:30:00.000')
+		expect(IikoClient.prototype.createReserve).toHaveBeenCalledWith(payload)
+		expect(IikoClient.prototype.createDeliveryOrder).not.toHaveBeenCalled()
+	})
+
+	it('resolves preorder table number from synced iiko tables', async () => {
+		repo.findExternalItemsByType.mockResolvedValueOnce([
+			{
+				id: 'external-table-1',
+				catalogId: 'catalog-1',
+				integrationId: 'integration-1',
+				provider: IntegrationProvider.IIKO,
+				type: 'TABLE',
+				externalId: 'table-11',
+				externalParentId: 'section-1',
+				publicCode: 'table-code-11',
+				name: 'Table 11',
+				code: '11',
+				isActive: true,
+				rawMeta: {
+					iikoTableNumber: 11,
+					displayTableNumber: '11',
+					tableName: 'Table 11',
+					restaurantSectionId: 'section-1',
+					restaurantSectionName: 'Hall'
+				},
+				lastSeenAt: new Date('2026-05-21T09:00:00.000Z'),
+				lastSyncedAt: new Date('2026-05-21T09:00:00.000Z'),
+				createdAt: new Date('2026-05-21T09:00:00.000Z'),
+				updatedAt: new Date('2026-05-21T09:00:00.000Z')
+			}
+		] as any)
+		repo.findOrderForExport.mockResolvedValueOnce({
+			...order,
+			checkoutMethod: CartCheckoutMethod.PREORDER,
+			checkoutData: {
+				customerName: 'Ivan',
+				phone: '+7 (988) 111-22-33',
+				personsCount: 3,
+				tableNumber: '11',
+				visitDate: '2026-05-26',
+				visitTime: '19:30'
+			}
+		} as any)
+
+		await service.exportOrder(exportRecord as any)
+		const payload = repo.setOrderExportPayload.mock.calls[0]?.[1] as any
+
+		expect(repo.findExternalItemsByType).toHaveBeenCalledWith({
+			integrationId: 'integration-1',
+			provider: IntegrationProvider.IIKO,
+			type: 'TABLE'
+		})
+		expect(payload.tableIds).toEqual(['table-11'])
+		expect(payload.guests).toEqual({ count: 3 })
+		expect(payload.order.externalData).toEqual(
+			expect.arrayContaining([
+				{ key: 'iikoTableId', value: 'table-11', isPublic: false }
+			])
+		)
+		expect(IikoClient.prototype.createReserve).toHaveBeenCalledWith(payload)
+		expect(IikoClient.prototype.createDeliveryOrder).not.toHaveBeenCalled()
+	})
+
+	it('does not send preorder to iiko deliveries when table is missing', async () => {
+		repo.findOrderForExport.mockResolvedValueOnce({
+			...order,
+			checkoutMethod: CartCheckoutMethod.PREORDER,
+			checkoutData: {
+				customerName: 'Ivan',
+				phone: '+7 (988) 111-22-33',
+				personsCount: 2,
+				visitDate: '2026-05-26',
+				visitTime: '19:30'
+			}
+		} as any)
+
+		await expect(service.exportOrder(exportRecord as any)).rejects.toThrow(
+			/iiko preorder export requires a table number/
+		)
+		expect(IikoClient.prototype.createReserve).not.toHaveBeenCalled()
+		expect(IikoClient.prototype.createDeliveryOrder).not.toHaveBeenCalled()
+		expect(IikoClient.prototype.createTableOrder).not.toHaveBeenCalled()
 	})
 
 	it('waits until iiko command status is final before marking export successful', async () => {

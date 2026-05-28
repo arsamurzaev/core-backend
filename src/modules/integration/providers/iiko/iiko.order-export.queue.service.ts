@@ -508,7 +508,7 @@ export class IikoOrderExportQueueService
 						code: SpanStatusCode.ERROR,
 						message
 					})
-					this.logger.error('iiko order export failed', {
+					this.logger.error(`iiko order export failed: ${message}`, {
 						component: 'queue',
 						queue: IIKO_ORDER_EXPORT_QUEUE_NAME,
 						jobName,

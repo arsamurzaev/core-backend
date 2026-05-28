@@ -47,6 +47,7 @@ import type {
 	IikoNomenclatureSize,
 	IikoStopListItem,
 	IikoTerminalGroup,
+	IikoTerminalGroupStopListItemsGroup,
 	IikoTerminalGroupStopList,
 	IikoSyncCategory,
 	IikoSyncMenu,
@@ -605,6 +606,7 @@ export class IikoSyncService {
 		return mapStopListSyncResult({
 			result,
 			stopLists,
+			terminalGroupIds,
 			syncedAt,
 			durationMs: Date.now() - startedAt
 		})
@@ -1363,9 +1365,10 @@ function filterStopListsByTerminalGroup(
 	if (!Array.isArray(stopLists)) return []
 	const normalizedTerminalGroupId = normalizeOptionalString(terminalGroupId)
 	if (!normalizedTerminalGroupId) return stopLists
-	return stopLists.filter(
-		item => normalizeOptionalString(item.terminalGroupId) === normalizedTerminalGroupId
-	)
+	return stopLists.filter(item => {
+		const itemTerminalGroupId = normalizeOptionalString(item.terminalGroupId)
+		return !itemTerminalGroupId || itemTerminalGroupId === normalizedTerminalGroupId
+	})
 }
 
 function normalizeStopListAvailabilityItems(
@@ -1373,10 +1376,47 @@ function normalizeStopListAvailabilityItems(
 ): IikoStopListAvailabilityItem[] {
 	return stopLists.flatMap(stopList => {
 		const items = Array.isArray(stopList.items) ? stopList.items : []
-		return items
-			.map(item => normalizeStopListAvailabilityItem(stopList, item))
-			.filter((item): item is IikoStopListAvailabilityItem => Boolean(item))
+		return items.flatMap(item => {
+			const itemGroup = normalizeTerminalGroupStopListItemsGroup(item)
+			if (itemGroup) {
+				const groupItems = Array.isArray(itemGroup.items) ? itemGroup.items : []
+				const nestedStopList: IikoTerminalGroupStopList = {
+					organizationId: stopList.organizationId ?? null,
+					terminalGroupId:
+						itemGroup.terminalGroupId ?? stopList.terminalGroupId ?? null
+				}
+				return groupItems
+					.map(groupItem =>
+						normalizeStopListAvailabilityItem(nestedStopList, groupItem)
+					)
+					.filter((entry): entry is IikoStopListAvailabilityItem =>
+						Boolean(entry)
+					)
+			}
+
+			const normalized = normalizeStopListAvailabilityItem(
+				stopList,
+				item as IikoStopListItem
+			)
+			return normalized ? [normalized] : []
+		})
 	})
+}
+
+function normalizeTerminalGroupStopListItemsGroup(
+	item: IikoStopListItem | IikoTerminalGroupStopListItemsGroup
+): IikoTerminalGroupStopListItemsGroup | null {
+	if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+	if (!Array.isArray((item as IikoTerminalGroupStopListItemsGroup).items)) {
+		return null
+	}
+
+	return {
+		terminalGroupId: normalizeOptionalString(
+			(item as IikoTerminalGroupStopListItemsGroup).terminalGroupId
+		),
+		items: (item as IikoTerminalGroupStopListItemsGroup).items
+	}
 }
 
 function normalizeStopListAvailabilityItem(
@@ -1404,9 +1444,15 @@ function normalizeStopListAvailabilityItem(
 function mapStopListSyncResult(params: {
 	result: IikoStopListAvailabilityResult
 	stopLists: IikoTerminalGroupStopList[]
+	terminalGroupIds?: string[]
 	syncedAt: Date
 	durationMs: number
 }): IikoStopListSyncResult {
+	const terminalGroupIds = [
+		...(params.terminalGroupIds ?? []),
+		...params.stopLists.flatMap(collectStopListTerminalGroupIds)
+	].filter((id): id is string => Boolean(id))
+
 	return {
 		ok: true,
 		totalStopListItems: params.result.totalStopListItems,
@@ -1418,16 +1464,23 @@ function mapStopListSyncResult(params: {
 		restoredVariants: params.result.restoredVariants,
 		changedVariants: params.result.changedVariants,
 		changedProducts: params.result.changedProducts,
-		terminalGroupIds: [
-			...new Set(
-				params.stopLists
-					.map(item => normalizeOptionalString(item.terminalGroupId))
-					.filter((id): id is string => Boolean(id))
-			)
-		],
+		terminalGroupIds: [...new Set(terminalGroupIds)],
 		durationMs: params.durationMs,
 		syncedAt: params.syncedAt
 	}
+}
+
+function collectStopListTerminalGroupIds(
+	stopList: IikoTerminalGroupStopList
+): string[] {
+	const ids = [normalizeOptionalString(stopList.terminalGroupId)]
+	const items = Array.isArray(stopList.items) ? stopList.items : []
+	for (const item of items) {
+		const itemGroup = normalizeTerminalGroupStopListItemsGroup(item)
+		if (itemGroup?.terminalGroupId) ids.push(itemGroup.terminalGroupId)
+	}
+
+	return ids.filter((id): id is string => Boolean(id))
 }
 
 function normalizePrice(value: unknown): number | null {

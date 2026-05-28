@@ -17,21 +17,14 @@ function parseCsv(value: string | undefined, fallback: string[]): string[] {
 		.filter(Boolean)
 }
 
-const BASE_DOMAINS = (
-	process.env.CATALOG_BASE_DOMAINS ?? 'myctlg.ru,myctlg-update.ru'
-)
-	.split(',')
-	.map(s => s.trim().toLowerCase())
-	.filter(Boolean)
-const PLATFORM_COOKIE_SUBDOMAINS = new Set(
-	parseCsv(process.env.PLATFORM_COOKIE_SUBDOMAINS, [
-		'www',
-		'api',
-		'admin',
-		'app',
-		'shtab'
-	])
-)
+const DEFAULT_BASE_DOMAINS = ['myctlg.ru', 'myctlg-update.ru']
+const DEFAULT_PLATFORM_COOKIE_SUBDOMAINS = [
+	'www',
+	'api',
+	'admin',
+	'app',
+	'shtab'
+]
 
 export function resolveServerHost(req: { headers: { host?: string } }): string {
 	return (req.headers.host ?? '').split(':')[0] ?? ''
@@ -41,19 +34,39 @@ export function resolveCookieDomain(host: string): string | undefined {
 	if (!host) return undefined
 	const h = host.toLowerCase().split(':')[0] ?? ''
 	if (isLocalCookieHost(h)) return undefined
-	for (const base of BASE_DOMAINS) {
+	const platformCookieSubdomains = resolvePlatformCookieSubdomains()
+	for (const base of resolveBaseDomains()) {
 		if (h === base) return '.' + base
-		if (isPlatformCookieSubdomain(h, base)) return '.' + base
+		if (isPlatformCookieSubdomain(h, base, platformCookieSubdomains)) {
+			return '.' + base
+		}
 	}
 	// Каталожные поддомены и кастомные домены должны получать host-only cookies.
 	return undefined
 }
 
-function isPlatformCookieSubdomain(host: string, base: string): boolean {
+function resolveBaseDomains(): string[] {
+	return parseCsv(process.env.CATALOG_BASE_DOMAINS, DEFAULT_BASE_DOMAINS)
+}
+
+function resolvePlatformCookieSubdomains(): Set<string> {
+	return new Set(
+		parseCsv(
+			process.env.PLATFORM_COOKIE_SUBDOMAINS,
+			DEFAULT_PLATFORM_COOKIE_SUBDOMAINS
+		)
+	)
+}
+
+function isPlatformCookieSubdomain(
+	host: string,
+	base: string,
+	platformCookieSubdomains: Set<string>
+): boolean {
 	if (!host.endsWith('.' + base)) return false
 	const left = host.slice(0, -(base.length + 1))
 	if (!left || left.includes('.')) return false
-	return PLATFORM_COOKIE_SUBDOMAINS.has(left)
+	return platformCookieSubdomains.has(left)
 }
 
 function isLocalCookieHost(host: string): boolean {

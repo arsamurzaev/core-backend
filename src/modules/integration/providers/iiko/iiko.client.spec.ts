@@ -395,6 +395,84 @@ describe('IikoClient', () => {
 		})
 	})
 
+	it('creates reserve preorder orders', async () => {
+		fetchMock
+			.mockResolvedValueOnce(jsonResponse({ token: 'token-1' }))
+			.mockResolvedValueOnce(
+				jsonResponse({
+					correlationId: 'corr-1',
+					reserveInfo: {
+						id: 'reserve-1',
+						organizationId: 'org-1',
+						timestamp: 1,
+						creationStatus: 'InProgress',
+						isDeleted: false
+					}
+				})
+			)
+
+		const client = new IikoClient({
+			apiLogin: 'login',
+			baseUrl: 'https://iiko.example'
+		})
+
+		const created = await client.createReserve({
+			organizationId: 'org-1',
+			terminalGroupId: 'terminal-1',
+			id: 'order-1',
+			externalNumber: 'ctlg-order-1',
+			customer: {
+				type: 'regular',
+				name: 'Ivan'
+			},
+			phone: '+79990000000',
+			durationInMinutes: 120,
+			shouldRemind: true,
+			tableIds: ['table-1'],
+			estimatedStartTime: '2026-05-26 19:30:00.000',
+			order: {
+				items: [
+					{
+						type: 'Product',
+						productId: 'product-1',
+						amount: 1,
+						price: 490
+					}
+				]
+			}
+		})
+
+		expect(created.correlationId).toBe('corr-1')
+		expect(fetchMock.mock.calls[1][0]).toBe(
+			'https://iiko.example/api/1/reserve/create'
+		)
+		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+			organizationId: 'org-1',
+			terminalGroupId: 'terminal-1',
+			id: 'order-1',
+			externalNumber: 'ctlg-order-1',
+			customer: {
+				type: 'regular',
+				name: 'Ivan'
+			},
+			phone: '+79990000000',
+			durationInMinutes: 120,
+			shouldRemind: true,
+			tableIds: ['table-1'],
+			estimatedStartTime: '2026-05-26 19:30:00.000',
+			order: {
+				items: [
+					{
+						type: 'Product',
+						productId: 'product-1',
+						amount: 1,
+						price: 490
+					}
+				]
+			}
+		})
+	})
+
 	it('gets and updates webhook settings', async () => {
 		fetchMock
 			.mockResolvedValueOnce(jsonResponse({ token: 'token-1' }))

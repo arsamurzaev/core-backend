@@ -10,6 +10,8 @@ import type {
 	IikoCommandStatusResponse,
 	IikoCreateDeliveryOrderPayload,
 	IikoCreateDeliveryOrderResponse,
+	IikoCreateReservePayload,
+	IikoCreateReserveResponse,
 	IikoCreateTableOrderPayload,
 	IikoCreateTableOrderResponse,
 	IikoExternalMenuRequest,
@@ -219,6 +221,15 @@ export class IikoClient {
 	): Promise<IikoCreateDeliveryOrderResponse> {
 		return this.request<IikoCreateDeliveryOrderResponse>(
 			'/api/1/deliveries/create',
+			payload
+		)
+	}
+
+	async createReserve(
+		payload: IikoCreateReservePayload
+	): Promise<IikoCreateReserveResponse> {
+		return this.request<IikoCreateReserveResponse>(
+			'/api/1/reserve/create',
 			payload
 		)
 	}

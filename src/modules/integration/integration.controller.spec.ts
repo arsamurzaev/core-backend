@@ -50,6 +50,7 @@ describe('IntegrationController', () => {
 							receiveMoySkladProductDeleteWebhook: jest.fn(),
 							receiveMoySkladProductChangeWebhook: jest.fn(),
 							receiveMoySkladProductFolderWebhook: jest.fn(),
+							receiveIikoWebhook: jest.fn(),
 							retryIikoOrderExport: jest.fn(),
 							retryMoySkladOrderExport: jest.fn(),
 							cancelMoySkladSync: jest.fn()
@@ -321,6 +322,30 @@ describe('IntegrationController', () => {
 		expect(service.receiveMoySkladProductFolderWebhook).toHaveBeenCalledWith({
 			integrationId: 'integration-1',
 			secret: 'secret-1',
+			payload
+		})
+	})
+
+	it('delegates iiko webhook to service', async () => {
+		service.receiveIikoWebhook.mockResolvedValue(undefined)
+		const headers = { 'x-request-id': 'request-1' }
+		const payload = {
+			eventType: 'StopListUpdate',
+			organizationId: 'organization-1',
+			correlationId: 'corr-1'
+		}
+
+		await controller.receiveIikoWebhook(
+			'integration-1',
+			'secret-1',
+			headers,
+			payload
+		)
+
+		expect(service.receiveIikoWebhook).toHaveBeenCalledWith({
+			integrationId: 'integration-1',
+			secret: 'secret-1',
+			headers,
 			payload
 		})
 	})
