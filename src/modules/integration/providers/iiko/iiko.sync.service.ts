@@ -806,12 +806,9 @@ export class IikoSyncService {
 			created = true
 		} else {
 			const data: {
-				name?: string
-				sku?: string
 				price?: number | null
 				status?: string
 			} = {}
-			if (localProduct.name !== name) data.name = name
 			if (priceChanged(localProduct.price, basePrice)) data.price = basePrice
 			if (localProduct.status !== ProductStatus.ACTIVE) {
 				data.status = ProductStatus.ACTIVE
@@ -827,12 +824,14 @@ export class IikoSyncService {
 			}
 		}
 
-		updated =
-			(await this.products.syncExternalProductDescription({
-				catalogId: context.catalogId,
-				productId: localProduct.id,
-				description
-			})) || updated
+		if (created) {
+			updated =
+				(await this.products.syncExternalProductDescription({
+					catalogId: context.catalogId,
+					productId: localProduct.id,
+					description
+				})) || updated
+		}
 
 		const categoryIds = product.groupId
 			? [context.categories.get(product.groupId)?.id].filter(

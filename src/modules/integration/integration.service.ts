@@ -898,9 +898,11 @@ export class IntegrationService {
 		const currentMetadata = existing
 			? this.iikoMetadataCrypto.parseStoredMetadata(existing.metadata)
 			: null
+		const apiLogin = dto.apiLogin
+		const organizationId = dto.organizationId
 		const metadata = this.iikoMetadataCrypto.buildStoredMetadata({
-			apiLogin: dto.apiLogin,
-			organizationId: dto.organizationId,
+			apiLogin,
+			organizationId,
 			organizationName: dto.organizationName,
 			externalMenuId: dto.externalMenuId,
 			externalMenuName: dto.externalMenuName,
@@ -916,7 +918,12 @@ export class IntegrationService {
 			orderExportSourceKey: dto.orderExportSourceKey,
 			lastRevision: currentMetadata?.lastRevision ?? null,
 			lastMenuSyncedAt: currentMetadata?.lastMenuSyncedAt ?? null,
-			lastStopListSyncedAt: currentMetadata?.lastStopListSyncedAt ?? null
+			lastStopListSyncedAt: currentMetadata?.lastStopListSyncedAt ?? null,
+			webhook: this.resolveReusableIikoWebhook(
+				currentMetadata,
+				apiLogin,
+				organizationId
+			)
 		})
 		const integration = await this.repo.upsertIiko(catalogId, {
 			metadata,
@@ -941,9 +948,11 @@ export class IntegrationService {
 		const currentMetadata = this.iikoMetadataCrypto.parseStoredMetadata(
 			existing.metadata
 		)
+		const apiLogin = dto.apiLogin ?? currentMetadata.apiLogin
+		const organizationId = dto.organizationId ?? currentMetadata.organizationId
 		const metadata = this.iikoMetadataCrypto.buildStoredMetadata({
-			apiLogin: dto.apiLogin ?? currentMetadata.apiLogin,
-			organizationId: dto.organizationId ?? currentMetadata.organizationId,
+			apiLogin,
+			organizationId,
 			organizationName:
 				dto.organizationName !== undefined
 					? dto.organizationName
@@ -994,7 +1003,12 @@ export class IntegrationService {
 					: currentMetadata.orderExportSourceKey,
 			lastRevision: currentMetadata.lastRevision,
 			lastMenuSyncedAt: currentMetadata.lastMenuSyncedAt,
-			lastStopListSyncedAt: currentMetadata.lastStopListSyncedAt
+			lastStopListSyncedAt: currentMetadata.lastStopListSyncedAt,
+			webhook: this.resolveReusableIikoWebhook(
+				currentMetadata,
+				apiLogin,
+				organizationId
+			)
 		})
 		const integration = await this.repo.updateIiko(catalogId, {
 			metadata,
@@ -3197,6 +3211,24 @@ export class IntegrationService {
 	): Promise<void> {
 		const stored = this.iikoMetadataCrypto.buildStoredMetadata(metadata)
 		await this.repo.updateIikoMetadataById(integration.id, stored)
+	}
+
+	private resolveReusableIikoWebhook(
+		currentMetadata: IikoMetadata | null,
+		nextApiLogin: string,
+		nextOrganizationId: string
+	): IikoWebhookMetadata | null {
+		if (!currentMetadata) return null
+		if (
+			normalizeOptionalString(currentMetadata.apiLogin) !==
+				normalizeOptionalString(nextApiLogin) ||
+			normalizeOptionalString(currentMetadata.organizationId) !==
+				normalizeOptionalString(nextOrganizationId)
+		) {
+			return null
+		}
+
+		return currentMetadata.webhook
 	}
 
 	private async touchIikoWebhook(

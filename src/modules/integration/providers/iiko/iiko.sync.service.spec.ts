@@ -198,7 +198,7 @@ describe('IikoSyncService', () => {
 		)
 	})
 
-	it('updates linked product name and price on repeat sync', async () => {
+	it('preserves linked product text fields and updates price on repeat sync', async () => {
 		jest.spyOn(IikoClient.prototype, 'getExternalMenuById').mockResolvedValue({
 			itemGroups: [
 				{
@@ -209,6 +209,7 @@ describe('IikoSyncService', () => {
 							id: 'product-1',
 							sku: 'PIZZA',
 							name: 'Updated Pizza',
+							description: 'Updated iiko description',
 							type: 'DISH',
 							orderItemType: 'Product',
 							itemSizes: [
@@ -249,7 +250,7 @@ describe('IikoSyncService', () => {
 			id: 'local-product-1',
 			catalogId: 'catalog-1',
 			productTypeId: null,
-			name: 'Updated Pizza',
+			name: 'Old Pizza',
 			sku: 'PIZZA',
 			slug: 'old-pizza',
 			price: 540,
@@ -266,10 +267,10 @@ describe('IikoSyncService', () => {
 			catalogId: 'catalog-1',
 			productId: 'local-product-1',
 			data: {
-				name: 'Updated Pizza',
 				price: 540
 			}
 		})
+		expect(products.syncExternalProductDescription).not.toHaveBeenCalled()
 	})
 
 	it('syncs one linked iiko product without hiding missing products', async () => {

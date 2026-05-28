@@ -612,6 +612,104 @@ describe('IntegrationService', () => {
 		expect(result.organizationId).toBe('organization-1')
 	})
 
+	it('preserves iiko webhook metadata when saving unchanged api login and organization', async () => {
+		const webhook = {
+			enabled: true,
+			urlPreview:
+				'https://api.example.test/integration/webhooks/iiko/integration-1/***',
+			secretHash: 'secret-hash',
+			lastConfiguredAt: '2026-05-28T09:00:00.000Z',
+			lastReceivedAt: null,
+			lastEventType: null,
+			lastError: null
+		}
+		repo.findIiko.mockResolvedValue({
+			...integrationRecord,
+			provider: IntegrationProvider.IIKO,
+			metadata: {
+				apiLogin: 'iiko-login',
+				organizationId: 'organization-1',
+				terminalGroupId: 'terminal-1',
+				webhook
+			}
+		} as any)
+		repo.updateIiko.mockImplementation(async (_catalogId, params) => ({
+			...integrationRecord,
+			provider: IntegrationProvider.IIKO,
+			metadata: params.metadata,
+			isActive: params.isActive ?? true
+		}) as any)
+
+		const result = await runWithCatalog(() =>
+			service.updateIiko({
+				organizationId: 'organization-1',
+				terminalGroupId: 'terminal-2',
+				terminalGroupName: 'Main terminal'
+			})
+		)
+
+		expect(iikoMetadataCrypto.buildStoredMetadata).toHaveBeenCalledWith(
+			expect.objectContaining({
+				apiLogin: 'iiko-login',
+				organizationId: 'organization-1',
+				terminalGroupId: 'terminal-2',
+				webhook
+			})
+		)
+		expect(result.webhook).toEqual(
+			expect.objectContaining({
+				enabled: true,
+				hasSecret: true,
+				urlPreview:
+					'https://api.example.test/integration/webhooks/iiko/integration-1/***'
+			})
+		)
+	})
+
+	it('clears iiko webhook metadata when organization changes', async () => {
+		repo.findIiko.mockResolvedValue({
+			...integrationRecord,
+			provider: IntegrationProvider.IIKO,
+			metadata: {
+				apiLogin: 'iiko-login',
+				organizationId: 'organization-1',
+				webhook: {
+					enabled: true,
+					urlPreview:
+						'https://api.example.test/integration/webhooks/iiko/integration-1/***',
+					secretHash: 'secret-hash',
+					lastConfiguredAt: '2026-05-28T09:00:00.000Z',
+					lastReceivedAt: null,
+					lastEventType: null,
+					lastError: null
+				}
+			}
+		} as any)
+		repo.updateIiko.mockImplementation(async (_catalogId, params) => ({
+			...integrationRecord,
+			provider: IntegrationProvider.IIKO,
+			metadata: params.metadata,
+			isActive: params.isActive ?? true
+		}) as any)
+
+		const result = await runWithCatalog(() =>
+			service.updateIiko({
+				organizationId: 'organization-2',
+				organizationName: 'Other'
+			})
+		)
+
+		expect(iikoMetadataCrypto.buildStoredMetadata).toHaveBeenCalledWith(
+			expect.objectContaining({
+				apiLogin: 'iiko-login',
+				organizationId: 'organization-2',
+				webhook: null
+			})
+		)
+		expect(result.webhook.enabled).toBe(false)
+		expect(result.webhook.hasSecret).toBe(false)
+	})
+
 	it('tests iiko connection through sync service', async () => {
 		iikoSync.testConnection.mockResolvedValue({
 			ok: true,
