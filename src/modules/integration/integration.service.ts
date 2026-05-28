@@ -10,6 +10,8 @@ import {
 	BadRequestException,
 	ConflictException,
 	ForbiddenException,
+	HttpException,
+	HttpStatus,
 	Inject,
 	Injectable,
 	Logger,
@@ -1268,16 +1270,41 @@ export class IntegrationService {
 		const secret = this.generateWebhookSecret()
 		const webHooksUri = this.buildIikoWebhookUrl(baseUrl, integration.id, secret)
 		const urlPreview = this.buildIikoWebhookUrl(baseUrl, integration.id, '***')
+		if (
+			metadata.webhook.enabled &&
+			metadata.webhook.secretHash &&
+			metadata.webhook.urlPreview === urlPreview
+		) {
+			return {
+				ok: true,
+				enabled: true,
+				correlationId: null,
+				webhook: this.mapIikoWebhookStatus(metadata.webhook)
+			}
+		}
+
 		const client = new IikoClient({
 			apiLogin: metadata.apiLogin,
 			baseUrl: this.resolveIikoApiBaseUrl()
 		})
-		const response = await client.updateWebhookSettings({
-			organizationId: metadata.organizationId,
-			webHooksUri,
-			authToken: secret,
-			webHooksFilter: buildIikoWebhookSettingsFilter()
-		})
+		let response: Awaited<ReturnType<IikoClient['updateWebhookSettings']>>
+		try {
+			response = await client.updateWebhookSettings({
+				organizationId: metadata.organizationId,
+				webHooksUri,
+				authToken: secret,
+				webHooksFilter: buildIikoWebhookSettingsFilter()
+			})
+		} catch (error) {
+			const message = renderSafeProviderErrorMessage(error)
+			if (this.isIikoRateLimitedError(message)) {
+				throw new HttpException(
+					'iiko API temporarily rate-limited webhook setup; wait a bit and try again',
+					HttpStatus.TOO_MANY_REQUESTS
+				)
+			}
+			throw error
+		}
 		const nextWebhook: IikoWebhookMetadata = {
 			...metadata.webhook,
 			enabled: true,
@@ -3918,6 +3945,13 @@ export class IntegrationService {
 				? renderSafeProviderErrorMessage(safeWebhook.lastError)
 				: null
 		}
+	}
+
+	private isIikoRateLimitedError(message: string): boolean {
+		return (
+			message.includes('iiko API error 429') ||
+			message.includes('TOO_MANY_REQUESTS')
+		)
 	}
 
 	private mapIikoWebhookEvent(

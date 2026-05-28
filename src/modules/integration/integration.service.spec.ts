@@ -26,6 +26,7 @@ import { RequestContext } from '@/shared/tenancy/request-context'
 
 import { IntegrationRepository } from './integration.repository'
 import { IntegrationService } from './integration.service'
+import { IikoClient } from './providers/iiko/iiko.client'
 import { IikoMetadataCryptoService } from './providers/iiko/iiko.metadata'
 import { IikoOrderExportQueueService } from './providers/iiko/iiko.order-export.queue.service'
 import { IikoQueueService } from './providers/iiko/iiko.queue.service'
@@ -1050,6 +1051,88 @@ describe('IntegrationService', () => {
 		])
 		expect(result[0]).not.toHaveProperty('payload')
 		expect(result[0]).not.toHaveProperty('response')
+	})
+
+	it('does not re-register iiko webhook when the saved setup is current', async () => {
+		const iikoRecord = {
+			...integrationRecord,
+			id: 'iiko-integration-1',
+			provider: IntegrationProvider.IIKO,
+			metadata: {
+				apiLogin: 'iiko-login',
+				organizationId: 'organization-1',
+				webhook: {
+					enabled: true,
+					urlPreview:
+						'https://api.example.test/integration/webhooks/iiko/iiko-integration-1/***',
+					secretHash: 'secret-hash',
+					lastConfiguredAt: '2026-05-28T09:00:00.000Z',
+					lastReceivedAt: null,
+					lastEventType: null,
+					lastError: null
+				}
+			}
+		}
+		repo.findIiko.mockResolvedValue(iikoRecord as any)
+		const updateWebhookSettings = jest
+			.spyOn(IikoClient.prototype, 'updateWebhookSettings')
+			.mockResolvedValue({ correlationId: 'corr-1' })
+
+		const result = await runWithCatalog(() => service.setupIikoWebhooks())
+
+		expect(updateWebhookSettings).not.toHaveBeenCalled()
+		expect(repo.updateIikoMetadataById).not.toHaveBeenCalled()
+		expect(result).toEqual({
+			ok: true,
+			enabled: true,
+			correlationId: null,
+			webhook: expect.objectContaining({
+				enabled: true,
+				urlPreview:
+					'https://api.example.test/integration/webhooks/iiko/iiko-integration-1/***',
+				hasSecret: true,
+				lastError: null
+			})
+		})
+	})
+
+	it('returns 429 when iiko rate-limits webhook registration', async () => {
+		repo.findIiko.mockResolvedValue({
+			...integrationRecord,
+			id: 'iiko-integration-1',
+			provider: IntegrationProvider.IIKO,
+			metadata: {
+				apiLogin: 'iiko-login',
+				organizationId: 'organization-1',
+				webhook: {
+					enabled: false,
+					urlPreview: null,
+					secretHash: null,
+					lastConfiguredAt: null,
+					lastReceivedAt: null,
+					lastEventType: null,
+					lastError: null
+				}
+			}
+		} as any)
+		jest
+			.spyOn(IikoClient.prototype, 'updateWebhookSettings')
+			.mockRejectedValue(
+				new Error(
+					'iiko API error 429: {"error":"TOO_MANY_REQUESTS"}'
+				)
+			)
+
+		try {
+			await runWithCatalog(() => service.setupIikoWebhooks())
+			throw new Error('Expected setupIikoWebhooks to fail')
+		} catch (error) {
+			expect((error as { getStatus?: () => number }).getStatus?.()).toBe(429)
+			expect(String((error as Error).message)).toContain(
+				'iiko API temporarily rate-limited'
+			)
+		}
+		expect(repo.updateIikoMetadataById).not.toHaveBeenCalled()
 	})
 
 	it('stores iiko stop-list webhook event and queues stock sync', async () => {
