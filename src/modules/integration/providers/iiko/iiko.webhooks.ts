@@ -3,6 +3,9 @@ import { createHash } from 'crypto'
 import { BadRequestException } from '@nestjs/common'
 
 import type {
+	IikoDeliveryOrderStatus,
+	IikoOrderItemStatus,
+	IikoTableOrderStatus,
 	IikoWebhookEventType,
 	IikoWebhookSettingsFilter
 } from './iiko.types'
@@ -42,28 +45,33 @@ const DELIVERY_ORDER_STATUSES = [
 	'Delivered',
 	'Closed',
 	'Cancelled'
-]
-const TABLE_ORDER_STATUSES = ['New', 'Bill', 'Closed', 'Deleted']
+] as const satisfies readonly IikoDeliveryOrderStatus[]
+const TABLE_ORDER_STATUSES = [
+	'New',
+	'Bill',
+	'Closed',
+	'Deleted'
+] as const satisfies readonly IikoTableOrderStatus[]
 const ORDER_ITEM_STATUSES = [
 	'Added',
 	'PrintedNotCooking',
 	'CookingStarted',
 	'CookingCompleted',
 	'Served'
-]
+] as const satisfies readonly IikoOrderItemStatus[]
 const RETURNED_EXTERNAL_DATA_KEYS = ['catalogOrderId']
 
 export function buildIikoWebhookSettingsFilter(): IikoWebhookSettingsFilter {
 	return {
 		deliveryOrderFilter: {
-			orderStatuses: DELIVERY_ORDER_STATUSES,
-			itemStatuses: ORDER_ITEM_STATUSES,
+			orderStatuses: [...DELIVERY_ORDER_STATUSES],
+			itemStatuses: [...ORDER_ITEM_STATUSES],
 			errors: true,
 			returnedExternalDataKeys: RETURNED_EXTERNAL_DATA_KEYS
 		},
 		tableOrderFilter: {
-			orderStatuses: TABLE_ORDER_STATUSES,
-			itemStatuses: ORDER_ITEM_STATUSES,
+			orderStatuses: [...TABLE_ORDER_STATUSES],
+			itemStatuses: [...ORDER_ITEM_STATUSES],
 			errors: true
 		},
 		reserveFilter: {
@@ -71,9 +79,6 @@ export function buildIikoWebhookSettingsFilter(): IikoWebhookSettingsFilter {
 			errors: true
 		},
 		stopListUpdateFilter: {
-			updates: true
-		},
-		personalShiftFilter: {
 			updates: true
 		},
 		nomenclatureUpdateFilter: {
@@ -88,18 +93,21 @@ export function buildIikoWebhookSettingsFilter(): IikoWebhookSettingsFilter {
 export function normalizeIikoWebhookPayload(
 	payload: unknown
 ): NormalizedIikoWebhookEvent {
-	const normalizedPayload = normalizeWebhookPayloadJson(payload)
+	const normalizedPayload = unwrapIikoWebhookPayload(
+		normalizeWebhookPayloadJson(payload)
+	)
 	if (!isRecord(normalizedPayload)) {
 		throw new BadRequestException('iiko webhook payload must be a JSON object')
 	}
 
-	const eventType = readString(normalizedPayload.eventType) || 'Unknown'
+	const eventInfo = resolveIikoWebhookEventInfo(normalizedPayload)
+	const eventType =
+		readString(normalizedPayload.eventType) ||
+		inferIikoWebhookEventType(normalizedPayload, eventInfo) ||
+		'Unknown'
 	const eventTime = readString(normalizedPayload.eventTime)
 	const organizationId = readString(normalizedPayload.organizationId)
 	const correlationId = readString(normalizedPayload.correlationId)
-	const eventInfo = isRecord(normalizedPayload.eventInfo)
-		? normalizedPayload.eventInfo
-		: null
 	const requestId = buildIikoWebhookRequestId({
 		eventType,
 		eventTime,
@@ -117,6 +125,37 @@ export function normalizeIikoWebhookPayload(
 		payload: normalizedPayload,
 		requestId
 	}
+}
+
+export function isEmptyIikoWebhookPayload(payload: unknown): boolean {
+	if (payload === null || payload === undefined) return true
+	if (Buffer.isBuffer(payload)) return payload.toString('utf8').trim() === ''
+	return typeof payload === 'string' && payload.trim() === ''
+}
+
+export function describeIikoWebhookPayload(payload: unknown): {
+	kind: string
+	preview: string | null
+} {
+	if (payload === null) return { kind: 'null', preview: null }
+	if (payload === undefined) return { kind: 'undefined', preview: null }
+	if (Buffer.isBuffer(payload)) {
+		const text = payload.toString('utf8')
+		return { kind: 'buffer', preview: trimPreview(text) }
+	}
+	if (typeof payload === 'string') {
+		return { kind: 'string', preview: trimPreview(payload) }
+	}
+	if (Array.isArray(payload)) {
+		return { kind: `array:${payload.length}`, preview: trimPreview(payload) }
+	}
+	if (isRecord(payload)) {
+		return {
+			kind: `object:${Object.keys(payload).sort().join(',')}`,
+			preview: trimPreview(payload)
+		}
+	}
+	return { kind: typeof payload, preview: trimPreview(payload) }
 }
 
 export function resolveIikoWebhookAction(
@@ -228,9 +267,103 @@ function normalizeWebhookPayloadJson(payload: unknown): unknown {
 		throw new BadRequestException('iiko webhook payload must not be empty')
 	}
 
+	if (looksLikeFormPayload(trimmed)) {
+		return Object.fromEntries(new URLSearchParams(trimmed).entries())
+	}
+
 	try {
 		return JSON.parse(trimmed)
 	} catch {
 		throw new BadRequestException('iiko webhook payload must be valid JSON')
 	}
+}
+
+function unwrapIikoWebhookPayload(payload: unknown): unknown {
+	if (Array.isArray(payload)) {
+		return (
+			payload.find(item => isIikoWebhookEventRecord(item)) ??
+			(payload.length === 1 ? unwrapIikoWebhookPayload(payload[0]) : payload)
+		)
+	}
+
+	if (!isRecord(payload)) return payload
+	if (isIikoWebhookEventRecord(payload)) return payload
+
+	for (const key of ['event', 'webhook', 'notification', 'payload', 'data']) {
+		const nested = payload[key]
+		if (isRecord(nested) || Array.isArray(nested)) {
+			const unwrapped = unwrapIikoWebhookPayload(nested)
+			if (isIikoWebhookEventRecord(unwrapped)) return unwrapped
+		}
+	}
+
+	for (const key of ['events', 'webhooks', 'notifications', 'items']) {
+		const nested = payload[key]
+		if (Array.isArray(nested)) {
+			const unwrapped = unwrapIikoWebhookPayload(nested)
+			if (isIikoWebhookEventRecord(unwrapped)) return unwrapped
+		}
+	}
+
+	return payload
+}
+
+function isIikoWebhookEventRecord(
+	value: unknown
+): value is Record<string, unknown> {
+	if (!isRecord(value)) return false
+	return Boolean(
+		readString(value.eventType) ||
+			readString(value.eventTime) ||
+			readString(value.organizationId) ||
+			readString(value.correlationId) ||
+			isRecord(value.eventInfo) ||
+			isIikoStopListEventInfo(value)
+	)
+}
+
+function resolveIikoWebhookEventInfo(
+	payload: Record<string, unknown>
+): Record<string, unknown> | null {
+	if (isRecord(payload.eventInfo)) return payload.eventInfo
+	if (isIikoStopListEventInfo(payload)) return payload
+	return null
+}
+
+function inferIikoWebhookEventType(
+	payload: Record<string, unknown>,
+	eventInfo: Record<string, unknown> | null
+): string | null {
+	if (isIikoStopListEventInfo(eventInfo) || isIikoStopListEventInfo(payload)) {
+		return 'StopListUpdate'
+	}
+	return null
+}
+
+function isIikoStopListEventInfo(value: unknown): boolean {
+	return (
+		isRecord(value) && Array.isArray(value.terminalGroupsStopListsUpdates)
+	)
+}
+
+function looksLikeFormPayload(value: string): boolean {
+	const firstChar = value[0]
+	return firstChar !== '{' && firstChar !== '[' && value.includes('=')
+}
+
+function trimPreview(value: unknown): string | null {
+	const text =
+		typeof value === 'string'
+			? value
+			: JSON.stringify(value, (_, nestedValue) => {
+					if (typeof nestedValue === 'string' && nestedValue.length > 200) {
+						return `${nestedValue.slice(0, 200)}...`
+					}
+					return nestedValue
+				})
+	if (!text) return null
+	const normalized = text.replace(/\s+/g, ' ').trim()
+	return normalized.length > 500
+		? `${normalized.slice(0, 500)}...`
+		: normalized
 }

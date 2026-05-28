@@ -115,6 +115,8 @@ import type {
 } from './providers/iiko/iiko.types'
 import {
 	buildIikoWebhookSettingsFilter,
+	describeIikoWebhookPayload,
+	isEmptyIikoWebhookPayload,
 	normalizeIikoWebhookPayload,
 	resolveIikoWebhookAction,
 	resolveIikoWebhookOrderRefs
@@ -1284,10 +1286,13 @@ export class IntegrationService {
 		const secret = this.generateWebhookSecret()
 		const webHooksUri = this.buildIikoWebhookUrl(baseUrl, integration.id, secret)
 		const urlPreview = this.buildIikoWebhookUrl(baseUrl, integration.id, '***')
+		const webHooksFilter = buildIikoWebhookSettingsFilter()
+		const filterHash = this.hashIikoWebhookSettingsFilter(webHooksFilter)
 		if (
 			metadata.webhook.enabled &&
 			metadata.webhook.secretHash &&
-			metadata.webhook.urlPreview === urlPreview
+			metadata.webhook.urlPreview === urlPreview &&
+			metadata.webhook.filterHash === filterHash
 		) {
 			return {
 				ok: true,
@@ -1307,7 +1312,7 @@ export class IntegrationService {
 				organizationId: metadata.organizationId,
 				webHooksUri,
 				authToken: secret,
-				webHooksFilter: buildIikoWebhookSettingsFilter()
+				webHooksFilter
 			})
 		} catch (error) {
 			const message = renderSafeProviderErrorMessage(error)
@@ -1324,6 +1329,7 @@ export class IntegrationService {
 			enabled: true,
 			urlPreview,
 			secretHash: this.hashWebhookSecret(secret),
+			filterHash,
 			lastConfiguredAt: new Date().toISOString(),
 			lastError: null
 		}
@@ -1381,6 +1387,7 @@ export class IntegrationService {
 				enabled: false,
 				urlPreview: null,
 				secretHash: null,
+				filterHash: null,
 				lastConfiguredAt: new Date().toISOString(),
 				lastError
 			}
@@ -1411,7 +1418,46 @@ export class IntegrationService {
 			return
 		}
 
-		const event = normalizeIikoWebhookPayload(params.payload)
+		if (isEmptyIikoWebhookPayload(params.payload)) {
+			await this.touchIikoWebhook(integration, metadata, {
+				lastReceivedAt: new Date().toISOString(),
+				lastEventType: 'WebhookProbe',
+				lastError: null
+			})
+			return
+		}
+
+		let event: ReturnType<typeof normalizeIikoWebhookPayload>
+		try {
+			event = normalizeIikoWebhookPayload(params.payload)
+		} catch (error) {
+			if (error instanceof BadRequestException) {
+				const message = renderSafeProviderErrorMessage(error)
+				const payload = describeIikoWebhookPayload(params.payload)
+				this.logger.warn(
+					'iiko webhook payload was not recognized; queued stop-list sync fallback',
+					{
+						integrationId: integration.id,
+						error: message,
+						payload
+					}
+				)
+				const queued = await this.iikoQueue.enqueueStockWebhookSync(integration)
+				if (!queued.queued) {
+					this.logger.log('iiko webhook fallback accepted without queue', {
+						integrationId: integration.id,
+						reason: 'reason' in queued ? queued.reason : 'not_queued'
+					})
+				}
+				await this.touchIikoWebhook(integration, metadata, {
+					lastReceivedAt: new Date().toISOString(),
+					lastEventType: 'WebhookFallback',
+					lastError: null
+				})
+				return
+			}
+			throw error
+		}
 		if (
 			event.organizationId &&
 			event.organizationId !== metadata.organizationId
@@ -3330,6 +3376,14 @@ export class IntegrationService {
 
 	private hashWebhookSecret(secret: string): string {
 		return createHash('sha256').update(secret).digest('hex')
+	}
+
+	private hashIikoWebhookSettingsFilter(
+		filter: ReturnType<typeof buildIikoWebhookSettingsFilter>
+	): string {
+		return createHash('sha256')
+			.update(JSON.stringify(filter))
+			.digest('hex')
 	}
 
 	private assertMoySkladWebhookSecret(

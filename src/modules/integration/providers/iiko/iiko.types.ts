@@ -58,6 +58,7 @@ export type IikoWebhookMetadata = {
 	enabled: boolean
 	urlPreview: string | null
 	secretHash: string | null
+	filterHash: string | null
 	lastConfiguredAt: string | null
 	lastReceivedAt: string | null
 	lastEventType: IikoOpenString<IikoWebhookEventType> | null
@@ -630,16 +631,37 @@ export type IikoWebhookEventType =
 	| 'NomenclatureUpdate'
 	| 'BusinessHoursAndMappingUpdate'
 
+export type IikoDeliveryOrderStatus =
+	| 'Unconfirmed'
+	| 'WaitCooking'
+	| 'ReadyForCooking'
+	| 'CookingStarted'
+	| 'CookingCompleted'
+	| 'Waiting'
+	| 'OnWay'
+	| 'Delivered'
+	| 'Closed'
+	| 'Cancelled'
+
+export type IikoTableOrderStatus = 'New' | 'Bill' | 'Closed' | 'Deleted'
+
+export type IikoOrderItemStatus =
+	| 'Added'
+	| 'PrintedNotCooking'
+	| 'CookingStarted'
+	| 'CookingCompleted'
+	| 'Served'
+
 export type IikoWebhookSettingsFilter = {
 	deliveryOrderFilter?: {
-		orderStatuses?: string[] | null
-		itemStatuses?: string[] | null
+		orderStatuses?: IikoDeliveryOrderStatus[] | null
+		itemStatuses?: IikoOrderItemStatus[] | null
 		errors?: boolean | null
 		returnedExternalDataKeys?: string[] | null
 	} | null
 	tableOrderFilter?: {
-		orderStatuses?: string[] | null
-		itemStatuses?: string[] | null
+		orderStatuses?: IikoTableOrderStatus[] | null
+		itemStatuses?: IikoOrderItemStatus[] | null
 		errors?: boolean | null
 	} | null
 	reserveFilter?: {

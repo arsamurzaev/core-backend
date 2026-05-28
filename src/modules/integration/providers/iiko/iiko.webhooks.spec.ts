@@ -1,5 +1,7 @@
 import {
 	buildIikoWebhookSettingsFilter,
+	describeIikoWebhookPayload,
+	isEmptyIikoWebhookPayload,
 	normalizeIikoWebhookPayload,
 	resolveIikoWebhookAction,
 	resolveIikoWebhookOrderRefs
@@ -21,6 +23,7 @@ describe('iiko webhooks helpers', () => {
 			'catalogOrderId'
 		)
 		expect(filter.tableOrderFilter?.orderStatuses).toContain('New')
+		expect(filter.personalShiftFilter).toBeUndefined()
 	})
 
 	it('normalizes request id from event type and correlation id', () => {
@@ -51,6 +54,55 @@ describe('iiko webhooks helpers', () => {
 		expect(event.organizationId).toBe('org-1')
 	})
 
+	it('accepts webhook events wrapped in arrays and containers', () => {
+		const event = normalizeIikoWebhookPayload({
+			notifications: [
+				{
+					eventType: 'StopListUpdate',
+					eventTime: '2026-05-21 12:00:00.000',
+					organizationId: 'org-1',
+					correlationId: 'corr-1',
+					eventInfo: {}
+				}
+			]
+		})
+
+		expect(event.eventType).toBe('StopListUpdate')
+		expect(event.requestId).toBe('iiko:StopListUpdate:corr-1')
+	})
+
+	it('accepts url-encoded webhook payloads', () => {
+		const event = normalizeIikoWebhookPayload(
+			'eventType=StopListUpdate&eventTime=2026-05-21+12%3A00%3A00.000&organizationId=org-1&correlationId=corr-1'
+		)
+
+		expect(event.eventType).toBe('StopListUpdate')
+		expect(event.organizationId).toBe('org-1')
+		expect(event.requestId).toBe('iiko:StopListUpdate:corr-1')
+	})
+
+	it('infers stop-list updates from eventInfo-only payloads', () => {
+		const event = normalizeIikoWebhookPayload({
+			terminalGroupsStopListsUpdates: [
+				{
+					terminalGroupId: 'terminal-group-1',
+					products: []
+				}
+			]
+		})
+
+		expect(event.eventType).toBe('StopListUpdate')
+		expect(event.eventInfo).toEqual({
+			terminalGroupsStopListsUpdates: [
+				{
+					terminalGroupId: 'terminal-group-1',
+					products: []
+				}
+			]
+		})
+		expect(resolveIikoWebhookAction(event.eventType)).toBe('stock-sync')
+	})
+
 	it('rejects invalid webhook payload as a bad request', () => {
 		expect(() => normalizeIikoWebhookPayload('')).toThrow(
 			'iiko webhook payload must not be empty'
@@ -60,6 +112,24 @@ describe('iiko webhooks helpers', () => {
 		)
 		expect(() => normalizeIikoWebhookPayload([])).toThrow(
 			'iiko webhook payload must be a JSON object'
+		)
+	})
+
+	it('detects empty webhook probe payloads', () => {
+		expect(isEmptyIikoWebhookPayload(undefined)).toBe(true)
+		expect(isEmptyIikoWebhookPayload(null)).toBe(true)
+		expect(isEmptyIikoWebhookPayload('   ')).toBe(true)
+		expect(isEmptyIikoWebhookPayload(Buffer.from(' '))).toBe(true)
+		expect(isEmptyIikoWebhookPayload('{}')).toBe(false)
+		expect(isEmptyIikoWebhookPayload({})).toBe(false)
+	})
+
+	it('describes webhook payload shape without throwing', () => {
+		expect(describeIikoWebhookPayload([{ eventType: 'StopListUpdate' }])).toEqual(
+			expect.objectContaining({
+				kind: 'array:1',
+				preview: expect.stringContaining('StopListUpdate')
+			})
 		)
 	})
 

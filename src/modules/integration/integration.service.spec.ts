@@ -31,6 +31,7 @@ import { IikoMetadataCryptoService } from './providers/iiko/iiko.metadata'
 import { IikoOrderExportQueueService } from './providers/iiko/iiko.order-export.queue.service'
 import { IikoQueueService } from './providers/iiko/iiko.queue.service'
 import { IikoSyncService } from './providers/iiko/iiko.sync.service'
+import { buildIikoWebhookSettingsFilter } from './providers/iiko/iiko.webhooks'
 import { MoySkladClient } from './providers/moysklad/moysklad.client'
 import {
 	buildMoySkladMetadata,
@@ -93,6 +94,12 @@ function buildEncryptedMetadata(input: {
 
 function hashWebhookSecret(secret: string): string {
 	return createHash('sha256').update(secret).digest('hex')
+}
+
+function hashIikoWebhookSettingsFilter(): string {
+	return createHash('sha256')
+		.update(JSON.stringify(buildIikoWebhookSettingsFilter()))
+		.digest('hex')
 }
 
 describe('IntegrationService', () => {
@@ -1164,6 +1171,7 @@ describe('IntegrationService', () => {
 					urlPreview:
 						'https://api.example.test/integration/webhooks/iiko/iiko-integration-1/***',
 					secretHash: 'secret-hash',
+					filterHash: hashIikoWebhookSettingsFilter(),
 					lastConfiguredAt: '2026-05-28T09:00:00.000Z',
 					lastReceivedAt: null,
 					lastEventType: null,
@@ -1318,6 +1326,101 @@ describe('IntegrationService', () => {
 				webhook: expect.objectContaining({
 					enabled: true,
 					lastEventType: 'StopListUpdate',
+					lastError: null
+				})
+			})
+		)
+	})
+
+	it('accepts empty iiko webhook probes without queuing sync', async () => {
+		const secret = 'iiko-secret-1'
+		const iikoRecord = {
+			...integrationRecord,
+			id: 'iiko-integration-1',
+			provider: IntegrationProvider.IIKO,
+			metadata: {
+				apiLogin: 'iiko-login',
+				organizationId: 'organization-1',
+				webhook: {
+					enabled: true,
+					urlPreview:
+						'https://api.example.test/integration/webhooks/iiko/iiko-integration-1/***',
+					secretHash: hashWebhookSecret(secret),
+					lastConfiguredAt: '2026-05-28T09:00:00.000Z',
+					lastReceivedAt: null,
+					lastEventType: null,
+					lastError: null
+				}
+			}
+		}
+		repo.findIikoById.mockResolvedValue(iikoRecord as any)
+
+		await service.receiveIikoWebhook({
+			integrationId: 'iiko-integration-1',
+			secret,
+			payload: undefined
+		})
+
+		expect(repo.createWebhookEventIfNew).not.toHaveBeenCalled()
+		expect(iikoQueue.enqueueStockWebhookSync).not.toHaveBeenCalled()
+		expect(iikoQueue.enqueueCatalogWebhookSync).not.toHaveBeenCalled()
+		expect(repo.updateIikoMetadataById).toHaveBeenCalledWith(
+			'iiko-integration-1',
+			expect.objectContaining({
+				webhook: expect.objectContaining({
+					enabled: true,
+					lastEventType: 'WebhookProbe',
+					lastError: null
+				})
+			})
+		)
+	})
+
+	it('falls back to stock sync when iiko webhook payload is not an event object', async () => {
+		const secret = 'iiko-secret-1'
+		const iikoRecord = {
+			...integrationRecord,
+			id: 'iiko-integration-1',
+			provider: IntegrationProvider.IIKO,
+			metadata: {
+				apiLogin: 'iiko-login',
+				organizationId: 'organization-1',
+				webhook: {
+					enabled: true,
+					urlPreview:
+						'https://api.example.test/integration/webhooks/iiko/iiko-integration-1/***',
+					secretHash: hashWebhookSecret(secret),
+					lastConfiguredAt: '2026-05-28T09:00:00.000Z',
+					lastReceivedAt: null,
+					lastEventType: null,
+					lastError: null
+				}
+			}
+		}
+		repo.findIikoById.mockResolvedValue(iikoRecord as any)
+		iikoQueue.enqueueStockWebhookSync.mockResolvedValue({
+			ok: true,
+			queued: true,
+			runId: 'run-iiko-webhook',
+			jobId: 'job-iiko-webhook',
+			mode: IntegrationSyncRunMode.STOCK,
+			trigger: IntegrationSyncRunTrigger.WEBHOOK
+		} as any)
+
+		await service.receiveIikoWebhook({
+			integrationId: 'iiko-integration-1',
+			secret,
+			payload: '["StopListUpdate"]'
+		})
+
+		expect(repo.createWebhookEventIfNew).not.toHaveBeenCalled()
+		expect(iikoQueue.enqueueStockWebhookSync).toHaveBeenCalledWith(iikoRecord)
+		expect(repo.updateIikoMetadataById).toHaveBeenCalledWith(
+			'iiko-integration-1',
+			expect.objectContaining({
+				webhook: expect.objectContaining({
+					enabled: true,
+					lastEventType: 'WebhookFallback',
 					lastError: null
 				})
 			})

@@ -138,6 +138,7 @@ describe('IikoMetadataCryptoService', () => {
 			enabled: false,
 			urlPreview: null,
 			secretHash: null,
+			filterHash: null,
 			lastConfiguredAt: null,
 			lastReceivedAt: null,
 			lastEventType: null,
