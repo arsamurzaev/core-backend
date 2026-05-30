@@ -72,7 +72,9 @@ export class ProductExternalSyncService implements ProductExternalSyncPort {
 				sku: input.sku,
 				slug: input.slug,
 				price: normalizePrice(input.price),
-				status: normalizeProductStatus(input.status) ?? ProductStatus.ACTIVE
+				status: normalizeProductStatus(input.status) ?? ProductStatus.ACTIVE,
+				...(input.isPopular === undefined ? {} : { isPopular: input.isPopular }),
+				...(input.position === undefined ? {} : { position: input.position })
 			},
 			asTransaction(input.tx)
 		)
@@ -86,6 +88,9 @@ export class ProductExternalSyncService implements ProductExternalSyncPort {
 		if (input.data.sku !== undefined) {
 			data.sku = input.data.sku
 		}
+		if (input.data.slug !== undefined) {
+			data.slug = input.data.slug
+		}
 		if (input.data.price !== undefined) {
 			data.price = normalizePrice(input.data.price)
 		}
@@ -94,6 +99,12 @@ export class ProductExternalSyncService implements ProductExternalSyncPort {
 			if (status) {
 				data.status = status
 			}
+		}
+		if (input.data.isPopular !== undefined) {
+			data.isPopular = input.data.isPopular
+		}
+		if (input.data.position !== undefined) {
+			data.position = input.data.position
 		}
 
 		return this.repo.updateExternalSync(

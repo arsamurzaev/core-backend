@@ -149,10 +149,7 @@ export class IikoOrderExportService {
 			)
 		}
 		if (isReserveOrder && !hallOrder?.tableId) {
-			hallOrder = await this.resolvePreorderTableFromNumber(
-				order,
-				integration.id
-			)
+			hallOrder = await this.resolvePreorderTableFromNumber(order, integration.id)
 		}
 		if (isReserveOrder && !hallOrder?.tableId) {
 			throw new NonRetryableIikoOrderExportError(
@@ -171,13 +168,13 @@ export class IikoOrderExportService {
 				})
 			: hallOrder
 				? await this.buildTableOrderPayload(order, integration.id, {
-					organizationId: metadata.organizationId,
-					terminalGroupId: metadata.terminalGroupId,
-					externalMenuId: metadata.externalMenuId,
-					priceCategoryId: metadata.priceCategoryId,
-					orderExportSourceKey: metadata.orderExportSourceKey,
-					hallOrder
-				})
+						organizationId: metadata.organizationId,
+						terminalGroupId: metadata.terminalGroupId,
+						externalMenuId: metadata.externalMenuId,
+						priceCategoryId: metadata.priceCategoryId,
+						orderExportSourceKey: metadata.orderExportSourceKey,
+						hallOrder
+					})
 				: await this.buildDeliveryPayload(order, integration.id, {
 						organizationId: metadata.organizationId,
 						terminalGroupId: metadata.terminalGroupId,
@@ -470,7 +467,8 @@ export class IikoOrderExportService {
 				productId: ref.productId,
 				...(ref.sizeId ? { productSizeId: ref.sizeId } : {}),
 				amount,
-				price
+				price,
+				...(item.guestName ? { comment: `Guest: ${item.guestName}` } : {})
 			})
 		}
 
@@ -725,9 +723,7 @@ function resolvePreorderDurationMinutes(order: OrderForExportRecord): number {
 
 function resolvePreorderShouldRemind(order: OrderForExportRecord): boolean {
 	const data = isRecord(order.checkoutData) ? order.checkoutData : {}
-	return (
-		readBoolean(data.shouldRemind ?? data.reserveShouldRemind) ?? true
-	)
+	return readBoolean(data.shouldRemind ?? data.reserveShouldRemind) ?? true
 }
 
 function resolveIikoCreationInfo(
@@ -1193,7 +1189,10 @@ function normalizeDateParts(
 	return `${year}-${pad2(month)}-${pad2(day)}`
 }
 
-function buildNextIikoDateTime(createdAt: Date, visitTime: string): string | null {
+function buildNextIikoDateTime(
+	createdAt: Date,
+	visitTime: string
+): string | null {
 	const time = visitTime.match(/^(\d{2}):(\d{2}):(\d{2})\.000$/)
 	if (!time) return null
 

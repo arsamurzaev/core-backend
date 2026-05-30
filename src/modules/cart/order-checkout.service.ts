@@ -66,6 +66,8 @@ const checkoutCartSelect = {
 			quantity: true,
 			baseQuantity: true,
 			unitPriceSnapshot: true,
+			guestSessionId: true,
+			guestName: true,
 			product: {
 				select: {
 					id: true,

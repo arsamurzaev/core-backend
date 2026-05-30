@@ -4,6 +4,7 @@ export const CAPABILITY_CATALOG_SALE_UNITS = 'catalog.sale_units'
 export const CAPABILITY_INVENTORY_INTERNAL = 'inventory.internal'
 export const CAPABILITY_INTEGRATION_MOYSKLAD = 'integration.moysklad'
 export const CAPABILITY_INTEGRATION_IIKO = 'integration.iiko'
+export const CAPABILITY_INTEGRATION_ONE_C = 'integration.one_c'
 
 export const CATALOG_CAPABILITIES = [
 	CAPABILITY_PRODUCT_TYPES,
@@ -11,7 +12,8 @@ export const CATALOG_CAPABILITIES = [
 	CAPABILITY_CATALOG_SALE_UNITS,
 	CAPABILITY_INVENTORY_INTERNAL,
 	CAPABILITY_INTEGRATION_MOYSKLAD,
-	CAPABILITY_INTEGRATION_IIKO
+	CAPABILITY_INTEGRATION_IIKO,
+	CAPABILITY_INTEGRATION_ONE_C
 ] as const
 
 export type CatalogCapability = (typeof CATALOG_CAPABILITIES)[number]
@@ -59,8 +61,15 @@ export const CATALOG_CAPABILITY_DEFINITIONS = [
 	{
 		key: CAPABILITY_INTEGRATION_IIKO,
 		title: 'iiko',
-		description: 'Импорт меню iikoCloud: категории, товары, варианты и изображения.',
+		description:
+			'Импорт меню iikoCloud: категории, товары, варианты и изображения.',
 		dependsOn: [CAPABILITY_PRODUCT_TYPES, CAPABILITY_PRODUCT_VARIANTS]
+	},
+	{
+		key: CAPABILITY_INTEGRATION_ONE_C,
+		title: '1C',
+		description: 'Configurable 1C API, object and field mappings.',
+		dependsOn: []
 	}
 ] as const satisfies CatalogCapabilityDefinition[]
 
@@ -75,4 +84,5 @@ export type CatalogCapabilityFlags = {
 	canUseInternalInventory: boolean
 	canUseMoySkladIntegration: boolean
 	canUseIikoIntegration: boolean
+	canUseOneCIntegration: boolean
 }

@@ -74,6 +74,8 @@ export type ProductExternalProductCreateInput = {
 	slug: string
 	price: number | string | null
 	status: string
+	isPopular?: boolean
+	position?: number
 	tx?: unknown
 }
 
@@ -83,8 +85,11 @@ export type ProductExternalProductUpdateInput = {
 	data: {
 		name?: string
 		sku?: string
+		slug?: string
 		price?: number | string | null
 		status?: string
+		isPopular?: boolean
+		position?: number
 	}
 	tx?: unknown
 }

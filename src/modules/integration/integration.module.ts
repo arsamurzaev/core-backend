@@ -3,15 +3,15 @@ import { Module } from '@nestjs/common'
 import { CapabilityModule } from '@/modules/capability/public'
 import { INVENTORY_EXTERNAL_STOCK_PORT } from '@/modules/inventory/contracts'
 import { ProductModule } from '@/modules/product/public'
+import { S3Module } from '@/modules/s3/public'
 import { MediaRepository } from '@/shared/media/media.repository'
 
-import { S3Module } from '@/modules/s3/public'
-
 import { ORDER_EXPORT_PORT } from './contracts'
-import { IntegrationController } from './integration.controller'
 import { IntegrationOrderExportDispatcherService } from './integration-order-export-dispatcher.service'
+import { IntegrationController } from './integration.controller'
 import { IntegrationRepository } from './integration.repository'
 import { IntegrationService } from './integration.service'
+import { OneCIntegrationController } from './one-c.integration.controller'
 import { IikoImageImportService } from './providers/iiko/iiko.image-import.service'
 import { IikoMetadataCryptoService } from './providers/iiko/iiko.metadata'
 import { IikoOrderExportQueueService } from './providers/iiko/iiko.order-export.queue.service'
@@ -33,14 +33,22 @@ import { MoySkladSyncRunRecorderService } from './providers/moysklad/moysklad.sy
 import { MoySkladSyncService } from './providers/moysklad/moysklad.sync.service'
 import { MoySkladVariantAttributeResolverService } from './providers/moysklad/moysklad.variant-attribute-resolver.service'
 import { MoySkladVariantSyncService } from './providers/moysklad/moysklad.variant-sync.service'
+import { OneCIntegrationService } from './providers/one-c/one-c.integration.service'
+import { OneCMetadataCryptoService } from './providers/one-c/one-c.metadata'
+import { OneCQueueService } from './providers/one-c/one-c.queue.service'
+import { OneCIntegrationRepository } from './providers/one-c/one-c.repository'
 
 @Module({
 	imports: [S3Module, CapabilityModule, ProductModule],
-	controllers: [IntegrationController],
+	controllers: [IntegrationController, OneCIntegrationController],
 	providers: [
 		IntegrationService,
+		OneCIntegrationService,
+		OneCQueueService,
 		IntegrationOrderExportDispatcherService,
 		IntegrationRepository,
+		OneCIntegrationRepository,
+		OneCMetadataCryptoService,
 		IikoImageImportService,
 		IikoMetadataCryptoService,
 		IikoOrderExportQueueService,

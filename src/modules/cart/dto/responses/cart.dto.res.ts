@@ -1,6 +1,7 @@
 import {
 	CartCheckoutMethod,
 	CartStatus,
+	CartTableSessionStatus,
 	OrderStatus,
 	ProductVariantStatus
 } from '@generated/client'
@@ -129,6 +130,12 @@ export class CartItemDto {
 	@ApiPropertyOptional({ type: String, format: 'uuid', nullable: true })
 	saleUnitId: string | null
 
+	@ApiPropertyOptional({ type: String, nullable: true })
+	guestSessionId: string | null
+
+	@ApiPropertyOptional({ type: String, nullable: true })
+	guestName: string | null
+
 	@ApiProperty({ type: Number, example: 2 })
 	quantity: number
 
@@ -212,6 +219,56 @@ export class CartTotalsDto {
 	total: number
 }
 
+export class CartTableSessionDto {
+	@ApiProperty({ type: String, format: 'uuid' })
+	id: string
+
+	@ApiProperty({
+		enum: CartTableSessionStatus,
+		enumName: 'CartTableSessionStatus'
+	})
+	status: CartTableSessionStatus
+
+	@ApiProperty({ type: String })
+	publicCode: string
+
+	@ApiProperty({ type: String })
+	tableExternalId: string
+
+	@ApiProperty({ type: String, nullable: true })
+	tableNumber: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	tableName: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	sectionExternalId: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	sectionName: string | null
+
+	@ApiProperty({ type: Number, nullable: true })
+	guestsCount: number | null
+
+	@ApiProperty({ type: String, nullable: true })
+	externalOrderId: string | null
+
+	@ApiProperty({ type: String, format: 'uuid', nullable: true })
+	submittedOrderId: string | null
+
+	@ApiProperty({ type: String, format: 'date-time', nullable: true })
+	submittedAt: string | null
+
+	@ApiProperty({ type: String, format: 'date-time', nullable: true })
+	closedAt: string | null
+
+	@ApiProperty({ type: String, format: 'date-time' })
+	createdAt: string
+
+	@ApiProperty({ type: String, format: 'date-time' })
+	updatedAt: string
+}
+
 export class CartDto {
 	@ApiProperty({ type: String, format: 'uuid' })
 	id: string
@@ -293,6 +350,9 @@ export class CartDto {
 	@ApiProperty({ type: [CartItemDto] })
 	items: CartItemDto[]
 
+	@ApiProperty({ type: CartTableSessionDto, nullable: true })
+	tableSession: CartTableSessionDto | null
+
 	@ApiProperty({ type: CartTotalsDto })
 	totals: CartTotalsDto
 
@@ -328,6 +388,12 @@ export class CompletedOrderItemDto {
 
 	@ApiProperty({ type: String, format: 'uuid', nullable: true })
 	saleUnitId: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	guestSessionId: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	guestName: string | null
 
 	@ApiProperty({ type: Number, example: 2 })
 	quantity: number
@@ -388,6 +454,28 @@ export class CompleteCartOrderResponseDto extends OkResponseDto {
 	order: CompletedOrderDto
 }
 
+export class HallTableSessionDto {
+	@ApiProperty({ type: CartTableSessionDto })
+	session: CartTableSessionDto
+
+	@ApiProperty({ type: CartDto })
+	cart: CartDto
+
+	@ApiProperty({
+		type: String,
+		example: '5f7ec4ac9cc6c392419eec11850d45f1'
+	})
+	publicKey: string
+
+	@ApiProperty({ type: String, nullable: true })
+	guestSessionId: string | null
+}
+
+export class HallTableSessionResponseDto extends OkResponseDto {
+	@ApiProperty({ type: HallTableSessionDto })
+	tableSession: HallTableSessionDto
+}
+
 export class HallTableLinkDto {
 	@ApiProperty({ type: String })
 	code: string
@@ -408,4 +496,42 @@ export class HallTableLinkDto {
 export class HallTableLinkResponseDto extends OkResponseDto {
 	@ApiProperty({ type: HallTableLinkDto })
 	table: HallTableLinkDto
+}
+
+export class HallTableOverviewDto extends HallTableLinkDto {
+	@ApiProperty({ type: String })
+	tableExternalId: string
+
+	@ApiProperty({
+		type: String,
+		nullable: true,
+		example: '5f7ec4ac9cc6c392419eec11850d45f1'
+	})
+	publicKey: string | null
+
+	@ApiProperty({ type: CartTableSessionDto, nullable: true })
+	session: CartTableSessionDto | null
+
+	@ApiProperty({ type: CartDto, nullable: true })
+	cart: CartDto | null
+
+	@ApiProperty({ type: Boolean })
+	hasItems: boolean
+
+	@ApiProperty({ type: Boolean })
+	needsConfirmation: boolean
+
+	@ApiProperty({ type: Number })
+	itemsCount: number
+
+	@ApiProperty({ type: Number })
+	total: number
+
+	@ApiProperty({ type: String, format: 'date-time', nullable: true })
+	updatedAt: string | null
+}
+
+export class HallTableOverviewResponseDto extends OkResponseDto {
+	@ApiProperty({ type: [HallTableOverviewDto] })
+	tables: HallTableOverviewDto[]
 }

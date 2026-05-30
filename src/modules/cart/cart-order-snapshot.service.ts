@@ -64,6 +64,8 @@ type SnapshotCartItem = {
 	productId: string
 	variantId: string | null
 	saleUnitId?: string | null
+	guestSessionId?: string | null
+	guestName?: string | null
 	variant?: Parameters<typeof mapCartVariant>[0]
 	saleUnit?: Parameters<typeof mapCartSaleUnit>[0]
 	quantity: number
@@ -161,6 +163,8 @@ export class CartOrderSnapshotService {
 				saleUnitHidden: item.saleUnitHidden,
 				variant: item.variantHidden ? null : mapCartVariant(item.variant),
 				saleUnit: item.saleUnitHidden ? null : mapCartSaleUnit(item.saleUnit),
+				guestSessionId: item.guestSessionId ?? null,
+				guestName: item.guestName ?? null,
 				externalProducts:
 					externalLinks.productsByProductId.get(item.productId) ?? [],
 				externalVariants: item.variantId
@@ -168,9 +172,7 @@ export class CartOrderSnapshotService {
 					: [],
 				quantity: item.quantity,
 				baseQuantity: this.resolveSnapshotBaseQuantity(item),
-				priceState: item.saleUnit
-					? 'KNOWN'
-					: item.commercialProjection.priceState,
+				priceState: item.saleUnit ? 'KNOWN' : item.commercialProjection.priceState,
 				displayPrice: item.saleUnit
 					? normalizeMoneyString(item.saleUnit.price)
 					: item.commercialProjection.displayPrice,
@@ -214,6 +216,8 @@ export class CartOrderSnapshotService {
 				productId: item.productId ?? '',
 				variantId: item.variantId,
 				saleUnitId: item.saleUnitId,
+				guestSessionId: item.guestSessionId,
+				guestName: item.guestName,
 				quantity: item.quantity,
 				baseQuantity: item.baseQuantity,
 				priceState: item.priceState,
@@ -371,9 +375,7 @@ export class CartOrderSnapshotService {
 	}
 
 	private buildPricingSource(item: SnapshotSource) {
-		const commercialPrice = this.resolveCommercialPrice(
-			item.commercialProjection
-		)
+		const commercialPrice = this.resolveCommercialPrice(item.commercialProjection)
 		const hasVariantPricingSource = Boolean(item.variantId && item.variant)
 		const product = hasVariantPricingSource
 			? item.product
@@ -477,9 +479,7 @@ function readFiniteNumber(value: unknown): number | null {
 		const candidate = value as { toNumber?: unknown }
 		if (typeof candidate.toNumber === 'function') {
 			const parsed = candidate.toNumber()
-			return typeof parsed === 'number' && Number.isFinite(parsed)
-				? parsed
-				: null
+			return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : null
 		}
 	}
 	return null

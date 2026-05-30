@@ -1,4 +1,8 @@
-import { CartCheckoutMethod, CartStatus } from '@generated/client'
+import {
+	CartCheckoutMethod,
+	CartStatus,
+	CartTableSessionStatus
+} from '@generated/client'
 import { BadRequestException } from '@nestjs/common'
 
 import type { MediaRecord } from '@/shared/media/media-url.service'
@@ -12,6 +16,8 @@ export type UpsertCartItemInput = {
 	variantId?: string
 	saleUnitId?: string
 	quantity: number
+	guestSessionId?: string | null
+	guestName?: string | null
 }
 
 export type NormalizedCartItemInput = {
@@ -19,6 +25,8 @@ export type NormalizedCartItemInput = {
 	variantId: string | null
 	saleUnitId: string | null
 	quantity: number
+	guestSessionId: string | null
+	guestName: string | null
 }
 
 type CartEntityLike = {
@@ -36,7 +44,27 @@ type CartEntityLike = {
 	managerSessionStartedAt: unknown
 	managerLastSeenAt: unknown
 	closedAt: unknown
+	tableSession?: CartTableSessionLike | null
 	items: CartItemLike[]
+	createdAt: unknown
+	updatedAt: unknown
+}
+
+type CartTableSessionLike = {
+	id: string
+	cartId?: string
+	status: string
+	publicCode: string
+	tableExternalId: string
+	tableNumber: string | null
+	tableName: string | null
+	sectionExternalId: string | null
+	sectionName: string | null
+	guestsCount: number | null
+	externalOrderId: string | null
+	submittedOrderId: string | null
+	submittedAt: unknown
+	closedAt: unknown
 	createdAt: unknown
 	updatedAt: unknown
 }
@@ -55,6 +83,8 @@ type CartItemLike = {
 	quantity: number
 	baseQuantity?: number | null
 	unitPriceSnapshot?: unknown
+	guestSessionId?: string | null
+	guestName?: string | null
 	createdAt: unknown
 	updatedAt: unknown
 	variant?: CartVariantLike | null
@@ -145,7 +175,8 @@ function buildCartItemLineKey(
 			: 'default',
 		options.canExposeSaleUnits
 			? (trimToNull(item.saleUnitId) ?? 'default')
-			: 'default'
+			: 'default',
+		trimToNull(item.guestSessionId) ?? 'default'
 	].join(':')
 }
 
@@ -216,7 +247,20 @@ export const CART_SSE_HEARTBEAT_MS = 200_000
 export const MAX_ITEM_QUANTITY = 999
 export const MAX_CART_ITEMS = 50
 
-function getCartStatusMessage(status: CartStatus): string | null {
+function getCartStatusMessage(
+	status: CartStatus,
+	tableSessionStatus?: string | null
+): string | null {
+	if (tableSessionStatus === CartTableSessionStatus.PENDING_CONFIRMATION) {
+		return 'Заказ отправлен официанту. Дождитесь подтверждения.'
+	}
+	if (tableSessionStatus === CartTableSessionStatus.EXPORT_ERROR) {
+		return 'Не удалось отправить заказ в iiko. Позовите сотрудника.'
+	}
+	if (tableSessionStatus === CartTableSessionStatus.SUBMITTED) {
+		return 'Заказ принят.'
+	}
+
 	if (status === CartStatus.IN_PROGRESS) {
 		return 'Менеджер магазина сейчас просматривает ваш заказ.'
 	}
@@ -252,6 +296,8 @@ export function normalizeCartItemInput(
 	const productId = input.productId.trim()
 	const variantId = input.variantId?.trim() || null
 	const saleUnitId = input.saleUnitId?.trim() || null
+	const guestSessionId = normalizeOptionalText(input.guestSessionId, 64)
+	const guestName = normalizeOptionalText(input.guestName, 120)
 	const quantity = input.quantity
 
 	if (!productId) {
@@ -264,7 +310,14 @@ export function normalizeCartItemInput(
 		)
 	}
 
-	return { productId, variantId, saleUnitId, quantity }
+	return {
+		productId,
+		variantId,
+		saleUnitId,
+		quantity,
+		guestSessionId,
+		guestName
+	}
 }
 
 function readFiniteNumber(value: unknown): number | null {
@@ -391,6 +444,8 @@ export function mapCartEntity(
 				productId: item.productId,
 				variantId: canUseProductVariants ? item.variantId : null,
 				saleUnitId: canExposeSaleUnits ? (item.saleUnitId ?? null) : null,
+				guestSessionId: item.guestSessionId ?? null,
+				guestName: item.guestName ?? null,
 				quantity: item.quantity,
 				baseQuantity: resolveMappedCartItemBaseQuantity(item, itemSaleUnit),
 				product: {
@@ -430,7 +485,10 @@ export function mapCartEntity(
 		id: cart.id,
 		catalogId: cart.catalogId,
 		status: cart.status,
-		statusMessage: getCartStatusMessage(cart.status),
+		statusMessage: getCartStatusMessage(
+			cart.status,
+			cart.tableSession?.status ?? null
+		),
 		statusChangedAt: cart.statusChangedAt,
 		publicKey: cart.publicKey,
 		checkoutAt: cart.checkoutAt,
@@ -442,6 +500,7 @@ export function mapCartEntity(
 		managerSessionStartedAt: cart.managerSessionStartedAt,
 		managerLastSeenAt: cart.managerLastSeenAt,
 		closedAt: cart.closedAt,
+		tableSession: mapCartTableSession(cart.tableSession ?? null),
 		items,
 		totals: {
 			itemsCount,
@@ -453,6 +512,37 @@ export function mapCartEntity(
 		},
 		createdAt: cart.createdAt,
 		updatedAt: cart.updatedAt
+	}
+}
+
+function normalizeOptionalText(
+	value: string | null | undefined,
+	maxLength: number
+): string | null {
+	const normalized = value?.trim()
+	if (!normalized) return null
+	return normalized.slice(0, maxLength)
+}
+
+export function mapCartTableSession(session?: CartTableSessionLike | null) {
+	if (!session) return null
+
+	return {
+		id: session.id,
+		status: session.status,
+		publicCode: session.publicCode,
+		tableExternalId: session.tableExternalId,
+		tableNumber: session.tableNumber,
+		tableName: session.tableName,
+		sectionExternalId: session.sectionExternalId,
+		sectionName: session.sectionName,
+		guestsCount: session.guestsCount,
+		externalOrderId: session.externalOrderId,
+		submittedOrderId: session.submittedOrderId,
+		submittedAt: session.submittedAt,
+		closedAt: session.closedAt,
+		createdAt: session.createdAt,
+		updatedAt: session.updatedAt
 	}
 }
 

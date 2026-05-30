@@ -7,6 +7,7 @@ import {
 	CAPABILITY_CATALOG_SALE_UNITS,
 	CAPABILITY_INTEGRATION_IIKO,
 	CAPABILITY_INTEGRATION_MOYSKLAD,
+	CAPABILITY_INTEGRATION_ONE_C,
 	CAPABILITY_INVENTORY_INTERNAL,
 	CAPABILITY_PRODUCT_TYPES,
 	CAPABILITY_PRODUCT_VARIANTS,
@@ -111,6 +112,10 @@ export class CapabilityService {
 		return this.can(catalogId, CAPABILITY_INTEGRATION_IIKO, at)
 	}
 
+	canUseOneCIntegration(catalogId: string, at = new Date()) {
+		return this.can(catalogId, CAPABILITY_INTEGRATION_ONE_C, at)
+	}
+
 	async assert(
 		catalogId: string,
 		capability: CatalogCapability,
@@ -180,6 +185,14 @@ export class CapabilityService {
 			catalogId,
 			CAPABILITY_INTEGRATION_IIKO,
 			'iiko integration is not enabled for this catalog'
+		)
+	}
+
+	async assertCanUseOneCIntegration(catalogId: string) {
+		await this.assert(
+			catalogId,
+			CAPABILITY_INTEGRATION_ONE_C,
+			'1C integration is not enabled for this catalog'
 		)
 	}
 
@@ -258,7 +271,8 @@ export class CapabilityService {
 			canUseCatalogSaleUnits: effective[CAPABILITY_CATALOG_SALE_UNITS],
 			canUseInternalInventory: effective[CAPABILITY_INVENTORY_INTERNAL],
 			canUseMoySkladIntegration: effective[CAPABILITY_INTEGRATION_MOYSKLAD],
-			canUseIikoIntegration: effective[CAPABILITY_INTEGRATION_IIKO]
+			canUseIikoIntegration: effective[CAPABILITY_INTEGRATION_IIKO],
+			canUseOneCIntegration: effective[CAPABILITY_INTEGRATION_ONE_C]
 		}
 	}
 }

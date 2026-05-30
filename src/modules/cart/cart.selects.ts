@@ -20,6 +20,26 @@ export const cartSelect = {
 	managerSessionStartedAt: true,
 	managerLastSeenAt: true,
 	closedAt: true,
+	tableSession: {
+		select: {
+			id: true,
+			cartId: true,
+			status: true,
+			publicCode: true,
+			tableExternalId: true,
+			tableNumber: true,
+			tableName: true,
+			sectionExternalId: true,
+			sectionName: true,
+			guestsCount: true,
+			externalOrderId: true,
+			submittedOrderId: true,
+			submittedAt: true,
+			closedAt: true,
+			createdAt: true,
+			updatedAt: true
+		}
+	},
 	createdAt: true,
 	updatedAt: true,
 	catalog: {
@@ -38,6 +58,8 @@ export const cartSelect = {
 			quantity: true,
 			baseQuantity: true,
 			unitPriceSnapshot: true,
+			guestSessionId: true,
+			guestName: true,
 			createdAt: true,
 			updatedAt: true,
 			product: {

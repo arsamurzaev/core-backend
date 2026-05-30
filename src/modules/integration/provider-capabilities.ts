@@ -49,6 +49,15 @@ export const INTEGRATION_PROVIDER_CAPABILITIES: Record<
 		orderExport: true,
 		reservation: false,
 		webhook: true
+	},
+	[IntegrationProvider.ONE_C]: {
+		productImport: true,
+		variantImport: true,
+		stockImport: true,
+		imageImport: false,
+		orderExport: true,
+		reservation: false,
+		webhook: false
 	}
 }
 

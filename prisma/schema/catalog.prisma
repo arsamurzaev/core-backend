@@ -69,6 +69,7 @@ model Catalog {
   saleUnits           CatalogSaleUnit[]
   order               Order[]
   cart                Cart[]
+  cartTableSessions   CartTableSession[]
   media               Media[]
   domains             CatalogDomain[]
   featureEntitlements CatalogFeatureEntitlement[]

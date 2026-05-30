@@ -1,4 +1,4 @@
-import { CartStatus, Prisma } from '@generated/client'
+import { CartStatus, CartTableSessionStatus, Prisma } from '@generated/client'
 import type { CatalogInventoryMode } from '@generated/enums'
 import {
 	BadRequestException,
@@ -33,8 +33,8 @@ import {
 	MAX_CART_ITEMS,
 	MAX_ITEM_QUANTITY,
 	normalizeCartItemInput,
-	resolveCartItemBaseQuantity,
 	type NormalizedCartItemInput,
+	resolveCartItemBaseQuantity,
 	type UpsertCartItemInput
 } from './cart.utils'
 
@@ -78,6 +78,7 @@ type CartContext = {
 	parentCatalogId: string | null
 	inventoryMode: CatalogInventoryMode
 	status: CartStatus
+	tableSessionStatus: CartTableSessionStatus | null
 }
 
 type ExistingCartItem = {
@@ -88,6 +89,8 @@ type ExistingCartItem = {
 	saleUnitId: string | null
 	baseQuantity: number | null
 	unitPriceSnapshot: Prisma.Decimal | null
+	guestSessionId: string | null
+	guestName: string | null
 }
 
 const existingCartItemSelect = {
@@ -97,7 +100,9 @@ const existingCartItemSelect = {
 	quantity: true,
 	saleUnitId: true,
 	baseQuantity: true,
-	unitPriceSnapshot: true
+	unitPriceSnapshot: true,
+	guestSessionId: true,
+	guestName: true
 } satisfies Prisma.CartItemSelect
 
 function sortCartLineMatches(items: ExistingCartItem[]) {
@@ -180,7 +185,7 @@ export class CartLineService {
 		const result = await this.prisma.$transaction(
 			async tx => {
 				const cart = await this.findCartContextOrThrow(cartId, tx)
-				this.ensureCartIsOpen(cart.status)
+				this.ensureCartIsOpen(cart.status, cart.tableSessionStatus)
 
 				const item = await tx.cartItem.findFirst({
 					where: {
@@ -192,7 +197,8 @@ export class CartLineService {
 						id: true,
 						productId: true,
 						variantId: true,
-						saleUnitId: true
+						saleUnitId: true,
+						guestSessionId: true
 					}
 				})
 
@@ -206,6 +212,7 @@ export class CartLineService {
 						productId: item.productId,
 						variantId: item.variantId,
 						saleUnitId: item.saleUnitId,
+						guestSessionId: item.guestSessionId,
 						deleteAt: null
 					},
 					data: { deleteAt: new Date() }
@@ -258,7 +265,7 @@ export class CartLineService {
 		tx: Prisma.TransactionClient
 	): Promise<CartLineMutationResult> {
 		const cart = await this.findCartContextOrThrow(cartId, tx)
-		this.ensureCartIsOpen(cart.status)
+		this.ensureCartIsOpen(cart.status, cart.tableSessionStatus)
 
 		const productSnapshot = await this.ensureProductInCatalog(
 			tx,
@@ -328,7 +335,8 @@ export class CartLineService {
 			cart.id,
 			resolvedInput.productId,
 			resolvedInput.variantId,
-			resolvedInput.saleUnitId
+			resolvedInput.saleUnitId,
+			resolvedInput.guestSessionId
 		)
 		const activeExistingQuantity = getActiveCartLineQuantity(existingItems)
 
@@ -414,6 +422,9 @@ export class CartLineService {
 				id: true,
 				catalogId: true,
 				status: true,
+				tableSession: {
+					select: { status: true }
+				},
 				catalog: {
 					select: {
 						parentId: true,
@@ -430,7 +441,8 @@ export class CartLineService {
 			catalogId: cart.catalogId,
 			parentCatalogId: cart.catalog.parentId ?? null,
 			inventoryMode: cart.catalog.settings?.inventoryMode ?? INVENTORY_MODE_NONE,
-			status: cart.status
+			status: cart.status,
+			tableSessionStatus: cart.tableSession?.status ?? null
 		}
 	}
 
@@ -592,14 +604,16 @@ export class CartLineService {
 		cartId: string,
 		productId: string,
 		variantId: string | null,
-		saleUnitId: string | null
+		saleUnitId: string | null,
+		guestSessionId: string | null
 	): Promise<ExistingCartItem[]> {
 		const exact = await tx.cartItem.findFirst({
 			where: {
 				cartId,
 				productId,
 				variantId,
-				saleUnitId
+				saleUnitId,
+				guestSessionId
 			},
 			select: existingCartItemSelect
 		})
@@ -609,7 +623,8 @@ export class CartLineService {
 					cartId,
 					productId,
 					variantId,
-					saleUnitId
+					saleUnitId,
+					guestSessionId
 				},
 				select: existingCartItemSelect
 			})
@@ -623,6 +638,7 @@ export class CartLineService {
 				where: {
 					cartId,
 					productId,
+					guestSessionId,
 					deleteAt: null
 				},
 				select: existingCartItemSelect,
@@ -638,6 +654,7 @@ export class CartLineService {
 				cartId,
 				productId,
 				variantId,
+				guestSessionId,
 				saleUnitId: null
 			},
 			select: existingCartItemSelect
@@ -677,6 +694,8 @@ export class CartLineService {
 				primary.quantity !== input.quantity ||
 				primary.saleUnitId !== input.saleUnitId ||
 				primary.baseQuantity !== input.baseQuantity ||
+				primary.guestSessionId !== input.guestSessionId ||
+				primary.guestName !== input.guestName ||
 				!this.linePricing.isSameMoney(
 					primary.unitPriceSnapshot,
 					input.unitPriceSnapshot
@@ -690,6 +709,8 @@ export class CartLineService {
 						baseQuantity: input.baseQuantity,
 						unitPriceSnapshot: input.unitPriceSnapshot,
 						saleUnitId: input.saleUnitId,
+						guestSessionId: input.guestSessionId,
+						guestName: input.guestName,
 						deleteAt: null
 					}
 				})
@@ -713,16 +734,27 @@ export class CartLineService {
 				saleUnitId: input.saleUnitId,
 				quantity: input.quantity,
 				baseQuantity: input.baseQuantity,
-				unitPriceSnapshot: input.unitPriceSnapshot
+				unitPriceSnapshot: input.unitPriceSnapshot,
+				guestSessionId: input.guestSessionId,
+				guestName: input.guestName
 			}
 		})
 
 		return true
 	}
 
-	private ensureCartIsOpen(status: CartStatus) {
+	private ensureCartIsOpen(
+		status: CartStatus,
+		tableSessionStatus?: CartTableSessionStatus | null
+	) {
 		if (TERMINAL_CART_STATUSES.has(status)) {
 			throw new BadRequestException('Корзина уже закрыта')
+		}
+		if (
+			tableSessionStatus &&
+			tableSessionStatus !== CartTableSessionStatus.OPEN
+		) {
+			throw new BadRequestException('hall table session is not open')
 		}
 	}
 

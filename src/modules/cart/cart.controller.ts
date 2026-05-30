@@ -44,6 +44,7 @@ import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
 import { CartService } from './cart.service'
 import {
+	JoinHallTableSessionDtoReq,
 	PublicUpsertCartItemDtoReq,
 	ShareCurrentCartDtoReq,
 	UpsertCartItemDtoReq
@@ -52,6 +53,8 @@ import {
 	CartResponseDto,
 	CompleteCartOrderResponseDto,
 	HallTableLinkResponseDto,
+	HallTableOverviewResponseDto,
+	HallTableSessionResponseDto,
 	ShareCartResponseDto
 } from './dto/responses/cart.dto.res'
 
@@ -200,6 +203,41 @@ export class CartController {
 		const catalogId = mustCatalogId()
 		const table = await this.cartService.getHallTableLink(catalogId, code)
 		return { ok: true, table }
+	}
+
+	@Get('hall-tables')
+	@UseGuards(SessionGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({ summary: 'List iiko hall tables with active cart sessions' })
+	@ApiOkResponse({ type: HallTableOverviewResponseDto })
+	async listHallTables() {
+		const catalogId = mustCatalogId()
+		const tables = await this.cartService.listHallTables(catalogId)
+		return { ok: true, tables }
+	}
+
+	@Post('hall-table/:code/session')
+	@ApiOperation({
+		summary: 'Create or return a shared cart session for a hall table'
+	})
+	@ApiParam({
+		name: 'code',
+		description: 'Short backend-stored hall table code',
+		example: 'Ab7Kp92x'
+	})
+	@ApiBody({ type: JoinHallTableSessionDtoReq, required: false })
+	@ApiOkResponse({ type: HallTableSessionResponseDto })
+	async joinHallTableSession(
+		@Param('code') code: string,
+		@Body() dto: JoinHallTableSessionDtoReq = {}
+	) {
+		const catalogId = mustCatalogId()
+		const tableSession = await this.cartService.joinHallTableSession(
+			catalogId,
+			code,
+			dto
+		)
+		return { ok: true, tableSession }
 	}
 
 	@Put('current/items')
@@ -389,6 +427,99 @@ export class CartController {
 			comment: dto.comment
 		})
 		return { ok: true, order: result.order }
+	}
+
+	@SkipCatalog()
+	@Post('public/:publicKey/hall-table/close')
+	@UseGuards(SessionGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({
+		summary: 'Close an open shared hall table cart'
+	})
+	@ApiParam({
+		name: 'publicKey',
+		description: 'Public cart key',
+		example: '5f7ec4ac9cc6c392419eec11850d45f1'
+	})
+	@ApiOkResponse({ type: CartResponseDto })
+	async closeHallTableSession(
+		@Param('publicKey') publicKey: string,
+		@User() user: SessionUser
+	) {
+		const cart = await this.cartService.closeHallTableSession(publicKey, user)
+		return { ok: true, cart }
+	}
+
+	@SkipCatalog()
+	@Post('public/:publicKey/hall-table/reset')
+	@UseGuards(SessionGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({
+		summary: 'Reset an open shared hall table cart'
+	})
+	@ApiParam({
+		name: 'publicKey',
+		description: 'Public cart key',
+		example: '5f7ec4ac9cc6c392419eec11850d45f1'
+	})
+	@ApiOkResponse({ type: CartResponseDto })
+	async resetHallTableSession(
+		@Param('publicKey') publicKey: string,
+		@User() user: SessionUser
+	) {
+		const cart = await this.cartService.resetHallTableSession(publicKey, user)
+		return { ok: true, cart }
+	}
+
+	@SkipCatalog()
+	@Post('public/:publicKey/hall-table/confirm')
+	@UseGuards(SessionGuard)
+	@Roles(Role.CATALOG)
+	@ApiOperation({
+		summary: 'Confirm a shared hall table cart and send it to iiko'
+	})
+	@ApiParam({
+		name: 'publicKey',
+		description: 'Public cart key',
+		example: '5f7ec4ac9cc6c392419eec11850d45f1'
+	})
+	@ApiBody({ type: ShareCurrentCartDtoReq, required: false })
+	@ApiOkResponse({ type: CompleteCartOrderResponseDto })
+	async confirmHallTableOrder(
+		@Param('publicKey') publicKey: string,
+		@User() user: SessionUser,
+		@Body() dto: ShareCurrentCartDtoReq = {}
+	) {
+		const result = await this.cartService.confirmHallTableOrder(publicKey, user, {
+			checkoutData: dto.checkoutData,
+			checkoutMethod: dto.checkoutMethod,
+			comment: dto.comment
+		})
+		return { ok: true, order: result.order }
+	}
+
+	@SkipCatalog()
+	@Post('public/:publicKey/hall-order')
+	@ApiOperation({
+		summary: 'Send a public shared hall table cart to waiter confirmation'
+	})
+	@ApiParam({
+		name: 'publicKey',
+		description: 'Public cart key',
+		example: '5f7ec4ac9cc6c392419eec11850d45f1'
+	})
+	@ApiBody({ type: ShareCurrentCartDtoReq, required: false })
+	@ApiOkResponse({ type: CartResponseDto })
+	async submitPublicHallOrder(
+		@Param('publicKey') publicKey: string,
+		@Body() dto: ShareCurrentCartDtoReq = {}
+	) {
+		const result = await this.cartService.submitPublicHallOrder(publicKey, {
+			checkoutData: dto.checkoutData,
+			checkoutMethod: dto.checkoutMethod,
+			comment: dto.comment
+		})
+		return { ok: true, cart: result.cart }
 	}
 
 	@SkipCatalog()

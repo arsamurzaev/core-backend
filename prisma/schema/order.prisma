@@ -28,6 +28,7 @@ model Order {
   catalog               Catalog                  @relation(fields: [catalogId], references: [id])
   catalogId             String                   @map("catalog_id") @db.Uuid
   integrationExports    IntegrationOrderExport[]
+  tableSessions         CartTableSession[]       @relation("CartTableSessionSubmittedOrder")
   inventoryMovements    InventoryMovement[]
   inventoryReservations InventoryReservation[]
 

@@ -1,6 +1,7 @@
 import {
 	CartCheckoutMethod,
 	CartStatus,
+	CartTableSessionStatus,
 	ContactType,
 	IntegrationProvider,
 	OrderStatus,
@@ -55,6 +56,7 @@ function createCartEntity(overrides: Record<string, unknown> = {}) {
 		checkoutContacts: null,
 		comment: null,
 		catalog: { parentId: null },
+		tableSession: null,
 		assignedManagerId: null,
 		managerSessionStartedAt: null,
 		managerLastSeenAt: null,
@@ -62,6 +64,28 @@ function createCartEntity(overrides: Record<string, unknown> = {}) {
 		createdAt: new Date('2026-03-25T09:00:00.000Z'),
 		updatedAt: new Date('2026-03-25T09:00:00.000Z'),
 		items: [],
+		...overrides
+	}
+}
+
+function createCartTableSession(overrides: Record<string, unknown> = {}) {
+	return {
+		id: 'table-session-1',
+		cartId: 'cart-1',
+		status: CartTableSessionStatus.OPEN,
+		publicCode: 'table-code-1',
+		tableExternalId: 'iiko-table-1',
+		tableNumber: '1',
+		tableName: 'Table 1',
+		sectionExternalId: 'section-1',
+		sectionName: 'Main hall',
+		guestsCount: null,
+		externalOrderId: null,
+		submittedOrderId: null,
+		submittedAt: null,
+		closedAt: null,
+		createdAt: new Date('2026-03-25T09:00:00.000Z'),
+		updatedAt: new Date('2026-03-25T09:00:00.000Z'),
 		...overrides
 	}
 }
@@ -138,6 +162,13 @@ describe('CartService', () => {
 			update: jest.Mock
 			updateMany: jest.Mock
 		}
+		cartTableSession: {
+			findFirst: jest.Mock
+			findMany: jest.Mock
+			create: jest.Mock
+			update: jest.Mock
+			updateMany: jest.Mock
+		}
 		cartItem: {
 			findFirst: jest.Mock
 			findMany: jest.Mock
@@ -170,6 +201,10 @@ describe('CartService', () => {
 		}
 		integrationExternalItem: {
 			findFirst: jest.Mock
+			findMany: jest.Mock
+		}
+		integrationOrderExport: {
+			findFirst: jest.Mock
 		}
 		$queryRaw: jest.Mock
 		$transaction: jest.Mock
@@ -183,6 +218,7 @@ describe('CartService', () => {
 	}
 	let orderExportQueue: {
 		enqueueCompletedOrder: jest.Mock
+		waitForCompletedOrderExport: jest.Mock
 	}
 	let inventory: {
 		consumeCompletedOrderStockTx: jest.Mock
@@ -208,6 +244,13 @@ describe('CartService', () => {
 			cart: {
 				findFirst: jest.fn(),
 				findMany: jest.fn(),
+				create: jest.fn(),
+				update: jest.fn(),
+				updateMany: jest.fn().mockResolvedValue({ count: 1 })
+			},
+			cartTableSession: {
+				findFirst: jest.fn(),
+				findMany: jest.fn().mockResolvedValue([]),
 				create: jest.fn(),
 				update: jest.fn(),
 				updateMany: jest.fn().mockResolvedValue({ count: 1 })
@@ -243,6 +286,10 @@ describe('CartService', () => {
 				findMany: jest.fn().mockResolvedValue([])
 			},
 			integrationExternalItem: {
+				findFirst: jest.fn().mockResolvedValue(null),
+				findMany: jest.fn().mockResolvedValue([])
+			},
+			integrationOrderExport: {
 				findFirst: jest.fn().mockResolvedValue(null)
 			},
 			$queryRaw: jest.fn().mockResolvedValue([{ id: 'cart-1' }]),
@@ -265,6 +312,10 @@ describe('CartService', () => {
 				ok: true,
 				queued: false,
 				reason: 'order_export_disabled'
+			}),
+			waitForCompletedOrderExport: jest.fn().mockResolvedValue({
+				ok: true,
+				status: 'SUCCEEDED'
 			})
 		}
 		inventory = {
@@ -987,6 +1038,367 @@ describe('CartService', () => {
 		expect(result.status).toBe(CartStatus.PAUSED)
 	})
 
+	it('resets an open hall table session for a catalog manager', async () => {
+		const openSession = createCartTableSession()
+		const currentCart = createCartEntity({
+			tableSession: openSession
+		})
+		const closedAt = new Date('2026-03-25T09:30:00.000Z')
+		const resetCart = createCartEntity({
+			status: CartStatus.CANCELLED,
+			closedAt,
+			tableSession: createCartTableSession({
+				status: CartTableSessionStatus.CANCELLED,
+				closedAt
+			})
+		})
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(resetCart)
+		prisma.catalog.findFirst.mockResolvedValue({
+			id: 'catalog-1',
+			userId: 'manager-1'
+		})
+
+		const broadcastSpy = jest.spyOn(service as never, 'broadcastCart' as never)
+
+		const result = await service.resetHallTableSession('public-1', {
+			id: 'manager-1',
+			role: Role.CATALOG
+		})
+
+		expect(prisma.cartTableSession.updateMany).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: expect.objectContaining({
+					id: 'table-session-1',
+					status: {
+						in: [
+							CartTableSessionStatus.OPEN,
+							CartTableSessionStatus.PENDING_CONFIRMATION
+						]
+					}
+				}),
+				data: expect.objectContaining({
+					status: CartTableSessionStatus.CANCELLED,
+					activeKey: null,
+					closedAt: expect.any(Date)
+				})
+			})
+		)
+		expect(prisma.cart.updateMany).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: expect.objectContaining({ id: 'cart-1' }),
+				data: expect.objectContaining({
+					status: CartStatus.CANCELLED,
+					closedAt: expect.any(Date),
+					assignedManagerId: null,
+					publicKey: null,
+					checkoutKey: null
+				})
+			})
+		)
+		expect(inventory.releaseCartReservationsTx).toHaveBeenCalledWith(
+			prisma,
+			expect.objectContaining({
+				catalogId: 'catalog-1',
+				cartId: 'cart-1',
+				reason: 'Hall table session reset',
+				actorUserId: 'manager-1'
+			})
+		)
+		expect(broadcastSpy).toHaveBeenCalledWith(
+			'cart-1',
+			'cart.status_changed',
+			expect.any(Object)
+		)
+		expect(result.status).toBe(CartStatus.CANCELLED)
+		expect(result.tableSession?.status).toBe(CartTableSessionStatus.CANCELLED)
+	})
+
+	it('detaches a hall table cart as soon as a manager confirms it', async () => {
+		const openSession = createCartTableSession()
+		const cartItem = createCartItem({ quantity: 2 })
+		const currentCart = createCartEntity({
+			status: CartStatus.IN_PROGRESS,
+			assignedManagerId: 'manager-1',
+			tableSession: openSession,
+			items: [cartItem]
+		})
+		const submittedAt = new Date('2026-03-25T09:11:00.000Z')
+		const submittedCart = createCartEntity({
+			status: CartStatus.CONVERTED,
+			publicKey: null,
+			checkoutKey: null,
+			assignedManagerId: 'manager-1',
+			closedAt: new Date('2026-03-25T09:10:00.000Z'),
+			tableSession: createCartTableSession({
+				status: CartTableSessionStatus.SUBMITTED,
+				submittedOrderId: 'order-1',
+				submittedAt
+			}),
+			items: [cartItem]
+		})
+		const exportedCart = createCartEntity({
+			...submittedCart,
+			tableSession: createCartTableSession({
+				status: CartTableSessionStatus.SUBMITTED,
+				submittedOrderId: 'order-1',
+				submittedAt,
+				externalOrderId: 'iiko-order-1'
+			})
+		})
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(submittedCart)
+			.mockResolvedValueOnce(exportedCart)
+		prisma.catalog.findFirst
+			.mockResolvedValueOnce({
+				id: 'catalog-1',
+				userId: 'manager-1'
+			})
+			.mockResolvedValueOnce({
+				type: { code: 'restaurant' },
+				settings: {
+					address: 'Hall street, 1',
+					checkout: { enabledMethods: [CartCheckoutMethod.PICKUP] }
+				},
+				contacts: []
+			})
+		prisma.order.create.mockResolvedValue(createCompletedOrderEntity())
+		prisma.integrationOrderExport.findFirst.mockResolvedValueOnce({
+			externalId: 'iiko-order-1',
+			response: { correlationId: 'corr-1' }
+		})
+		prisma.integrationExternalItem.findFirst.mockResolvedValueOnce({
+			id: 'table-item-1',
+			integrationId: 'integration-1',
+			externalId: 'iiko-table-1',
+			externalParentId: 'section-1',
+			name: 'Table 1',
+			code: '1',
+			publicCode: 'table-code-1',
+			rawMeta: {
+				restaurantSectionId: 'section-1',
+				tableName: 'Table 1',
+				tableNumber: '1'
+			}
+		})
+
+		const broadcastSpy = jest.spyOn(service as never, 'broadcastCart' as never)
+
+		const result = await service.confirmHallTableOrder('public-1', {
+			id: 'manager-1',
+			role: Role.CATALOG
+		})
+
+		expect(prisma.cart.updateMany).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: expect.objectContaining({
+					id: 'cart-1',
+					status: { in: expect.any(Array) }
+				}),
+				data: expect.objectContaining({
+					status: CartStatus.CONVERTED,
+					publicKey: null,
+					checkoutKey: null
+				})
+			})
+		)
+		expect(prisma.cartTableSession.update).toHaveBeenNthCalledWith(1, {
+			where: { id: 'table-session-1' },
+			data: expect.objectContaining({
+				status: CartTableSessionStatus.SUBMITTED,
+				submittedOrderId: 'order-1',
+				submittedAt: expect.any(Date),
+				activeKey: null
+			})
+		})
+		expect(
+			prisma.cartTableSession.update.mock.invocationCallOrder[0]
+		).toBeLessThan(
+			orderExportQueue.waitForCompletedOrderExport.mock.invocationCallOrder[0]
+		)
+		expect(prisma.cartTableSession.update).toHaveBeenNthCalledWith(2, {
+			where: { id: 'table-session-1' },
+			data: expect.objectContaining({
+				status: CartTableSessionStatus.SUBMITTED,
+				submittedOrderId: 'order-1',
+				submittedAt: expect.any(Date),
+				activeKey: null,
+				externalOrderId: 'iiko-order-1',
+				externalCorrelationId: 'corr-1'
+			})
+		})
+		expect(broadcastSpy).toHaveBeenCalledWith(
+			'cart-1',
+			'cart.status_changed',
+			expect.objectContaining({
+				publicKey: null,
+				status: CartStatus.CONVERTED,
+				tableSession: expect.objectContaining({
+					status: CartTableSessionStatus.SUBMITTED
+				})
+			})
+		)
+		expect(result.order.id).toBe('order-1')
+	})
+
+	it('closes a hall table session through generic manager completion', async () => {
+		const openSession = createCartTableSession()
+		const cartItem = createCartItem({ quantity: 2 })
+		const currentCart = createCartEntity({
+			status: CartStatus.IN_PROGRESS,
+			assignedManagerId: 'manager-1',
+			tableSession: openSession,
+			items: [cartItem]
+		})
+		const submittedCart = createCartEntity({
+			status: CartStatus.CONVERTED,
+			publicKey: null,
+			checkoutKey: null,
+			assignedManagerId: 'manager-1',
+			closedAt: new Date('2026-03-25T09:10:00.000Z'),
+			tableSession: createCartTableSession({
+				status: CartTableSessionStatus.SUBMITTED,
+				submittedOrderId: 'order-1',
+				submittedAt: new Date('2026-03-25T09:11:00.000Z')
+			}),
+			items: [cartItem]
+		})
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(submittedCart)
+			.mockResolvedValueOnce(submittedCart)
+		prisma.catalog.findFirst
+			.mockResolvedValueOnce({
+				id: 'catalog-1',
+				userId: 'manager-1'
+			})
+			.mockResolvedValueOnce({
+				type: { code: 'restaurant' },
+				settings: {
+					address: 'Hall street, 1',
+					checkout: { enabledMethods: [CartCheckoutMethod.PICKUP] }
+				},
+				contacts: []
+			})
+		prisma.order.create.mockResolvedValue(createCompletedOrderEntity())
+		prisma.integrationExternalItem.findFirst.mockResolvedValueOnce({
+			id: 'table-item-1',
+			integrationId: 'integration-1',
+			externalId: 'iiko-table-1',
+			externalParentId: 'section-1',
+			name: 'Table 1',
+			code: '1',
+			publicCode: 'table-code-1',
+			rawMeta: {
+				restaurantSectionId: 'section-1',
+				tableName: 'Table 1',
+				tableNumber: '1'
+			}
+		})
+
+		const result = await service.completeManagerOrder('public-1', {
+			id: 'manager-1',
+			role: Role.CATALOG
+		})
+
+		expect(prisma.cartTableSession.update).toHaveBeenCalledWith({
+			where: { id: 'table-session-1' },
+			data: expect.objectContaining({
+				status: CartTableSessionStatus.SUBMITTED,
+				submittedOrderId: 'order-1',
+				activeKey: null
+			})
+		})
+		expect(orderExportQueue.waitForCompletedOrderExport).toHaveBeenCalledWith(
+			'catalog-1',
+			'order-1',
+			expect.any(Object)
+		)
+		expect(result.order.id).toBe('order-1')
+	})
+
+	it('marks a public hall table cart as waiting for waiter confirmation', async () => {
+		const openCart = createCartEntity({
+			tableSession: createCartTableSession(),
+			items: [createCartItem({ quantity: 2 })]
+		})
+		const pendingCart = createCartEntity({
+			tableSession: createCartTableSession({
+				status: CartTableSessionStatus.PENDING_CONFIRMATION
+			}),
+			items: openCart.items
+		})
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(openCart)
+			.mockResolvedValueOnce(pendingCart)
+		prisma.catalog.findFirst.mockResolvedValue({
+			id: 'catalog-1',
+			type: { code: 'restaurant' },
+			settings: {
+				address: 'Hall street, 1',
+				checkout: { enabledMethods: [CartCheckoutMethod.PICKUP] }
+			},
+			contacts: []
+		})
+		prisma.integrationExternalItem.findFirst.mockResolvedValueOnce({
+			id: 'table-item-1',
+			integrationId: 'integration-1',
+			externalId: 'iiko-table-1',
+			externalParentId: 'section-1',
+			name: 'Table 1',
+			code: '1',
+			publicCode: 'table-code-1',
+			rawMeta: {
+				restaurantSectionId: 'section-1',
+				tableName: 'Table 1',
+				tableNumber: '1'
+			}
+		})
+		prisma.cart.update.mockResolvedValue(undefined)
+		prisma.cartTableSession.update.mockResolvedValue(undefined)
+
+		const result = await service.submitPublicHallOrder('public-1', {})
+
+		expect(prisma.cartTableSession.update).toHaveBeenCalledWith({
+			where: { id: 'table-session-1' },
+			data: {
+				status: CartTableSessionStatus.PENDING_CONFIRMATION
+			}
+		})
+		expect(prisma.order.create).not.toHaveBeenCalled()
+		expect(orderExportQueue.enqueueCompletedOrder).not.toHaveBeenCalled()
+		expect(result.cart.tableSession?.status).toBe(
+			CartTableSessionStatus.PENDING_CONFIRMATION
+		)
+	})
+
+	it('rejects public item changes after a hall table session is closed', async () => {
+		const closedCart = createCartEntity({
+			tableSession: createCartTableSession({
+				status: CartTableSessionStatus.CLOSED,
+				closedAt: new Date('2026-03-25T09:30:00.000Z')
+			})
+		})
+
+		prisma.cart.findFirst.mockResolvedValueOnce(closedCart)
+
+		await expect(
+			service.upsertPublicItem('public-1', {
+				productId: 'product-1',
+				quantity: 1
+			})
+		).rejects.toThrow('hall table session is not open')
+		expect(prisma.cartItem.create).not.toHaveBeenCalled()
+	})
+
 	it('expires inactive IN_PROGRESS carts to PAUSED', async () => {
 		const waitingCart = createCartEntity({
 			status: CartStatus.PAUSED,
@@ -1034,6 +1446,76 @@ describe('CartService', () => {
 				reason: 'Cart expired',
 				actorUserId: null
 			})
+		)
+	})
+
+	it('expires stale open hall table sessions and releases reservations', async () => {
+		const expiredCart = createCartEntity({
+			status: CartStatus.EXPIRED,
+			closedAt: new Date('2026-03-25T15:30:00.000Z'),
+			tableSession: createCartTableSession({
+				status: CartTableSessionStatus.EXPIRED,
+				closedAt: new Date('2026-03-25T15:30:00.000Z')
+			})
+		})
+
+		prisma.cartTableSession.findMany.mockResolvedValueOnce([
+			{
+				id: 'table-session-1',
+				cartId: 'cart-1',
+				catalogId: 'catalog-1'
+			}
+		])
+		prisma.cart.findMany.mockResolvedValueOnce([expiredCart])
+
+		const broadcastSpy = jest.spyOn(service as never, 'broadcastCart' as never)
+
+		await service['expireStaleHallTableSessions']()
+
+		expect(prisma.cartTableSession.updateMany).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: expect.objectContaining({
+					id: { in: ['table-session-1'] },
+					status: {
+						in: [
+							CartTableSessionStatus.OPEN,
+							CartTableSessionStatus.PENDING_CONFIRMATION
+						]
+					}
+				}),
+				data: expect.objectContaining({
+					status: CartTableSessionStatus.EXPIRED,
+					activeKey: null,
+					closedAt: expect.any(Date)
+				})
+			})
+		)
+		expect(prisma.cart.updateMany).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: expect.objectContaining({
+					id: { in: ['cart-1'] }
+				}),
+				data: expect.objectContaining({
+					status: CartStatus.EXPIRED,
+					closedAt: expect.any(Date),
+					publicKey: null,
+					checkoutKey: null
+				})
+			})
+		)
+		expect(inventory.releaseCartReservationsTx).toHaveBeenCalledWith(
+			prisma,
+			expect.objectContaining({
+				catalogId: 'catalog-1',
+				cartId: 'cart-1',
+				reason: 'Hall table session expired',
+				actorUserId: null
+			})
+		)
+		expect(broadcastSpy).toHaveBeenCalledWith(
+			'cart-1',
+			'cart.status_changed',
+			expect.any(Object)
 		)
 	})
 
@@ -1430,8 +1912,9 @@ describe('CartService', () => {
 			availabilityState: 'AVAILABLE',
 			stock: 5
 		})
-		prisma.productVariant.findFirst
-			.mockResolvedValueOnce({ id: 'variant-single' })
+		prisma.productVariant.findFirst.mockResolvedValueOnce({
+			id: 'variant-single'
+		})
 		prisma.cartItem.findFirst.mockResolvedValueOnce(null)
 		prisma.cartItem.count.mockResolvedValueOnce(0)
 		prisma.cartItem.create.mockResolvedValueOnce({ id: 'cart-item-1' })
@@ -1463,7 +1946,8 @@ describe('CartService', () => {
 					cartId: 'cart-1',
 					productId: 'product-1',
 					variantId: 'variant-single',
-					saleUnitId: null
+					saleUnitId: null,
+					guestSessionId: null
 				}
 			})
 		)
@@ -1851,7 +2335,8 @@ describe('CartService', () => {
 					cartId: 'cart-1',
 					productId: 'product-1',
 					variantId: 'variant-medium',
-					saleUnitId: null
+					saleUnitId: null,
+					guestSessionId: null
 				}
 			})
 		)

@@ -7,6 +7,43 @@ enum Role {
 enum IntegrationProvider {
   MOYSKLAD
   IIKO
+  ONE_C
+}
+
+enum IntegrationExternalObjectKind {
+  ODATA_ENTITY
+  HTTP_ENDPOINT
+  CATALOG
+  DOCUMENT
+  REGISTER
+  CUSTOM
+}
+
+enum IntegrationMappingLocalEntity {
+  PRODUCT
+  PRODUCT_VARIANT
+  CATEGORY
+  ORDER
+  STOCK
+  PRICE
+  WAREHOUSE
+  CUSTOMER
+}
+
+enum IntegrationMappingDirection {
+  IMPORT
+  EXPORT
+  IMPORT_EXPORT
+}
+
+enum IntegrationMappingDataType {
+  STRING
+  INTEGER
+  DECIMAL
+  BOOLEAN
+  DATETIME
+  JSON
+  REFERENCE
 }
 
 enum IntegrationSyncStatus {
@@ -19,7 +56,9 @@ enum IntegrationSyncStatus {
 enum IntegrationSyncRunMode {
   FULL
   PRODUCT
+  VARIANT
   STOCK
+  PRICE
 }
 
 enum IntegrationSyncRunTrigger {
@@ -157,6 +196,16 @@ enum CartStatus {
   IN_PROGRESS
   PAUSED
   CONVERTED
+  CANCELLED
+  EXPIRED
+}
+
+enum CartTableSessionStatus {
+  OPEN
+  PENDING_CONFIRMATION
+  SUBMITTED
+  EXPORT_ERROR
+  CLOSED
   CANCELLED
   EXPIRED
 }

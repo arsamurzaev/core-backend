@@ -44,6 +44,38 @@ export class ShareCurrentCartDtoReq {
 	checkoutData?: Record<string, unknown>
 }
 
+export class JoinHallTableSessionDtoReq {
+	@ApiPropertyOptional({
+		type: String,
+		maxLength: 64,
+		example: 'guest-f2b8b2'
+	})
+	@IsOptional()
+	@IsString()
+	@MaxLength(64)
+	guestSessionId?: string
+
+	@ApiPropertyOptional({
+		type: String,
+		maxLength: 120,
+		example: 'Гость 1'
+	})
+	@IsOptional()
+	@IsString()
+	@MaxLength(120)
+	guestName?: string
+
+	@ApiPropertyOptional({
+		type: Number,
+		example: 4
+	})
+	@IsOptional()
+	@Type(() => Number)
+	@IsInt()
+	@Min(1)
+	guestsCount?: number
+}
+
 export class UpsertCartItemDtoReq {
 	@ApiProperty({
 		type: String,
@@ -84,6 +116,26 @@ export class UpsertCartItemDtoReq {
 	@IsInt()
 	@Min(0)
 	quantity: number
+
+	@ApiPropertyOptional({
+		type: String,
+		maxLength: 64,
+		example: 'guest-f2b8b2'
+	})
+	@IsOptional()
+	@IsString()
+	@MaxLength(64)
+	guestSessionId?: string
+
+	@ApiPropertyOptional({
+		type: String,
+		maxLength: 120,
+		example: 'Гость 1'
+	})
+	@IsOptional()
+	@IsString()
+	@MaxLength(120)
+	guestName?: string
 }
 
 export class PublicUpsertCartItemDtoReq extends UpsertCartItemDtoReq {}

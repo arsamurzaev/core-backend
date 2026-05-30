@@ -3,6 +3,8 @@ export type OrderProductSnapshot = {
 	productId: string | null
 	variantId: string | null
 	saleUnitId: string | null
+	guestSessionId: string | null
+	guestName: string | null
 	variantHidden: boolean
 	saleUnitHidden: boolean
 	variant: OrderProductVariantSnapshot | null
@@ -104,6 +106,8 @@ export function normalizeOrderProducts(value: unknown): OrderProductSnapshot[] {
 				productId: readString(item.productId),
 				variantId: readString(item.variantId),
 				saleUnitId: readString(item.saleUnitId),
+				guestSessionId: readString(item.guestSessionId),
+				guestName: readString(item.guestName),
 				variantHidden: item.variantHidden === true,
 				saleUnitHidden: item.saleUnitHidden === true,
 				variant: normalizeVariant(item.variant),

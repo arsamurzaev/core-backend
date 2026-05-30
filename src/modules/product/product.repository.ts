@@ -1589,6 +1589,8 @@ export class ProductRepository {
 			slug: string
 			price: number | string | null
 			status: ProductStatus
+			isPopular?: boolean
+			position?: number
 		},
 		tx?: Prisma.TransactionClient
 	): Promise<ProductExternalSyncRecord> {
@@ -1600,7 +1602,9 @@ export class ProductRepository {
 				sku: params.sku,
 				slug: params.slug,
 				price: params.price,
-				status: params.status
+				status: params.status,
+				...(params.isPopular === undefined ? {} : { isPopular: params.isPopular }),
+				...(params.position === undefined ? {} : { position: params.position })
 			},
 			select: productExternalSyncSelect
 		})

@@ -19,7 +19,7 @@ model Integration {
   updatedProducts Int @default(0) @map("updated_products")
   deletedProducts Int @default(0) @map("deleted_products")
 
-  catalog            Catalog                   @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  catalog            Catalog                     @relation(fields: [catalogId], references: [id], onDelete: Cascade)
   productLinks       IntegrationProductLink[]
   variantLinks       IntegrationVariantLink[]
   categoryLinks      IntegrationCategoryLink[]
@@ -27,6 +27,9 @@ model Integration {
   orderExports       IntegrationOrderExport[]
   webhookEvents      IntegrationWebhookEvent[]
   externalItems      IntegrationExternalItem[]
+  externalObjects    IntegrationExternalObject[]
+  entityMappings     IntegrationEntityMapping[]
+  cartTableSessions  CartTableSession[]
   inventoryMovements InventoryMovement[]
 
   deleteAt  DateTime? @map("delete_at") // Дата удаления
@@ -37,6 +40,86 @@ model Integration {
   @@index([catalogId, isActive])
   @@index([lastSyncStatus, syncStartedAt])
   @@map("integrations")
+}
+
+model IntegrationExternalObject {
+  id String @id @default(uuid()) @db.Uuid
+
+  integrationId String @map("integration_id") @db.Uuid
+
+  code     String                        @db.VarChar(191)
+  name     String                        @db.VarChar(255)
+  kind     IntegrationExternalObjectKind @default(CUSTOM)
+  endpoint String?                       @db.VarChar(1000)
+  method   String?                       @db.VarChar(16)
+  schema   Json?
+  sample   Json?
+
+  isActive         Boolean   @default(true) @map("is_active")
+  lastDiscoveredAt DateTime? @map("last_discovered_at")
+
+  integration    Integration                @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  entityMappings IntegrationEntityMapping[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([integrationId, code])
+  @@index([integrationId, kind, isActive])
+  @@map("integration_external_objects")
+}
+
+model IntegrationEntityMapping {
+  id String @id @default(uuid()) @db.Uuid
+
+  integrationId    String  @map("integration_id") @db.Uuid
+  externalObjectId String? @map("external_object_id") @db.Uuid
+
+  localEntity        IntegrationMappingLocalEntity
+  externalObjectCode String                        @map("external_object_code") @db.VarChar(191)
+  identityField      String                        @map("identity_field") @db.VarChar(255)
+  direction          IntegrationMappingDirection   @default(IMPORT)
+  conflictPolicy     String?                       @map("conflict_policy") @db.VarChar(64)
+  filters            Json?
+  options            Json?
+  isActive           Boolean                       @default(true) @map("is_active")
+
+  integration    Integration                @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  externalObject IntegrationExternalObject? @relation(fields: [externalObjectId], references: [id], onDelete: SetNull)
+  fieldMappings  IntegrationFieldMapping[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([integrationId, localEntity, externalObjectCode])
+  @@index([integrationId, localEntity, isActive])
+  @@index([externalObjectId])
+  @@map("integration_entity_mappings")
+}
+
+model IntegrationFieldMapping {
+  id String @id @default(uuid()) @db.Uuid
+
+  entityMappingId String @map("entity_mapping_id") @db.Uuid
+
+  localPath    String                      @map("local_path") @db.VarChar(255)
+  externalPath String                      @map("external_path") @db.VarChar(500)
+  direction    IntegrationMappingDirection @default(IMPORT)
+  dataType     IntegrationMappingDataType  @default(STRING) @map("data_type")
+  transform    Json?
+  defaultValue Json?                       @map("default_value")
+  isRequired   Boolean                     @default(false) @map("is_required")
+  isActive     Boolean                     @default(true) @map("is_active")
+  displayOrder Int                         @default(0) @map("display_order")
+
+  entityMapping IntegrationEntityMapping @relation(fields: [entityMappingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([entityMappingId, localPath, externalPath])
+  @@index([entityMappingId, isActive, displayOrder])
+  @@map("integration_field_mappings")
 }
 
 model IntegrationExternalItem {
@@ -58,8 +141,9 @@ model IntegrationExternalItem {
   lastSeenAt   DateTime? @map("last_seen_at")
   lastSyncedAt DateTime? @map("last_synced_at")
 
-  catalog     Catalog     @relation(fields: [catalogId], references: [id], onDelete: Cascade)
-  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  catalog       Catalog            @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  integration   Integration        @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  tableSessions CartTableSession[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -163,10 +247,10 @@ model IntegrationSyncRun {
   integrationId String @map("integration_id") @db.Uuid
   catalogId     String @map("catalog_id") @db.Uuid
 
-  provider IntegrationProvider
-  mode     IntegrationSyncRunMode
-  trigger  IntegrationSyncRunTrigger
-  status   IntegrationSyncRunStatus  @default(PENDING)
+  provider             IntegrationProvider
+  mode                 IntegrationSyncRunMode
+  trigger              IntegrationSyncRunTrigger
+  status               IntegrationSyncRunStatus            @default(PENDING)
   snapshotCompleteness IntegrationSyncSnapshotCompleteness @default(PARTIAL) @map("snapshot_completeness")
 
   jobId      String? @unique @map("job_id") @db.VarChar(191)
