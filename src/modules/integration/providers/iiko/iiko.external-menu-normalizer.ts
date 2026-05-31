@@ -335,7 +335,8 @@ function resolveExternalPrice(
 			: false
 	)
 	const fallback = prices.find(
-		price => !Array.isArray(price.organizations) || price.organizations.length === 0
+		price =>
+			!Array.isArray(price.organizations) || price.organizations.length === 0
 	)
 	const value = byOrganization?.price ?? fallback?.price ?? null
 	return normalizePrice(value)
@@ -358,7 +359,8 @@ function resolvePreviewBasePrice(product: IikoSyncProduct): number | null {
 	const options = (product.sizePrices ?? [])
 		.filter(size => size.price?.isIncludedInMenu !== false)
 		.map(size => ({
-			isDefault: size.isDefault === true || size.sizeId === DEFAULT_SIZE_EXTERNAL_ID,
+			isDefault:
+				size.isDefault === true || size.sizeId === DEFAULT_SIZE_EXTERNAL_ID,
 			price: normalizePrice(size.price?.currentPrice)
 		}))
 		.filter(option => option.price !== null)
@@ -372,17 +374,24 @@ function resolvePreviewBasePrice(product: IikoSyncProduct): number | null {
 function hasProductModifiers(product: IikoSyncProduct): boolean {
 	return Boolean(
 		(product.modifiers?.length ?? 0) > 0 ||
-			(product.groupModifiers?.length ?? 0) > 0
+		(product.groupModifiers?.length ?? 0) > 0
 	)
 }
 
 function normalizeImageLinks(values: unknown[]): string[] {
-	return [...new Set(values.flatMap(value => normalizeOptionalString(value) ?? []))]
+	const links = values
+		.map(value => normalizeOptionalString(value))
+		.filter((value): value is string => value !== null)
+	return [...new Set(links)]
 }
 
 function normalizeOptionalString(value: unknown): string | null {
 	const normalized =
-		typeof value === 'number' ? String(value) : typeof value === 'string' ? value : ''
+		typeof value === 'number'
+			? String(value)
+			: typeof value === 'string'
+				? value
+				: ''
 	const trimmed = normalized.trim()
 	return trimmed || null
 }

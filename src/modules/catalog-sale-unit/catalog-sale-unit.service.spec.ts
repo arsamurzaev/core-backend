@@ -130,9 +130,7 @@ describe('CatalogSaleUnitService', () => {
 	it('can disable a unit without archiving it', async () => {
 		repo.findById.mockResolvedValueOnce(createRecord())
 
-		await runWithCatalog(() =>
-			service.update('sale-unit-1', { isActive: false })
-		)
+		await runWithCatalog(() => service.update('sale-unit-1', { isActive: false }))
 
 		expect(repo.update).toHaveBeenCalledWith('sale-unit-1', 'catalog-1', {
 			isActive: false
@@ -149,9 +147,7 @@ describe('CatalogSaleUnitService', () => {
 			})
 		)
 
-		await runWithCatalog(() =>
-			service.update('sale-unit-1', { isActive: true })
-		)
+		await runWithCatalog(() => service.update('sale-unit-1', { isActive: true }))
 
 		expect(repo.update).toHaveBeenCalledWith('sale-unit-1', 'catalog-1', {
 			isActive: true,

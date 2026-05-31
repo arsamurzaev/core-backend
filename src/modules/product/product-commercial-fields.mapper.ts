@@ -38,9 +38,7 @@ export function toProductCommercialFieldsMap(
 	)
 }
 
-export function applyProductCommercialFields<
-	T extends Record<string, unknown>
->(
+export function applyProductCommercialFields<T extends Record<string, unknown>>(
 	product: T,
 	commercial?: ProductCommercialFields
 ): T & ProductCommercialFields {
@@ -74,7 +72,8 @@ export function buildFallbackProductCommercialFields(product: {
 function toDecimalString(value: unknown): string | null {
 	if (value === null || value === undefined) return null
 	if (typeof value === 'string') return value
-	if (typeof value === 'number') return Number.isFinite(value) ? value.toFixed(2) : null
+	if (typeof value === 'number')
+		return Number.isFinite(value) ? value.toFixed(2) : null
 	if (
 		typeof value === 'boolean' ||
 		typeof value === 'bigint' ||
@@ -88,7 +87,7 @@ function toDecimalString(value: unknown): string | null {
 			typeof toString === 'function' &&
 			toString !== Object.prototype.toString
 		) {
-			const normalized = toString.call(value)
+			const normalized = toString()
 			return normalized ? normalized : null
 		}
 	}

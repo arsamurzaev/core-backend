@@ -324,7 +324,7 @@ export class AttributeService {
 	}
 
 	private assertImportedEnumValueUpdateAllowed(
-		enumValue: { source?: AttributeEnumValueSource | string | null },
+		enumValue: { source?: AttributeEnumValueSource | null },
 		dto: UpdateAttributeEnumDtoReq
 	): void {
 		if (enumValue.source !== AttributeEnumValueSource.IMPORTED) return
@@ -344,7 +344,7 @@ export class AttributeService {
 	}
 
 	private assertEnumValueIsNotImported(enumValue: {
-		source?: AttributeEnumValueSource | string | null
+		source?: AttributeEnumValueSource | null
 	}): void {
 		if (enumValue.source !== AttributeEnumValueSource.IMPORTED) return
 

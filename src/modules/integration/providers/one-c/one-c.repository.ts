@@ -35,7 +35,7 @@ const oneCIntegrationSelect = {
 	deleteAt: true,
 	createdAt: true,
 	updatedAt: true
-}
+} as const satisfies Prisma.IntegrationSelect
 
 const oneCExternalObjectSelect = {
 	id: true,
@@ -51,7 +51,7 @@ const oneCExternalObjectSelect = {
 	lastDiscoveredAt: true,
 	createdAt: true,
 	updatedAt: true
-}
+} as const satisfies Prisma.IntegrationExternalObjectSelect
 
 const oneCFieldMappingSelect = {
 	id: true,
@@ -67,7 +67,7 @@ const oneCFieldMappingSelect = {
 	displayOrder: true,
 	createdAt: true,
 	updatedAt: true
-}
+} as const satisfies Prisma.IntegrationFieldMappingSelect
 
 const oneCEntityMappingSelect = {
 	id: true,
@@ -90,7 +90,7 @@ const oneCEntityMappingSelect = {
 	},
 	createdAt: true,
 	updatedAt: true
-}
+} as const satisfies Prisma.IntegrationEntityMappingSelect
 
 const oneCSyncRunSelect = {
 	id: true,
@@ -116,7 +116,7 @@ const oneCSyncRunSelect = {
 	finishedAt: true,
 	createdAt: true,
 	updatedAt: true
-}
+} as const satisfies Prisma.IntegrationSyncRunSelect
 
 const oneCProductPreviewSelect = {
 	id: true,
@@ -131,7 +131,7 @@ const oneCProductPreviewSelect = {
 	position: true,
 	deleteAt: true,
 	updatedAt: true
-}
+} as const satisfies Prisma.ProductSelect
 
 const oneCProductStockPreviewSelect = {
 	...oneCProductPreviewSelect,
@@ -151,7 +151,7 @@ const oneCProductStockPreviewSelect = {
 		orderBy: [{ kind: 'asc' as const }, { createdAt: 'asc' as const }],
 		take: 1
 	}
-}
+} as const satisfies Prisma.ProductSelect
 
 const oneCProductLinkPreviewSelect = {
 	id: true,
@@ -162,7 +162,7 @@ const oneCProductLinkPreviewSelect = {
 	product: {
 		select: oneCProductPreviewSelect
 	}
-}
+} as const satisfies Prisma.IntegrationProductLinkSelect
 
 const oneCProductStockLinkPreviewSelect = {
 	id: true,
@@ -173,7 +173,7 @@ const oneCProductStockLinkPreviewSelect = {
 	product: {
 		select: oneCProductStockPreviewSelect
 	}
-}
+} as const satisfies Prisma.IntegrationProductLinkSelect
 
 const oneCVariantPreviewSelect = {
 	id: true,
@@ -190,7 +190,7 @@ const oneCVariantPreviewSelect = {
 	product: {
 		select: oneCProductPreviewSelect
 	}
-}
+} as const satisfies Prisma.ProductVariantSelect
 
 const oneCVariantLinkPreviewSelect = {
 	id: true,
@@ -201,7 +201,7 @@ const oneCVariantLinkPreviewSelect = {
 	variant: {
 		select: oneCVariantPreviewSelect
 	}
-}
+} as const satisfies Prisma.IntegrationVariantLinkSelect
 
 export type OneCIntegrationRecord = Prisma.IntegrationGetPayload<{
 	select: typeof oneCIntegrationSelect
@@ -1071,7 +1071,8 @@ export class OneCIntegrationRepository {
 		const externalIds = [
 			...new Set(params.externalIds.map(normalizeString).filter(Boolean))
 		]
-		if (!externalIds.length) return Promise.resolve([])
+		if (!externalIds.length)
+			return Promise.resolve<OneCProductLinkPreviewRecord[]>([])
 
 		return this.prisma.integrationProductLink.findMany({
 			where: {
@@ -1079,7 +1080,7 @@ export class OneCIntegrationRepository {
 				externalId: { in: externalIds }
 			},
 			select: oneCProductLinkPreviewSelect
-		})
+		}) as Promise<OneCProductLinkPreviewRecord[]>
 	}
 
 	findProductStockLinksByExternalIds(params: {
@@ -1089,7 +1090,8 @@ export class OneCIntegrationRepository {
 		const externalIds = [
 			...new Set(params.externalIds.map(normalizeString).filter(Boolean))
 		]
-		if (!externalIds.length) return Promise.resolve([])
+		if (!externalIds.length)
+			return Promise.resolve<OneCProductStockLinkPreviewRecord[]>([])
 
 		return this.prisma.integrationProductLink.findMany({
 			where: {
@@ -1097,7 +1099,7 @@ export class OneCIntegrationRepository {
 				externalId: { in: externalIds }
 			},
 			select: oneCProductStockLinkPreviewSelect
-		})
+		}) as Promise<OneCProductStockLinkPreviewRecord[]>
 	}
 
 	findVariantLinksByExternalIds(params: {
@@ -1107,7 +1109,8 @@ export class OneCIntegrationRepository {
 		const externalIds = [
 			...new Set(params.externalIds.map(normalizeString).filter(Boolean))
 		]
-		if (!externalIds.length) return Promise.resolve([])
+		if (!externalIds.length)
+			return Promise.resolve<OneCVariantLinkPreviewRecord[]>([])
 
 		return this.prisma.integrationVariantLink.findMany({
 			where: {
@@ -1115,7 +1118,7 @@ export class OneCIntegrationRepository {
 				externalId: { in: externalIds }
 			},
 			select: oneCVariantLinkPreviewSelect
-		})
+		}) as Promise<OneCVariantLinkPreviewRecord[]>
 	}
 
 	findProductsByIds(params: {
@@ -1125,7 +1128,7 @@ export class OneCIntegrationRepository {
 		const productIds = [
 			...new Set(params.productIds.map(normalizeString).filter(Boolean))
 		]
-		if (!productIds.length) return Promise.resolve([])
+		if (!productIds.length) return Promise.resolve<OneCProductPreviewRecord[]>([])
 
 		return this.prisma.product.findMany({
 			where: {
@@ -1134,7 +1137,7 @@ export class OneCIntegrationRepository {
 				deleteAt: null
 			},
 			select: oneCProductPreviewSelect
-		})
+		}) as Promise<OneCProductPreviewRecord[]>
 	}
 
 	findStockProductsByIds(params: {
@@ -1144,7 +1147,8 @@ export class OneCIntegrationRepository {
 		const productIds = [
 			...new Set(params.productIds.map(normalizeString).filter(Boolean))
 		]
-		if (!productIds.length) return Promise.resolve([])
+		if (!productIds.length)
+			return Promise.resolve<OneCProductStockPreviewRecord[]>([])
 
 		return this.prisma.product.findMany({
 			where: {
@@ -1153,7 +1157,7 @@ export class OneCIntegrationRepository {
 				deleteAt: null
 			},
 			select: oneCProductStockPreviewSelect
-		})
+		}) as Promise<OneCProductStockPreviewRecord[]>
 	}
 
 	findProductsBySkus(params: {
@@ -1161,7 +1165,7 @@ export class OneCIntegrationRepository {
 		skus: string[]
 	}): Promise<OneCProductPreviewRecord[]> {
 		const skus = [...new Set(params.skus.map(normalizeString).filter(Boolean))]
-		if (!skus.length) return Promise.resolve([])
+		if (!skus.length) return Promise.resolve<OneCProductPreviewRecord[]>([])
 
 		return this.prisma.product.findMany({
 			where: {
@@ -1170,7 +1174,7 @@ export class OneCIntegrationRepository {
 				deleteAt: null
 			},
 			select: oneCProductPreviewSelect
-		})
+		}) as Promise<OneCProductPreviewRecord[]>
 	}
 
 	findStockProductsBySkus(params: {
@@ -1178,7 +1182,7 @@ export class OneCIntegrationRepository {
 		skus: string[]
 	}): Promise<OneCProductStockPreviewRecord[]> {
 		const skus = [...new Set(params.skus.map(normalizeString).filter(Boolean))]
-		if (!skus.length) return Promise.resolve([])
+		if (!skus.length) return Promise.resolve<OneCProductStockPreviewRecord[]>([])
 
 		return this.prisma.product.findMany({
 			where: {
@@ -1187,7 +1191,7 @@ export class OneCIntegrationRepository {
 				deleteAt: null
 			},
 			select: oneCProductStockPreviewSelect
-		})
+		}) as Promise<OneCProductStockPreviewRecord[]>
 	}
 
 	findVariantsByIds(params: {
@@ -1197,7 +1201,7 @@ export class OneCIntegrationRepository {
 		const variantIds = [
 			...new Set(params.variantIds.map(normalizeString).filter(Boolean))
 		]
-		if (!variantIds.length) return Promise.resolve([])
+		if (!variantIds.length) return Promise.resolve<OneCVariantPreviewRecord[]>([])
 
 		return this.prisma.productVariant.findMany({
 			where: {
@@ -1209,7 +1213,7 @@ export class OneCIntegrationRepository {
 				}
 			},
 			select: oneCVariantPreviewSelect
-		})
+		}) as Promise<OneCVariantPreviewRecord[]>
 	}
 
 	findVariantsBySkus(params: {
@@ -1217,7 +1221,7 @@ export class OneCIntegrationRepository {
 		skus: string[]
 	}): Promise<OneCVariantPreviewRecord[]> {
 		const skus = [...new Set(params.skus.map(normalizeString).filter(Boolean))]
-		if (!skus.length) return Promise.resolve([])
+		if (!skus.length) return Promise.resolve<OneCVariantPreviewRecord[]>([])
 
 		return this.prisma.productVariant.findMany({
 			where: {
@@ -1229,7 +1233,7 @@ export class OneCIntegrationRepository {
 				}
 			},
 			select: oneCVariantPreviewSelect
-		})
+		}) as Promise<OneCVariantPreviewRecord[]>
 	}
 
 	findVariantsByProductVariantKeys(params: {
@@ -1247,7 +1251,7 @@ export class OneCIntegrationRepository {
 					.map(pair => [`${pair.productId}:${pair.variantKey}`, pair])
 			).values()
 		]
-		if (!pairs.length) return Promise.resolve([])
+		if (!pairs.length) return Promise.resolve<OneCVariantPreviewRecord[]>([])
 
 		return this.prisma.productVariant.findMany({
 			where: {
@@ -1262,7 +1266,7 @@ export class OneCIntegrationRepository {
 				}))
 			},
 			select: oneCVariantPreviewSelect
-		})
+		}) as Promise<OneCVariantPreviewRecord[]>
 	}
 
 	async touchProductLinkPriceSynced(

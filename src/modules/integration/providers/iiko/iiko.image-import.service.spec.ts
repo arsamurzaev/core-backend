@@ -7,7 +7,11 @@ describe('IikoImageImportService', () => {
 		const s3 = createS3Mock()
 		const media = createMediaMock()
 		const client = createClientMock()
-		const service = new IikoImageImportService(repo as any, s3 as any, media as any)
+		const service = new IikoImageImportService(
+			repo as any,
+			s3 as any,
+			media as any
+		)
 
 		const result = await service.refreshProductImages({
 			catalogId: 'catalog-1',
@@ -40,7 +44,11 @@ describe('IikoImageImportService', () => {
 			buffer: Buffer.from('image'),
 			contentType: 'image/png'
 		})
-		const service = new IikoImageImportService(repo as any, s3 as any, media as any)
+		const service = new IikoImageImportService(
+			repo as any,
+			s3 as any,
+			media as any
+		)
 
 		const result = await service.refreshProductImages({
 			catalogId: 'catalog-1',

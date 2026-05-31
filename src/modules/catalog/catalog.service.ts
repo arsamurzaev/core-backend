@@ -64,7 +64,12 @@ import { UpdateCatalogDtoReq } from './dto/requests/update-catalog.dto.req'
 
 type CatalogCurrent = any
 type CatalogWithCheckoutSettings = Record<string, unknown> & {
-	settings?: (Record<string, unknown> & { checkout?: unknown }) | null
+	settings?:
+		| (Record<string, unknown> & {
+				checkout?: unknown
+				inventoryMode?: CatalogInventoryMode | null
+		  })
+		| null
 }
 const CATALOG_INVENTORY_MODE_INTERNAL: CatalogInventoryMode = 'INTERNAL'
 
@@ -166,7 +171,7 @@ export class CatalogService {
 				type,
 				features: await this.buildCatalogFeatures(
 					store.catalogId,
-					shell.settings?.inventoryMode
+					this.readInventoryMode(shell)
 				)
 			},
 			type
@@ -190,7 +195,7 @@ export class CatalogService {
 				...shell,
 				features: await this.buildCatalogFeatures(
 					store.catalogId,
-					shell.settings?.inventoryMode
+					this.readInventoryMode(shell)
 				)
 			},
 			type
@@ -317,7 +322,7 @@ export class CatalogService {
 				...mapped,
 				features: await this.buildCatalogFeatures(
 					store.catalogId,
-					mapped.settings?.inventoryMode
+					this.readInventoryMode(mapped)
 				)
 			},
 			type
@@ -527,7 +532,7 @@ export class CatalogService {
 				type,
 				features: await this.buildCatalogFeatures(
 					catalogId,
-					shell.settings?.inventoryMode
+					this.readInventoryMode(shell)
 				)
 			},
 			type
@@ -552,6 +557,12 @@ export class CatalogService {
 
 	private mapCatalog<T>(catalog: T) {
 		return mapCatalogRecord(catalog, media => this.mediaUrl.mapMedia(media))
+	}
+
+	private readInventoryMode(
+		catalog: CatalogWithCheckoutSettings
+	): CatalogInventoryMode | null {
+		return catalog.settings?.inventoryMode ?? null
 	}
 
 	private withResolvedCheckout<T extends CatalogWithCheckoutSettings>(

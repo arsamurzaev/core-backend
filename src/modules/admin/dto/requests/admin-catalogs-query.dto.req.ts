@@ -20,8 +20,19 @@ export type AdminCatalogSortOrder = (typeof SORT_ORDERS)[number]
 
 function normalizeStringArray(value: unknown) {
 	if (value === undefined || value === null || value === '') return undefined
-	const values = Array.isArray(value) ? value : String(value).split(',')
-	const normalized = values.map(item => String(item).trim()).filter(Boolean)
+	const values = Array.isArray(value) ? value : [value]
+	const normalized = values
+		.flatMap(item =>
+			typeof item === 'string'
+				? item.split(',')
+				: typeof item === 'number' ||
+					  typeof item === 'boolean' ||
+					  typeof item === 'bigint'
+					? [String(item)]
+					: []
+		)
+		.map(item => item.trim())
+		.filter(Boolean)
 	return normalized.length ? normalized : undefined
 }
 

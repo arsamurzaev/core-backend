@@ -440,7 +440,7 @@ export class AdminCatalogFeatureEntitlementItemDto {
 	expiresAt: Date | null
 
 	@ApiProperty({ type: Object, nullable: true })
-	metadata: unknown | null
+	metadata: unknown
 }
 
 export class AdminCatalogFeatureEntitlementsDto {

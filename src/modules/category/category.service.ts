@@ -15,8 +15,8 @@ import {
 	type ProductCommandPort,
 	type ProductCommercialFields,
 	type ProductSellableReader,
-	type ProductVariantProjection,
 	ProductVariantCardProjectionService,
+	type ProductVariantProjection,
 	resolveProductSaleUnitsForRead,
 	toProductCommercialFieldsMap
 } from '@/modules/product/public'

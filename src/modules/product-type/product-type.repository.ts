@@ -175,8 +175,9 @@ function buildProductTypeMatrixEditorSchemaSelect(
 	}
 }
 
-const productTypeMatrixEditorSchemaSelect =
-	buildProductTypeMatrixEditorSchemaSelect('__catalog__', '__product_type__')
+type ProductTypeMatrixEditorSchemaSelect = ReturnType<
+	typeof buildProductTypeMatrixEditorSchemaSelect
+>
 
 export type ProductTypeAttributeSummaryRecord = Prisma.AttributeGetPayload<{
 	select: typeof attributeSummarySelect
@@ -187,7 +188,7 @@ export type ProductTypeRecord = Prisma.ProductTypeGetPayload<{
 }>
 
 export type ProductTypeMatrixEditorSchemaRecord = Prisma.ProductTypeGetPayload<{
-	select: typeof productTypeMatrixEditorSchemaSelect
+	select: ProductTypeMatrixEditorSchemaSelect
 }>
 
 export type ProductTypeCreateData = {

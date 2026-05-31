@@ -247,9 +247,7 @@ export class ProductSeoSyncService {
 			product.price === null
 				? null
 				: `Цена: ${this.formatPrice(product.price)} ${currency}.`,
-			attributeSummary
-				? `Характеристики: ${attributeSummary}.`
-				: null
+			attributeSummary ? `Характеристики: ${attributeSummary}.` : null
 		].filter((part): part is string => Boolean(part))
 
 		return this.truncateText(parts.join(' '), 500)
@@ -269,9 +267,7 @@ export class ProductSeoSyncService {
 			categoryNames.length
 				? `Разделы: ${categoryNames.slice(0, 3).join(', ')}.`
 				: null,
-			attributeSummary
-				? `Основные характеристики: ${attributeSummary}.`
-				: null
+			attributeSummary ? `Основные характеристики: ${attributeSummary}.` : null
 		].filter((part): part is string => Boolean(part))
 
 		return parts.join(' ')

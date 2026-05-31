@@ -4,7 +4,6 @@ import {
 	IntegrationMappingDataType,
 	IntegrationMappingDirection,
 	IntegrationMappingLocalEntity,
-	IntegrationProvider,
 	IntegrationSyncRunMode,
 	IntegrationSyncRunStatus,
 	IntegrationSyncRunTrigger,
@@ -91,11 +90,7 @@ import { getIntegrationProviderCapabilities } from '../../provider-capabilities'
 import { renderSafeProviderErrorMessage } from '../../provider-error-redaction'
 
 import { OneCClient } from './one-c.client'
-import {
-	maskOneCSecret,
-	OneCMetadataCryptoService,
-	type PartialOneCMetadata
-} from './one-c.metadata'
+import { maskOneCSecret, OneCMetadataCryptoService } from './one-c.metadata'
 import {
 	type OneCEntityMappingRecord,
 	type OneCExternalObjectRecord,
@@ -2054,7 +2049,7 @@ export class OneCIntegrationService {
 			sku: resolveVariantSku(mapped, externalId),
 			variantKey: resolveVariantKey(mapped, attributes, externalId),
 			price: readNullableNumber(mapped.price),
-			syncPrice: Object.prototype.hasOwnProperty.call(mapped, 'price'),
+			syncPrice: Object.hasOwn(mapped, 'price'),
 			syncContent: attributes.length > 0,
 			stock,
 			status: resolveMappedVariantStatus(mapped, stock),
@@ -2550,11 +2545,14 @@ export class OneCIntegrationService {
 		const data: ProductExternalProductUpdateInput['data'] = {}
 		for (const change of row.changes) {
 			if (change.field === 'name') {
-				data.name = normalizeRequiredString(String(change.nextValue ?? ''), 'name')
+				data.name = normalizeRequiredString(
+					normalizeIdentityValue(change.nextValue) ?? '',
+					'name'
+				)
 			}
 			if (change.field === 'sku') {
 				const nextSku = normalizeRequiredString(
-					String(change.nextValue ?? ''),
+					normalizeIdentityValue(change.nextValue) ?? '',
 					'sku'
 				)
 				if (
@@ -3757,12 +3755,7 @@ function normalizeProductComparableValue(
 	if (value === null || value === '') return null
 
 	if (field === 'price') {
-		const number = Number(
-			typeof value === 'object' && value && 'toString' in value
-				? String(value)
-				: value
-		)
-		return Number.isFinite(number) ? number : null
+		return readNullableNumber(value)
 	}
 	if (field === 'isPopular') return Boolean(value)
 	if (field === 'position') {
@@ -3770,7 +3763,7 @@ function normalizeProductComparableValue(
 		return Number.isFinite(number) ? Math.trunc(number) : null
 	}
 
-	return String(value).trim()
+	return normalizeIdentityValue(value)
 }
 
 type OneCVariantAttributeValueInput = {
@@ -3944,7 +3937,7 @@ function normalizeVariantComparableValue(
 		return status && isProductVariantStatus(status) ? status : null
 	}
 
-	return String(value).trim()
+	return normalizeIdentityValue(value)
 }
 
 function readVariantAttributes(
@@ -3989,7 +3982,7 @@ function resolveMappedVariantStatus(
 ): ProductVariantStatus {
 	const status = normalizeIdentityValue(payload.status)
 	if (status && isProductVariantStatus(status)) {
-		return status as ProductVariantStatus
+		return status
 	}
 
 	const isAvailable = Object.prototype.hasOwnProperty.call(
@@ -4164,8 +4157,8 @@ function readValueSyncNextValue(
 	kind: ValueSyncKind
 ): OneCValueSyncNextValue {
 	if (kind === 'stock') {
-		const hasStock = Object.prototype.hasOwnProperty.call(payload, 'stock')
-		const hasQuantity = Object.prototype.hasOwnProperty.call(payload, 'quantity')
+		const hasStock = Object.hasOwn(payload, 'stock')
+		const hasQuantity = Object.hasOwn(payload, 'quantity')
 		const raw = hasStock
 			? payload.stock
 			: hasQuantity
@@ -4257,11 +4250,25 @@ function normalizeComparableNumber(value: unknown): number | null {
 }
 
 function normalizePreviewPayload(value: unknown): Record<string, unknown> {
-	const source = Array.isArray(value) ? value[0] : value
+	const source: unknown = Array.isArray(value) ? (value as unknown[])[0] : value
 	if (!source || typeof source !== 'object' || Array.isArray(source)) {
 		return {}
 	}
 	return source as Record<string, unknown>
+}
+
+function stringifyMappingValue(value: unknown): string | null {
+	if (value === null || value === undefined) return null
+	if (typeof value === 'string') return value
+	if (
+		typeof value === 'number' ||
+		typeof value === 'boolean' ||
+		typeof value === 'bigint'
+	) {
+		return String(value)
+	}
+	if (value instanceof Date) return value.toISOString()
+	return JSON.stringify(value) ?? null
 }
 
 function normalizeIdentityValue(value: unknown): string | null {
@@ -4311,8 +4318,7 @@ function applyTransform(value: unknown, transform: unknown): unknown {
 	const type = typeof transform.type === 'string' ? transform.type : null
 
 	if (type === 'trim') return typeof value === 'string' ? value.trim() : value
-	if (type === 'toString')
-		return value === null || value === undefined ? null : String(value)
+	if (type === 'toString') return stringifyMappingValue(value)
 	if (type === 'toNumber') return toFiniteNumber(value)
 	if (type === 'booleanInvert') return !toBoolean(value)
 	if (type === 'defaultIfEmpty') {
@@ -4322,7 +4328,7 @@ function applyTransform(value: unknown, transform: unknown): unknown {
 	}
 	if (type === 'enumMap') {
 		const map = isRecord(transform.map) ? transform.map : {}
-		const key = value === null || value === undefined ? '' : String(value)
+		const key = stringifyMappingValue(value) ?? ''
 		return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : value
 	}
 
@@ -4335,7 +4341,8 @@ function coerceValue(
 ): unknown {
 	if (value === null || value === undefined || value === '') return null
 
-	if (dataType === IntegrationMappingDataType.STRING) return String(value)
+	if (dataType === IntegrationMappingDataType.STRING)
+		return stringifyMappingValue(value)
 	if (dataType === IntegrationMappingDataType.INTEGER) {
 		return Math.trunc(toFiniteNumber(value))
 	}
@@ -4343,9 +4350,12 @@ function coerceValue(
 		return toFiniteNumber(value)
 	if (dataType === IntegrationMappingDataType.BOOLEAN) return toBoolean(value)
 	if (dataType === IntegrationMappingDataType.DATETIME) {
-		const date = new Date(String(value))
+		const text = stringifyMappingValue(value)
+		const date = text ? new Date(text) : new Date(Number.NaN)
 		if (Number.isNaN(date.getTime())) {
-			throw new BadRequestException(`Invalid date value: ${String(value)}`)
+			throw new BadRequestException(
+				`Invalid date value: ${stringifyMappingValue(value) ?? 'unknown'}`
+			)
 		}
 		return date.toISOString()
 	}
@@ -4361,7 +4371,9 @@ function toFiniteNumber(value: unknown): number {
 				? Number(value.replace(',', '.'))
 				: Number.NaN
 	if (!Number.isFinite(number)) {
-		throw new BadRequestException(`Invalid number value: ${String(value)}`)
+		throw new BadRequestException(
+			`Invalid number value: ${stringifyMappingValue(value) ?? 'unknown'}`
+		)
 	}
 	return number
 }

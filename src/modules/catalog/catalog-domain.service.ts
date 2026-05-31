@@ -29,9 +29,6 @@ type DomainCheckResult = {
 }
 
 type DomainRecord = Awaited<ReturnType<CatalogDomainRepository['findById']>>
-type DomainListRecord = Awaited<
-	ReturnType<CatalogDomainRepository['listByCatalog']>
->[number]
 type DomainDtoRecord = NonNullable<DomainRecord>
 type DnsRecordInstruction = {
 	type: string
@@ -118,7 +115,7 @@ export class CatalogDomainService {
 		const catalogId = this.currentCatalogId()
 		const domain = await this.requireCatalogDomain(id, catalogId)
 		const result = await this.verifyDomainDns(domain)
-		const status =
+		const status: CatalogDomainStatus =
 			result.status ??
 			(result.ok ? CatalogDomainStatus.ACTIVE : CatalogDomainStatus.PENDING_DNS)
 
@@ -175,12 +172,11 @@ export class CatalogDomainService {
 
 			try {
 				const result = await this.verifyDomainDns(domain)
+				const status: CatalogDomainStatus =
+					result.status ??
+					(result.ok ? CatalogDomainStatus.ACTIVE : CatalogDomainStatus.PENDING_DNS)
 				await this.domains.update(domain.id, {
-					status:
-						result.status ??
-						(result.ok
-							? CatalogDomainStatus.ACTIVE
-							: CatalogDomainStatus.PENDING_DNS),
+					status,
 					lastCheckedAt: new Date(),
 					lastError: result.error ?? null
 				})
@@ -331,7 +327,9 @@ export class CatalogDomainService {
 		return new Date(Date.now() + this.recheckAfterSeconds() * 1000)
 	}
 
-	private async verifyDomainDns(domain: NonNullable<DomainRecord>) {
+	private async verifyDomainDns(
+		domain: NonNullable<DomainRecord>
+	): Promise<DomainCheckResult> {
 		const txtCheck = await this.verifyTxt(domain)
 		if (!txtCheck.ok) return txtCheck
 
@@ -348,7 +346,9 @@ export class CatalogDomainService {
 		return { ok: true, error: null }
 	}
 
-	private async verifyTxt(domain: NonNullable<DomainRecord>) {
+	private async verifyTxt(
+		domain: NonNullable<DomainRecord>
+	): Promise<DomainCheckResult> {
 		const requireTxt = process.env.CATALOG_DOMAIN_REQUIRE_TXT !== 'false'
 		if (!requireTxt) return { ok: true, error: null }
 
@@ -446,6 +446,14 @@ export class CatalogDomainService {
 
 	private errorMessage(error: unknown): string {
 		if (error instanceof Error) return error.message
-		return String(error)
+		if (
+			typeof error === 'string' ||
+			typeof error === 'number' ||
+			typeof error === 'boolean' ||
+			typeof error === 'bigint'
+		) {
+			return String(error)
+		}
+		return JSON.stringify(error) ?? 'Unknown error'
 	}
 }

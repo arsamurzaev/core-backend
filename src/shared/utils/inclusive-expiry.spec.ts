@@ -10,9 +10,7 @@ describe('inclusive expiry utilities', () => {
 		expect(isInclusiveExpiryActive(expiresAt, new Date(2026, 4, 28, 23))).toBe(
 			true
 		)
-		expect(isInclusiveExpiryActive(expiresAt, new Date(2026, 4, 29))).toBe(
-			false
-		)
+		expect(isInclusiveExpiryActive(expiresAt, new Date(2026, 4, 29))).toBe(false)
 	})
 
 	it('counts calendar days including today and the expiry date', () => {

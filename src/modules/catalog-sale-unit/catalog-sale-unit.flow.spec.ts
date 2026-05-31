@@ -1,11 +1,10 @@
-import { BadRequestException } from '@nestjs/common'
 import { ProductVariantKind, ProductVariantStatus } from '@generated/enums'
-
-import { RequestContext } from '@/shared/tenancy/request-context'
+import { BadRequestException } from '@nestjs/common'
 
 import { CartLinePricingService } from '@/modules/cart/cart-line-pricing.service'
 import { ProductReadService } from '@/modules/product/product-read.service'
 import { ProductRepository } from '@/modules/product/product.repository'
+import { RequestContext } from '@/shared/tenancy/request-context'
 
 import { CatalogSaleUnitService } from './catalog-sale-unit.service'
 

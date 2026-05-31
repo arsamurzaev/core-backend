@@ -41,40 +41,36 @@ describe('CartOrderSnapshotService', () => {
 			stock: 5
 		})
 
-		const [item] = await service.buildSnapshotItems(
-			tx as never,
-			'catalog-1',
-			[
-				{
-					id: 'cart-item-1',
-					productId: 'product-1',
-					variantId: 'variant-1',
-					saleUnitId: null,
-					quantity: 2,
-					baseQuantity: 2,
-					unitPriceSnapshot: 900,
-					product: {
-						id: 'product-1',
-						catalogId: 'catalog-1',
-						name: 'Product',
-						slug: 'product',
-						price: 900,
-						productAttributes: []
-					},
-					variant: {
-						id: 'variant-1',
-						sku: 'SKU-1',
-						variantKey: 'default',
-						price: 900,
-						stock: 5,
-						status: 'ACTIVE',
-						isAvailable: true,
-						attributes: []
-					},
-					saleUnit: null
-				}
-			]
-		)
+		const [item] = await service.buildSnapshotItems(tx as never, 'catalog-1', [
+			{
+				id: 'cart-item-1',
+				productId: 'product-1',
+				variantId: 'variant-1',
+				saleUnitId: null,
+				quantity: 2,
+				baseQuantity: 2,
+				unitPriceSnapshot: 900,
+				product: {
+					id: 'product-1',
+					catalogId: 'catalog-1',
+					name: 'Product',
+					slug: 'product',
+					price: 900,
+					productAttributes: []
+				},
+				variant: {
+					id: 'variant-1',
+					sku: 'SKU-1',
+					variantKey: 'default',
+					price: 900,
+					stock: 5,
+					status: 'ACTIVE',
+					isAvailable: true,
+					attributes: []
+				},
+				saleUnit: null
+			}
+		])
 
 		expect(item).toEqual(
 			expect.objectContaining({

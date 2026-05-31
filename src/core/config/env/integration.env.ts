@@ -13,8 +13,7 @@ export const integrationEnv = registerAs<IntegrationInterface>(
 		const integrationWebhookBaseUrl =
 			process.env.INTEGRATION_WEBHOOK_BASE_URL?.trim() || null
 		const moySkladWebhookBaseUrl =
-			process.env.MOYSKLAD_WEBHOOK_BASE_URL?.trim() ||
-			integrationWebhookBaseUrl
+			process.env.MOYSKLAD_WEBHOOK_BASE_URL?.trim() || integrationWebhookBaseUrl
 		const iikoWebhookBaseUrl =
 			process.env.IIKO_WEBHOOK_BASE_URL?.trim() ||
 			integrationWebhookBaseUrl ||

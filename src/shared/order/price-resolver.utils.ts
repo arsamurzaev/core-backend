@@ -43,6 +43,17 @@ function normalizeAttributeKey(value: string | null | undefined): string {
 	return (value ?? '').replace(/[^a-z0-9]/gi, '').toLowerCase()
 }
 
+function readCustomString(value: object): string | null {
+	const candidate = value as { toString?: () => string }
+	if (
+		typeof candidate.toString !== 'function' ||
+		candidate.toString === Object.prototype.toString
+	) {
+		return null
+	}
+	return candidate.toString()
+}
+
 function toFiniteNumber(value: unknown): number | null {
 	if (typeof value === 'number') {
 		return Number.isFinite(value) ? value : null
@@ -51,8 +62,10 @@ function toFiniteNumber(value: unknown): number | null {
 		const parsed = Number(value)
 		return Number.isFinite(parsed) ? parsed : null
 	}
-	if (typeof value === 'object' && value !== null && 'toString' in value) {
-		const parsed = Number(String(value))
+	if (typeof value === 'object' && value !== null) {
+		const text = readCustomString(value)
+		if (!text) return null
+		const parsed = Number(text)
 		return Number.isFinite(parsed) ? parsed : null
 	}
 	return null
@@ -86,7 +99,17 @@ function readAttributeDate(attribute: PriceAttributeLike): Date | null {
 	const raw = attribute.valueDateTime ?? attribute.valueString
 	if (!raw) return null
 
-	const parsed = raw instanceof Date ? raw : new Date(String(raw))
+	const rawText =
+		typeof raw === 'string' ||
+		typeof raw === 'number' ||
+		typeof raw === 'boolean' ||
+		typeof raw === 'bigint'
+			? String(raw)
+			: typeof raw === 'object' && raw !== null
+				? readCustomString(raw)
+				: null
+	const parsed = raw instanceof Date ? raw : rawText ? new Date(rawText) : null
+	if (!parsed) return null
 	return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 

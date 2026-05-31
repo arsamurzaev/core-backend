@@ -116,9 +116,7 @@ export class CatalogSaleUnitService {
 	async update(id: string, dto: UpdateCatalogSaleUnitDtoReq) {
 		const catalogId = mustCatalogId()
 		await this.featureEntitlements.assertCanUseCatalogSaleUnits(catalogId)
-		const current = this.requireRecord(
-			await this.repo.findById(id, catalogId, true)
-		)
+		this.requireRecord(await this.repo.findById(id, catalogId, true))
 		const data: CatalogSaleUnitUpdateData = {}
 
 		if (dto.name !== undefined) {

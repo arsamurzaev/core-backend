@@ -11,11 +11,12 @@ import {
 } from '@nestjs/common'
 import { createHash } from 'crypto'
 
-import type { CatalogCapabilityFlags } from '@/modules/capability/public'
 import {
 	CAPABILITY_READER_PORT,
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
+import type { CatalogCapabilityFlags } from '@/modules/capability/public'
+import { SeoRepository } from '@/modules/seo/public'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_PRODUCTS_CACHE_TTL_SEC,
@@ -36,8 +37,6 @@ import {
 	ProductMediaMapper
 } from '@/shared/media/product-media.mapper'
 import { effectiveCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
-
-import { SeoRepository } from '@/modules/seo/public'
 
 import {
 	PRODUCT_SELLABLE_READER_PORT,
@@ -60,6 +59,7 @@ import {
 	resolveProductAttributeFilter,
 	uniqueNonEmptyValues
 } from './product-query.utils'
+import { resolveProductSaleUnitsForRead } from './product-sale-units-read.utils'
 import {
 	type AttributeFilterMeta,
 	type DiscountAttributeIds,
@@ -71,7 +71,6 @@ import {
 	type ProductVariantPickerOptionRecord,
 	type ProductVariantSummaryRecord
 } from './product.repository'
-import { resolveProductSaleUnitsForRead } from './product-sale-units-read.utils'
 
 export type ProductReadOptions = {
 	includeInactive?: boolean
@@ -222,7 +221,9 @@ function resolveDefaultSaleUnit(
 	)
 }
 
-function resolveVariantDisplayPrice(variant: ProductVariantPickerSource): unknown {
+function resolveVariantDisplayPrice(
+	variant: ProductVariantPickerSource
+): unknown {
 	return resolveDefaultSaleUnit(variant)?.price ?? variant.price
 }
 
@@ -1299,7 +1300,10 @@ export class ProductReadService {
 		const variantSummary = shouldExposeVariants
 			? buildVariantSummaryFromVariants(variantSources)
 			: { ...EMPTY_VARIANT_SUMMARY }
-		const commercial = await this.resolveCommercialProjection(catalogId, product.id)
+		const commercial = await this.resolveCommercialProjection(
+			catalogId,
+			product.id
+		)
 		const mappedProduct = applyProductCommercialFields(
 			this.mapper.mapProduct(product, MEDIA_DETAIL_VARIANT_NAMES),
 			commercial
@@ -1308,13 +1312,10 @@ export class ProductReadService {
 		return sanitizeProductForReadFeatures(
 			{
 				...mappedProduct,
-				saleUnits: resolveProductSaleUnitsForRead(
-					mappedProduct,
-					{
-						canUseCatalogSaleUnits: readFeatures.canUseCatalogSaleUnits,
-						shouldExposeVariants
-					}
-				),
+				saleUnits: resolveProductSaleUnitsForRead(mappedProduct, {
+					canUseCatalogSaleUnits: readFeatures.canUseCatalogSaleUnits,
+					shouldExposeVariants
+				}),
 				variantSummary,
 				variantPickerOptions: shouldExposeVariants
 					? buildVariantPickerOptionsFromVariants(variantSources, variantSummary)
@@ -1373,7 +1374,9 @@ export class ProductReadService {
 				canUseCatalogSaleUnits: readFeatures.canUseCatalogSaleUnits,
 				shouldExposeVariants
 			})
-			const mappedProductWithoutVariants = { ...mappedProduct } as typeof mappedProduct & {
+			const mappedProductWithoutVariants = {
+				...mappedProduct
+			} as typeof mappedProduct & {
 				variants?: unknown
 			}
 			delete mappedProductWithoutVariants.variants

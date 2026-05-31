@@ -117,7 +117,9 @@ function resolveDefaultSaleUnit(
 	)
 }
 
-function resolveVariantDisplayPrice(variant: ProductVariantPickerSource): unknown {
+function resolveVariantDisplayPrice(
+	variant: ProductVariantPickerSource
+): unknown {
 	return resolveDefaultSaleUnit(variant)?.price ?? variant.price
 }
 

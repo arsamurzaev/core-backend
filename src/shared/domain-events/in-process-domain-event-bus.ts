@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common'
 
+import { buildDomainEventIdempotencyKey } from './domain-event-idempotency'
 import type {
 	DomainEvent,
 	DomainEventBus,
 	DomainEventHandler
 } from './domain-events.contract'
-import { buildDomainEventIdempotencyKey } from './domain-event-idempotency'
 
 @Injectable()
 export class InProcessDomainEventBus implements DomainEventBus {

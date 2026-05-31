@@ -58,5 +58,9 @@ export interface ObservabilityRecorderPort {
 			| 'not_found'
 			| 'other'
 	): void
-	recordAdminAction(action: string, outcome: 'success' | 'error', actorId: string): void
+	recordAdminAction(
+		action: string,
+		outcome: 'success' | 'error',
+		actorId: string
+	): void
 }

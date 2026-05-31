@@ -64,5 +64,13 @@ export function resolveDomainEventAggregate(
 
 export function formatDomainEventError(error: unknown): string {
 	if (error instanceof Error) return error.message.slice(0, 4000)
-	return String(error).slice(0, 4000)
+	if (
+		typeof error === 'string' ||
+		typeof error === 'number' ||
+		typeof error === 'boolean' ||
+		typeof error === 'bigint'
+	) {
+		return String(error).slice(0, 4000)
+	}
+	return (JSON.stringify(error) ?? 'Unknown error').slice(0, 4000)
 }

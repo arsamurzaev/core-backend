@@ -4,14 +4,14 @@ import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
-import type {
-	DomainEvent,
-	DomainEventOutboxWriter
-} from './domain-events.contract'
 import {
 	resolveDomainEventAggregate,
 	serializeDomainEvent
 } from './domain-event-outbox.utils'
+import type {
+	DomainEvent,
+	DomainEventOutboxWriter
+} from './domain-events.contract'
 
 const domainEventOutboxSelect = {
 	id: true,
@@ -20,7 +20,7 @@ const domainEventOutboxSelect = {
 	payload: true,
 	status: true,
 	attempts: true
-} satisfies Prisma.DomainEventOutboxSelect
+} as const satisfies Prisma.DomainEventOutboxSelect
 
 export type DomainEventOutboxRecord = Prisma.DomainEventOutboxGetPayload<{
 	select: typeof domainEventOutboxSelect
@@ -46,7 +46,7 @@ export class DomainEventOutboxRepository implements DomainEventOutboxWriter {
 	findDispatchableByEventIds(
 		eventIds: string[]
 	): Promise<DomainEventOutboxRecord[]> {
-		if (!eventIds.length) return Promise.resolve([])
+		if (!eventIds.length) return Promise.resolve<DomainEventOutboxRecord[]>([])
 
 		return this.prisma.domainEventOutbox.findMany({
 			where: {
@@ -57,11 +57,11 @@ export class DomainEventOutboxRepository implements DomainEventOutboxWriter {
 			},
 			orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }],
 			select: domainEventOutboxSelect
-		})
+		}) as Promise<DomainEventOutboxRecord[]>
 	}
 
 	findProcessableByIds(ids: string[]): Promise<DomainEventOutboxRecord[]> {
-		if (!ids.length) return Promise.resolve([])
+		if (!ids.length) return Promise.resolve<DomainEventOutboxRecord[]>([])
 
 		return this.prisma.domainEventOutbox.findMany({
 			where: {
@@ -76,7 +76,7 @@ export class DomainEventOutboxRepository implements DomainEventOutboxWriter {
 			},
 			orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }],
 			select: domainEventOutboxSelect
-		})
+		}) as Promise<DomainEventOutboxRecord[]>
 	}
 
 	findDueForProcessing(params: {

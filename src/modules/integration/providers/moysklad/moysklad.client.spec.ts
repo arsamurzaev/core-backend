@@ -259,7 +259,12 @@ describe('MoySkladClient', () => {
 		const fetchMock = jest
 			.spyOn(global, 'fetch')
 			.mockImplementation(async input => {
-				const url = String(input)
+				const url =
+					typeof input === 'string'
+						? input
+						: input instanceof URL
+							? input.toString()
+							: input.url
 				const name = url.includes('/entity/organization')
 					? 'Organization 1'
 					: url.includes('/entity/counterparty')

@@ -1,4 +1,11 @@
 import {
+	IntegrationProvider,
+	IntegrationSyncRunMode,
+	IntegrationSyncRunStatus,
+	IntegrationSyncRunTrigger,
+	IntegrationSyncSnapshotCompleteness
+} from '@generated/enums'
+import {
 	ConflictException,
 	Inject,
 	Injectable,
@@ -7,13 +14,6 @@ import {
 	type OnModuleDestroy
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import {
-	IntegrationProvider,
-	IntegrationSyncRunMode,
-	IntegrationSyncRunStatus,
-	IntegrationSyncRunTrigger,
-	IntegrationSyncSnapshotCompleteness
-} from '@generated/enums'
 import { Job, Queue, Worker } from 'bullmq'
 
 import { AllInterfaces } from '@/core/config'
@@ -238,10 +238,7 @@ export class IikoQueueService implements OnModuleDestroy {
 				{ jobId }
 			)
 			const resolvedJobId = String(job.id ?? jobId)
-			this.observability.recordQueueJobEnqueued(
-				IIKO_SYNC_QUEUE_NAME,
-				jobName
-			)
+			this.observability.recordQueueJobEnqueued(IIKO_SYNC_QUEUE_NAME, jobName)
 			await this.repo.attachSyncRunJobId(run.id, resolvedJobId)
 
 			return {
@@ -283,11 +280,9 @@ export class IikoQueueService implements OnModuleDestroy {
 					externalId: productResult.externalId,
 					totalProducts: 1 + productResult.totalVariants,
 					createdProducts:
-						(productResult.created ? 1 : 0) +
-						productResult.createdVariants,
+						(productResult.created ? 1 : 0) + productResult.createdVariants,
 					updatedProducts:
-						(productResult.updated ? 1 : 0) +
-						productResult.updatedVariants,
+						(productResult.updated ? 1 : 0) + productResult.updatedVariants,
 					deletedProducts: productResult.deletedVariants,
 					imagesImported: productResult.imagesImported,
 					durationMs: productResult.durationMs,
@@ -299,12 +294,9 @@ export class IikoQueueService implements OnModuleDestroy {
 			}
 
 			if (job.data.mode === IntegrationSyncRunMode.STOCK) {
-				const stockResult = await this.iikoSync.syncStopList(
-					job.data.catalogId,
-					{
-						runId: job.data.runId
-					}
-				)
+				const stockResult = await this.iikoSync.syncStopList(job.data.catalogId, {
+					runId: job.data.runId
+				})
 				await this.repo.completeSyncRun(job.data.runId, {
 					totalProducts: 0,
 					createdProducts: 0,
@@ -312,8 +304,7 @@ export class IikoQueueService implements OnModuleDestroy {
 					deletedProducts: 0,
 					imagesImported: 0,
 					durationMs: stockResult.durationMs,
-					snapshotCompleteness:
-						IntegrationSyncSnapshotCompleteness.FULL_COMPLETE,
+					snapshotCompleteness: IntegrationSyncSnapshotCompleteness.FULL_COMPLETE,
 					metadata: this.buildStockSuccessMetadata(stockResult)
 				})
 				this.recordOutcome(job.data, 'success', Date.now() - startedAt)
@@ -330,8 +321,7 @@ export class IikoQueueService implements OnModuleDestroy {
 				deletedProducts: result.deletedProducts,
 				imagesImported: result.imagesImported,
 				durationMs: result.durationMs,
-				snapshotCompleteness:
-					IntegrationSyncSnapshotCompleteness.FULL_COMPLETE,
+				snapshotCompleteness: IntegrationSyncSnapshotCompleteness.FULL_COMPLETE,
 				metadata: this.buildSuccessMetadata(result)
 			})
 			this.recordOutcome(job.data, 'success', Date.now() - startedAt)
@@ -411,8 +401,7 @@ export class IikoQueueService implements OnModuleDestroy {
 								missingStock: 0,
 								productHasVariantLinks: 0,
 								variantsCapabilityDisabled: 0,
-								stockRowWithoutLocalLink:
-									result.stock.unmatchedStopListItems
+								stockRowWithoutLocalLink: result.stock.unmatchedStopListItems
 							}
 						}
 					: null

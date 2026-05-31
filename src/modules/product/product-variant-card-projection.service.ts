@@ -4,8 +4,8 @@ import {
 	buildVariantPickerOptionsMap,
 	buildVariantSummaryMap,
 	createEmptyVariantProjection,
-	shouldBuildVariantPickerOptions,
-	type ProductVariantProjection
+	type ProductVariantProjection,
+	shouldBuildVariantPickerOptions
 } from './product-variant-card-projection'
 import { ProductRepository } from './product.repository'
 
@@ -30,13 +30,12 @@ export class ProductVariantCardProjectionService {
 			? buildVariantPickerOptionsMap(
 					await this.repo.findVariantPickerOptions(variantPickerProductIds)
 				)
-			: new Map()
+			: new Map<string, ProductVariantProjection['variantPickerOptions']>()
 
 		return new Map(
 			ids.map(productId => {
 				const summary =
-					summaryMap.get(productId) ??
-					createEmptyVariantProjection().variantSummary
+					summaryMap.get(productId) ?? createEmptyVariantProjection().variantSummary
 				return [
 					productId,
 					{

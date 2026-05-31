@@ -163,8 +163,8 @@ export class IikoOrderExportService {
 					terminalGroupId: metadata.terminalGroupId,
 					externalMenuId: metadata.externalMenuId,
 					orderExportSourceKey: metadata.orderExportSourceKey,
-					hallOrder: hallOrder as IikoHallOrderInfo,
-					estimatedStartTime: preorderStartTime as string
+					hallOrder: hallOrder,
+					estimatedStartTime: preorderStartTime
 				})
 			: hallOrder
 				? await this.buildTableOrderPayload(order, integration.id, {

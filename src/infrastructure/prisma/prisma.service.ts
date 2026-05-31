@@ -1,4 +1,8 @@
 ﻿import { PrismaClient } from '@generated/client'
+import type {
+	PrismaClient as GeneratedPrismaClientType,
+	Prisma
+} from '@generated/client'
 import {
 	Injectable,
 	Logger,
@@ -18,9 +22,13 @@ import {
 	resolvePrismaSlowQuerySettings
 } from './prisma-observability'
 
+const PrismaClientBase = PrismaClient as unknown as new (
+	options?: Prisma.PrismaClientOptions
+) => GeneratedPrismaClientType<'query'>
+
 @Injectable()
 export class PrismaService
-	extends PrismaClient
+	extends PrismaClientBase
 	implements OnModuleInit, OnModuleDestroy
 {
 	private readonly logger = new Logger(PrismaService.name)
@@ -87,7 +95,7 @@ export class PrismaService
 	private registerSlowQueryLogger() {
 		if (this.slowQuerySettings.thresholdMs <= 0) return
 
-		this.$on('query', event => {
+		this.$on('query', (event: Prisma.QueryEvent) => {
 			if (event.duration < this.slowQuerySettings.thresholdMs) {
 				return
 			}

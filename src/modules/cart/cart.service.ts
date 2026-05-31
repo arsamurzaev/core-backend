@@ -360,7 +360,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 					sessionDto?.status === CartTableSessionStatus.PENDING_CONFIRMATION,
 				itemsCount: cart?.totals.itemsCount ?? 0,
 				total: cart?.totals.total ?? 0,
-				updatedAt: cart?.updatedAt ?? session?.updatedAt ?? null
+				updatedAt: normalizeDateLike(cart?.updatedAt ?? session?.updatedAt)
 			})
 		}
 
@@ -1305,6 +1305,11 @@ function normalizeTextOrNumber(value: unknown): string | null {
 	}
 
 	return normalizeText(value)
+}
+
+function normalizeDateLike(value: unknown): Date | string | null {
+	if (value instanceof Date || typeof value === 'string') return value
+	return null
 }
 
 function normalizePositiveInt(value: unknown): number | null {

@@ -84,7 +84,7 @@ type PartialIikoMetadata = {
 	terminalGroupId?: string | null
 	terminalGroupName?: string | null
 	menuVersion?: number | null
-	syncSource?: 'external_menu' | 'nomenclature' | string | null
+	syncSource?: string | null
 	importImages?: boolean
 	exportOrders?: boolean | null
 	orderExportServiceType?: 'DeliveryByCourier' | 'DeliveryByClient' | null
@@ -282,10 +282,8 @@ function isEncryptedApiLogin(value: unknown): value is IikoEncryptedApiLogin {
 		typeof value === 'object' &&
 		value !== null &&
 		!Array.isArray(value) &&
-		(value as Record<string, unknown>).format ===
-			IIKO_SECRET_ENCRYPTION_FORMAT &&
-		(value as Record<string, unknown>).alg ===
-			IIKO_SECRET_ENCRYPTION_ALGORITHM &&
+		(value as Record<string, unknown>).format === IIKO_SECRET_ENCRYPTION_FORMAT &&
+		(value as Record<string, unknown>).alg === IIKO_SECRET_ENCRYPTION_ALGORITHM &&
 		typeof (value as Record<string, unknown>).keyVersion === 'string' &&
 		typeof (value as Record<string, unknown>).iv === 'string' &&
 		typeof (value as Record<string, unknown>).tag === 'string' &&
@@ -311,7 +309,7 @@ function normalizeMenuVersion(value?: number | null): number {
 }
 
 function normalizeSyncSource(
-	value?: 'external_menu' | 'nomenclature' | string | null
+	value?: string | null
 ): 'external_menu' | 'nomenclature' {
 	return value === 'nomenclature' ? 'nomenclature' : 'external_menu'
 }

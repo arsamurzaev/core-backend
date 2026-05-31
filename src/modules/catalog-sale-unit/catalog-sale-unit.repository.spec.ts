@@ -13,7 +13,7 @@ describe('CatalogSaleUnitRepository', () => {
 			}
 		}
 		repository = new CatalogSaleUnitRepository(prisma as never)
-})
+	})
 
 	it('lists only active non-archived units by default', async () => {
 		await repository.findAll('catalog-1')

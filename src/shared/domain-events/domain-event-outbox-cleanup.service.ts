@@ -23,7 +23,9 @@ const OUTBOX_CLEANUP_JOB_NAME = 'domain-event-outbox-cleanup'
 export class DomainEventOutboxCleanupService {
 	private readonly logger = new Logger(DomainEventOutboxCleanupService.name)
 
-	constructor(private readonly diagnostics: DomainEventOutboxDiagnosticsService) {}
+	constructor(
+		private readonly diagnostics: DomainEventOutboxDiagnosticsService
+	) {}
 
 	@Cron(OUTBOX_CLEANUP_CRON, {
 		name: OUTBOX_CLEANUP_JOB_NAME,

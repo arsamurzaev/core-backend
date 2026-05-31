@@ -41,9 +41,9 @@ import {
 	UpdateCatalogSaleUnitDtoReq
 } from '@/modules/catalog-sale-unit/public'
 import {
+	IikoImportPreviewDto,
 	IikoIntegrationDto,
 	IikoIntegrationStatusDto,
-	IikoImportPreviewDto,
 	IikoQueuedSyncDto,
 	IikoSyncProgressDto,
 	IikoSyncRunDto,
@@ -474,7 +474,9 @@ export class CatalogAdvancedSettingsController {
 	}
 
 	@Post('integrations/iiko/import-preview')
-	@ApiOperation({ summary: 'Preview advanced settings iiko external menu import' })
+	@ApiOperation({
+		summary: 'Preview advanced settings iiko external menu import'
+	})
 	@ApiOkResponse({ type: IikoImportPreviewDto })
 	previewIikoImport(
 		@Body() dto: PreviewIikoImportDtoReq

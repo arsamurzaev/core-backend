@@ -45,7 +45,7 @@ export class OneCClient {
 	): Promise<Record<string, unknown>[]> {
 		const url = this.buildRowsUrl(params)
 		const response = await this.request(url)
-		const payload = await response.json().catch(async () => {
+		const payload: unknown = await response.json().catch(() => {
 			throw new OneCClientError('ONE_C API returned non-JSON rows response')
 		})
 

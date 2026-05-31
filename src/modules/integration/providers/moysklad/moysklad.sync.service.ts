@@ -1082,8 +1082,7 @@ export class MoySkladSyncService {
 			const durationMs = Date.now() - startedAt
 			await progress.report({
 				phase: 'COMPLETED',
-				message:
-					'Синхронизация категории MoySklad завершена',
+				message: 'Синхронизация категории MoySklad завершена',
 				processed: 1,
 				total: 1,
 				force: true
@@ -1588,8 +1587,7 @@ export class MoySkladSyncService {
 		if (needsParentSync) {
 			await params.progress.report({
 				phase: 'FETCHING_PRODUCT',
-				message:
-					'Получаем родительский товар из MoySklad',
+				message: 'Получаем родительский товар из MoySklad',
 				processed: 0,
 				total: totalSyncItems,
 				force: true
@@ -1626,8 +1624,7 @@ export class MoySkladSyncService {
 			)
 			await params.progress.report({
 				phase: 'SYNCING_PRODUCTS',
-				message:
-					'Родительский товар синхронизирован',
+				message: 'Родительский товар синхронизирован',
 				processed: 1,
 				total: totalSyncItems,
 				force: true
@@ -1676,8 +1673,7 @@ export class MoySkladSyncService {
 		const durationMs = Date.now() - params.startedAt
 		await params.progress.report({
 			phase: 'COMPLETED',
-			message:
-				'Синхронизация модификации завершена',
+			message: 'Синхронизация модификации завершена',
 			processed: totalSyncItems,
 			total: totalSyncItems,
 			force: true

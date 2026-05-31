@@ -1,13 +1,13 @@
 import { Inject, Injectable, Optional } from '@nestjs/common'
 
-import { IntegrationRepository } from '../../integration.repository'
-
+import type { InventoryExternalStockPort } from '@/modules/inventory/contracts'
 import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
 import {
 	DOMAIN_EVENT_DISPATCHER,
 	type DomainEventDispatcher
 } from '@/shared/domain-events/domain-events.contract'
-import type { InventoryExternalStockPort } from '@/modules/inventory/contracts'
+
+import { IntegrationRepository } from '../../integration.repository'
 
 import { MoySkladClient } from './moysklad.client'
 import {
@@ -139,8 +139,7 @@ export class MoySkladStockSyncService implements InventoryExternalStockPort {
 
 		await params.progress.report({
 			phase: 'SYNCING_STOCK',
-			message:
-				'Применяем остатки к товарам и модификациям',
+			message: 'Применяем остатки к товарам и модификациям',
 			processed: 0,
 			total: totalStockLinks,
 			force: true
@@ -155,10 +154,7 @@ export class MoySkladStockSyncService implements InventoryExternalStockPort {
 
 		if (!params.canSyncVariants) {
 			for (const link of rawVariantLinks) {
-				const stockResolution = resolveStockForExternalLink(
-					params.stockMap,
-					link
-				)
+				const stockResolution = resolveStockForExternalLink(params.stockMap, link)
 				if (stockResolution) {
 					matchedStockRowIds.add(stockResolution.matchedExternalId)
 				}
@@ -172,10 +168,7 @@ export class MoySkladStockSyncService implements InventoryExternalStockPort {
 
 		for (const link of variantLinks) {
 			try {
-				const stockResolution = resolveStockForExternalLink(
-					params.stockMap,
-					link
-				)
+				const stockResolution = resolveStockForExternalLink(params.stockMap, link)
 				if (!stockResolution) {
 					skippedReasons.missingStock += 1
 					skippedReasons.snapshotIncomplete += 1
@@ -237,10 +230,7 @@ export class MoySkladStockSyncService implements InventoryExternalStockPort {
 		for (const link of productLinks) {
 			try {
 				if (productsWithVariants.has(link.productId)) {
-					const stockResolution = resolveStockForExternalLink(
-						params.stockMap,
-						link
-					)
+					const stockResolution = resolveStockForExternalLink(params.stockMap, link)
 					if (stockResolution) {
 						matchedStockRowIds.add(stockResolution.matchedExternalId)
 					}
@@ -254,10 +244,7 @@ export class MoySkladStockSyncService implements InventoryExternalStockPort {
 					continue
 				}
 
-				const stockResolution = resolveStockForExternalLink(
-					params.stockMap,
-					link
-				)
+				const stockResolution = resolveStockForExternalLink(params.stockMap, link)
 				if (!stockResolution) {
 					skippedReasons.missingStock += 1
 					skippedReasons.snapshotIncomplete += 1
@@ -472,10 +459,8 @@ function normalizeStockUpdateResult(
 	const record = value as Record<string, unknown>
 	return {
 		changed: record.changed === true,
-		productId:
-			readMoySkladString(record.productId) || fallback.productId || null,
-		variantId:
-			readMoySkladString(record.variantId) || fallback.variantId || null,
+		productId: readMoySkladString(record.productId) || fallback.productId || null,
+		variantId: readMoySkladString(record.variantId) || fallback.variantId || null,
 		previousStock: readNullableNumber(record.previousStock),
 		nextStock: readNullableNumber(record.nextStock)
 	}

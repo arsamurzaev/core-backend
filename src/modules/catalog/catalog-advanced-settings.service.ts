@@ -7,11 +7,11 @@ import {
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import {
+	type ActiveSessionEntry,
+	AuthService,
 	AuthSessionDto,
 	AuthSessionsResponseDto,
-	AuthService,
 	ChangePasswordDtoReq,
-	type ActiveSessionEntry,
 	SessionService
 } from '@/modules/auth/public'
 import {
@@ -119,10 +119,7 @@ export class CatalogAdvancedSettingsService {
 		return this.saleUnits.create(dto)
 	}
 
-	updateSaleUnit(
-		id: string,
-		dto: UpdateCatalogSaleUnitDtoReq
-	) {
+	updateSaleUnit(id: string, dto: UpdateCatalogSaleUnitDtoReq) {
 		return this.saleUnits.update(id, dto)
 	}
 

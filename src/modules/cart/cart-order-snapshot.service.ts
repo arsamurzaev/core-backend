@@ -476,7 +476,7 @@ function readFiniteNumber(value: unknown): number | null {
 	}
 	if (typeof value === 'bigint') return Number(value)
 	if (typeof value === 'object' && value !== null) {
-		const candidate = value as { toNumber?: unknown }
+		const candidate = value as { toNumber?: () => unknown }
 		if (typeof candidate.toNumber === 'function') {
 			const parsed = candidate.toNumber()
 			return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : null

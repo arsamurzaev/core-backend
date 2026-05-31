@@ -50,9 +50,9 @@ describe('CatalogAdvancedSettingsController', () => {
 	})
 
 	it('rejects invalid sale unit boolean filters', async () => {
-		expect(() =>
-			controller.listSaleUnits('sometimes', undefined)
-		).toThrow(BadRequestException)
+		expect(() => controller.listSaleUnits('sometimes', undefined)).toThrow(
+			BadRequestException
+		)
 	})
 
 	it('delegates sale unit creation, update and archive', async () => {
@@ -71,10 +71,7 @@ describe('CatalogAdvancedSettingsController', () => {
 		await controller.archiveSaleUnit('sale-unit-1')
 
 		expect(service.createSaleUnit).toHaveBeenCalledWith(createDto)
-		expect(service.updateSaleUnit).toHaveBeenCalledWith(
-			'sale-unit-1',
-			updateDto
-		)
+		expect(service.updateSaleUnit).toHaveBeenCalledWith('sale-unit-1', updateDto)
 		expect(service.archiveSaleUnit).toHaveBeenCalledWith('sale-unit-1')
 	})
 })

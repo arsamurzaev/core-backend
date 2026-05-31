@@ -24,7 +24,7 @@ const attributeSelect = {
 	types: {
 		select: { id: true }
 	}
-}
+} as const satisfies Prisma.AttributeSelect
 
 const enumValueSelect = {
 	id: true,
@@ -52,7 +52,7 @@ const enumValueSelect = {
 	},
 	createdAt: true,
 	updatedAt: true
-}
+} as const satisfies Prisma.AttributeEnumValueSelect
 
 const enumValueDuplicateSelect = {
 	id: true,
@@ -60,7 +60,7 @@ const enumValueDuplicateSelect = {
 	catalogId: true,
 	value: true,
 	displayName: true
-}
+} as const satisfies Prisma.AttributeEnumValueSelect
 
 const enumValueAliasSelect = {
 	id: true,
@@ -71,16 +71,7 @@ const enumValueAliasSelect = {
 	displayName: true,
 	createdAt: true,
 	updatedAt: true
-}
-
-const attributeSelectWithEnums = {
-	...attributeSelect,
-	enumValues: {
-		where: { deleteAt: null },
-		select: enumValueSelect,
-		orderBy: [{ displayOrder: 'asc' }, { value: 'asc' }]
-	}
-}
+} as const satisfies Prisma.AttributeEnumValueAliasSelect
 
 function buildEnumValueWhere(
 	catalogId?: string | null
@@ -134,10 +125,32 @@ type AttributeMutationTx = Pick<
 	Prisma.TransactionClient,
 	| 'attribute'
 	| 'attributeEnumValue'
+	| 'attributeEnumValueAlias'
 	| 'productAttribute'
 	| 'productVariant'
 	| 'variantAttribute'
 >
+
+export type AttributeRecord = Prisma.AttributeGetPayload<{
+	select: typeof attributeSelect
+}>
+export type AttributeWithEnumsRecord = Prisma.AttributeGetPayload<{
+	select: ReturnType<typeof buildAttributeSelectWithEnums>
+}>
+export type AttributeResult = AttributeRecord | AttributeWithEnumsRecord
+export type AttributeEnumValueRecord = Prisma.AttributeEnumValueGetPayload<{
+	select: typeof enumValueSelect
+}>
+export type AttributeEnumValueDuplicateRecord =
+	Prisma.AttributeEnumValueGetPayload<{
+		select: typeof enumValueDuplicateSelect
+	}> & {
+		matchType: 'value' | 'alias'
+	}
+export type AttributeEnumValueAliasRecord =
+	Prisma.AttributeEnumValueAliasGetPayload<{
+		select: typeof enumValueAliasSelect
+	}>
 
 @Injectable()
 export class AttributeRepository {
@@ -167,12 +180,12 @@ export class AttributeRepository {
 		id: string,
 		withEnums = false,
 		catalogId?: string | null
-	): Promise<any> {
+	): Promise<AttributeResult | null> {
 		return this.prisma.attribute.findFirst({
 			where: buildActiveAttributeWhere(id),
-			select: (withEnums
+			select: withEnums
 				? buildAttributeSelectWithEnums(catalogId)
-				: attributeSelect) as any
+				: attributeSelect
 		})
 	}
 
@@ -180,7 +193,7 @@ export class AttributeRepository {
 		typeId: string,
 		withEnums = false,
 		catalogId?: string | null
-	): Promise<any[]> {
+	): Promise<AttributeResult[]> {
 		const resolvedTypeId = await this.resolveTypeId(typeId)
 		if (!resolvedTypeId) return []
 
@@ -189,14 +202,14 @@ export class AttributeRepository {
 				deleteAt: null,
 				types: { some: { id: resolvedTypeId } }
 			},
-			select: (withEnums
+			select: withEnums
 				? buildAttributeSelectWithEnums(catalogId)
-				: attributeSelect) as any,
+				: attributeSelect,
 			orderBy: [{ displayOrder: 'asc' }, { key: 'asc' }]
 		})
 	}
 
-	create(data: AttributeCreateInput): Promise<any> {
+	create(data: AttributeCreateInput): Promise<AttributeRecord> {
 		return this.prisma.attribute.create({ data, select: attributeSelect })
 	}
 
@@ -204,7 +217,7 @@ export class AttributeRepository {
 		id: string,
 		data: AttributeUpdateInput,
 		typeIds?: string[]
-	): Promise<any> {
+	): Promise<AttributeRecord | null> {
 		return this.prisma.$transaction(async tx => {
 			const exists = await this.ensureAttributeReadyForUpdate(tx, id, data)
 			if (!exists) return null
@@ -214,7 +227,7 @@ export class AttributeRepository {
 		})
 	}
 
-	async softDelete(id: string): Promise<any> {
+	async softDelete(id: string): Promise<AttributeRecord | null> {
 		return this.prisma.$transaction(async tx => {
 			const attribute = await this.findActiveAttributeInTx(tx, id)
 			if (!attribute) return null
@@ -236,10 +249,10 @@ export class AttributeRepository {
 	findEnumValues(
 		attributeId: string,
 		catalogId?: string | null
-	): Promise<any[]> {
+	): Promise<AttributeEnumValueRecord[]> {
 		return this.prisma.attributeEnumValue.findMany({
 			where: { attributeId, ...buildEnumValueWhere(catalogId) },
-			select: enumValueSelect as any,
+			select: enumValueSelect,
 			orderBy: [{ displayOrder: 'asc' }, { value: 'asc' }]
 		})
 	}
@@ -248,17 +261,19 @@ export class AttributeRepository {
 		attributeId: string,
 		id: string,
 		catalogId?: string | null
-	): Promise<any> {
+	): Promise<AttributeEnumValueRecord | null> {
 		return this.prisma.attributeEnumValue.findFirst({
 			where: { id, attributeId, ...buildEnumValueWhere(catalogId) },
-			select: enumValueSelect as any
+			select: enumValueSelect
 		})
 	}
 
-	createEnumValue(data: AttributeEnumValueCreateInput): Promise<any> {
+	createEnumValue(
+		data: AttributeEnumValueCreateInput
+	): Promise<AttributeEnumValueRecord> {
 		return this.prisma.attributeEnumValue.create({
-			data: data as any,
-			select: enumValueSelect as any
+			data,
+			select: enumValueSelect
 		})
 	}
 
@@ -323,7 +338,7 @@ export class AttributeRepository {
 		value: string,
 		excludeId?: string,
 		catalogId?: string | null
-	): Promise<any> {
+	): Promise<AttributeEnumValueDuplicateRecord | null> {
 		const enumValue = await this.prisma.attributeEnumValue.findFirst({
 			where: {
 				attributeId,
@@ -332,11 +347,11 @@ export class AttributeRepository {
 				...(catalogId ? { catalogId } : {}),
 				...(excludeId ? { id: { not: excludeId } } : {})
 			},
-			select: enumValueDuplicateSelect as any
+			select: enumValueDuplicateSelect
 		})
 		if (enumValue) return { ...enumValue, matchType: 'value' }
 
-		const alias = await (this.prisma as any).attributeEnumValueAlias.findFirst({
+		const alias = await this.prisma.attributeEnumValueAlias.findFirst({
 			where: {
 				attributeId,
 				value,
@@ -362,10 +377,10 @@ export class AttributeRepository {
 		attributeId: string,
 		data: AttributeEnumValueUpdateInput,
 		catalogId?: string | null
-	): Promise<any> {
+	): Promise<AttributeEnumValueRecord | null> {
 		const result = await this.prisma.attributeEnumValue.updateMany({
 			where: { id, attributeId, ...buildEnumValueWhere(catalogId) },
-			data: data as any
+			data
 		})
 		if (!result.count) return null
 
@@ -376,8 +391,8 @@ export class AttributeRepository {
 		attributeId: string,
 		enumValueId: string,
 		catalogId?: string | null
-	): Promise<any[]> {
-		return (this.prisma as any).attributeEnumValueAlias.findMany({
+	): Promise<AttributeEnumValueAliasRecord[]> {
+		return this.prisma.attributeEnumValueAlias.findMany({
 			where: {
 				attributeId,
 				enumValueId,
@@ -394,8 +409,8 @@ export class AttributeRepository {
 		enumValueId: string
 		value: string
 		displayName: string | null
-	}): Promise<any> {
-		return (this.prisma as any).attributeEnumValueAlias.create({
+	}): Promise<AttributeEnumValueAliasRecord> {
+		return this.prisma.attributeEnumValueAlias.create({
 			data,
 			select: enumValueAliasSelect
 		})
@@ -406,8 +421,8 @@ export class AttributeRepository {
 		enumValueId: string,
 		aliasId: string,
 		catalogId?: string | null
-	): Promise<any> {
-		const result = await (this.prisma as any).attributeEnumValueAlias.updateMany({
+	): Promise<AttributeEnumValueAliasRecord | null> {
+		const result = await this.prisma.attributeEnumValueAlias.updateMany({
 			where: {
 				id: aliasId,
 				attributeId,
@@ -418,7 +433,7 @@ export class AttributeRepository {
 		})
 		if (!result.count) return null
 
-		return (this.prisma as any).attributeEnumValueAlias.findFirst({
+		return this.prisma.attributeEnumValueAlias.findFirst({
 			where: { id: aliasId, attributeId, enumValueId },
 			select: enumValueAliasSelect
 		})
@@ -429,18 +444,18 @@ export class AttributeRepository {
 		sourceId: string,
 		targetId: string,
 		catalogId?: string | null
-	): Promise<any> {
+	): Promise<AttributeEnumValueRecord | null> {
 		return this.prisma.$transaction(async tx => {
 			const source = (await tx.attributeEnumValue.findFirst({
 				where: { id: sourceId, attributeId, ...buildEnumValueWhere(catalogId) },
-				select: enumValueSelect as any
-			})) as any
+				select: enumValueSelect
+			})) as AttributeEnumValueRecord | null
 			if (!source) return null
 
 			const target = (await tx.attributeEnumValue.findFirst({
 				where: { id: targetId, attributeId, ...buildEnumValueWhere(catalogId) },
-				select: enumValueSelect as any
-			})) as any
+				select: enumValueSelect
+			})) as AttributeEnumValueRecord | null
 			if (!target) return null
 
 			const now = new Date()
@@ -474,7 +489,7 @@ export class AttributeRepository {
 
 			await tx.attributeEnumValue.update({
 				where: { id: sourceId },
-				data: { deleteAt: now, mergedIntoId: targetId } as any
+				data: { deleteAt: now, mergedIntoId: targetId }
 			})
 			await this.ensureMergedValueAlias(
 				tx,
@@ -488,7 +503,7 @@ export class AttributeRepository {
 
 			return tx.attributeEnumValue.findFirst({
 				where: { id: targetId, attributeId, ...buildEnumValueWhere(catalogId) },
-				select: enumValueSelect as any
+				select: enumValueSelect
 			})
 		})
 	}
@@ -497,7 +512,7 @@ export class AttributeRepository {
 		id: string,
 		attributeId: string,
 		catalogId?: string | null
-	): Promise<any> {
+	): Promise<AttributeEnumValueRecord | null> {
 		const result = await this.prisma.attributeEnumValue.updateMany({
 			where: { id, attributeId, ...buildEnumValueWhere(catalogId) },
 			data: { deleteAt: new Date() }
@@ -616,7 +631,7 @@ export class AttributeRepository {
 	) {
 		return this.prisma.attributeEnumValue.findFirst({
 			where: { id, attributeId, ...(catalogId ? { catalogId } : {}) },
-			select: enumValueSelect as any
+			select: enumValueSelect
 		})
 	}
 
@@ -628,7 +643,7 @@ export class AttributeRepository {
 		deleteAt: Date,
 		catalogId?: string | null
 	): Promise<void> {
-		const aliases = await (tx as any).attributeEnumValueAlias.findMany({
+		const aliases = await tx.attributeEnumValueAlias.findMany({
 			where: {
 				attributeId,
 				enumValueId: sourceId,
@@ -638,7 +653,7 @@ export class AttributeRepository {
 		})
 
 		for (const alias of aliases) {
-			const conflict = await (tx as any).attributeEnumValueAlias.findFirst({
+			const conflict = await tx.attributeEnumValueAlias.findFirst({
 				where: {
 					attributeId,
 					enumValueId: targetId,
@@ -649,14 +664,14 @@ export class AttributeRepository {
 			})
 
 			if (conflict) {
-				await (tx as any).attributeEnumValueAlias.update({
+				await tx.attributeEnumValueAlias.update({
 					where: { id: alias.id },
 					data: { deleteAt }
 				})
 				continue
 			}
 
-			await (tx as any).attributeEnumValueAlias.update({
+			await tx.attributeEnumValueAlias.update({
 				where: { id: alias.id },
 				data: { enumValueId: targetId }
 			})
@@ -678,19 +693,19 @@ export class AttributeRepository {
 		})
 		if (enumValueConflict && enumValueConflict.id !== targetId) return
 
-		const aliasConflict = await (tx as any).attributeEnumValueAlias.findFirst({
+		const aliasConflict = await tx.attributeEnumValueAlias.findFirst({
 			where: { attributeId, value, ...buildEnumValueAliasWhere(catalogId) },
 			select: { id: true, enumValueId: true }
 		})
 		if (aliasConflict?.enumValueId === targetId) return
 		if (aliasConflict) {
-			await (tx as any).attributeEnumValueAlias.update({
+			await tx.attributeEnumValueAlias.update({
 				where: { id: aliasConflict.id },
 				data: { deleteAt }
 			})
 		}
 
-		await (tx as any).attributeEnumValueAlias.create({
+		await tx.attributeEnumValueAlias.create({
 			data: {
 				attributeId,
 				catalogId: catalogId ?? null,

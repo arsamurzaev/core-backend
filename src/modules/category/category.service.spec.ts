@@ -4,10 +4,10 @@ import { Test, TestingModule } from '@nestjs/testing'
 
 import {
 	PRODUCT_COMMAND_PORT,
-	type ProductCommandPort,
 	PRODUCT_SELLABLE_READER_PORT,
-	ProductVariantCardProjectionService,
-	type ProductSellableReader
+	type ProductCommandPort,
+	type ProductSellableReader,
+	ProductVariantCardProjectionService
 } from '@/modules/product/public'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
@@ -812,9 +812,7 @@ describe('CategoryService', () => {
 			{ id: 'cat-1', parentId: null, position: 0, name: 'First' }
 		] as any)
 
-		await runWithCatalog(() =>
-			service.remove('cat-2', { deleteProducts: true })
-		)
+		await runWithCatalog(() => service.remove('cat-2', { deleteProducts: true }))
 
 		expect(repo.findProductIdsByCategory).toHaveBeenCalledWith(
 			'cat-2',

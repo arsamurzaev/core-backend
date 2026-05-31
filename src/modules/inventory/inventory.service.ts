@@ -14,11 +14,11 @@ import {
 	AUDIT_RECORDER_PORT,
 	type AuditRecorderPort
 } from '@/modules/audit/contracts'
-import { CAPABILITY_INVENTORY_INTERNAL } from '@/modules/capability/public'
 import {
 	CAPABILITY_ASSERT_PORT,
 	type CapabilityAssertPort
 } from '@/modules/capability/contracts'
+import { CAPABILITY_INVENTORY_INTERNAL } from '@/modules/capability/public'
 import {
 	OBSERVABILITY_RECORDER_PORT,
 	type ObservabilityRecorderPort
@@ -42,6 +42,7 @@ import { RequestContext } from '@/shared/tenancy/request-context'
 
 import type { AuthRequest, SessionUser } from '../auth/types/auth-request'
 
+import type { InventoryTransactionEffects } from './contracts'
 import { CreateInventoryStockAdjustmentDtoReq } from './dto/requests/create-inventory-stock-adjustment.dto.req'
 import { CreateInventoryWarehouseDtoReq } from './dto/requests/create-inventory-warehouse.dto.req'
 import { UpdateInventoryWarehouseDtoReq } from './dto/requests/update-inventory-warehouse.dto.req'
@@ -61,7 +62,6 @@ import {
 	type InventoryWarehouseRecord,
 	type InventoryWarehouseWriteData
 } from './inventory.repository'
-import type { InventoryTransactionEffects } from './contracts'
 
 const WAREHOUSE_CODE_FALLBACK = 'warehouse'
 const WAREHOUSE_CODE_MAX_ATTEMPTS = 50

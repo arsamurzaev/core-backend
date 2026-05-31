@@ -67,7 +67,9 @@ function readRawMetaType(value: unknown): string | null {
 	return typeof type === 'string' ? type : null
 }
 
-function isIikoStopListItemStopped(item: IikoStopListAvailabilityItem): boolean {
+function isIikoStopListItemStopped(
+	item: IikoStopListAvailabilityItem
+): boolean {
 	return item.balance === null || item.balance <= 0
 }
 
@@ -1191,8 +1193,7 @@ export class IntegrationRepository {
 						: {}),
 					...(stats.lastStopListSyncedAt
 						? {
-								lastStopListSyncedAt:
-									stats.lastStopListSyncedAt.toISOString()
+								lastStopListSyncedAt: stats.lastStopListSyncedAt.toISOString()
 							}
 						: {})
 				})
@@ -3665,9 +3666,7 @@ export class IntegrationRepository {
 			}
 			for (const link of productLinks) {
 				if (variantLinksByProductId.has(link.productId)) continue
-				const defaultVariant = resolveDefaultProductVariant(
-					link.product.variants
-				)
+				const defaultVariant = resolveDefaultProductVariant(link.product.variants)
 				if (!defaultVariant) continue
 				managedVariants.set(defaultVariant.id, defaultVariant)
 				variantSourceLinks.set(defaultVariant.id, { productLinkId: link.id })
@@ -4934,8 +4933,7 @@ export class IntegrationRepository {
 		}
 	): Promise<boolean> {
 		const nextStock =
-			params.variant.status === ProductVariantStatus.DISABLED &&
-			!params.isStopped
+			params.variant.status === ProductVariantStatus.DISABLED && !params.isStopped
 				? params.variant.stock
 				: params.isStopped
 					? 0

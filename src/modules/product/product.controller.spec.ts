@@ -23,8 +23,7 @@ describe('ProductController', () => {
 							duplicate: jest.fn(),
 							diagnoseDefaultVariantsForCurrentCatalog: jest.fn(),
 							repairMissingDefaultVariantsForCurrentCatalog: jest.fn(),
-							repairDefaultVariantPriceMismatchesForCurrentCatalog:
-								jest.fn(),
+							repairDefaultVariantPriceMismatchesForCurrentCatalog: jest.fn(),
 							previewProductTypeCompatibility: jest.fn(),
 							applyProductTypeChange: jest.fn(),
 							update: jest.fn(),

@@ -14,8 +14,8 @@ import { UpdateProductDtoReq } from './dto/requests/update-product.dto.req'
 import { ProductTypeCompatibilityPreviewDto } from './dto/responses/product.dto.res'
 import { ProductCommandService } from './product-command.service'
 import {
-	ProductMaintenanceService,
-	type ProductDefaultVariantPriceMismatchRepairOptions
+	type ProductDefaultVariantPriceMismatchRepairOptions,
+	ProductMaintenanceService
 } from './product-maintenance.service'
 import {
 	type ProductReadOptions,

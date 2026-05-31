@@ -17,7 +17,7 @@ const catalogDomainSelect = {
 	lastError: true,
 	createdAt: true,
 	updatedAt: true
-} satisfies Prisma.CatalogDomainSelect
+} as const satisfies Prisma.CatalogDomainSelect
 
 @Injectable()
 export class CatalogDomainRepository {

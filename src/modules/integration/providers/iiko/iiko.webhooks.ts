@@ -1,6 +1,5 @@
-import { createHash } from 'crypto'
-
 import { BadRequestException } from '@nestjs/common'
+import { createHash } from 'crypto'
 
 import type {
 	IikoDeliveryOrderStatus,
@@ -314,11 +313,11 @@ function isIikoWebhookEventRecord(
 	if (!isRecord(value)) return false
 	return Boolean(
 		readString(value.eventType) ||
-			readString(value.eventTime) ||
-			readString(value.organizationId) ||
-			readString(value.correlationId) ||
-			isRecord(value.eventInfo) ||
-			isIikoStopListEventInfo(value)
+		readString(value.eventTime) ||
+		readString(value.organizationId) ||
+		readString(value.correlationId) ||
+		isRecord(value.eventInfo) ||
+		isIikoStopListEventInfo(value)
 	)
 }
 
@@ -341,9 +340,7 @@ function inferIikoWebhookEventType(
 }
 
 function isIikoStopListEventInfo(value: unknown): boolean {
-	return (
-		isRecord(value) && Array.isArray(value.terminalGroupsStopListsUpdates)
-	)
+	return isRecord(value) && Array.isArray(value.terminalGroupsStopListsUpdates)
 }
 
 function looksLikeFormPayload(value: string): boolean {
@@ -355,7 +352,7 @@ function trimPreview(value: unknown): string | null {
 	const text =
 		typeof value === 'string'
 			? value
-			: JSON.stringify(value, (_, nestedValue) => {
+			: JSON.stringify(value, (_key: string, nestedValue: unknown) => {
 					if (typeof nestedValue === 'string' && nestedValue.length > 200) {
 						return `${nestedValue.slice(0, 200)}...`
 					}
@@ -363,7 +360,5 @@ function trimPreview(value: unknown): string | null {
 				})
 	if (!text) return null
 	const normalized = text.replace(/\s+/g, ' ').trim()
-	return normalized.length > 500
-		? `${normalized.slice(0, 500)}...`
-		: normalized
+	return normalized.length > 500 ? `${normalized.slice(0, 500)}...` : normalized
 }

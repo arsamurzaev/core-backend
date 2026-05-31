@@ -220,7 +220,11 @@ export class DomainEventOutboxDiagnosticsService {
 	async retryFailed(
 		params: DomainEventOutboxRetryFailedParams = {}
 	): Promise<DomainEventOutboxRetryResult> {
-		const limit = normalizeLimit(params.limit, DEFAULT_RETRY_LIMIT, MAX_RETRY_LIMIT)
+		const limit = normalizeLimit(
+			params.limit,
+			DEFAULT_RETRY_LIMIT,
+			MAX_RETRY_LIMIT
+		)
 		const rows = await this.prisma.domainEventOutbox.findMany({
 			where: {
 				status: DomainEventOutboxStatus.FAILED,
@@ -251,8 +255,7 @@ export class DomainEventOutboxDiagnosticsService {
 			DEFAULT_PROCESSED_RETENTION_DAYS
 		)
 		const limit = normalizeLimit(
-			params.limit ??
-				Number(process.env.DOMAIN_EVENT_OUTBOX_CLEANUP_LIMIT),
+			params.limit ?? Number(process.env.DOMAIN_EVENT_OUTBOX_CLEANUP_LIMIT),
 			DEFAULT_CLEANUP_LIMIT,
 			MAX_CLEANUP_LIMIT
 		)

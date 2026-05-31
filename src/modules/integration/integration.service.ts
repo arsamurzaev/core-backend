@@ -85,8 +85,12 @@ import {
 	MoySkladTestConnectionDto
 } from './dto/responses/moysklad.dto.res'
 import {
-	type IntegrationOrderExportRecord,
+	INTEGRATION_EXTERNAL_ITEM_TYPE_RESTAURANT_SECTION,
+	INTEGRATION_EXTERNAL_ITEM_TYPE_TABLE
+} from './integration-external-items'
+import {
 	type IntegrationExternalItemRecord,
+	type IntegrationOrderExportRecord,
 	type IntegrationProductPreviewRecord,
 	type IntegrationRecord,
 	IntegrationRepository,
@@ -94,10 +98,6 @@ import {
 	type IntegrationWebhookEventRecord,
 	type MappingPreviewAttributeRecord
 } from './integration.repository'
-import {
-	INTEGRATION_EXTERNAL_ITEM_TYPE_RESTAURANT_SECTION,
-	INTEGRATION_EXTERNAL_ITEM_TYPE_TABLE
-} from './integration-external-items'
 import { getIntegrationProviderCapabilities } from './provider-capabilities'
 import { renderSafeProviderErrorMessage } from './provider-error-redaction'
 import { IikoClient } from './providers/iiko/iiko.client'
@@ -1139,9 +1139,8 @@ export class IntegrationService {
 						lastSyncedAt: now
 					})
 				})
-				.filter(
-					(promise): promise is Promise<IntegrationExternalItemRecord> =>
-						Boolean(promise)
+				.filter((promise): promise is Promise<IntegrationExternalItemRecord> =>
+					Boolean(promise)
 				)
 		)
 
@@ -3381,9 +3380,7 @@ export class IntegrationService {
 	private hashIikoWebhookSettingsFilter(
 		filter: ReturnType<typeof buildIikoWebhookSettingsFilter>
 	): string {
-		return createHash('sha256')
-			.update(JSON.stringify(filter))
-			.digest('hex')
+		return createHash('sha256').update(JSON.stringify(filter)).digest('hex')
 	}
 
 	private assertMoySkladWebhookSecret(
@@ -4011,10 +4008,11 @@ export class IntegrationService {
 	}
 
 	private mapIikoWebhookStatus(webhook?: IikoWebhookMetadata | null) {
-		const safeWebhook = webhook ?? {
+		const safeWebhook: IikoWebhookMetadata = webhook ?? {
 			enabled: false,
 			urlPreview: null,
 			secretHash: null,
+			filterHash: null,
 			lastConfiguredAt: null,
 			lastReceivedAt: null,
 			lastEventType: null,

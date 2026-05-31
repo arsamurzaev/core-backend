@@ -428,14 +428,14 @@ function normalizeOptionalString(value?: string | null): string | null {
 
 function normalizeTimeoutMs(value?: number | null): number {
 	const normalized = Number.isFinite(value)
-		? Math.trunc(value as number)
+		? Math.trunc(value)
 		: DEFAULT_TIMEOUT_MS
 	return Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, normalized))
 }
 
 function normalizeProductSyncLimit(value?: number | null): number {
 	const normalized = Number.isFinite(value)
-		? Math.trunc(value as number)
+		? Math.trunc(value)
 		: DEFAULT_PRODUCT_SYNC_LIMIT
 	return Math.min(
 		MAX_PRODUCT_SYNC_LIMIT,
@@ -445,7 +445,7 @@ function normalizeProductSyncLimit(value?: number | null): number {
 
 function normalizeVariantSyncLimit(value?: number | null): number {
 	const normalized = Number.isFinite(value)
-		? Math.trunc(value as number)
+		? Math.trunc(value)
 		: DEFAULT_VARIANT_SYNC_LIMIT
 	return Math.min(
 		MAX_VARIANT_SYNC_LIMIT,
@@ -455,7 +455,7 @@ function normalizeVariantSyncLimit(value?: number | null): number {
 
 function normalizeValueSyncLimit(value?: number | null): number {
 	const normalized = Number.isFinite(value)
-		? Math.trunc(value as number)
+		? Math.trunc(value)
 		: DEFAULT_VALUE_SYNC_LIMIT
 	return Math.min(
 		MAX_VALUE_SYNC_LIMIT,

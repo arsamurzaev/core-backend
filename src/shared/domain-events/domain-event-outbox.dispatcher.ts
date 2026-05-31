@@ -1,12 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
 
 import {
-	DOMAIN_EVENT_BUS,
-	type DomainEvent,
-	type DomainEventBus,
-	type DomainEventDispatcher
-} from './domain-events.contract'
-import {
 	DomainEventOutboxRecord,
 	DomainEventOutboxRepository
 } from './domain-event-outbox.repository'
@@ -14,6 +8,12 @@ import {
 	deserializeDomainEvent,
 	formatDomainEventError
 } from './domain-event-outbox.utils'
+import {
+	DOMAIN_EVENT_BUS,
+	type DomainEvent,
+	type DomainEventBus,
+	type DomainEventDispatcher
+} from './domain-events.contract'
 
 const DEFAULT_DRAIN_LIMIT = 100
 const DEFAULT_MAX_ATTEMPTS = 5
@@ -49,19 +49,18 @@ export class DomainEventOutboxDispatcher implements DomainEventDispatcher {
 		await this.processRows(rows, { throwOnError: true })
 	}
 
-	async drainPending(params: {
-		limit?: number
-		maxAttempts?: number
-		staleProcessingMs?: number
-	} = {}): Promise<DomainEventOutboxDrainResult> {
+	async drainPending(
+		params: {
+			limit?: number
+			maxAttempts?: number
+			staleProcessingMs?: number
+		} = {}
+	): Promise<DomainEventOutboxDrainResult> {
 		const staleProcessingMs =
 			params.staleProcessingMs ?? DEFAULT_PROCESSING_STALE_MS
 		const rows = await this.outbox.findDueForProcessing({
 			limit: normalizePositiveInt(params.limit, DEFAULT_DRAIN_LIMIT),
-			maxAttempts: normalizePositiveInt(
-				params.maxAttempts,
-				DEFAULT_MAX_ATTEMPTS
-			),
+			maxAttempts: normalizePositiveInt(params.maxAttempts, DEFAULT_MAX_ATTEMPTS),
 			staleProcessingBefore: new Date(Date.now() - staleProcessingMs)
 		})
 
@@ -89,8 +88,7 @@ export class DomainEventOutboxDispatcher implements DomainEventDispatcher {
 			skipped: 0
 		}
 		const staleProcessingBefore = new Date(
-			Date.now() -
-				(options.staleProcessingMs ?? DEFAULT_PROCESSING_STALE_MS)
+			Date.now() - (options.staleProcessingMs ?? DEFAULT_PROCESSING_STALE_MS)
 		)
 
 		for (const row of rows) {
@@ -124,6 +122,9 @@ export class DomainEventOutboxDispatcher implements DomainEventDispatcher {
 	}
 }
 
-function normalizePositiveInt(value: number | undefined, fallback: number): number {
+function normalizePositiveInt(
+	value: number | undefined,
+	fallback: number
+): number {
 	return Number.isInteger(value) && value && value > 0 ? value : fallback
 }

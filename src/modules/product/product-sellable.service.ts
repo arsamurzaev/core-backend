@@ -91,10 +91,7 @@ export class ProductSellableService implements ProductSellableReader {
 
 		const products = await this.findProducts(catalogId, uniqueProductIds)
 		return new Map(
-			products.map(product => [
-				product.id,
-				this.buildProjection(product, options)
-			])
+			products.map(product => [product.id, this.buildProjection(product, options)])
 		)
 	}
 
@@ -158,10 +155,7 @@ export class ProductSellableService implements ProductSellableReader {
 			.map(variant => this.resolveDisplayPrice(variant))
 			.filter((price): price is number => price !== null)
 		const legacyPrice = this.toNumber(product.price)
-		const canUseLegacyPrice = this.canUseLegacyProductPrice(
-			mode,
-			selectedVariant
-		)
+		const canUseLegacyPrice = this.canUseLegacyProductPrice(mode, selectedVariant)
 		const resolvedPrices = prices.length
 			? prices
 			: canUseLegacyPrice && legacyPrice !== null
@@ -171,11 +165,7 @@ export class ProductSellableService implements ProductSellableReader {
 		const maxPrice = resolvedPrices.length ? Math.max(...resolvedPrices) : null
 		const availabilityCandidates = selectedVariant
 			? [selectedVariant]
-			: this.resolveAvailabilityCandidates(
-					product.variants,
-					mode,
-					defaultVariant
-				)
+			: this.resolveAvailabilityCandidates(product.variants, mode, defaultVariant)
 
 		return {
 			catalogId: product.catalogId,
@@ -243,8 +233,7 @@ export class ProductSellableService implements ProductSellableReader {
 	private isMatrixVariant(variant: ProductVariantRow): boolean {
 		return (
 			!this.isDefaultVariant(variant) &&
-			(variant.kind === ProductVariantKind.MATRIX ||
-				variant.attributes.length > 0)
+			(variant.kind === ProductVariantKind.MATRIX || variant.attributes.length > 0)
 		)
 	}
 

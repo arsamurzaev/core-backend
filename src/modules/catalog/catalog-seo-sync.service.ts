@@ -3,10 +3,7 @@ import { SeoSettingCreateInput, SeoSettingUpdateInput } from '@generated/models'
 import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import sharp from 'sharp'
 
-import {
-	S3Service,
-	type UploadGeneratedAssetResult
-} from '@/modules/s3/public'
+import { S3Service, type UploadGeneratedAssetResult } from '@/modules/s3/public'
 import { SeoRepository } from '@/modules/seo/public'
 import {
 	MEDIA_VARIANT_NAMES,

@@ -7,8 +7,8 @@ import {
 	CAPABILITY_INVENTORY_INTERNAL,
 	CAPABILITY_PRODUCT_TYPES,
 	CAPABILITY_PRODUCT_VARIANTS,
-	CATALOG_CAPABILITIES,
 	CapabilityService,
+	CATALOG_CAPABILITIES,
 	type CatalogCapability,
 	type CatalogCapabilityFlags
 } from '@/modules/capability/public'

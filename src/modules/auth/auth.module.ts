@@ -6,13 +6,13 @@ import { RedisModule } from '@/infrastructure/redis/redis.module'
 import { AuthController } from './auth.controller'
 import { AuthService } from './auth.service'
 import { CatalogAuthController } from './catalog-auth.controller'
+import { AUTH_SESSION_ISSUER_PORT } from './contracts'
 import { CatalogAccessGuard } from './guards/catalog-access.guard'
 import { OptionalSessionGuard } from './guards/optional-session.guard'
 import { SessionGuard } from './guards/session.guard'
 import { HandoffController } from './handoff/handoff.controller'
 import { HandoffService } from './handoff/handoff.service'
 import { SessionService } from './session/session.service'
-import { AUTH_SESSION_ISSUER_PORT } from './contracts'
 
 @Global()
 @Module({

@@ -192,7 +192,9 @@ export class ProductWriteFinalizer {
 function resolveDefaultVariantSaleUnits(product: {
 	variants?: unknown
 }): unknown[] {
-	const variants = Array.isArray(product.variants) ? product.variants : []
+	const variants: unknown[] = Array.isArray(product.variants)
+		? product.variants
+		: []
 	const defaultVariant = variants.find(variant => {
 		if (!variant || typeof variant !== 'object') return false
 		const row = variant as { kind?: unknown; variantKey?: unknown }

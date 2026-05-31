@@ -1,12 +1,12 @@
 import { DomainEventOutboxStatus } from '@generated/enums'
 
-import { createDomainEvent } from './domain-event.utils'
 import { DomainEventOutboxDispatcher } from './domain-event-outbox.dispatcher'
 import type {
 	DomainEventOutboxRecord,
 	DomainEventOutboxRepository
 } from './domain-event-outbox.repository'
 import { serializeDomainEvent } from './domain-event-outbox.utils'
+import { createDomainEvent } from './domain-event.utils'
 import type { DomainEventBus } from './domain-events.contract'
 
 describe('DomainEventOutboxDispatcher', () => {
@@ -60,9 +60,7 @@ describe('DomainEventOutboxDispatcher', () => {
 		await dispatcher.dispatchMany([event])
 
 		expect(repo.append).toHaveBeenCalledWith([event])
-		expect(repo.findDispatchableByEventIds).toHaveBeenCalledWith([
-			event.eventId
-		])
+		expect(repo.findDispatchableByEventIds).toHaveBeenCalledWith([event.eventId])
 		expect(repo.markProcessing).toHaveBeenCalledWith(row.id, expect.any(Date))
 		expect(bus.dispatch).toHaveBeenCalledWith(
 			expect.objectContaining({

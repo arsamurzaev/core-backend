@@ -46,8 +46,8 @@ import { PrismaModule } from '../infrastructure/prisma/prisma.module'
 import {
 	databaseEnv,
 	httpEnv,
-	integrationEnv,
 	integrationCryptoEnv,
+	integrationEnv,
 	redisEnv,
 	s3Env
 } from './config/env'

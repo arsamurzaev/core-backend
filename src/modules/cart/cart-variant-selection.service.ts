@@ -74,9 +74,14 @@ export class CartVariantSelectionService {
 		}
 
 		if (!canUseVariants) {
-			return this.resolveImplicitProductVariantId(catalogId, input, inventoryMode, {
-				requireExplicitSelection: false
-			})
+			return this.resolveImplicitProductVariantId(
+				catalogId,
+				input,
+				inventoryMode,
+				{
+					requireExplicitSelection: false
+				}
+			)
 		}
 
 		return this.resolveImplicitProductVariantId(catalogId, input, inventoryMode, {

@@ -1,8 +1,8 @@
 import type { Prisma } from '@generated/client'
 import { ProductStatus, ProductVariantStatus } from '@generated/enums'
 import {
-	BadRequestException,
 	BadGatewayException,
+	BadRequestException,
 	ConflictException,
 	Inject,
 	Injectable,
@@ -46,13 +46,13 @@ import type {
 	IikoMetadata,
 	IikoNomenclatureSize,
 	IikoStopListItem,
-	IikoTerminalGroup,
-	IikoTerminalGroupStopListItemsGroup,
-	IikoTerminalGroupStopList,
 	IikoSyncCategory,
 	IikoSyncMenu,
 	IikoSyncProduct,
-	IikoSyncSizePrice
+	IikoSyncSizePrice,
+	IikoTerminalGroup,
+	IikoTerminalGroupStopList,
+	IikoTerminalGroupStopListItemsGroup
 } from './iiko.types'
 
 const SYNC_LOCK_TIMEOUT_MS = 10 * 60 * 1000
@@ -304,10 +304,7 @@ export class IikoSyncService {
 				throw new NotFoundException('Product was not found')
 			}
 
-			const link = await this.repo.findProductLinkByProductId(
-				locked.id,
-				productId
-			)
+			const link = await this.repo.findProductLinkByProductId(locked.id, productId)
 			if (!link) {
 				throw new NotFoundException('Product is not linked to iiko')
 			}
@@ -458,10 +455,7 @@ export class IikoSyncService {
 					organizationIds,
 					terminalGroupIds
 				})
-				applyTerminalGroupAliveStatus(
-					terminalGroups,
-					aliveResponse.isAliveStatus
-				)
+				applyTerminalGroupAliveStatus(terminalGroups, aliveResponse.isAliveStatus)
 			} catch (error) {
 				this.logger.warn('Failed to fetch iiko terminal group availability', {
 					error: renderSafeProviderErrorMessage(error)
@@ -475,9 +469,7 @@ export class IikoSyncService {
 				id: organization.id,
 				name: organization.name,
 				isActive:
-					typeof organization.isActive === 'boolean'
-						? organization.isActive
-					: null
+					typeof organization.isActive === 'boolean' ? organization.isActive : null
 			})),
 			externalMenus: normalizeNamedItems(menusResponse.externalMenus),
 			priceCategories: normalizeNamedItems(menusResponse.priceCategories),
@@ -649,9 +641,7 @@ export class IikoSyncService {
 							catalogId: params.catalogId,
 							data: {
 								...(shouldRename ? { name: group.name } : {}),
-								...(shouldReparent
-									? { parentId: parentCategory?.id ?? null }
-									: {})
+								...(shouldReparent ? { parentId: parentCategory?.id ?? null } : {})
 							}
 						})) ?? category
 				}
@@ -682,9 +672,7 @@ export class IikoSyncService {
 		return categories
 	}
 
-	private resolveSyncableProducts(
-		menu: IikoSyncMenu
-	): IikoSyncProduct[] {
+	private resolveSyncableProducts(menu: IikoSyncMenu): IikoSyncProduct[] {
 		return menu.products.filter(product => {
 			if (product.isDeleted || product.isHidden) return false
 			const type = product.type?.toLowerCase()
@@ -834,8 +822,8 @@ export class IikoSyncService {
 		}
 
 		const categoryIds = product.groupId
-			? [context.categories.get(product.groupId)?.id].filter(
-					(id): id is string => Boolean(id)
+			? [context.categories.get(product.groupId)?.id].filter((id): id is string =>
+					Boolean(id)
 				)
 			: []
 		const categorySync = await this.repo.syncManagedProductCategories(
@@ -983,14 +971,13 @@ export class IikoSyncService {
 			}
 		}
 
-		const deletedVariants = await this.repo.archiveMissingIntegratedProductVariants(
-			{
+		const deletedVariants =
+			await this.repo.archiveMissingIntegratedProductVariants({
 				integrationId: params.integrationId,
 				productId: params.product.id,
 				externalIds,
 				requiredMissingSyncs: 2
-			}
-		)
+			})
 
 		return {
 			createdVariants,
@@ -1266,7 +1253,8 @@ function normalizeTerminalGroups(
 			if (Array.isArray(group.items)) {
 				return group.items.map(item => ({
 					...item,
-					organizationId: normalizeOptionalString(item.organizationId) ?? organizationId
+					organizationId:
+						normalizeOptionalString(item.organizationId) ?? organizationId
 				}))
 			}
 			return [group]
@@ -1278,11 +1266,13 @@ function normalizeTerminalGroups(
 			isActive:
 				typeof item.isActive === 'boolean'
 					? item.isActive
-					: options.isActive ?? null,
+					: (options.isActive ?? null),
 			isAlive: null
 		}))
 		.filter(
-			(item): item is {
+			(
+				item
+			): item is {
 				id: string
 				name: string
 				organizationId: string | null
@@ -1320,7 +1310,7 @@ function mergeTerminalGroups(
 			isActive:
 				existing.isActive === true || item.isActive === true
 					? true
-					: item.isActive ?? existing.isActive,
+					: (item.isActive ?? existing.isActive),
 			isAlive: item.isAlive ?? existing.isAlive
 		})
 	}
@@ -1366,7 +1356,9 @@ function filterStopListsByTerminalGroup(
 	if (!normalizedTerminalGroupId) return stopLists
 	return stopLists.filter(item => {
 		const itemTerminalGroupId = normalizeOptionalString(item.terminalGroupId)
-		return !itemTerminalGroupId || itemTerminalGroupId === normalizedTerminalGroupId
+		return (
+			!itemTerminalGroupId || itemTerminalGroupId === normalizedTerminalGroupId
+		)
 	})
 }
 
@@ -1388,9 +1380,7 @@ function normalizeStopListAvailabilityItems(
 					.map(groupItem =>
 						normalizeStopListAvailabilityItem(nestedStopList, groupItem)
 					)
-					.filter((entry): entry is IikoStopListAvailabilityItem =>
-						Boolean(entry)
-					)
+					.filter((entry): entry is IikoStopListAvailabilityItem => Boolean(entry))
 			}
 
 			const normalized = normalizeStopListAvailabilityItem(

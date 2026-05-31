@@ -574,9 +574,7 @@ function normalizeIntInRange(
 	return numeric
 }
 
-function normalizePreorderSchedule(
-	rawData: Record<string, unknown>
-): {
+function normalizePreorderSchedule(rawData: Record<string, unknown>): {
 	date: Date
 	scheduledAt: string
 	visitDate: string
@@ -634,7 +632,8 @@ function normalizeVisitDate(value: unknown): string | null {
 	if (!raw) return null
 
 	const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-	if (iso) return normalizeDateParts(Number(iso[1]), Number(iso[2]), Number(iso[3]))
+	if (iso)
+		return normalizeDateParts(Number(iso[1]), Number(iso[2]), Number(iso[3]))
 
 	const ru = raw.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/)
 	if (ru) return normalizeDateParts(Number(ru[3]), Number(ru[2]), Number(ru[1]))

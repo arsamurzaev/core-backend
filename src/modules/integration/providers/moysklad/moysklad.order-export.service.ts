@@ -24,6 +24,7 @@ import { MoySkladMetadataCryptoService } from './moysklad.metadata'
 import type {
 	MoySkladCreateCustomerOrderPayload,
 	MoySkladCustomerOrder,
+	MoySkladCustomerOrderPosition,
 	MoySkladEntityType,
 	MoySkladMetaRef
 } from './moysklad.types'
@@ -156,7 +157,7 @@ export class MoySkladOrderExportService {
 			)
 		}
 
-		const positions = []
+		const positions: MoySkladCustomerOrderPosition[] = []
 		for (const item of items) {
 			const assortment = await this.resolveAssortmentRef(integrationId, item)
 			const quantity = item.baseQuantity > 0 ? item.baseQuantity : item.quantity

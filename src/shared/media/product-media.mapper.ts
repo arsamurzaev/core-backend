@@ -80,9 +80,10 @@ export class ProductMediaMapper {
 	): T {
 		if (!Array.isArray(value.variants)) return value
 
+		const variants: unknown[] = value.variants
 		return {
 			...value,
-			variants: value.variants.map(variant => {
+			variants: variants.map(variant => {
 				if (!isRecord(variant) || !('integrationLinks' in variant)) {
 					return variant
 				}
@@ -90,9 +91,7 @@ export class ProductMediaMapper {
 				const { integrationLinks, ...rest } = variant
 				return {
 					...rest,
-					integration: this.mapIntegration(
-						Array.isArray(integrationLinks) ? integrationLinks : undefined
-					)
+					integration: this.mapIntegration(readIntegrationLinks(integrationLinks))
 				}
 			})
 		}
@@ -115,4 +114,23 @@ export class ProductMediaMapper {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function readIntegrationLinks(
+	value: unknown
+): ProductIntegrationLinkRecord[] | undefined {
+	if (!Array.isArray(value)) return undefined
+	return value.filter(isProductIntegrationLinkRecord)
+}
+
+function isProductIntegrationLinkRecord(
+	value: unknown
+): value is ProductIntegrationLinkRecord {
+	if (!isRecord(value) || typeof value.externalId !== 'string') return false
+	const integration = value.integration
+	return (
+		integration === null ||
+		integration === undefined ||
+		(isRecord(integration) && typeof integration.provider === 'string')
+	)
 }

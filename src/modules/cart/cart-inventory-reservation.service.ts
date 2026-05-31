@@ -4,8 +4,8 @@ import { Inject, Injectable } from '@nestjs/common'
 
 import {
 	INVENTORY_RESERVATION_PORT,
-	type InventoryTransactionEffects,
-	type InventoryReservationPort
+	type InventoryReservationPort,
+	type InventoryTransactionEffects
 } from '@/modules/inventory/contracts'
 import type { DomainEvent } from '@/shared/domain-events/domain-events.contract'
 

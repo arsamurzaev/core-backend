@@ -425,13 +425,11 @@ describe('IntegrationService', () => {
 							syncSource: metadata?.syncSource ?? 'external_menu',
 							importImages: metadata?.importImages ?? true,
 							exportOrders: metadata?.exportOrders ?? false,
-							orderExportServiceType:
-								metadata?.orderExportServiceType ?? null,
+							orderExportServiceType: metadata?.orderExportServiceType ?? null,
 							orderExportSourceKey: metadata?.orderExportSourceKey ?? null,
 							lastRevision: metadata?.lastRevision ?? null,
 							lastMenuSyncedAt: metadata?.lastMenuSyncedAt ?? null,
-							lastStopListSyncedAt:
-								metadata?.lastStopListSyncedAt ?? null,
+							lastStopListSyncedAt: metadata?.lastStopListSyncedAt ?? null,
 							webhook: metadata?.webhook ?? {
 								enabled: false,
 								urlPreview: null,
@@ -640,12 +638,15 @@ describe('IntegrationService', () => {
 				webhook
 			}
 		} as any)
-		repo.updateIiko.mockImplementation(async (_catalogId, params) => ({
-			...integrationRecord,
-			provider: IntegrationProvider.IIKO,
-			metadata: params.metadata,
-			isActive: params.isActive ?? true
-		}) as any)
+		repo.updateIiko.mockImplementation(
+			async (_catalogId, params) =>
+				({
+					...integrationRecord,
+					provider: IntegrationProvider.IIKO,
+					metadata: params.metadata,
+					isActive: params.isActive ?? true
+				}) as any
+		)
 
 		const result = await runWithCatalog(() =>
 			service.updateIiko({
@@ -692,12 +693,15 @@ describe('IntegrationService', () => {
 				}
 			}
 		} as any)
-		repo.updateIiko.mockImplementation(async (_catalogId, params) => ({
-			...integrationRecord,
-			provider: IntegrationProvider.IIKO,
-			metadata: params.metadata,
-			isActive: params.isActive ?? true
-		}) as any)
+		repo.updateIiko.mockImplementation(
+			async (_catalogId, params) =>
+				({
+					...integrationRecord,
+					provider: IntegrationProvider.IIKO,
+					metadata: params.metadata,
+					isActive: params.isActive ?? true
+				}) as any
+		)
 
 		const result = await runWithCatalog(() =>
 			service.updateIiko({
@@ -1135,9 +1139,7 @@ describe('IntegrationService', () => {
 			} as any
 		])
 
-		const result = await runWithCatalog(() =>
-			service.getIikoOrderExports('10')
-		)
+		const result = await runWithCatalog(() => service.getIikoOrderExports('10'))
 
 		expect(repo.findOrderExportsByCatalog).toHaveBeenCalledWith(
 			'catalog-1',
@@ -1224,9 +1226,7 @@ describe('IntegrationService', () => {
 		jest
 			.spyOn(IikoClient.prototype, 'updateWebhookSettings')
 			.mockRejectedValue(
-				new Error(
-					'iiko API error 429: {"error":"TOO_MANY_REQUESTS"}'
-				)
+				new Error('iiko API error 429: {"error":"TOO_MANY_REQUESTS"}')
 			)
 
 		try {
@@ -1317,9 +1317,7 @@ describe('IntegrationService', () => {
 			'inline'
 		)
 		expect(iikoQueue.enqueueStockWebhookSync).toHaveBeenCalledWith(iikoRecord)
-		expect(repo.markWebhookEventProcessed).toHaveBeenCalledWith(
-			'webhook-event-1'
-		)
+		expect(repo.markWebhookEventProcessed).toHaveBeenCalledWith('webhook-event-1')
 		expect(repo.updateIikoMetadataById).toHaveBeenCalledWith(
 			'iiko-integration-1',
 			expect.objectContaining({

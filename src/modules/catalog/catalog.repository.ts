@@ -17,7 +17,7 @@ const enumValueSelect = {
 	businessId: true,
 	createdAt: true,
 	updatedAt: true
-}
+} as const satisfies Prisma.AttributeEnumValueSelect
 
 const attributeSelect = {
 	id: true,
@@ -34,7 +34,7 @@ const attributeSelect = {
 	types: {
 		select: { id: true }
 	}
-}
+} as const satisfies Prisma.AttributeSelect
 
 const attributeSelectWithEnums = {
 	...attributeSelect,
@@ -43,7 +43,7 @@ const attributeSelectWithEnums = {
 		select: enumValueSelect,
 		orderBy: [{ displayOrder: 'asc' as const }, { value: 'asc' as const }]
 	}
-}
+} as const satisfies Prisma.AttributeSelect
 
 const typeSelectWithAttributes = {
 	id: true,
@@ -54,14 +54,14 @@ const typeSelectWithAttributes = {
 		select: attributeSelectWithEnums,
 		orderBy: [{ displayOrder: 'asc' as const }, { key: 'asc' as const }]
 	}
-}
+} as const satisfies Prisma.TypeSelect
 
 const catalogContactSelect = {
 	id: true,
 	type: true,
 	position: true,
 	value: true
-}
+} as const satisfies Prisma.CatalogContactSelect
 
 const catalogSeoSelect = {
 	id: true,
@@ -99,7 +99,7 @@ const catalogSeoSelect = {
 	sitemapChangeFreq: true,
 	createdAt: true,
 	updatedAt: true
-}
+} as const satisfies Prisma.SeoSettingSelect
 
 const catalogSeoRelationSelect = {
 	seoSettings: {
@@ -111,9 +111,9 @@ const catalogSeoRelationSelect = {
 		orderBy: [{ updatedAt: 'desc' as const }, { createdAt: 'desc' as const }],
 		take: 1
 	}
-}
+} as const satisfies Prisma.CatalogSelect
 
-const catalogSelect: Prisma.CatalogSelect = {
+const catalogSelect = {
 	id: true,
 	slug: true,
 	domain: true,
@@ -160,7 +160,7 @@ const catalogSelect: Prisma.CatalogSelect = {
 		},
 		orderBy: [{ scope: 'asc' as const }, { createdAt: 'asc' as const }]
 	}
-}
+} as const satisfies Prisma.CatalogSelect
 
 const catalogSelectWithType = {
 	...catalogSelect,
@@ -172,14 +172,14 @@ const catalogSelectWithType = {
 	type: {
 		select: typeSelectWithAttributes
 	}
-}
+} as const satisfies Prisma.CatalogSelect
 
-const catalogCurrentSelect: Prisma.CatalogSelect = {
+const catalogCurrentSelect = {
 	...catalogSeoRelationSelect,
 	createdAt: false,
 	updatedAt: false,
 	deleteAt: false
-}
+} as const satisfies Prisma.CatalogSelect
 
 const catalogCurrentShellSelect = {
 	...catalogSelect,
@@ -192,7 +192,7 @@ const catalogCurrentShellSelect = {
 		select: catalogContactSelect,
 		orderBy: [{ position: 'asc' as const }, { createdAt: 'asc' as const }]
 	}
-}
+} as const satisfies Prisma.CatalogSelect
 
 const catalogTypeSelect = {
 	id: true,
@@ -203,7 +203,7 @@ const catalogTypeSelect = {
 		select: attributeSelectWithEnums,
 		orderBy: [{ displayOrder: 'asc' as const }, { key: 'asc' as const }]
 	}
-}
+} as const satisfies Prisma.TypeSelect
 
 const catalogCurrentFallbackSelect = {
 	...catalogCurrentSelect,
@@ -225,7 +225,6 @@ const catalogCurrentFallbackSelect = {
 					displayOrder: true,
 					createdAt: true,
 					updatedAt: true,
-					typeId: true,
 					enumValues: {
 						where: { deleteAt: null },
 						select: {
@@ -244,7 +243,7 @@ const catalogCurrentFallbackSelect = {
 			}
 		}
 	}
-}
+} as const satisfies Prisma.CatalogSelect
 
 @Injectable()
 export class CatalogRepository {

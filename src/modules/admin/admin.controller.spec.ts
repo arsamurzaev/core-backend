@@ -52,9 +52,7 @@ describe('AdminController', () => {
 
 		controller = module.get<AdminController>(AdminController)
 		service = module.get(AdminService)
-		outbox = module.get(
-			DomainEventOutboxDiagnosticsService
-		) as jest.Mocked<DomainEventOutboxDiagnosticsService>
+		outbox = module.get(DomainEventOutboxDiagnosticsService)
 	})
 
 	it('delegates catalog content soft-delete to service', async () => {
@@ -185,9 +183,7 @@ describe('AdminController', () => {
 		outbox.retryOne.mockResolvedValue(result)
 
 		await expect(
-			controller.retryDomainEventOutboxItem(
-				'11111111-1111-1111-1111-111111111111'
-			)
+			controller.retryDomainEventOutboxItem('11111111-1111-1111-1111-111111111111')
 		).resolves.toBe(result)
 		expect(outbox.retryOne).toHaveBeenCalledWith(
 			'11111111-1111-1111-1111-111111111111'

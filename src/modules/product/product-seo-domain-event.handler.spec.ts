@@ -8,7 +8,9 @@ import { ProductRepository } from './product.repository'
 describe('ProductSeoDomainEventHandler', () => {
 	let bus: InProcessDomainEventBus
 	let repo: jest.Mocked<Pick<ProductRepository, 'findById'>>
-	let seo: jest.Mocked<Pick<ProductSeoSyncService, 'syncProduct' | 'removeProduct'>>
+	let seo: jest.Mocked<
+		Pick<ProductSeoSyncService, 'syncProduct' | 'removeProduct'>
+	>
 
 	beforeEach(() => {
 		bus = new InProcessDomainEventBus()

@@ -303,7 +303,10 @@ export class ProductMaintenanceService {
 		return Math.min(value, 100)
 	}
 
-	private normalizeBatchSize(value: number | undefined, fallback: number): number {
+	private normalizeBatchSize(
+		value: number | undefined,
+		fallback: number
+	): number {
 		if (!Number.isInteger(value) || value <= 0) {
 			return fallback
 		}

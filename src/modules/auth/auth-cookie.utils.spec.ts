@@ -2,8 +2,7 @@ import { getSessionCookieNames, resolveCookieDomain } from './auth-cookie.utils'
 
 describe('auth cookie utils', () => {
 	const originalBaseDomains = process.env.CATALOG_BASE_DOMAINS
-	const originalPlatformCookieSubdomains =
-		process.env.PLATFORM_COOKIE_SUBDOMAINS
+	const originalPlatformCookieSubdomains = process.env.PLATFORM_COOKIE_SUBDOMAINS
 
 	beforeEach(() => {
 		process.env.CATALOG_BASE_DOMAINS = 'myctlg.ru,myctlg-update.ru'

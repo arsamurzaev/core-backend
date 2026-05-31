@@ -1,7 +1,7 @@
 import { DatabaseInterface } from './database.interface'
 import { HttpInterface } from './http.interface'
-import { IntegrationInterface } from './integration.interface'
 import { IntegrationCryptoInterface } from './integration-crypto.interface'
+import { IntegrationInterface } from './integration.interface'
 import { RedisInterface } from './redis.interface'
 import { S3Interface } from './s3.interface'
 

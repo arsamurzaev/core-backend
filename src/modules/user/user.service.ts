@@ -2,11 +2,11 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common'
 import { hash } from 'argon2'
 
+import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import {
 	AUTH_SESSION_ISSUER_PORT,
 	type AuthSessionIssuerPort
 } from '@/modules/auth/contracts'
-import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
 import { CreateUserDtoReq } from './dto/requests/create-user.dto.req'
 

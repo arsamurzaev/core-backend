@@ -1,10 +1,10 @@
 import {
 	type IntegrationOrderExportStatus,
 	IntegrationProvider,
-	IntegrationSyncSnapshotCompleteness,
 	IntegrationSyncRunMode,
 	IntegrationSyncRunStatus,
 	IntegrationSyncRunTrigger,
+	IntegrationSyncSnapshotCompleteness,
 	IntegrationSyncStatus
 } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'

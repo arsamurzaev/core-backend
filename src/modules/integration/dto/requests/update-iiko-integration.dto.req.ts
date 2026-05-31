@@ -1,5 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger'
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator'
+import {
+	IsBoolean,
+	IsIn,
+	IsInt,
+	IsOptional,
+	IsString,
+	Max,
+	MaxLength,
+	Min
+} from 'class-validator'
 
 export class UpdateIikoIntegrationDtoReq {
 	@ApiPropertyOptional({ type: String, example: 'demo-api-login' })
@@ -61,7 +70,11 @@ export class UpdateIikoIntegrationDtoReq {
 	@MaxLength(64)
 	terminalGroupId?: string | null
 
-	@ApiPropertyOptional({ type: String, nullable: true, example: 'Main terminal' })
+	@ApiPropertyOptional({
+		type: String,
+		nullable: true,
+		example: 'Main terminal'
+	})
 	@IsOptional()
 	@IsString()
 	@MaxLength(255)

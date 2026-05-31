@@ -42,7 +42,9 @@ function isTestFile(filePath: string): boolean {
 
 function isInsidePath(childPath: string, parentPath: string): boolean {
 	const path = relative(parentPath, childPath)
-	return path === '' || (path !== '' && !path.startsWith('..') && !isAbsolute(path))
+	return (
+		path === '' || (path !== '' && !path.startsWith('..') && !isAbsolute(path))
+	)
 }
 
 function collectSourceFiles(dir: string): string[] {
@@ -110,7 +112,10 @@ function isAllowedCrossModuleImport(edge: ImportEdge): boolean {
 	const targetPath = normalizePath(edge.resolvedPath ?? edge.specifier)
 	const specifier = normalizePath(edge.specifier)
 
-	if (targetPath.endsWith('/contracts') || targetPath.endsWith('/contracts.ts')) {
+	if (
+		targetPath.endsWith('/contracts') ||
+		targetPath.endsWith('/contracts.ts')
+	) {
 		return true
 	}
 

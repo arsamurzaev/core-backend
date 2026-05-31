@@ -9,7 +9,10 @@ import {
 	resolveCheckoutContactsSnapshot
 } from './catalog-checkout'
 
-function futureVisit(daysFromNow = 1): { visitDate: string; visitTime: string } {
+function futureVisit(daysFromNow = 1): {
+	visitDate: string
+	visitTime: string
+} {
 	const date = new Date()
 	date.setDate(date.getDate() + daysFromNow)
 	date.setHours(19, 30, 0, 0)
@@ -45,7 +48,9 @@ describe('catalog checkout helpers', () => {
 		expect(
 			resolveCatalogCheckoutConfig({ typeCode: 'restaurant' }).enabledMethods
 		).toEqual([CartCheckoutMethod.DELIVERY, CartCheckoutMethod.PICKUP])
-		expect(resolveCatalogCheckoutConfig({ typeCode: 'restaurant' }).preorder).toEqual({
+		expect(
+			resolveCatalogCheckoutConfig({ typeCode: 'restaurant' }).preorder
+		).toEqual({
 			minLeadTimeMinutes: 30,
 			maxAdvanceDays: 14
 		})
@@ -345,8 +350,8 @@ describe('catalog checkout helpers', () => {
 	it('rejects hall checkout without table id or backend-stored table code', () => {
 		const config = resolveCatalogCheckoutConfig({ typeCode: 'restaurant' })
 
-		expect(
-			() => normalizeCartCheckoutData({
+		expect(() =>
+			normalizeCartCheckoutData({
 				config,
 				data: {
 					customerName: 'Ivan',

@@ -13,6 +13,7 @@ import slugify from 'slugify'
 import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
 import {
 	DOMAIN_EVENT_DISPATCHER,
+	type DomainEvent,
 	type DomainEventDispatcher
 } from '@/shared/domain-events/domain-events.contract'
 
@@ -581,7 +582,7 @@ export class MoySkladVariantSyncService {
 	}): Promise<void> {
 		if (!this.events) return
 
-		const events = []
+		const events: DomainEvent[] = []
 		if (
 			params.priceChanged &&
 			hasNumericFieldChanged(params.previousPrice, params.nextPrice)
