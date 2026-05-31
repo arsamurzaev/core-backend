@@ -967,6 +967,45 @@ export class AdminService {
 		}
 	}
 
+	async resetCatalogOwnerPassword(id: string) {
+		const current = await this.prisma.catalog.findUnique({
+			where: { id },
+			select: { id: true, userId: true }
+		})
+
+		if (!current) throw new NotFoundException('Catalog not found')
+		if (!current.userId) throw new NotFoundException('Catalog owner not found')
+
+		const password = DEFAULT_CATALOG_OWNER_PASSWORD
+		const passwordHash = await hash(password)
+
+		const updated = await this.prisma.$transaction(async tx => {
+			const owner = await tx.user.update({
+				where: { id: current.userId },
+				data: { password: passwordHash },
+				select: {
+					id: true,
+					name: true,
+					login: true
+				}
+			})
+			const catalog = await tx.catalog.findUniqueOrThrow({
+				where: { id: current.id },
+				select: adminCatalogSelect
+			})
+
+			return { owner, catalog }
+		})
+
+		return {
+			catalog: this.mapAdminCatalog(updated.catalog),
+			owner: {
+				...updated.owner,
+				password
+			}
+		}
+	}
+
 	async updateCatalog(id: string, dto: AdminUpdateCatalogDtoReq) {
 		const current = await this.prisma.catalog.findUnique({
 			where: { id },

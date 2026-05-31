@@ -174,6 +174,19 @@ export class AdminController {
 		) as Promise<AdminCreateCatalogResponseDto>
 	}
 
+	@Post('/catalogs/:id/owner-password/reset')
+	@ApiOperation({
+		summary: 'Reset catalog owner password to default and return credentials'
+	})
+	@ApiOkResponse({ type: AdminCreateCatalogResponseDto })
+	async resetCatalogOwnerPassword(
+		@Param('id', ParseUUIDPipe) id: string
+	): Promise<AdminCreateCatalogResponseDto> {
+		return this.adminService.resetCatalogOwnerPassword(
+			id
+		) as Promise<AdminCreateCatalogResponseDto>
+	}
+
 	@Patch('/catalogs/:id')
 	@ApiOperation({ summary: 'Редактировать каталог' })
 	@ApiOkResponse({ type: AdminCatalogListItemDto })

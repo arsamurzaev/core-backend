@@ -50,7 +50,8 @@ function createTransactionMock() {
 			updateMany: jest.fn().mockResolvedValue(createBatchPayload(12))
 		},
 		catalog: {
-			update: jest.fn()
+			update: jest.fn(),
+			findUniqueOrThrow: jest.fn()
 		},
 		catalogConfig: {
 			updateMany: jest.fn()
@@ -830,6 +831,42 @@ describe('AdminService', () => {
 				name: true,
 				login: true
 			}
+		})
+	})
+
+	it('resets catalog owner password to the default value', async () => {
+		const { prisma, service, tx } = createService()
+		prisma.catalog.findUnique.mockResolvedValueOnce({
+			id: 'catalog-1',
+			userId: 'user-1'
+		})
+		tx.user.update.mockResolvedValueOnce({
+			id: 'user-1',
+			name: 'Catalog Owner',
+			login: 'catalog-one'
+		})
+		tx.catalog.findUniqueOrThrow.mockResolvedValueOnce(createAdminCatalogRecord())
+
+		const result = await service.resetCatalogOwnerPassword('catalog-1')
+
+		expect(result.owner).toEqual({
+			id: 'user-1',
+			name: 'Catalog Owner',
+			login: 'catalog-one',
+			password: '00000000'
+		})
+		expect(tx.user.update).toHaveBeenCalledWith({
+			where: { id: 'user-1' },
+			data: { password: expect.any(String) },
+			select: {
+				id: true,
+				name: true,
+				login: true
+			}
+		})
+		expect(tx.catalog.findUniqueOrThrow).toHaveBeenCalledWith({
+			where: { id: 'catalog-1' },
+			select: expect.any(Object)
 		})
 	})
 
