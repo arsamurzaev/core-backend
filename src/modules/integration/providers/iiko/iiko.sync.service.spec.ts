@@ -52,6 +52,7 @@ describe('IikoSyncService', () => {
 
 		const repo = createRepoMock()
 		const products = createProductsMock()
+		const events = { dispatch: jest.fn().mockResolvedValue(undefined) }
 		const service = new IikoSyncService(
 			repo as any,
 			{
@@ -80,7 +81,9 @@ describe('IikoSyncService', () => {
 				get: jest.fn().mockReturnValue({
 					iikoApiBaseUrl: 'https://iiko.example'
 				})
-			} as any
+			} as any,
+			undefined,
+			events as any
 		)
 
 		const result = await service.syncCatalog('catalog-1')
@@ -115,6 +118,14 @@ describe('IikoSyncService', () => {
 			expect.objectContaining({
 				totalProducts: 1,
 				lastRevision: 7
+			})
+		)
+		expect(events.dispatch).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: 'product.changed',
+				catalogId: 'catalog-1',
+				productId: '*',
+				changes: ['catalog_products', 'category_products', 'category_list']
 			})
 		)
 	})
@@ -486,10 +497,18 @@ describe('IikoSyncService', () => {
 			changedVariants: 2,
 			changedProducts: 1
 		})
-		const service = createService(repo, createProductsMock(), {
-			terminalGroupId: 'terminal-1',
-			terminalGroupName: 'Main terminal'
-		})
+		const events = { dispatch: jest.fn().mockResolvedValue(undefined) }
+		const service = createService(
+			repo,
+			createProductsMock(),
+			{
+				terminalGroupId: 'terminal-1',
+				terminalGroupName: 'Main terminal'
+			},
+			{
+				events
+			}
+		)
 
 		const result = await service.syncStopList('catalog-1')
 
@@ -509,6 +528,14 @@ describe('IikoSyncService', () => {
 						balance: 3
 					})
 				]
+			})
+		)
+		expect(events.dispatch).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: 'product.changed',
+				catalogId: 'catalog-1',
+				productId: '*',
+				changes: ['catalog_products', 'category_products', 'category_list']
 			})
 		)
 		expect(repo.finishIikoStockSync).toHaveBeenCalledWith('catalog-1', {
@@ -599,7 +626,11 @@ function createProductsMock() {
 function createService(
 	repo: ReturnType<typeof createRepoMock>,
 	products: ReturnType<typeof createProductsMock>,
-	metadata: Record<string, unknown> = {}
+	metadata: Record<string, unknown> = {},
+	options: {
+		cache?: { bumpVersion: jest.Mock }
+		events?: { dispatch: jest.Mock }
+	} = {}
 ) {
 	return new IikoSyncService(
 		repo as any,
@@ -633,6 +664,8 @@ function createService(
 			get: jest.fn().mockReturnValue({
 				iikoApiBaseUrl: 'https://iiko.example'
 			})
-		} as any
+		} as any,
+		options.cache as any,
+		options.events as any
 	)
 }

@@ -7,7 +7,8 @@ import {
 	Inject,
 	Injectable,
 	Logger,
-	NotFoundException
+	NotFoundException,
+	Optional
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { createHash } from 'crypto'
@@ -23,6 +24,17 @@ import {
 	type ProductExternalSyncPort,
 	type ProductExternalSyncProductRecord
 } from '@/modules/product/public'
+import { CacheService } from '@/shared/cache/cache.service'
+import {
+	CATEGORY_LIST_CACHE_VERSION,
+	CATEGORY_PRODUCTS_CACHE_VERSION,
+	PRODUCTS_CACHE_VERSION
+} from '@/shared/cache/catalog-cache.constants'
+import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
+import {
+	DOMAIN_EVENT_DISPATCHER,
+	type DomainEventDispatcher
+} from '@/shared/domain-events/domain-events.contract'
 
 import {
 	type CategorySyncRecord,
@@ -153,7 +165,12 @@ export class IikoSyncService {
 		private readonly products: ProductExternalSyncPort,
 		@Inject(CAPABILITY_ASSERT_PORT)
 		private readonly featureAssertions: CapabilityAssertPort,
-		private readonly configService: ConfigService<AllInterfaces>
+		private readonly configService: ConfigService<AllInterfaces>,
+		@Optional()
+		private readonly cache?: CacheService,
+		@Optional()
+		@Inject(DOMAIN_EVENT_DISPATCHER)
+		private readonly events?: DomainEventDispatcher
 	) {}
 
 	async syncCatalog(
@@ -243,6 +260,7 @@ export class IikoSyncService {
 				lastRevision: normalizeRevision(menu.revision),
 				lastStopListSyncedAt: stock?.syncedAt ?? null
 			})
+			await this.invalidateProductCaches(catalogId)
 
 			await this.reportProgress(options.runId, {
 				phase: 'COMPLETED',
@@ -383,6 +401,7 @@ export class IikoSyncService {
 				syncedAt,
 				lastRevision: normalizeRevision(menu.revision)
 			})
+			await this.invalidateProductCaches(catalogId)
 			await this.reportProgress(options.runId, {
 				phase: 'COMPLETED',
 				message: 'iiko product sync completed',
@@ -587,6 +606,9 @@ export class IikoSyncService {
 			items,
 			syncedAt
 		})
+		if (result.changedVariants > 0 || result.changedProducts > 0) {
+			await this.invalidateProductCaches(params.catalogId)
+		}
 
 		await this.reportProgress(params.runId, {
 			phase: 'SYNCING_STOP_LIST',
@@ -1080,6 +1102,25 @@ export class IikoSyncService {
 	private resolveBaseUrl(): string {
 		const config = this.configService.get('integration', { infer: true })
 		return config?.iikoApiBaseUrl ?? 'https://api-ru.iiko.services'
+	}
+
+	private async invalidateProductCaches(catalogId: string): Promise<void> {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'product.changed',
+					catalogId,
+					productId: '*',
+					changes: ['catalog_products', 'category_products', 'category_list']
+				})
+			)
+			return
+		}
+
+		if (!this.cache) return
+		await this.cache.bumpVersion(PRODUCTS_CACHE_VERSION, catalogId)
+		await this.cache.bumpVersion(CATEGORY_PRODUCTS_CACHE_VERSION, catalogId)
+		await this.cache.bumpVersion(CATEGORY_LIST_CACHE_VERSION, catalogId)
 	}
 }
 

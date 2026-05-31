@@ -15,7 +15,8 @@ import {
 	Inject,
 	Injectable,
 	Logger,
-	NotFoundException
+	NotFoundException,
+	Optional
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { createHash, randomBytes, timingSafeEqual } from 'crypto'
@@ -36,6 +37,17 @@ import {
 	PRODUCT_EXTERNAL_SYNC_PORT,
 	type ProductExternalSyncPort
 } from '@/modules/product/public'
+import { CacheService } from '@/shared/cache/cache.service'
+import {
+	CATEGORY_LIST_CACHE_VERSION,
+	CATEGORY_PRODUCTS_CACHE_VERSION,
+	PRODUCTS_CACHE_VERSION
+} from '@/shared/cache/catalog-cache.constants'
+import { createDomainEvent } from '@/shared/domain-events/domain-event.utils'
+import {
+	DOMAIN_EVENT_DISPATCHER,
+	type DomainEventDispatcher
+} from '@/shared/domain-events/domain-events.contract'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 
@@ -318,7 +330,12 @@ export class IntegrationService {
 		private readonly featureReader: CapabilityReaderPort,
 		@Inject(PRODUCT_EXTERNAL_SYNC_PORT)
 		private readonly products: ProductExternalSyncPort,
-		private readonly configService: ConfigService<AllInterfaces>
+		private readonly configService: ConfigService<AllInterfaces>,
+		@Optional()
+		private readonly cache?: CacheService,
+		@Optional()
+		@Inject(DOMAIN_EVENT_DISPATCHER)
+		private readonly events?: DomainEventDispatcher
 	) {}
 
 	async getMoySklad(): Promise<MoySkladIntegrationDto> {
@@ -1804,10 +1821,30 @@ export class IntegrationService {
 		})
 
 		if (deleted > 0) {
+			await this.invalidateProductCaches(integration.catalogId)
 			this.logger.log(
 				`Soft deleted ${deleted} items from MoySklad delete webhook for catalog ${integration.catalogId}`
 			)
 		}
+	}
+
+	private async invalidateProductCaches(catalogId: string): Promise<void> {
+		if (this.events) {
+			await this.events.dispatch(
+				createDomainEvent({
+					type: 'product.changed',
+					catalogId,
+					productId: '*',
+					changes: ['catalog_products', 'category_products', 'category_list']
+				})
+			)
+			return
+		}
+
+		if (!this.cache) return
+		await this.cache.bumpVersion(PRODUCTS_CACHE_VERSION, catalogId)
+		await this.cache.bumpVersion(CATEGORY_PRODUCTS_CACHE_VERSION, catalogId)
+		await this.cache.bumpVersion(CATEGORY_LIST_CACHE_VERSION, catalogId)
 	}
 
 	async cancelMoySkladSync(): Promise<void> {

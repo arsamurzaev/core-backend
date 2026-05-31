@@ -22,6 +22,7 @@ import {
 	PRODUCT_EXTERNAL_SYNC_PORT,
 	type ProductExternalSyncPort
 } from '@/modules/product/public'
+import { DOMAIN_EVENT_DISPATCHER } from '@/shared/domain-events/domain-events.contract'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
 import { IntegrationRepository } from './integration.repository'
@@ -115,6 +116,7 @@ describe('IntegrationService', () => {
 	let iikoMetadataCrypto: jest.Mocked<IikoMetadataCryptoService>
 	let audit: jest.Mocked<AuditService>
 	let products: jest.Mocked<ProductExternalSyncPort>
+	let events: { dispatch: jest.Mock }
 
 	const runWithCatalog = <T>(fn: () => Promise<T>) =>
 		RequestContext.run(
@@ -468,6 +470,12 @@ describe('IntegrationService', () => {
 					useExisting: AuditService
 				},
 				{
+					provide: DOMAIN_EVENT_DISPATCHER,
+					useValue: {
+						dispatch: jest.fn().mockResolvedValue(undefined)
+					}
+				},
+				{
 					provide: CapabilityService,
 					useValue: {
 						assertCanUseMoySkladIntegration: jest.fn().mockResolvedValue(undefined),
@@ -501,6 +509,7 @@ describe('IntegrationService', () => {
 		iikoMetadataCrypto = module.get(IikoMetadataCryptoService)
 		audit = module.get(AuditService)
 		products = module.get(PRODUCT_EXTERNAL_SYNC_PORT)
+		events = module.get<{ dispatch: jest.Mock }>(DOMAIN_EVENT_DISPATCHER)
 		jest.spyOn(MoySkladClient.prototype, 'createWebhook').mockResolvedValue({
 			id: 'product-delete-webhook-1',
 			accountId: 'account-1',
@@ -2311,6 +2320,14 @@ describe('IntegrationService', () => {
 				lastError: null
 			})
 		)
+		expect(events.dispatch).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: 'product.changed',
+				catalogId: 'catalog-1',
+				productId: '*',
+				changes: ['catalog_products', 'category_products', 'category_list']
+			})
+		)
 	})
 
 	it('soft deletes a linked variant from MoySklad delete webhook', async () => {
@@ -2379,6 +2396,14 @@ describe('IntegrationService', () => {
 			catalogId: 'catalog-1',
 			productId: 'product-1'
 		})
+		expect(events.dispatch).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: 'product.changed',
+				catalogId: 'catalog-1',
+				productId: '*',
+				changes: ['catalog_products', 'category_products', 'category_list']
+			})
+		)
 	})
 
 	it('queues product sync from MoySklad product change webhook', async () => {
