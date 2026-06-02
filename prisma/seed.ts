@@ -704,6 +704,8 @@ async function clearDatabase() {
 		prisma.user.deleteMany(),
 		prisma.regionality.deleteMany()
 	])
+
+	await prisma.country.deleteMany()
 }
 
 function variantSkuSegment(value: string): string {
@@ -832,8 +834,21 @@ async function main() {
 
 	const passwordHash = await hash('password')
 
+	const defaultCountry = await prisma.country.create({
+		data: {
+			code: 'RU',
+			name: 'Россия'
+		}
+	})
+
 	const defaultRegion = await prisma.regionality.create({
-		data: { code: 'RU-MOW', name: 'Москва' }
+		data: {
+			code: 'RU-MOW',
+			name: 'Москва',
+			country: { connect: { id: defaultCountry.id } },
+			countryCode: defaultCountry.code,
+			countryName: defaultCountry.name
+		}
 	})
 
 	const admin = await prisma.user.create({

@@ -2,6 +2,7 @@ import { CartStatus, CartTableSessionStatus, Prisma } from '@generated/client'
 import type { CatalogInventoryMode } from '@generated/enums'
 import {
 	BadRequestException,
+	ForbiddenException,
 	Inject,
 	Injectable,
 	NotFoundException
@@ -175,7 +176,8 @@ export class CartLineService {
 
 	async removeItem(
 		cartId: string,
-		itemId: string
+		itemId: string,
+		options: { guestSessionId?: string | null } = {}
 	): Promise<CartLineMutationResult> {
 		const normalizedItemId = itemId.trim()
 		if (!normalizedItemId) {
@@ -204,6 +206,15 @@ export class CartLineService {
 
 				if (!item) {
 					throw new NotFoundException('Позиция корзины не найдена')
+				}
+
+				if (
+					options.guestSessionId !== undefined &&
+					item.guestSessionId !== options.guestSessionId
+				) {
+					throw new ForbiddenException(
+						'Эту позицию может удалить только гость, который ее добавил'
+					)
 				}
 
 				await tx.cartItem.updateMany({

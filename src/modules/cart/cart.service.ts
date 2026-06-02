@@ -7,13 +7,14 @@ import {
 } from '@generated/client'
 import {
 	BadRequestException,
+	ForbiddenException,
 	Inject,
 	Injectable,
 	Logger,
 	OnModuleDestroy,
 	OnModuleInit
 } from '@nestjs/common'
-import { randomBytes } from 'node:crypto'
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import type { SessionUser } from '@/modules/auth/types/auth-request'
@@ -34,6 +35,7 @@ import { type CartSsePayload, CartSseService } from './cart-sse.service'
 import { type CartEntity, cartSelect } from './cart.selects'
 import {
 	CART_COOKIE_NAME,
+	CART_GUEST_TOKEN_HEADER,
 	mapCartEntity,
 	PUBLIC_KEY_BYTES,
 	readCartTokenFromCookie,
@@ -53,6 +55,11 @@ const CART_DRAFT_SWEEP_MS =
 const HALL_TABLE_SESSION_TTL_MS =
 	Number(process.env.HALL_TABLE_SESSION_TTL_MS ?? 6 * 60 * 60 * 1000) ||
 	6 * 60 * 60 * 1000
+const HALL_TABLE_GUEST_TOKEN_TTL_MS =
+	Number(
+		process.env.HALL_TABLE_GUEST_TOKEN_TTL_MS ??
+			HALL_TABLE_SESSION_TTL_MS + 60 * 60 * 1000
+	) || HALL_TABLE_SESSION_TTL_MS + 60 * 60 * 1000
 const HALL_TABLE_SESSION_SWEEP_MS =
 	Number(process.env.HALL_TABLE_SESSION_SWEEP_MS ?? 5 * 60 * 1000) ||
 	5 * 60 * 1000
@@ -61,6 +68,11 @@ const HALL_ORDER_IIKO_EXPORT_WAIT_TIMEOUT_MS =
 const HALL_ORDER_IIKO_EXPORT_WAIT_INTERVAL_MS =
 	Number(process.env.HALL_ORDER_IIKO_EXPORT_WAIT_INTERVAL_MS ?? 500) || 500
 const INTEGRATION_EXTERNAL_ITEM_TYPE_TABLE = 'TABLE'
+const CART_GUEST_TOKEN_VERSION = 1
+const CART_GUEST_TOKEN_SECRET =
+	process.env.CART_GUEST_TOKEN_SECRET?.trim() ||
+	process.env.INTEGRATION_ENCRYPTION_KEY?.trim() ||
+	'catalog-cart-guest-token-development-secret'
 const TERMINAL_CART_STATUSES = new Set<CartStatus>([
 	CartStatus.CONVERTED,
 	CartStatus.CANCELLED,
@@ -75,11 +87,25 @@ type CartMutationResult = {
 
 type JoinHallTableSessionInput = {
 	guestSessionId?: string | null
+	guestToken?: string | null
 	guestName?: string | null
 	guestsCount?: number | null
 }
 
 type HallTableSessionRecord = NonNullable<CartEntity['tableSession']>
+
+type HallTableGuestTokenPayload = {
+	v: typeof CART_GUEST_TOKEN_VERSION
+	catalogId: string
+	cartId: string
+	sessionId: string
+	tableExternalId: string
+	publicCode: string
+	guestSessionId: string
+	iat: number
+	exp: number
+	nonce: string
+}
 
 type ClosableHallTableSessionStatus = Extract<
 	CartTableSessionStatus,
@@ -392,14 +418,29 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		}
 
 		const activeKey = buildHallTableActiveKey(catalogId, tableId)
-		const guestSessionId =
-			normalizeGuestSessionId(input.guestSessionId) ?? generateGuestSessionId()
 		const session = await this.getOrCreateHallTableSession({
 			activeKey,
 			catalogId,
 			item,
 			tableData,
 			input
+		})
+		const verifiedGuest = this.verifyHallTableGuestTokenOrNull(input.guestToken, {
+			catalogId,
+			cartId: session.cartId,
+			sessionId: session.id,
+			tableExternalId: session.tableExternalId,
+			publicCode: session.publicCode
+		})
+		const guestSessionId =
+			verifiedGuest?.guestSessionId ?? generateGuestSessionId()
+		const guestToken = this.issueHallTableGuestToken({
+			catalogId,
+			cartId: session.cartId,
+			sessionId: session.id,
+			tableExternalId: session.tableExternalId,
+			publicCode: session.publicCode,
+			guestSessionId
 		})
 		const cart = await this.lookup.findByIdOrThrow(session.cartId)
 		const mappedCart = await this.mapCart(cart)
@@ -411,13 +452,15 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 			session: mappedCart.tableSession,
 			cart: mappedCart,
 			publicKey: mappedCart.publicKey,
-			guestSessionId
+			guestSessionId,
+			guestToken
 		}
 	}
 
 	async submitPublicHallOrder(
 		publicKey: string,
-		input: CartShareInput | string | null = {}
+		input: CartShareInput | string | null = {},
+		guestToken?: string | null
 	) {
 		const shareInput: CartShareInput =
 			typeof input === 'string' ? { comment: input } : (input ?? {})
@@ -433,6 +476,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 			throw new BadRequestException('hall table session is not open')
 		}
 		this.ensureCartIsOpen(cart.status)
+		this.resolveHallTableGuestSessionId(cart, guestToken)
 
 		if (!cart.items.length) {
 			throw new BadRequestException('Cannot submit an empty cart')
@@ -498,10 +542,20 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		return { mode: result.mode, token: result.token }
 	}
 
-	async upsertPublicItem(publicKey: string, input: UpsertCartItemInput) {
+	async upsertPublicItem(
+		publicKey: string,
+		input: UpsertCartItemInput,
+		guestToken?: string | null
+	) {
 		const cart = await this.lookup.findByPublicKeyOrThrow(publicKey)
 		this.ensurePublicCartAcceptsMutations(cart)
-		const updated = await this.upsertItem(cart.id, input)
+		const guestSessionId = cart.tableSession
+			? this.resolveHallTableGuestSessionId(cart, guestToken)
+			: null
+		const updated = await this.upsertItem(
+			cart.id,
+			guestSessionId ? { ...input, guestSessionId } : input
+		)
 		const mappedCart = await this.mapCart(updated.cart)
 		if (updated.changed) {
 			this.broadcastCart(updated.cart.id, 'cart.updated', mappedCart)
@@ -509,10 +563,21 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		return mappedCart
 	}
 
-	async removePublicItem(publicKey: string, itemId: string) {
+	async removePublicItem(
+		publicKey: string,
+		itemId: string,
+		guestToken?: string | null
+	) {
 		const cart = await this.lookup.findByPublicKeyOrThrow(publicKey)
 		this.ensurePublicCartAcceptsMutations(cart)
-		const updated = await this.removeItem(cart.id, itemId)
+		const guestSessionId = cart.tableSession
+			? this.resolveHallTableGuestSessionId(cart, guestToken)
+			: null
+		const updated = await this.removeItem(
+			cart.id,
+			itemId,
+			guestSessionId ? { guestSessionId } : undefined
+		)
 		const mappedCart = await this.mapCart(updated.cart)
 		if (updated.changed) {
 			this.broadcastCart(updated.cart.id, 'cart.updated', mappedCart)
@@ -1027,9 +1092,10 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 
 	private async removeItem(
 		cartId: string,
-		itemId: string
+		itemId: string,
+		options?: { guestSessionId?: string | null }
 	): Promise<CartMutationResult> {
-		const result = await this.cartLine.removeItem(cartId, itemId)
+		const result = await this.cartLine.removeItem(cartId, itemId, options)
 		return {
 			cart: await this.lookup.findByIdOrThrow(result.cartId),
 			changed: result.changed,
@@ -1063,6 +1129,88 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		this.ensureCartIsOpen(cart.status)
 		if (!cart.tableSession) return
 		this.ensureHallTableSessionOpen(cart)
+	}
+
+	private resolveHallTableGuestSessionId(
+		cart: CartEntity,
+		guestToken?: string | null
+	): string {
+		const session = cart.tableSession
+		if (!session) {
+			throw new BadRequestException('hall table session is not found')
+		}
+
+		const payload = this.verifyHallTableGuestTokenOrNull(guestToken, {
+			catalogId: cart.catalogId,
+			cartId: cart.id,
+			sessionId: session.id,
+			tableExternalId: session.tableExternalId,
+			publicCode: session.publicCode
+		})
+
+		if (!payload) {
+			throw new ForbiddenException(
+				`${CART_GUEST_TOKEN_HEADER} is required for hall table guest actions`
+			)
+		}
+
+		return payload.guestSessionId
+	}
+
+	private issueHallTableGuestToken(params: {
+		catalogId: string
+		cartId: string
+		sessionId: string
+		tableExternalId: string
+		publicCode: string
+		guestSessionId: string
+	}): string {
+		const now = Date.now()
+		const payload: HallTableGuestTokenPayload = {
+			v: CART_GUEST_TOKEN_VERSION,
+			catalogId: params.catalogId,
+			cartId: params.cartId,
+			sessionId: params.sessionId,
+			tableExternalId: params.tableExternalId,
+			publicCode: params.publicCode,
+			guestSessionId: params.guestSessionId,
+			iat: now,
+			exp: now + HALL_TABLE_GUEST_TOKEN_TTL_MS,
+			nonce: randomBytes(8).toString('hex')
+		}
+		const encodedPayload = encodeBase64UrlJson(payload)
+		return `${encodedPayload}.${signCartGuestTokenPayload(encodedPayload)}`
+	}
+
+	private verifyHallTableGuestTokenOrNull(
+		guestToken: string | null | undefined,
+		expected: {
+			catalogId: string
+			cartId: string
+			sessionId: string
+			tableExternalId: string
+			publicCode: string
+		}
+	): HallTableGuestTokenPayload | null {
+		const normalized = normalizeText(guestToken)
+		if (!normalized) return null
+
+		const [encodedPayload, signature, ...extra] = normalized.split('.')
+		if (!encodedPayload || !signature || extra.length) return null
+		if (!safeEqualText(signCartGuestTokenPayload(encodedPayload), signature)) {
+			return null
+		}
+
+		const payload = decodeBase64UrlJson(encodedPayload)
+		if (!isHallTableGuestTokenPayload(payload)) return null
+		if (payload.exp < Date.now()) return null
+		if (payload.catalogId !== expected.catalogId) return null
+		if (payload.cartId !== expected.cartId) return null
+		if (payload.sessionId !== expected.sessionId) return null
+		if (payload.tableExternalId !== expected.tableExternalId) return null
+		if (payload.publicCode !== expected.publicCode) return null
+
+		return payload
 	}
 
 	private ensureHallTableSessionActive(cart: CartEntity) {
@@ -1291,6 +1439,49 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function encodeBase64UrlJson(value: unknown): string {
+	return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url')
+}
+
+function decodeBase64UrlJson(value: string): unknown {
+	try {
+		return JSON.parse(Buffer.from(value, 'base64url').toString('utf8'))
+	} catch {
+		return null
+	}
+}
+
+function signCartGuestTokenPayload(encodedPayload: string): string {
+	return createHmac('sha256', CART_GUEST_TOKEN_SECRET)
+		.update(encodedPayload)
+		.digest('base64url')
+}
+
+function safeEqualText(left: string, right: string): boolean {
+	const leftBuffer = Buffer.from(left)
+	const rightBuffer = Buffer.from(right)
+	if (leftBuffer.length !== rightBuffer.length) return false
+	return timingSafeEqual(leftBuffer, rightBuffer)
+}
+
+function isHallTableGuestTokenPayload(
+	value: unknown
+): value is HallTableGuestTokenPayload {
+	if (!isRecord(value)) return false
+	return (
+		value.v === CART_GUEST_TOKEN_VERSION &&
+		typeof value.catalogId === 'string' &&
+		typeof value.cartId === 'string' &&
+		typeof value.sessionId === 'string' &&
+		typeof value.tableExternalId === 'string' &&
+		typeof value.publicCode === 'string' &&
+		typeof value.guestSessionId === 'string' &&
+		typeof value.iat === 'number' &&
+		typeof value.exp === 'number' &&
+		typeof value.nonce === 'string'
+	)
 }
 
 function normalizeText(value: unknown): string | null {

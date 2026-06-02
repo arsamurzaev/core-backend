@@ -11,6 +11,7 @@ model User {
   isEmailConfirmed Boolean
 
   catalogs            Catalog[]
+  countries           Country[]
   regions             Regionality[]
   inventoryWarehouses InventoryWarehouse[]
   inventoryMovements  InventoryMovement[]  @relation("InventoryMovementActor")

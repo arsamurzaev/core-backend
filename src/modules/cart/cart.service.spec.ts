@@ -8,6 +8,7 @@ import {
 	ProductVariantStatus,
 	Role
 } from '@generated/client'
+import { CatalogInventoryMode } from '@generated/enums'
 import type { MessageEvent } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 
@@ -37,9 +38,9 @@ import { CartVariantSelectionService } from './cart-variant-selection.service'
 import { CartService } from './cart.service'
 import { OrderCheckoutService } from './order-checkout.service'
 
-const INVENTORY_MODE_NONE = 'NONE'
-const INVENTORY_MODE_EXTERNAL = 'EXTERNAL'
-const INVENTORY_MODE_INTERNAL = 'INTERNAL'
+const INVENTORY_MODE_NONE = CatalogInventoryMode.NONE
+const INVENTORY_MODE_EXTERNAL = CatalogInventoryMode.EXTERNAL
+const INVENTORY_MODE_INTERNAL = CatalogInventoryMode.INTERNAL
 
 function createCartEntity(overrides: Record<string, unknown> = {}) {
 	return {
@@ -55,7 +56,10 @@ function createCartEntity(overrides: Record<string, unknown> = {}) {
 		checkoutData: null,
 		checkoutContacts: null,
 		comment: null,
-		catalog: { parentId: null },
+		catalog: {
+			parentId: null,
+			settings: { inventoryMode: INVENTORY_MODE_NONE }
+		},
 		tableSession: null,
 		assignedManagerId: null,
 		managerSessionStartedAt: null,
@@ -150,6 +154,39 @@ function createCartItem(overrides: Record<string, unknown> = {}) {
 		},
 		...overrides
 	}
+}
+
+function issueHallTableGuestToken(
+	service: CartService,
+	overrides: Partial<{
+		catalogId: string
+		cartId: string
+		sessionId: string
+		tableExternalId: string
+		publicCode: string
+		guestSessionId: string
+	}> = {}
+) {
+	const issuer = service as unknown as {
+		issueHallTableGuestToken(params: {
+			catalogId: string
+			cartId: string
+			sessionId: string
+			tableExternalId: string
+			publicCode: string
+			guestSessionId: string
+		}): string
+	}
+
+	return issuer.issueHallTableGuestToken({
+		catalogId: 'catalog-1',
+		cartId: 'cart-1',
+		sessionId: 'table-session-1',
+		tableExternalId: 'iiko-table-1',
+		publicCode: 'table-code-1',
+		guestSessionId: 'guest-1',
+		...overrides
+	})
 }
 
 describe('CartService', () => {
@@ -1116,6 +1153,79 @@ describe('CartService', () => {
 		expect(result.tableSession?.status).toBe(CartTableSessionStatus.CANCELLED)
 	})
 
+	it('does not trust a hall table guestSessionId without a valid guest token', async () => {
+		const session = createCartTableSession()
+		const cart = createCartEntity({ tableSession: session })
+
+		prisma.integrationExternalItem.findFirst.mockResolvedValueOnce({
+			id: 'table-item-1',
+			integrationId: 'integration-1',
+			externalId: 'iiko-table-1',
+			externalParentId: 'section-1',
+			name: 'Table 1',
+			code: '1',
+			publicCode: 'table-code-1',
+			rawMeta: {
+				restaurantSectionId: 'section-1',
+				tableName: 'Table 1',
+				tableNumber: '1'
+			}
+		})
+		prisma.cartTableSession.findFirst.mockResolvedValueOnce(session)
+		prisma.cart.findFirst.mockResolvedValueOnce(cart)
+
+		const result = await service.joinHallTableSession(
+			'catalog-1',
+			'table-code-1',
+			{
+				guestName: 'Guest 1',
+				guestSessionId: 'guest-victim'
+			}
+		)
+
+		expect(result.guestSessionId).not.toBe('guest-victim')
+		expect(result.guestSessionId).toMatch(/^guest-/)
+		expect(result.guestToken).toEqual(expect.any(String))
+	})
+
+	it('keeps a hall table guestSessionId when the guest token is valid', async () => {
+		const session = createCartTableSession()
+		const cart = createCartEntity({ tableSession: session })
+		const guestToken = issueHallTableGuestToken(service, {
+			guestSessionId: 'guest-1'
+		})
+
+		prisma.integrationExternalItem.findFirst.mockResolvedValueOnce({
+			id: 'table-item-1',
+			integrationId: 'integration-1',
+			externalId: 'iiko-table-1',
+			externalParentId: 'section-1',
+			name: 'Table 1',
+			code: '1',
+			publicCode: 'table-code-1',
+			rawMeta: {
+				restaurantSectionId: 'section-1',
+				tableName: 'Table 1',
+				tableNumber: '1'
+			}
+		})
+		prisma.cartTableSession.findFirst.mockResolvedValueOnce(session)
+		prisma.cart.findFirst.mockResolvedValueOnce(cart)
+
+		const result = await service.joinHallTableSession(
+			'catalog-1',
+			'table-code-1',
+			{
+				guestName: 'Guest 1',
+				guestSessionId: 'guest-1',
+				guestToken
+			}
+		)
+
+		expect(result.guestSessionId).toBe('guest-1')
+		expect(result.guestToken).toEqual(expect.any(String))
+	})
+
 	it('detaches a hall table cart as soon as a manager confirms it', async () => {
 		const openSession = createCartTableSession()
 		const cartItem = createCartItem({ quantity: 2 })
@@ -1365,7 +1475,11 @@ describe('CartService', () => {
 		prisma.cart.update.mockResolvedValue(undefined)
 		prisma.cartTableSession.update.mockResolvedValue(undefined)
 
-		const result = await service.submitPublicHallOrder('public-1', {})
+		const result = await service.submitPublicHallOrder(
+			'public-1',
+			{},
+			issueHallTableGuestToken(service)
+		)
 
 		expect(prisma.cartTableSession.update).toHaveBeenCalledWith({
 			where: { id: 'table-session-1' },
@@ -1397,6 +1511,100 @@ describe('CartService', () => {
 			})
 		).rejects.toThrow('hall table session is not open')
 		expect(prisma.cartItem.create).not.toHaveBeenCalled()
+	})
+
+	it('requires a guest token for public hall table item changes', async () => {
+		const openCart = createCartEntity({
+			tableSession: createCartTableSession()
+		})
+
+		prisma.cart.findFirst.mockResolvedValueOnce(openCart)
+
+		await expect(
+			service.upsertPublicItem('public-1', {
+				productId: 'product-1',
+				quantity: 1
+			})
+		).rejects.toThrow('x-cart-guest-token is required')
+		expect(prisma.cartItem.create).not.toHaveBeenCalled()
+	})
+
+	it('uses the guest token owner for public hall table item upserts', async () => {
+		const openCart = createCartEntity({
+			tableSession: createCartTableSession()
+		})
+		const upsertItem = jest
+			.spyOn(
+				service as unknown as {
+					upsertItem(cartId: string, input: unknown): Promise<unknown>
+				},
+				'upsertItem'
+			)
+			.mockResolvedValueOnce({
+				cart: openCart,
+				changed: false,
+				inventoryCacheCatalogIds: [],
+				inventoryDomainEvents: []
+			})
+
+		prisma.cart.findFirst.mockResolvedValueOnce(openCart)
+
+		await service.upsertPublicItem(
+			'public-1',
+			{
+				productId: 'product-1',
+				quantity: 1,
+				guestSessionId: 'guest-victim'
+			},
+			issueHallTableGuestToken(service, { guestSessionId: 'guest-owner' })
+		)
+
+		expect(upsertItem).toHaveBeenCalledWith(
+			'cart-1',
+			expect.objectContaining({ guestSessionId: 'guest-owner' })
+		)
+	})
+
+	it('rejects removing another guest public hall table item', async () => {
+		const openCart = createCartEntity({
+			tableSession: createCartTableSession(),
+			items: [
+				createCartItem({
+					id: 'cart-item-guest-1',
+					guestSessionId: 'guest-1'
+				})
+			]
+		})
+		const context = {
+			id: 'cart-1',
+			catalogId: 'catalog-1',
+			status: CartStatus.SHARED,
+			tableSession: { status: CartTableSessionStatus.OPEN },
+			catalog: {
+				parentId: null,
+				settings: { inventoryMode: INVENTORY_MODE_NONE }
+			}
+		}
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(openCart)
+			.mockResolvedValueOnce(context)
+		prisma.cartItem.findFirst.mockResolvedValueOnce({
+			id: 'cart-item-guest-1',
+			productId: 'product-1',
+			variantId: null,
+			saleUnitId: null,
+			guestSessionId: 'guest-1'
+		})
+
+		await expect(
+			service.removePublicItem(
+				'public-1',
+				'cart-item-guest-1',
+				issueHallTableGuestToken(service, { guestSessionId: 'guest-2' })
+			)
+		).rejects.toThrow('Эту позицию')
+		expect(prisma.cartItem.updateMany).not.toHaveBeenCalled()
 	})
 
 	it('expires inactive IN_PROGRESS carts to PAUSED', async () => {
@@ -2684,6 +2892,9 @@ describe('CartService', () => {
 	})
 
 	it('applies manager checkout data before converting a preorder cart', async () => {
+		const visitDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+			.toISOString()
+			.slice(0, 10)
 		const preorderCheckoutData = {
 			customerName: 'Ivan',
 			hallTableId: 'table-11',
@@ -2693,7 +2904,7 @@ describe('CartService', () => {
 			phone: '+7 (988) 111-22-33',
 			personsCount: 2,
 			tableNumber: '11',
-			visitDate: '2026-06-01',
+			visitDate,
 			visitTime: '19:30'
 		}
 		const cartWithItems = createCartEntity({
@@ -2722,7 +2933,7 @@ describe('CartService', () => {
 			checkoutData: {
 				...preorderCheckoutData,
 				guestsCount: 2,
-				scheduledAt: '2026-06-01T19:30:00.000'
+				scheduledAt: `${visitDate}T19:30:00.000`
 			},
 			checkoutContacts: { PHONE: '+7 (999) 000-00-00' }
 		})
@@ -2799,7 +3010,7 @@ describe('CartService', () => {
 					phone: '+7 (988) 111-22-33',
 					personsCount: 2,
 					tableNumber: '11',
-					visitDate: '2026-06-01',
+					visitDate,
 					visitTime: '19:30'
 				}),
 				checkoutContacts: { PHONE: '+7 (999) 000-00-00' }

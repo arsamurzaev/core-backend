@@ -11,6 +11,7 @@ import {
 } from '@generated/enums'
 import {
 	BadRequestException,
+	ForbiddenException,
 	Inject,
 	Injectable,
 	Logger,
@@ -76,7 +77,10 @@ import {
 } from './dto/requests/admin-catalogs-query.dto.req'
 import { AdminCreateActivityDtoReq } from './dto/requests/admin-create-activity.dto.req'
 import { AdminCreateCatalogDtoReq } from './dto/requests/admin-create-catalog.dto.req'
+import { AdminCreateCountryDtoReq } from './dto/requests/admin-create-country.dto.req'
+import { AdminCreateGeoAdminDtoReq } from './dto/requests/admin-create-geo-admin.dto.req'
 import { AdminCreatePromoCodeDtoReq } from './dto/requests/admin-create-promo-code.dto.req'
+import { AdminCreateRegionalityDtoReq } from './dto/requests/admin-create-regionality.dto.req'
 import { AdminCreatePromoPaymentDtoReq } from './dto/requests/admin-create-promo-payment.dto.req'
 import { AdminCreateSubscriptionPaymentDtoReq } from './dto/requests/admin-create-subscription-payment.dto.req'
 import { AdminDuplicateCatalogDtoReq } from './dto/requests/admin-duplicate-catalog.dto.req'
@@ -84,9 +88,53 @@ import { AdminUpdateCatalogFeatureEntitlementDtoReq } from './dto/requests/admin
 import { AdminUpdateCatalogDtoReq } from './dto/requests/admin-update-catalog.dto.req'
 
 const mediaSelect = buildMediaSelect()
+const countrySelect = {
+	id: true,
+	code: true,
+	name: true,
+	deleteAt: true
+} as const satisfies Prisma.CountrySelect
+const regionalitySelect = {
+	id: true,
+	code: true,
+	name: true,
+	countryId: true,
+	parentId: true,
+	countryCode: true,
+	countryName: true,
+	country: {
+		select: countrySelect
+	},
+	deleteAt: true
+} as const satisfies Prisma.RegionalitySelect
+const adminGeoAdminSelect = {
+	id: true,
+	login: true,
+	name: true,
+	role: true,
+	countries: {
+		select: countrySelect,
+		orderBy: { name: 'asc' }
+	},
+	regions: {
+		select: regionalitySelect,
+		orderBy: [{ countryName: 'asc' }, { parentId: 'asc' }, { name: 'asc' }]
+	},
+	deleteAt: true,
+	createdAt: true,
+	updatedAt: true
+} as const satisfies Prisma.UserSelect
 const LOGIN_SUFFIX_ALPHABET = '23456789abcdefghijkmnopqrstuvwxyz'
+const PASSWORD_ALPHABET =
+	'23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 const DEFAULT_CATALOG_OWNER_PASSWORD = '00000000'
 const GLOBAL_YANDEX_METRIKA_COUNTER_ID = '104676804'
+const KNOWN_COUNTRY_CODES = new Map([
+	['россия', 'RU'],
+	['российская федерация', 'RU'],
+	['russia', 'RU'],
+	['russian federation', 'RU']
+])
 const SOFT_DELETE_RETENTION_DAYS = Number(
 	process.env.SOFT_DELETE_RETENTION_DAYS ?? 30
 )
@@ -99,6 +147,7 @@ const ALLOWED_PAYMENT_PROOF_MIME = new Set([
 	'image/webp'
 ])
 const DUPLICATE_CATALOG_TRANSACTION_TIMEOUT_MS = 60_000
+const GEO_ACCESS_EMPTY_ID = '00000000-0000-0000-0000-000000000000'
 
 type DuplicateCatalogMediaRecord = {
 	id: string
@@ -170,6 +219,10 @@ const adminCatalogSelect = {
 		},
 		orderBy: { name: 'asc' }
 	},
+	region: {
+		select: regionalitySelect,
+		orderBy: [{ countryName: 'asc' }, { name: 'asc' }]
+	},
 	payments: {
 		where: {
 			kind: PaymentKind.PROMOCODE,
@@ -232,7 +285,11 @@ const adminCatalogSelect = {
 			slug: true,
 			domain: true,
 			name: true,
-			deleteAt: true
+			deleteAt: true,
+			region: {
+				select: regionalitySelect,
+				orderBy: [{ countryName: 'asc' }, { name: 'asc' }]
+			}
 		},
 		orderBy: { createdAt: 'desc' }
 	}
@@ -254,6 +311,20 @@ const paymentSelect = {
 type AdminCatalogRecord = Prisma.CatalogGetPayload<{
 	select: typeof adminCatalogSelect
 }>
+type AdminGeoAdminRecord = Prisma.UserGetPayload<{
+	select: typeof adminGeoAdminSelect
+}>
+
+type AdminActor = {
+	id: string
+	role: Role
+}
+
+type AdminGeoAccessScope = {
+	isGlobal: boolean
+	countryIds: string[]
+	regionalityIds: string[]
+}
 
 export type UploadedPaymentProofFile = {
 	buffer: Buffer
@@ -279,7 +350,12 @@ export class AdminService {
 		private readonly events?: DomainEventDispatcher
 	) {}
 
-	async createCatalog(dto: AdminCreateCatalogDtoReq) {
+	async createCatalog(dto: AdminCreateCatalogDtoReq, actor?: AdminActor) {
+		await this.assertRegionalityIdsAllowed(dto.regionalityIds ?? [], actor, {
+			requireAnyForGeoAdmin: true
+		})
+		if (dto.parentId) await this.assertCatalogAccess(dto.parentId, actor)
+
 		const normalizedSlug = dto.slug ? normalizeCatalogSlug(dto.slug) : null
 		if (normalizedSlug) {
 			ensureCatalogSlugAllowed(normalizedSlug)
@@ -350,6 +426,13 @@ export class AdminService {
 								}
 							}
 						: {}),
+					...(dto.regionalityIds?.length
+						? {
+								region: {
+									connect: uniqueIds(dto.regionalityIds).map(id => ({ id }))
+								}
+							}
+						: {}),
 					user: { connect: { id: owner.id } },
 					...(dto.parentId ? { parent: { connect: { id: dto.parentId } } } : {}),
 					...(subscriptionEndsAt ? { subscriptionEndsAt } : {}),
@@ -376,8 +459,11 @@ export class AdminService {
 
 	async duplicateCatalog(
 		sourceCatalogId: string,
-		dto: AdminDuplicateCatalogDtoReq
+		dto: AdminDuplicateCatalogDtoReq,
+		actor?: AdminActor
 	) {
+		await this.assertCatalogAccess(sourceCatalogId, actor)
+
 		const source = await this.prisma.catalog.findUnique({
 			where: { id: sourceCatalogId },
 			select: {
@@ -967,7 +1053,9 @@ export class AdminService {
 		}
 	}
 
-	async resetCatalogOwnerPassword(id: string) {
+	async resetCatalogOwnerPassword(id: string, actor?: AdminActor) {
+		await this.assertCatalogAccess(id, actor)
+
 		const current = await this.prisma.catalog.findUnique({
 			where: { id },
 			select: { id: true, userId: true }
@@ -1006,7 +1094,15 @@ export class AdminService {
 		}
 	}
 
-	async updateCatalog(id: string, dto: AdminUpdateCatalogDtoReq) {
+	async updateCatalog(id: string, dto: AdminUpdateCatalogDtoReq, actor?: AdminActor) {
+		await this.assertCatalogAccess(id, actor)
+		if (dto.regionalityIds !== undefined) {
+			await this.assertRegionalityIdsAllowed(dto.regionalityIds, actor, {
+				requireAnyForGeoAdmin: true
+			})
+		}
+		if (dto.parentId) await this.assertCatalogAccess(dto.parentId, actor)
+
 		const current = await this.prisma.catalog.findUnique({
 			where: { id },
 			select: {
@@ -1045,6 +1141,15 @@ export class AdminService {
 			...(dto.activityIds !== undefined
 				? {
 						activity: { set: dto.activityIds.map(activityId => ({ id: activityId })) }
+					}
+				: {}),
+			...(dto.regionalityIds !== undefined
+				? {
+						region: {
+							set: uniqueIds(dto.regionalityIds).map(regionalityId => ({
+								id: regionalityId
+							}))
+						}
 					}
 				: {}),
 			...(dto.parentId !== undefined
@@ -1140,12 +1245,18 @@ export class AdminService {
 		return this.mapAdminCatalog(catalog)
 	}
 
-	async getCatalogFeatureEntitlements(id: string) {
+	async getCatalogFeatureEntitlements(id: string, actor?: AdminActor) {
+		await this.assertCatalogAccess(id, actor)
 		await this.ensureCatalogExists(id)
 		return this.buildCatalogFeatureEntitlementDto(id)
 	}
 
-	async diagnoseCatalogDefaultVariants(catalogId: string, sampleLimit?: number) {
+	async diagnoseCatalogDefaultVariants(
+		catalogId: string,
+		sampleLimit?: number,
+		actor?: AdminActor
+	) {
+		await this.assertCatalogAccess(catalogId, actor)
 		await this.ensureCatalogExists(catalogId)
 		return this.productMaintenance.diagnoseDefaultVariantsForCatalog(
 			catalogId,
@@ -1153,7 +1264,11 @@ export class AdminService {
 		)
 	}
 
-	async repairCatalogMissingDefaultVariants(catalogId: string) {
+	async repairCatalogMissingDefaultVariants(
+		catalogId: string,
+		actor?: AdminActor
+	) {
+		await this.assertCatalogAccess(catalogId, actor)
 		await this.ensureCatalogExists(catalogId)
 		return this.productMaintenance.repairMissingDefaultVariantsForCatalog(
 			catalogId
@@ -1166,8 +1281,10 @@ export class AdminService {
 			apply?: boolean
 			batchSize?: number
 			sampleLimit?: number
-		}
+		},
+		actor?: AdminActor
 	) {
+		await this.assertCatalogAccess(catalogId, actor)
 		await this.ensureCatalogExists(catalogId)
 		return this.productMaintenance.repairDefaultVariantPriceMismatchesForCatalog(
 			catalogId,
@@ -1175,7 +1292,8 @@ export class AdminService {
 		)
 	}
 
-	async getCatalogMoySkladStockDiagnostics(catalogId: string) {
+	async getCatalogMoySkladStockDiagnostics(catalogId: string, actor?: AdminActor) {
+		await this.assertCatalogAccess(catalogId, actor)
 		await this.ensureCatalogExists(catalogId)
 
 		const integration = await this.prisma.integration.findUnique({
@@ -1316,8 +1434,10 @@ export class AdminService {
 
 	async updateCatalogFeatureEntitlement(
 		id: string,
-		dto: AdminUpdateCatalogFeatureEntitlementDtoReq
+		dto: AdminUpdateCatalogFeatureEntitlementDtoReq,
+		actor?: AdminActor
 	) {
+		await this.assertCatalogAccess(id, actor)
 		await this.ensureCatalogExists(id)
 		const feature: CatalogCapability = dto.feature
 		const expiresAt =
@@ -1358,12 +1478,15 @@ export class AdminService {
 	}
 
 	async getCatalogs(
-		query: AdminCatalogsQueryDtoReq = new AdminCatalogsQueryDtoReq()
+		query: AdminCatalogsQueryDtoReq = new AdminCatalogsQueryDtoReq(),
+		actor?: AdminActor
 	) {
 		const typeIds = query.typeIds ?? query['typeIds[]']
 		const promoCodeIds = query.promoCodeIds ?? query['promoCodeIds[]']
 		const statuses = query.statuses ?? query['statuses[]']
+		const accessWhere = await this.buildCatalogAccessWhere(actor)
 		const where: Prisma.CatalogWhereInput = {
+			...accessWhere,
 			...(typeIds?.length ? { typeId: { in: typeIds } } : {}),
 			...(promoCodeIds?.length ? { promoCodeId: { in: promoCodeIds } } : {}),
 			...(statuses?.length ? { config: { status: { in: statuses } } } : {})
@@ -1383,7 +1506,9 @@ export class AdminService {
 		)
 	}
 
-	async deleteCatalog(id: string) {
+	async deleteCatalog(id: string, actor?: AdminActor) {
+		await this.assertCatalogAccess(id, actor)
+
 		const current = await this.prisma.catalog.findUnique({
 			where: { id },
 			select: adminCatalogSelect
@@ -1403,7 +1528,9 @@ export class AdminService {
 		return this.mapAdminCatalog(catalog)
 	}
 
-	async restoreCatalog(id: string) {
+	async restoreCatalog(id: string, actor?: AdminActor) {
+		await this.assertCatalogAccess(id, actor)
+
 		const current = await this.prisma.catalog.findUnique({
 			where: { id },
 			select: adminCatalogSelect
@@ -1423,7 +1550,9 @@ export class AdminService {
 		return this.mapAdminCatalog(catalog)
 	}
 
-	async deleteCatalogContent(catalogId: string) {
+	async deleteCatalogContent(catalogId: string, actor?: AdminActor) {
+		await this.assertCatalogAccess(catalogId, actor)
+
 		const catalog = await this.prisma.catalog.findUnique({
 			where: { id: catalogId },
 			select: { id: true }
@@ -1559,6 +1688,292 @@ export class AdminService {
 			deleteInfo: this.buildDeleteInfo(type.deleteAt),
 			catalogsCount: _count.catalogs
 		}))
+	}
+
+	async getGeoAdmins(actor?: AdminActor) {
+		this.assertGlobalAdmin(actor)
+
+		const users = await this.prisma.user.findMany({
+			where: {
+				role: Role.GEO_ADMIN,
+				deleteAt: null
+			},
+			select: adminGeoAdminSelect,
+			orderBy: { createdAt: 'desc' }
+		})
+
+		return users.map(user => this.mapGeoAdmin(user))
+	}
+
+	async createGeoAdmin(dto: AdminCreateGeoAdminDtoReq, actor?: AdminActor) {
+		this.assertGlobalAdmin(actor)
+
+		const name = normalizeRequiredText(dto.name)
+		const countryIds = uniqueIds(dto.countryIds ?? [])
+		const regionalityIds = uniqueIds(dto.regionalityIds ?? [])
+		const login = dto.login?.trim() || (await this.generateGeoAdminLogin(name))
+		const password = dto.password?.trim() || randomPassword()
+
+		if (!countryIds.length && !regionalityIds.length) {
+			throw new BadRequestException('Укажите хотя бы одну страну или регион')
+		}
+
+		const existing = await this.prisma.user.findFirst({
+			where: { login },
+			select: { id: true }
+		})
+		if (existing) {
+			throw new BadRequestException('Пользователь с таким логином уже существует')
+		}
+
+		await Promise.all([
+			this.ensureCountryIdsExist(countryIds),
+			this.ensureRegionalityIdsExist(regionalityIds)
+		])
+
+		const passwordHash = await hash(password)
+		const user = await this.prisma.user.create({
+			data: {
+				login,
+				name,
+				password: passwordHash,
+				role: Role.GEO_ADMIN,
+				isEmailConfirmed: true,
+				...(countryIds.length
+					? { countries: { connect: countryIds.map(id => ({ id })) } }
+					: {}),
+				...(regionalityIds.length
+					? { regions: { connect: regionalityIds.map(id => ({ id })) } }
+					: {})
+			},
+			select: adminGeoAdminSelect
+		})
+
+		return {
+			admin: this.mapGeoAdmin(user),
+			credentials: {
+				login,
+				password
+			}
+		}
+	}
+
+	async getRegionalities(actor?: AdminActor) {
+		const scope = await this.resolveGeoAccessScope(actor)
+		return this.prisma.regionality.findMany({
+			where: {
+				deleteAt: null,
+				...(scope.isGlobal
+					? {}
+					: scope.regionalityIds.length
+						? { id: { in: scope.regionalityIds } }
+						: { id: GEO_ACCESS_EMPTY_ID })
+			},
+			select: regionalitySelect,
+			orderBy: [{ countryName: 'asc' }, { parentId: 'asc' }, { name: 'asc' }]
+		})
+	}
+
+	async getCountries(actor?: AdminActor) {
+		const scope = await this.resolveGeoAccessScope(actor)
+		return this.prisma.country.findMany({
+			where: {
+				deleteAt: null,
+				...(scope.isGlobal
+					? {}
+					: scope.countryIds.length
+						? { id: { in: scope.countryIds } }
+						: { id: GEO_ACCESS_EMPTY_ID })
+			},
+			select: countrySelect,
+			orderBy: { name: 'asc' }
+		})
+	}
+
+	async createCountry(dto: AdminCreateCountryDtoReq, actor?: AdminActor) {
+		this.assertGlobalAdmin(actor)
+
+		const name = normalizeRequiredText(dto.name)
+		const code = dto.code ?? buildRegionalityCountryCode(name)
+
+		const existingByCode = await this.prisma.country.findUnique({
+			where: { code },
+			select: countrySelect
+		})
+
+		if (existingByCode && !existingByCode.deleteAt) {
+			throw new BadRequestException('Страна с таким кодом уже существует')
+		}
+
+		const existingByName = await this.prisma.country.findFirst({
+			where: {
+				name,
+				deleteAt: null
+			},
+			select: { id: true }
+		})
+
+		if (existingByName) {
+			throw new BadRequestException('Страна уже существует')
+		}
+
+		if (existingByCode) {
+			return this.prisma.country.update({
+				where: { id: existingByCode.id },
+				data: { name, deleteAt: null },
+				select: countrySelect
+			})
+		}
+
+		return this.prisma.country.create({
+			data: { code, name },
+			select: countrySelect
+		})
+	}
+
+	async createRegionality(dto: AdminCreateRegionalityDtoReq, actor?: AdminActor) {
+		const regionName = normalizeRequiredText(dto.regionName)
+		const country = await this.resolveRegionalityCountry(dto)
+		const countryCode = country.code
+		const countryName = country.name
+		const parentId = dto.parentId ?? null
+		const parent = parentId
+			? await this.prisma.regionality.findUnique({
+					where: { id: parentId },
+					select: {
+						id: true,
+						countryId: true,
+						countryCode: true,
+						deleteAt: true
+					}
+				})
+			: null
+
+		if (parentId && (!parent || parent.deleteAt)) {
+			throw new BadRequestException('Родительский регион не найден')
+		}
+
+		if (
+			parent &&
+			((parent.countryId && parent.countryId !== country.id) ||
+				(!parent.countryId && parent.countryCode !== countryCode))
+		) {
+			throw new BadRequestException(
+				'Родительский регион должен быть в той же стране'
+			)
+		}
+		await this.assertCanCreateRegionality(country.id, parentId, actor)
+
+		const code =
+			dto.regionCode ?? buildRegionalityRegionCode(countryCode, regionName)
+
+		const existingByCode = await this.prisma.regionality.findUnique({
+			where: { code },
+			select: regionalitySelect
+		})
+
+		if (existingByCode && !existingByCode.deleteAt) {
+			throw new BadRequestException('Регион с таким кодом уже существует')
+		}
+
+		const existingByName = await this.prisma.regionality.findFirst({
+			where: {
+				OR: [
+					{ countryId: country.id },
+					{ countryId: null, countryCode }
+				],
+				parentId,
+				name: regionName,
+				deleteAt: null
+			},
+			select: { id: true }
+		})
+
+		if (existingByName) {
+			throw new BadRequestException('Регион уже существует в выбранной стране')
+		}
+
+		if (existingByCode) {
+			return this.prisma.regionality.update({
+				where: { id: existingByCode.id },
+				data: {
+					name: regionName,
+					country: { connect: { id: country.id } },
+					parent: parentId
+						? { connect: { id: parentId } }
+						: { disconnect: true },
+					countryCode,
+					countryName,
+					deleteAt: null
+				},
+				select: regionalitySelect
+			})
+		}
+
+		return this.prisma.regionality.create({
+			data: {
+				code,
+				name: regionName,
+				country: { connect: { id: country.id } },
+				...(parentId ? { parent: { connect: { id: parentId } } } : {}),
+				countryCode,
+				countryName
+			},
+			select: regionalitySelect
+		})
+	}
+
+	private async resolveRegionalityCountry(dto: AdminCreateRegionalityDtoReq) {
+		if (dto.countryId) {
+			const country = await this.prisma.country.findUnique({
+				where: { id: dto.countryId },
+				select: countrySelect
+			})
+
+			if (!country || country.deleteAt) {
+				throw new BadRequestException('Страна не найдена')
+			}
+
+			return country
+		}
+
+		if (!dto.countryName) {
+			throw new BadRequestException('Укажите страну')
+		}
+
+		const name = normalizeRequiredText(dto.countryName)
+		const code = dto.countryCode ?? buildRegionalityCountryCode(name)
+		const existingByCode = await this.prisma.country.findUnique({
+			where: { code },
+			select: countrySelect
+		})
+
+		if (existingByCode && !existingByCode.deleteAt) {
+			return existingByCode
+		}
+
+		const existingByName = await this.prisma.country.findFirst({
+			where: {
+				name,
+				deleteAt: null
+			},
+			select: countrySelect
+		})
+
+		if (existingByName) return existingByName
+
+		if (existingByCode) {
+			return this.prisma.country.update({
+				where: { id: existingByCode.id },
+				data: { name, deleteAt: null },
+				select: countrySelect
+			})
+		}
+
+		return this.prisma.country.create({
+			data: { code, name },
+			select: countrySelect
+		})
 	}
 
 	async getActivities(typeId?: string) {
@@ -1731,7 +2146,9 @@ export class AdminService {
 		}
 	}
 
-	async getCatalogPayments(catalogId: string) {
+	async getCatalogPayments(catalogId: string, actor?: AdminActor) {
+		await this.assertCatalogAccess(catalogId, actor)
+
 		const catalog = await this.prisma.catalog.findUnique({
 			where: { id: catalogId },
 			select: { id: true }
@@ -1772,8 +2189,11 @@ export class AdminService {
 	async createCatalogPromoPayment(
 		catalogId: string,
 		dto: AdminCreatePromoPaymentDtoReq,
-		proof?: UploadedPaymentProofFile
+		proof?: UploadedPaymentProofFile,
+		actor?: AdminActor
 	) {
+		await this.assertCatalogAccess(catalogId, actor)
+
 		const [catalog, promoCode] = await Promise.all([
 			this.prisma.catalog.findUnique({
 				where: { id: catalogId },
@@ -1835,8 +2255,11 @@ export class AdminService {
 	async createCatalogSubscriptionPayment(
 		catalogId: string,
 		dto: AdminCreateSubscriptionPaymentDtoReq,
-		proof?: UploadedPaymentProofFile
+		proof?: UploadedPaymentProofFile,
+		actor?: AdminActor
 	) {
+		await this.assertCatalogAccess(catalogId, actor)
+
 		const catalog = await this.prisma.catalog.findUnique({
 			where: { id: catalogId },
 			select: { id: true }
@@ -2069,6 +2492,130 @@ export class AdminService {
 		if (!catalog) throw new NotFoundException('Catalog not found')
 	}
 
+	private assertGlobalAdmin(actor?: AdminActor) {
+		if (!actor || actor.role === Role.ADMIN) return
+		throw new ForbiddenException('Недостаточно прав')
+	}
+
+	private async resolveGeoAccessScope(
+		actor?: AdminActor
+	): Promise<AdminGeoAccessScope> {
+		if (!actor || actor.role === Role.ADMIN) {
+			return { isGlobal: true, countryIds: [], regionalityIds: [] }
+		}
+
+		if (actor.role !== Role.GEO_ADMIN) {
+			throw new ForbiddenException('Недостаточно прав')
+		}
+
+		const user = await this.prisma.user.findUnique({
+			where: { id: actor.id },
+			select: {
+				id: true,
+				countries: { select: { id: true } },
+				regions: { select: { id: true } }
+			}
+		})
+
+		if (!user) throw new ForbiddenException('Недостаточно прав')
+
+		const countryIds = uniqueIds(user.countries.map(country => country.id))
+		const directRegionalityIds = uniqueIds(user.regions.map(region => region.id))
+		const regionalities = await this.prisma.regionality.findMany({
+			where: { deleteAt: null },
+			select: { id: true, countryId: true, parentId: true }
+		})
+		const allowedRegionalityIds = new Set<string>(directRegionalityIds)
+
+		for (const regionality of regionalities) {
+			if (regionality.countryId && countryIds.includes(regionality.countryId)) {
+				allowedRegionalityIds.add(regionality.id)
+			}
+		}
+
+		let changed = true
+		while (changed) {
+			changed = false
+			for (const regionality of regionalities) {
+				if (!regionality.parentId) continue
+				if (!allowedRegionalityIds.has(regionality.parentId)) continue
+				if (allowedRegionalityIds.has(regionality.id)) continue
+				allowedRegionalityIds.add(regionality.id)
+				changed = true
+			}
+		}
+
+		return {
+			isGlobal: false,
+			countryIds,
+			regionalityIds: Array.from(allowedRegionalityIds)
+		}
+	}
+
+	private async buildCatalogAccessWhere(actor?: AdminActor) {
+		const scope = await this.resolveGeoAccessScope(actor)
+		if (scope.isGlobal) return {}
+
+		return scope.regionalityIds.length
+			? {
+					region: {
+						some: {
+							id: { in: scope.regionalityIds }
+						}
+					}
+				}
+			: { id: GEO_ACCESS_EMPTY_ID }
+	}
+
+	private async assertCatalogAccess(catalogId: string, actor?: AdminActor) {
+		const accessWhere = await this.buildCatalogAccessWhere(actor)
+		if (!Object.keys(accessWhere).length) return
+
+		const catalog = await this.prisma.catalog.findFirst({
+			where: {
+				id: catalogId,
+				...accessWhere
+			},
+			select: { id: true }
+		})
+
+		if (!catalog) throw new ForbiddenException('Нет доступа к каталогу')
+	}
+
+	private async assertRegionalityIdsAllowed(
+		regionalityIds: string[],
+		actor?: AdminActor,
+		options?: { requireAnyForGeoAdmin?: boolean }
+	) {
+		const scope = await this.resolveGeoAccessScope(actor)
+		if (scope.isGlobal) return
+
+		const ids = uniqueIds(regionalityIds)
+		if (options?.requireAnyForGeoAdmin && !ids.length) {
+			throw new BadRequestException('Укажите доступную страну или регион')
+		}
+
+		const allowed = new Set(scope.regionalityIds)
+		const denied = ids.filter(id => !allowed.has(id))
+		if (denied.length) {
+			throw new ForbiddenException('Нет доступа к выбранному региону')
+		}
+	}
+
+	private async assertCanCreateRegionality(
+		countryId: string,
+		parentId: string | null,
+		actor?: AdminActor
+	) {
+		const scope = await this.resolveGeoAccessScope(actor)
+		if (scope.isGlobal) return
+
+		if (scope.countryIds.includes(countryId)) return
+		if (parentId && scope.regionalityIds.includes(parentId)) return
+
+		throw new ForbiddenException('Нет доступа к выбранной стране или региону')
+	}
+
 	private async buildCatalogFeatureEntitlementDto(catalogId: string) {
 		const capabilities = await this.capabilities.getCatalogCapabilities(catalogId)
 		const entitlements = await this.prisma.catalogFeatureEntitlement.findMany({
@@ -2107,6 +2654,50 @@ export class AdminService {
 		}
 	}
 
+	private async ensureCountryIdsExist(countryIds: string[]) {
+		if (!countryIds.length) return
+
+		const countries = await this.prisma.country.findMany({
+			where: {
+				id: { in: countryIds },
+				deleteAt: null
+			},
+			select: { id: true }
+		})
+		const existingIds = new Set(countries.map(country => country.id))
+		const missingIds = countryIds.filter(id => !existingIds.has(id))
+
+		if (missingIds.length) {
+			throw new BadRequestException('Выбрана несуществующая страна')
+		}
+	}
+
+	private async ensureRegionalityIdsExist(regionalityIds: string[]) {
+		if (!regionalityIds.length) return
+
+		const regionalities = await this.prisma.regionality.findMany({
+			where: {
+				id: { in: regionalityIds },
+				deleteAt: null
+			},
+			select: { id: true }
+		})
+		const existingIds = new Set(regionalities.map(regionality => regionality.id))
+		const missingIds = regionalityIds.filter(id => !existingIds.has(id))
+
+		if (missingIds.length) {
+			throw new BadRequestException('Выбран несуществующий регион')
+		}
+	}
+
+	private mapGeoAdmin(user: AdminGeoAdminRecord) {
+		const { regions, ...rest } = user
+		return {
+			...rest,
+			regionalities: regions
+		}
+	}
+
 	private mapAdminCatalog(catalog: AdminCatalogRecord) {
 		const {
 			activity,
@@ -2114,6 +2705,7 @@ export class AdminService {
 			featureEntitlements,
 			metrics,
 			payments,
+			region,
 			settings,
 			...rest
 		} = catalog
@@ -2126,6 +2718,14 @@ export class AdminService {
 		return {
 			...rest,
 			activities: activity,
+			regionalities: region ?? [],
+			children: (rest.children ?? []).map(child => {
+				const { region: childRegion, ...childRest } = child
+				return {
+					...childRest,
+					regionalities: childRegion ?? []
+				}
+			}),
 			metricId: metrics[0]?.counterId ?? null,
 			promoCodePaid,
 			subscriptionDaysLeft: buildSubscriptionDaysLeft(catalog.subscriptionEndsAt),
@@ -2260,6 +2860,24 @@ export class AdminService {
 		}
 
 		throw new BadRequestException('Unable to generate owner login')
+	}
+
+	private async generateGeoAdminLogin(name: string) {
+		const normalizedName = slugifyCatalogValue(name)
+		const base = normalizeLoginCandidate(`geo-${normalizedName || 'admin'}`)
+
+		for (let attempt = 0; attempt < 1000; attempt += 1) {
+			const suffix = attempt === 0 ? '' : `-${randomLoginSuffix()}`
+			const head = base.slice(0, Math.max(1, 25 - suffix.length))
+			const candidate = `${head}${suffix}`.replace(/-+$/g, '')
+			const existing = await this.prisma.user.findFirst({
+				where: { login: candidate },
+				select: { id: true }
+			})
+			if (!existing) return candidate
+		}
+
+		throw new BadRequestException('Unable to generate geo admin login')
 	}
 }
 
@@ -2398,10 +3016,49 @@ function randomLoginSuffix(length = 5) {
 	return suffix
 }
 
+function randomPassword(length = 12) {
+	let password = ''
+	for (let index = 0; index < length; index += 1) {
+		password += PASSWORD_ALPHABET[randomInt(0, PASSWORD_ALPHABET.length)]
+	}
+	return password
+}
+
+function normalizeLoginCandidate(value: string) {
+	return value
+		.toLowerCase()
+		.replace(/[^a-z0-9-]/g, '-')
+		.replace(/-+/g, '-')
+		.replace(/^-|-$/g, '')
+		.slice(0, 25)
+}
+
 function addDays(date: Date, days: number) {
 	const result = new Date(date)
 	result.setDate(result.getDate() + days)
 	return result
+}
+
+function uniqueIds(ids: string[]) {
+	return Array.from(new Set(ids))
+}
+
+function normalizeRequiredText(value: string) {
+	return value.trim().replace(/\s+/g, ' ')
+}
+
+function buildRegionalityCountryCode(countryName: string) {
+	const knownCode = KNOWN_COUNTRY_CODES.get(countryName.toLowerCase())
+	if (knownCode) return knownCode
+
+	const slug = slugifyCatalogValue(countryName).replace(/-/g, '')
+	return (slug || 'country').slice(0, 8).toUpperCase()
+}
+
+function buildRegionalityRegionCode(countryCode: string, regionName: string) {
+	const slug = slugifyCatalogValue(regionName).toUpperCase()
+	const regionCode = slug || 'REGION'
+	return `${countryCode}-${regionCode}`.slice(0, 64).replace(/-+$/g, '')
 }
 
 function buildSubscriptionDaysLeft(subscriptionEndsAt?: Date | null) {

@@ -1,6 +1,7 @@
 enum Role {
   CATALOG
   USER
+  GEO_ADMIN
   ADMIN
 }
 

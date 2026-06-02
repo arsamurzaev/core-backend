@@ -3,7 +3,8 @@ import {
 	IntegrationSyncRunStatus,
 	IntegrationSyncRunTrigger,
 	IntegrationSyncSnapshotCompleteness,
-	PaymentKind
+	PaymentKind,
+	Role
 } from '@generated/enums'
 import type { CatalogInventoryMode } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
@@ -474,6 +475,94 @@ export class AdminCatalogFeatureEntitlementsDto {
 	features: AdminCatalogFeatureEntitlementItemDto[]
 }
 
+export class AdminCountryListItemDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	code: string
+
+	@ApiProperty({ type: String })
+	name: string
+
+	@ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+	deleteAt?: Date | null
+}
+
+export class AdminRegionalityListItemDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	code: string
+
+	@ApiProperty({ type: String })
+	name: string
+
+	@ApiPropertyOptional({ type: String, format: 'uuid', nullable: true })
+	countryId?: string | null
+
+	@ApiPropertyOptional({ type: String, format: 'uuid', nullable: true })
+	parentId?: string | null
+
+	@ApiProperty({ type: String })
+	countryCode: string
+
+	@ApiProperty({ type: String })
+	countryName: string
+
+	@ApiPropertyOptional({ type: AdminCountryListItemDto, nullable: true })
+	country?: AdminCountryListItemDto | null
+
+	@ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+	deleteAt?: Date | null
+}
+
+export class AdminGeoAdminListItemDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	login: string
+
+	@ApiProperty({ type: String })
+	name: string
+
+	@ApiProperty({ enum: Role, enumName: 'Role', example: Role.GEO_ADMIN })
+	role: Role
+
+	@ApiProperty({ type: AdminCountryListItemDto, isArray: true })
+	countries: AdminCountryListItemDto[]
+
+	@ApiProperty({ type: AdminRegionalityListItemDto, isArray: true })
+	regionalities: AdminRegionalityListItemDto[]
+
+	@ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+	deleteAt?: Date | null
+
+	@ApiPropertyOptional({ type: String, format: 'date-time' })
+	createdAt?: Date
+
+	@ApiPropertyOptional({ type: String, format: 'date-time' })
+	updatedAt?: Date
+}
+
+export class AdminCreatedGeoAdminCredentialsDto {
+	@ApiProperty({ type: String })
+	login: string
+
+	@ApiProperty({ type: String })
+	password: string
+}
+
+export class AdminCreateGeoAdminResponseDto {
+	@ApiProperty({ type: AdminGeoAdminListItemDto })
+	admin: AdminGeoAdminListItemDto
+
+	@ApiProperty({ type: AdminCreatedGeoAdminCredentialsDto })
+	credentials: AdminCreatedGeoAdminCredentialsDto
+}
+
 export class AdminCatalogChildListItemDto {
 	@ApiProperty({ type: String })
 	id: string
@@ -489,6 +578,9 @@ export class AdminCatalogChildListItemDto {
 
 	@ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
 	deleteAt?: Date | null
+
+	@ApiProperty({ type: AdminRegionalityListItemDto, isArray: true })
+	regionalities: AdminRegionalityListItemDto[]
 }
 
 export class AdminCatalogListItemDto {
@@ -558,6 +650,9 @@ export class AdminCatalogListItemDto {
 
 	@ApiProperty({ type: AdminCatalogActivityListItemDto, isArray: true })
 	activities: AdminCatalogActivityListItemDto[]
+
+	@ApiProperty({ type: AdminRegionalityListItemDto, isArray: true })
+	regionalities: AdminRegionalityListItemDto[]
 
 	@ApiProperty({ type: AdminCatalogChildListItemDto, isArray: true })
 	children: AdminCatalogChildListItemDto[]

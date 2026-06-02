@@ -1,8 +1,34 @@
+model Country {
+  id String @id @default(uuid()) @db.Uuid
+
+  code String @unique @db.VarChar(8)
+  name String @db.VarChar(100)
+
+  regions Regionality[]
+  users   User[]
+
+  deleteAt  DateTime? @map("delete_at") // Дата удаления
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@map("countries")
+}
+
 model Regionality {
   id String @id @default(uuid()) @db.Uuid
 
   code String @unique
   name String
+
+  countryId String?  @map("country_id") @db.Uuid
+  country   Country? @relation(fields: [countryId], references: [id])
+
+  parentId String?       @map("parent_id") @db.Uuid
+  parent   Regionality?  @relation("RegionalityTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Regionality[] @relation("RegionalityTree")
+
+  countryCode String @default("RU") @map("country_code") @db.VarChar(8)
+  countryName String @default("Россия") @map("country_name") @db.VarChar(100)
 
   catalogs Catalog[]
   users    User[]
@@ -11,5 +37,8 @@ model Regionality {
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
+  @@index([countryId])
+  @@index([parentId])
+  @@index([countryCode])
   @@map("regionality")
 }

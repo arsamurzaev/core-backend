@@ -22,9 +22,14 @@ export class UserService {
 		dto: CreateUserDtoReq,
 		meta?: { ip?: string | null; userAgent?: string | null }
 	) {
-		const { login, password, role, regionalityIds, name } = dto
+		const { login, password, role, regionalityIds, countryIds, name } = dto
 
 		const hashedPassword = await hash(password)
+
+		const countryConnect =
+			countryIds && countryIds.length > 0
+				? { connect: countryIds.map(countryId => ({ id: countryId })) }
+				: undefined
 
 		const regionConnect =
 			regionalityIds && regionalityIds.length > 0
@@ -37,6 +42,7 @@ export class UserService {
 			password: hashedPassword,
 			isEmailConfirmed: false,
 			role,
+			...(countryConnect ? { countries: countryConnect } : {}),
 			...(regionConnect ? { regions: regionConnect } : {})
 		}
 

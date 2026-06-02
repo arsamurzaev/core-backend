@@ -23,6 +23,7 @@ async function main() {
 
 	const name = await askRequired('Name', 'Administrator')
 	const login = await askRequired('Login')
+	const role = await askRole()
 	const password = await askPassword('Password')
 	const passwordConfirmation = await askPassword('Repeat password')
 
@@ -35,15 +36,17 @@ async function main() {
 		where: {
 			login_role: {
 				login,
-				role: Role.ADMIN
+				role
 			}
 		},
 		select: { id: true, login: true, name: true }
 	})
+	const geoBindings =
+		role === Role.GEO_ADMIN ? await askGeoAdminBindings() : null
 
 	if (existing) {
 		const shouldUpdate = await askYesNo(
-			`Admin "${login}" already exists. Update name and password?`
+			`${role} "${login}" already exists. Update name, password and bindings?`
 		)
 		if (!shouldUpdate) {
 			console.log('Cancelled')
@@ -56,7 +59,13 @@ async function main() {
 				name,
 				password: passwordHash,
 				isEmailConfirmed: true,
-				deleteAt: null
+				deleteAt: null,
+				...(geoBindings
+					? {
+							countries: { set: geoBindings.countryIds.map(id => ({ id })) },
+							regions: { set: geoBindings.regionalityIds.map(id => ({ id })) }
+						}
+					: {})
 			},
 			select: { id: true, login: true, name: true, role: true }
 		})
@@ -70,13 +79,19 @@ async function main() {
 			name,
 			login,
 			password: passwordHash,
-			role: Role.ADMIN,
-			isEmailConfirmed: true
+			role,
+			isEmailConfirmed: true,
+			...(geoBindings
+				? {
+						countries: { connect: geoBindings.countryIds.map(id => ({ id })) },
+						regions: { connect: geoBindings.regionalityIds.map(id => ({ id })) }
+					}
+				: {})
 		},
 		select: { id: true, login: true, name: true, role: true }
 	})
 
-	console.log(`Admin created: ${admin.login} (${admin.id})`)
+	console.log(`${role} created: ${admin.login} (${admin.id})`)
 }
 
 async function askRequired(
@@ -103,6 +118,43 @@ async function askPassword(label: string): Promise<string> {
 	const value = (await rl.question(`${label}: `)).trim()
 	if (!value) throw new Error(`${label} is required`)
 	return value
+}
+
+async function askRole(): Promise<Role> {
+	const value = (await rl.question('Role ADMIN/GEO_ADMIN (ADMIN): '))
+		.trim()
+		.toUpperCase()
+
+	if (!value || value === Role.ADMIN) return Role.ADMIN
+	if (value === Role.GEO_ADMIN) return Role.GEO_ADMIN
+
+	throw new Error('Role must be ADMIN or GEO_ADMIN')
+}
+
+async function askGeoAdminBindings() {
+	const countryIds = parseCsvIds(
+		await rl.question('Country ids, comma separated (optional): ')
+	)
+	const regionalityIds = parseCsvIds(
+		await rl.question('Regionality ids, comma separated (optional): ')
+	)
+
+	if (!countryIds.length && !regionalityIds.length) {
+		throw new Error('GEO_ADMIN requires at least one country or regionality id')
+	}
+
+	return { countryIds, regionalityIds }
+}
+
+function parseCsvIds(value: string) {
+	return Array.from(
+		new Set(
+			value
+				.split(',')
+				.map(item => item.trim())
+				.filter(Boolean)
+		)
+	)
 }
 
 function validateDatabaseEnv() {

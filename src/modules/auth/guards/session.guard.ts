@@ -30,9 +30,10 @@ function isUnsafeMethod(method: string | undefined) {
 	return m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE'
 }
 
-// Иерархия ролей: ADMIN > CATALOG > USER
+// Иерархия ролей: ADMIN > GEO_ADMIN > CATALOG > USER
 const ROLE_RANK: Record<Role, number> = {
-	ADMIN: 3,
+	ADMIN: 4,
+	GEO_ADMIN: 3,
 	CATALOG: 2,
 	USER: 1
 }
@@ -116,7 +117,9 @@ export class SessionGuard implements CanActivate {
 			}
 
 			const responseCookieScope =
-				user.role === Role.ADMIN ? { global: true } : null
+				user.role === Role.ADMIN || user.role === Role.GEO_ADMIN
+					? { global: true }
+					: null
 			const cookieDomain = resolveCookieDomain(resolveServerHost(req))
 			if (res?.cookie) {
 				setSessionCookies(

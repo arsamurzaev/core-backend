@@ -43,6 +43,7 @@ import { mustCatalogId } from '@/shared/tenancy/ctx'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
 import { CartService } from './cart.service'
+import { CART_GUEST_TOKEN_HEADER } from './cart.utils'
 import {
 	JoinHallTableSessionDtoReq,
 	PublicUpsertCartItemDtoReq,
@@ -503,6 +504,11 @@ export class CartController {
 	@ApiOperation({
 		summary: 'Send a public shared hall table cart to waiter confirmation'
 	})
+	@ApiHeader({
+		name: CART_GUEST_TOKEN_HEADER,
+		required: false,
+		description: 'Required for hall table guest actions'
+	})
 	@ApiParam({
 		name: 'publicKey',
 		description: 'Public cart key',
@@ -512,19 +518,29 @@ export class CartController {
 	@ApiOkResponse({ type: CartResponseDto })
 	async submitPublicHallOrder(
 		@Param('publicKey') publicKey: string,
+		@Headers(CART_GUEST_TOKEN_HEADER) guestToken: string | undefined,
 		@Body() dto: ShareCurrentCartDtoReq = {}
 	) {
-		const result = await this.cartService.submitPublicHallOrder(publicKey, {
-			checkoutData: dto.checkoutData,
-			checkoutMethod: dto.checkoutMethod,
-			comment: dto.comment
-		})
+		const result = await this.cartService.submitPublicHallOrder(
+			publicKey,
+			{
+				checkoutData: dto.checkoutData,
+				checkoutMethod: dto.checkoutMethod,
+				comment: dto.comment
+			},
+			guestToken
+		)
 		return { ok: true, cart: result.cart }
 	}
 
 	@SkipCatalog()
 	@Put('public/:publicKey/items')
 	@ApiOperation({ summary: 'Upsert an item in a public cart' })
+	@ApiHeader({
+		name: CART_GUEST_TOKEN_HEADER,
+		required: false,
+		description: 'Required for hall table guest actions'
+	})
 	@ApiParam({
 		name: 'publicKey',
 		description: 'Public cart key',
@@ -546,15 +562,25 @@ export class CartController {
 	@ApiOkResponse({ type: CartResponseDto })
 	async upsertPublicItem(
 		@Param('publicKey') publicKey: string,
+		@Headers(CART_GUEST_TOKEN_HEADER) guestToken: string | undefined,
 		@Body() dto: PublicUpsertCartItemDtoReq
 	) {
-		const cart = await this.cartService.upsertPublicItem(publicKey, dto)
+		const cart = await this.cartService.upsertPublicItem(
+			publicKey,
+			dto,
+			guestToken
+		)
 		return { ok: true, cart }
 	}
 
 	@SkipCatalog()
 	@Delete('public/:publicKey/items/:itemId')
 	@ApiOperation({ summary: 'Remove an item from a public cart' })
+	@ApiHeader({
+		name: CART_GUEST_TOKEN_HEADER,
+		required: false,
+		description: 'Required for hall table guest actions'
+	})
 	@ApiParam({
 		name: 'publicKey',
 		description: 'Public cart key',
@@ -568,9 +594,14 @@ export class CartController {
 	@ApiOkResponse({ type: CartResponseDto })
 	async removePublicItem(
 		@Param('publicKey') publicKey: string,
+		@Headers(CART_GUEST_TOKEN_HEADER) guestToken: string | undefined,
 		@Param('itemId') itemId: string
 	) {
-		const cart = await this.cartService.removePublicItem(publicKey, itemId)
+		const cart = await this.cartService.removePublicItem(
+			publicKey,
+			itemId,
+			guestToken
+		)
 		return { ok: true, cart }
 	}
 

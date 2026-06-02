@@ -57,6 +57,18 @@ export class AdminUpdateCatalogDtoReq {
 
 	@ApiPropertyOptional({
 		type: String,
+		isArray: true,
+		example: ['regionality uuid'],
+		description:
+			'Full country/region bindings through the regionality directory. Pass an empty array to clear.'
+	})
+	@IsOptional()
+	@IsArray()
+	@IsString({ each: true })
+	regionalityIds?: string[]
+
+	@ApiPropertyOptional({
+		type: String,
 		example: '108517746',
 		nullable: true,
 		description: 'Yandex Metrika counter id for MAIN scope.'

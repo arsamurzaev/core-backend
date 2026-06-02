@@ -82,6 +82,8 @@ function createService(tx = createTransactionMock()) {
 			findFirst: jest.fn().mockResolvedValue(null)
 		},
 		user: {
+			create: jest.fn(),
+			findMany: jest.fn().mockResolvedValue([]),
 			findUnique: jest.fn().mockResolvedValue(null),
 			findFirst: jest.fn().mockResolvedValue(null)
 		},
@@ -98,6 +100,20 @@ function createService(tx = createTransactionMock()) {
 		integrationVariantLink: {
 			count: jest.fn(),
 			groupBy: jest.fn().mockResolvedValue([])
+		},
+		country: {
+			create: jest.fn(),
+			findFirst: jest.fn().mockResolvedValue(null),
+			findMany: jest.fn().mockResolvedValue([]),
+			findUnique: jest.fn().mockResolvedValue(null),
+			update: jest.fn()
+		},
+		regionality: {
+			create: jest.fn(),
+			findFirst: jest.fn().mockResolvedValue(null),
+			findMany: jest.fn().mockResolvedValue([]),
+			findUnique: jest.fn().mockResolvedValue(null),
+			update: jest.fn()
 		},
 		$transaction: jest.fn(async callback => callback(tx))
 	}
@@ -160,6 +176,7 @@ function createDuplicateTransactionMock() {
 				subscriptionEndsAt: null,
 				metrics: [],
 				activity: [],
+				region: [],
 				payments: [],
 				deleteAt: null,
 				createdAt: new Date('2026-05-10T00:00:00.000Z'),
@@ -319,6 +336,7 @@ function createAdminCatalogRecord(overrides: Record<string, unknown> = {}) {
 		subscriptionEndsAt: null,
 		metrics: [],
 		activity: [],
+		region: [],
 		payments: [],
 		deleteAt: null,
 		createdAt: new Date('2026-05-10T00:00:00.000Z'),
@@ -409,6 +427,465 @@ describe('AdminService', () => {
 			inventoryMode: 'INTERNAL',
 			canUseInternalInventory: true
 		})
+	})
+
+	it('exposes catalog country and region bindings for admin dashboard', async () => {
+		const { prisma, service } = createService()
+		const regionality = {
+			id: 'region-1',
+			code: 'RU-MOW',
+			name: 'Москва',
+			countryCode: 'RU',
+			countryName: 'Россия',
+			deleteAt: null
+		}
+		prisma.catalog.findMany.mockResolvedValue([
+			createAdminCatalogRecord({
+				region: [regionality],
+				children: [
+					{
+						id: 'catalog-child',
+						slug: 'catalog-child',
+						domain: null,
+						name: 'Catalog Child',
+						deleteAt: null,
+						region: [regionality]
+					}
+				]
+			})
+		])
+
+		const [catalog] = await service.getCatalogs()
+
+		expect(catalog.regionalities).toEqual([regionality])
+		expect(catalog.children[0]).toMatchObject({
+			id: 'catalog-child',
+			regionalities: [regionality]
+		})
+	})
+
+	it('returns active regionalities sorted for admin selectors', async () => {
+		const { prisma, service } = createService()
+		prisma.regionality.findMany.mockResolvedValue([
+			{
+				id: 'region-1',
+				code: 'RU-MOW',
+				name: 'Москва',
+				countryId: 'country-ru',
+				parentId: null,
+				countryCode: 'RU',
+				countryName: 'Россия',
+				country: {
+					id: 'country-ru',
+					code: 'RU',
+					name: 'Россия',
+					deleteAt: null
+				},
+				deleteAt: null
+			}
+		])
+
+		await expect(service.getRegionalities()).resolves.toEqual([
+			expect.objectContaining({
+				code: 'RU-MOW',
+				countryCode: 'RU'
+			})
+		])
+		expect(prisma.regionality.findMany).toHaveBeenCalledWith({
+			where: { deleteAt: null },
+			select: expect.objectContaining({
+				countryId: true,
+				parentId: true,
+				countryCode: true,
+				countryName: true,
+				country: expect.any(Object)
+			}),
+			orderBy: [{ countryName: 'asc' }, { parentId: 'asc' }, { name: 'asc' }]
+		})
+	})
+
+	it('returns active countries sorted for admin selectors', async () => {
+		const { prisma, service } = createService()
+		prisma.country.findMany.mockResolvedValue([
+			{
+				id: 'country-ru',
+				code: 'RU',
+				name: 'Россия',
+				deleteAt: null
+			}
+		])
+
+		await expect(service.getCountries()).resolves.toEqual([
+			expect.objectContaining({
+				code: 'RU',
+				name: 'Россия'
+			})
+		])
+		expect(prisma.country.findMany).toHaveBeenCalledWith({
+			where: { deleteAt: null },
+			select: expect.objectContaining({
+				code: true,
+				name: true
+			}),
+			orderBy: { name: 'asc' }
+		})
+	})
+
+	it('scopes countries and regionalities for geo admins', async () => {
+		const { prisma, service } = createService()
+		prisma.user.findUnique.mockResolvedValue({
+			id: 'geo-admin',
+			countries: [{ id: 'country-ru' }],
+			regions: [{ id: 'region-chechnya' }]
+		})
+		prisma.regionality.findMany.mockResolvedValue([
+			{ id: 'region-chechnya', countryId: 'country-ru', parentId: null },
+			{
+				id: 'region-grozny',
+				countryId: 'country-ru',
+				parentId: 'region-chechnya'
+			},
+			{ id: 'region-kz', countryId: 'country-kz', parentId: null }
+		])
+		prisma.country.findMany.mockResolvedValue([
+			{
+				id: 'country-ru',
+				code: 'RU',
+				name: 'Россия',
+				deleteAt: null
+			}
+		])
+
+		await service.getCountries({ id: 'geo-admin', role: Role.GEO_ADMIN })
+		await service.getRegionalities({ id: 'geo-admin', role: Role.GEO_ADMIN })
+
+		expect(prisma.country.findMany).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: expect.objectContaining({ id: { in: ['country-ru'] } })
+			})
+		)
+		expect(prisma.regionality.findMany).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				where: expect.objectContaining({
+					id: { in: ['region-chechnya', 'region-grozny'] }
+				})
+			})
+		)
+	})
+
+	it('filters catalog list for geo admins by assigned geo scope', async () => {
+		const { prisma, service } = createService()
+		prisma.user.findUnique.mockResolvedValue({
+			id: 'geo-admin',
+			countries: [{ id: 'country-ru' }],
+			regions: []
+		})
+		prisma.regionality.findMany.mockResolvedValue([
+			{ id: 'region-chechnya', countryId: 'country-ru', parentId: null },
+			{ id: 'region-grozny', countryId: 'country-ru', parentId: 'region-chechnya' },
+			{ id: 'region-kz', countryId: 'country-kz', parentId: null }
+		])
+
+		await service.getCatalogs(undefined, {
+			id: 'geo-admin',
+			role: Role.GEO_ADMIN
+		})
+
+		expect(prisma.catalog.findMany).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: {
+					region: {
+						some: {
+							id: { in: ['region-chechnya', 'region-grozny'] }
+						}
+					}
+				}
+			})
+		)
+	})
+
+	it('lists geo admins for global admins only', async () => {
+		const { prisma, service } = createService()
+		prisma.user.findMany.mockResolvedValue([
+			{
+				id: 'geo-admin',
+				login: 'geo-chechnya',
+				name: 'Geo Admin',
+				role: Role.GEO_ADMIN,
+				countries: [
+					{ id: 'country-ru', code: 'RU', name: 'Р РѕСЃСЃРёСЏ', deleteAt: null }
+				],
+				regions: [],
+				deleteAt: null,
+				createdAt: new Date('2026-06-01T00:00:00.000Z'),
+				updatedAt: new Date('2026-06-01T00:00:00.000Z')
+			}
+		])
+
+		await expect(
+			service.getGeoAdmins({ id: 'admin', role: Role.ADMIN })
+		).resolves.toEqual([
+			expect.objectContaining({
+				login: 'geo-chechnya',
+				regionalities: []
+			})
+		])
+		await expect(
+			service.getGeoAdmins({ id: 'geo-admin', role: Role.GEO_ADMIN })
+		).rejects.toThrow('Недостаточно прав')
+	})
+
+	it('creates geo admins with country and regionality assignments', async () => {
+		const { prisma, service } = createService()
+		const country = {
+			id: 'country-ru',
+			code: 'RU',
+			name: 'Р РѕСЃСЃРёСЏ',
+			deleteAt: null
+		}
+		const region = {
+			id: 'region-chechnya',
+			code: 'RU-CHECHENSKAYA-RESPUBLIKA',
+			name: 'Р§РµС‡РµРЅСЃРєР°СЏ СЂРµСЃРїСѓР±Р»РёРєР°',
+			countryId: country.id,
+			parentId: null,
+			countryCode: country.code,
+			countryName: country.name,
+			country,
+			deleteAt: null
+		}
+		prisma.country.findMany.mockResolvedValue([country])
+		prisma.regionality.findMany.mockResolvedValue([region])
+		prisma.user.create.mockResolvedValue({
+			id: 'geo-admin',
+			login: 'geo-chechnya',
+			name: 'Geo Admin',
+			role: Role.GEO_ADMIN,
+			countries: [country],
+			regions: [region],
+			deleteAt: null,
+			createdAt: new Date('2026-06-01T00:00:00.000Z'),
+			updatedAt: new Date('2026-06-01T00:00:00.000Z')
+		})
+
+		const result = await service.createGeoAdmin(
+			{
+				login: 'geo-chechnya',
+				password: 'password123',
+				name: 'Geo Admin',
+				countryIds: ['country-ru'],
+				regionalityIds: ['region-chechnya']
+			},
+			{ id: 'admin', role: Role.ADMIN }
+		)
+
+		expect(result).toEqual(
+			expect.objectContaining({
+				admin: expect.objectContaining({
+					login: 'geo-chechnya',
+					regionalities: [region]
+				}),
+				credentials: {
+					login: 'geo-chechnya',
+					password: 'password123'
+				}
+			})
+		)
+		expect(prisma.user.create).toHaveBeenCalledWith({
+			data: expect.objectContaining({
+				login: 'geo-chechnya',
+				name: 'Geo Admin',
+				role: Role.GEO_ADMIN,
+				isEmailConfirmed: true,
+				countries: { connect: [{ id: 'country-ru' }] },
+				regions: { connect: [{ id: 'region-chechnya' }] }
+			}),
+			select: expect.any(Object)
+		})
+	})
+
+	it('generates geo admin login and password when omitted', async () => {
+		const { prisma, service } = createService()
+		const country = {
+			id: 'country-ru',
+			code: 'RU',
+			name: 'Р РѕСЃСЃРёСЏ',
+			deleteAt: null
+		}
+		prisma.country.findMany.mockResolvedValue([country])
+		prisma.user.create.mockImplementation(async ({ data }: any) => ({
+			id: 'geo-admin',
+			login: data.login,
+			name: data.name,
+			role: data.role,
+			countries: [country],
+			regions: [],
+			deleteAt: null,
+			createdAt: new Date('2026-06-01T00:00:00.000Z'),
+			updatedAt: new Date('2026-06-01T00:00:00.000Z')
+		}))
+
+		const result = await service.createGeoAdmin(
+			{
+				name: 'Geo Admin',
+				countryIds: ['country-ru']
+			},
+			{ id: 'admin', role: Role.ADMIN }
+		)
+
+		expect(result.admin.login).toMatch(/^geo-geo-admin/)
+		expect(result.credentials.login).toBe(result.admin.login)
+		expect(result.credentials.password).toHaveLength(12)
+		expect(prisma.user.create).toHaveBeenCalledWith({
+			data: expect.objectContaining({
+				login: result.credentials.login,
+				password: expect.any(String),
+				role: Role.GEO_ADMIN,
+				countries: { connect: [{ id: 'country-ru' }] }
+			}),
+			select: expect.any(Object)
+		})
+	})
+
+	it('requires a country or regionality when creating geo admins', async () => {
+		const { service } = createService()
+
+		await expect(
+			service.createGeoAdmin(
+				{
+					login: 'geo-empty',
+					password: 'password123',
+					name: 'Geo Empty'
+				},
+				{ id: 'admin', role: Role.ADMIN }
+			)
+		).rejects.toThrow('Укажите хотя бы одну страну или регион')
+	})
+
+	it('creates country and region for admin selectors', async () => {
+		const { prisma, service } = createService()
+		const country = {
+			id: 'country-ru',
+			code: 'RU',
+			name: 'Россия',
+			deleteAt: null
+		}
+		const created = {
+			id: 'region-chechnya',
+			code: 'RU-CHECHENSKAYA-RESPUBLIKA',
+			name: 'Чеченская республика',
+			countryId: country.id,
+			parentId: null,
+			countryCode: 'RU',
+			countryName: 'Россия',
+			country,
+			deleteAt: null
+		}
+		prisma.country.create.mockResolvedValue(country)
+		prisma.regionality.create.mockResolvedValue(created)
+
+		const result = await service.createRegionality({
+			countryName: 'Россия',
+			regionName: 'Чеченская республика'
+		})
+
+		expect(result).toEqual(created)
+		expect(prisma.country.create).toHaveBeenCalledWith({
+			data: {
+				code: 'RU',
+				name: 'Россия'
+			},
+			select: expect.objectContaining({
+				code: true,
+				name: true
+			})
+		})
+		expect(prisma.regionality.create).toHaveBeenCalledWith({
+			data: {
+				code: 'RU-CHECHENSKAYA-RESPUBLIKA',
+				name: 'Чеченская республика',
+				country: { connect: { id: 'country-ru' } },
+				countryCode: 'RU',
+				countryName: 'Россия'
+			},
+			select: expect.objectContaining({
+				countryId: true,
+				parentId: true,
+				countryCode: true,
+				countryName: true
+			})
+		})
+	})
+
+	it('creates nested regionalities inside a country', async () => {
+		const { prisma, service } = createService()
+		const country = {
+			id: 'country-ru',
+			code: 'RU',
+			name: 'Россия',
+			deleteAt: null
+		}
+		const parent = {
+			id: 'region-chechnya',
+			countryId: country.id,
+			countryCode: country.code,
+			deleteAt: null
+		}
+		const created = {
+			id: 'region-grozny',
+			code: 'RU-GROZNYJ',
+			name: 'Грозный',
+			countryId: country.id,
+			parentId: parent.id,
+			countryCode: country.code,
+			countryName: country.name,
+			country,
+			deleteAt: null
+		}
+		prisma.country.findUnique.mockResolvedValue(country)
+		prisma.regionality.findUnique
+			.mockResolvedValueOnce(parent)
+			.mockResolvedValueOnce(null)
+		prisma.regionality.create.mockResolvedValue(created)
+
+		const result = await service.createRegionality({
+			countryId: country.id,
+			parentId: parent.id,
+			regionName: 'Грозный'
+		})
+
+		expect(result).toEqual(created)
+		expect(prisma.regionality.create).toHaveBeenCalledWith({
+			data: {
+				code: 'RU-GROZNYJ',
+				name: 'Грозный',
+				country: { connect: { id: country.id } },
+				parent: { connect: { id: parent.id } },
+				countryCode: country.code,
+				countryName: country.name
+			},
+			select: expect.any(Object)
+		})
+	})
+
+	it('blocks duplicate active country and region names', async () => {
+		const { prisma, service } = createService()
+		prisma.country.findUnique.mockResolvedValue({
+			id: 'country-ru',
+			code: 'RU',
+			name: 'Россия',
+			deleteAt: null
+		})
+		prisma.regionality.findFirst.mockResolvedValue({ id: 'region-1' })
+
+		await expect(
+			service.createRegionality({
+				countryName: 'Россия',
+				regionName: 'Чеченская республика',
+				regionCode: 'RU-CE'
+			})
+		).rejects.toThrow('Регион уже существует')
+		expect(prisma.regionality.create).not.toHaveBeenCalled()
 	})
 
 	it('counts catalog subscription end dates inclusively', async () => {
@@ -727,6 +1204,48 @@ describe('AdminService', () => {
 			})
 		)
 		expect(result.activities).toEqual([activity])
+	})
+
+	it('replaces catalog regionalities during admin edit', async () => {
+		const tx = createTransactionMock()
+		const { prisma, service } = createService(tx)
+		prisma.catalog.findUnique.mockResolvedValueOnce({
+			id: 'catalog-1',
+			slug: 'catalog-one',
+			typeId: 'type-1',
+			userId: 'user-1',
+			metrics: []
+		})
+		tx.catalog.update.mockResolvedValueOnce(
+			createAdminCatalogRecord({
+				region: [
+					{
+						id: 'region-1',
+						code: 'RU-MOW',
+						name: 'Москва',
+						countryCode: 'RU',
+						countryName: 'Россия',
+						deleteAt: null
+					}
+				]
+			})
+		)
+
+		const result = await service.updateCatalog('catalog-1', {
+			regionalityIds: ['region-1']
+		})
+
+		expect(tx.catalog.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: 'catalog-1' },
+				data: expect.objectContaining({
+					region: { set: [{ id: 'region-1' }] }
+				})
+			})
+		)
+		expect(result.regionalities).toEqual([
+			expect.objectContaining({ id: 'region-1', countryCode: 'RU' })
+		])
 	})
 
 	it('duplicates catalog product media with independent S3 keys', async () => {

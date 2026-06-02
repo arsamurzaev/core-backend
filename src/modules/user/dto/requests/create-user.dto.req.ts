@@ -48,4 +48,12 @@ export class CreateUserDtoReq {
 	@IsOptional()
 	@IsArray({ message: 'Региональность должна быть массивом' })
 	regionalityIds?: string[]
+
+	@ApiPropertyOptional({
+		type: [String],
+		example: ['countryId1', 'countryId2']
+	})
+	@IsOptional()
+	@IsArray({ message: 'Страны должны быть массивом' })
+	countryIds?: string[]
 }

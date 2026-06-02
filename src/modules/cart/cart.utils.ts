@@ -243,6 +243,7 @@ function buildCartVariantLabel(variant: CartVariantLike): string {
 export const CART_TOKEN_BYTES = 24
 export const PUBLIC_KEY_BYTES = 18
 export const CART_COOKIE_NAME = 'cart_token'
+export const CART_GUEST_TOKEN_HEADER = 'x-cart-guest-token'
 export const CART_SSE_HEARTBEAT_MS = 200_000
 export const MAX_ITEM_QUANTITY = 999
 export const MAX_CART_ITEMS = 50

@@ -469,6 +469,12 @@ export class HallTableSessionDto {
 
 	@ApiProperty({ type: String, nullable: true })
 	guestSessionId: string | null
+
+	@ApiProperty({
+		type: String,
+		description: 'Private token required to mutate this guest lines'
+	})
+	guestToken: string
 }
 
 export class HallTableSessionResponseDto extends OkResponseDto {

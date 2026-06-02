@@ -57,6 +57,14 @@ export class JoinHallTableSessionDtoReq {
 
 	@ApiPropertyOptional({
 		type: String,
+		description: 'Private token proving ownership of guestSessionId'
+	})
+	@IsOptional()
+	@IsString()
+	guestToken?: string
+
+	@ApiPropertyOptional({
+		type: String,
 		maxLength: 120,
 		example: 'Гость 1'
 	})

@@ -83,7 +83,9 @@ export class AuthController {
 			res,
 			{ sid, csrf },
 			resolveCookieDomain(resolveServerHost(req)),
-			user.role === Role.ADMIN ? { global: true } : null
+			user.role === Role.ADMIN || user.role === Role.GEO_ADMIN
+				? { global: true }
+				: null
 		)
 
 		return { ok: true, user, catalogId }
@@ -152,7 +154,10 @@ export class AuthController {
 		clearSessionCookies(
 			res,
 			resolveCookieDomain(resolveServerHost(req)),
-			authReq.user?.role === Role.ADMIN ? { global: true } : null
+			authReq.user?.role === Role.ADMIN ||
+				authReq.user?.role === Role.GEO_ADMIN
+				? { global: true }
+				: null
 		)
 
 		return { ok: true }

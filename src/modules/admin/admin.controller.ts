@@ -9,6 +9,7 @@ import {
 	Patch,
 	Post,
 	Query,
+	Req,
 	UploadedFile,
 	UseGuards,
 	UseInterceptors
@@ -35,23 +36,31 @@ import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { SessionGuard } from '../auth/guards/session.guard'
+import type { AuthRequest } from '../auth/types/auth-request'
 
 import { AdminService, type UploadedPaymentProofFile } from './admin.service'
 import {
 	AdminActivityListItemDto,
 	AdminCatalogFeatureEntitlementsDto,
 	AdminCatalogListItemDto,
+	AdminCountryListItemDto,
 	AdminCreateCatalogResponseDto,
+	AdminCreateGeoAdminResponseDto,
 	AdminDeleteCatalogContentResultDto,
+	AdminGeoAdminListItemDto,
 	AdminMoySkladStockDiagnosticsReportDto,
 	AdminPaymentDto,
 	AdminPromoCodeListItemDto,
+	AdminRegionalityListItemDto,
 	AdminTypeListItemDto
 } from './dto/admin-list.dto.res'
 import { AdminCatalogsQueryDtoReq } from './dto/requests/admin-catalogs-query.dto.req'
 import { AdminCreateActivityDtoReq } from './dto/requests/admin-create-activity.dto.req'
 import { AdminCreateCatalogDtoReq } from './dto/requests/admin-create-catalog.dto.req'
+import { AdminCreateCountryDtoReq } from './dto/requests/admin-create-country.dto.req'
+import { AdminCreateGeoAdminDtoReq } from './dto/requests/admin-create-geo-admin.dto.req'
 import { AdminCreatePromoCodeDtoReq } from './dto/requests/admin-create-promo-code.dto.req'
+import { AdminCreateRegionalityDtoReq } from './dto/requests/admin-create-regionality.dto.req'
 import { AdminCreatePromoPaymentDtoReq } from './dto/requests/admin-create-promo-payment.dto.req'
 import { AdminCreateSubscriptionPaymentDtoReq } from './dto/requests/admin-create-subscription-payment.dto.req'
 import { AdminDefaultVariantDiagnosticsQueryDtoReq } from './dto/requests/admin-default-variant-maintenance.dto.req'
@@ -77,7 +86,7 @@ const MAX_PAYMENT_PROOF_FILE_BYTES = 10 * 1024 * 1024
 @ApiSecurity('csrf')
 @SkipCatalog()
 @UseGuards(SessionGuard)
-@Roles(Role.ADMIN)
+@Roles(Role.GEO_ADMIN)
 @Controller('/admin')
 export class AdminController {
 	constructor(
@@ -86,6 +95,7 @@ export class AdminController {
 	) {}
 
 	@Get('/domain-events/outbox')
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'List domain event outbox rows' })
 	@ApiOkResponse({ type: AdminDomainEventOutboxListDto })
 	async getDomainEventOutbox(
@@ -95,6 +105,7 @@ export class AdminController {
 	}
 
 	@Get('/domain-events/outbox/stats')
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'Get domain event outbox status counters' })
 	@ApiOkResponse({ type: AdminDomainEventOutboxStatsDto })
 	async getDomainEventOutboxStats(): Promise<AdminDomainEventOutboxStatsDto> {
@@ -102,6 +113,7 @@ export class AdminController {
 	}
 
 	@Post('/domain-events/outbox/:id/retry')
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'Retry one pending or failed domain event' })
 	@ApiOkResponse({ type: AdminDomainEventOutboxActionResultDto })
 	async retryDomainEventOutboxItem(
@@ -111,6 +123,7 @@ export class AdminController {
 	}
 
 	@Post('/domain-events/outbox/retry-failed')
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'Retry failed domain events by optional filters' })
 	@ApiOkResponse({ type: AdminDomainEventOutboxActionResultDto })
 	async retryFailedDomainEvents(
@@ -120,6 +133,7 @@ export class AdminController {
 	}
 
 	@Post('/domain-events/outbox/drain')
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'Manually drain pending/failed domain events' })
 	@ApiOkResponse({ type: AdminDomainEventOutboxActionResultDto })
 	async drainDomainEventOutbox(
@@ -129,6 +143,7 @@ export class AdminController {
 	}
 
 	@Post('/domain-events/outbox/cleanup')
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'Delete old processed domain events' })
 	@ApiOkResponse({ type: AdminDomainEventOutboxCleanupResultDto })
 	async cleanupDomainEventOutbox(
@@ -141,9 +156,10 @@ export class AdminController {
 	@ApiOperation({ summary: 'Получить список каталогов для админки' })
 	@ApiOkResponse({ type: AdminCatalogListItemDto, isArray: true })
 	async getCatalogs(
-		@Query() query: AdminCatalogsQueryDtoReq
+		@Query() query: AdminCatalogsQueryDtoReq,
+		@Req() req: AuthRequest
 	): Promise<AdminCatalogListItemDto[]> {
-		return this.adminService.getCatalogs(query) as Promise<
+		return this.adminService.getCatalogs(query, getAdminActor(req)) as Promise<
 			AdminCatalogListItemDto[]
 		>
 	}
@@ -152,10 +168,12 @@ export class AdminController {
 	@ApiOperation({ summary: 'Create catalog with generated owner credentials' })
 	@ApiCreatedResponse({ type: AdminCreateCatalogResponseDto })
 	async createCatalog(
-		@Body() dto: AdminCreateCatalogDtoReq
+		@Body() dto: AdminCreateCatalogDtoReq,
+		@Req() req: AuthRequest
 	): Promise<AdminCreateCatalogResponseDto> {
 		return this.adminService.createCatalog(
-			dto
+			dto,
+			getAdminActor(req)
 		) as Promise<AdminCreateCatalogResponseDto>
 	}
 
@@ -166,11 +184,13 @@ export class AdminController {
 	@ApiCreatedResponse({ type: AdminCreateCatalogResponseDto })
 	async duplicateCatalog(
 		@Param('id', ParseUUIDPipe) id: string,
-		@Body() dto: AdminDuplicateCatalogDtoReq
+		@Body() dto: AdminDuplicateCatalogDtoReq,
+		@Req() req: AuthRequest
 	): Promise<AdminCreateCatalogResponseDto> {
 		return this.adminService.duplicateCatalog(
 			id,
-			dto
+			dto,
+			getAdminActor(req)
 		) as Promise<AdminCreateCatalogResponseDto>
 	}
 
@@ -180,10 +200,12 @@ export class AdminController {
 	})
 	@ApiOkResponse({ type: AdminCreateCatalogResponseDto })
 	async resetCatalogOwnerPassword(
-		@Param('id', ParseUUIDPipe) id: string
+		@Param('id', ParseUUIDPipe) id: string,
+		@Req() req: AuthRequest
 	): Promise<AdminCreateCatalogResponseDto> {
 		return this.adminService.resetCatalogOwnerPassword(
-			id
+			id,
+			getAdminActor(req)
 		) as Promise<AdminCreateCatalogResponseDto>
 	}
 
@@ -192,11 +214,13 @@ export class AdminController {
 	@ApiOkResponse({ type: AdminCatalogListItemDto })
 	async updateCatalog(
 		@Param('id', ParseUUIDPipe) id: string,
-		@Body() dto: AdminUpdateCatalogDtoReq
+		@Body() dto: AdminUpdateCatalogDtoReq,
+		@Req() req: AuthRequest
 	): Promise<AdminCatalogListItemDto> {
 		return this.adminService.updateCatalog(
 			id,
-			dto
+			dto,
+			getAdminActor(req)
 		) as Promise<AdminCatalogListItemDto>
 	}
 
@@ -204,9 +228,13 @@ export class AdminController {
 	@ApiOperation({ summary: 'Get catalog feature entitlements' })
 	@ApiOkResponse({ type: AdminCatalogFeatureEntitlementsDto })
 	async getCatalogFeatureEntitlements(
-		@Param('id', ParseUUIDPipe) id: string
+		@Param('id', ParseUUIDPipe) id: string,
+		@Req() req: AuthRequest
 	): Promise<AdminCatalogFeatureEntitlementsDto> {
-		return this.adminService.getCatalogFeatureEntitlements(id)
+		return this.adminService.getCatalogFeatureEntitlements(
+			id,
+			getAdminActor(req)
+		)
 	}
 
 	@Get('/catalogs/:id/maintenance/default-variants/diagnostics')
@@ -216,11 +244,13 @@ export class AdminController {
 	@ApiOkResponse({ type: ProductDefaultVariantDiagnosticsResponseDto })
 	async diagnoseCatalogDefaultVariants(
 		@Param('id', ParseUUIDPipe) id: string,
-		@Query() query: AdminDefaultVariantDiagnosticsQueryDtoReq
+		@Query() query: AdminDefaultVariantDiagnosticsQueryDtoReq,
+		@Req() req: AuthRequest
 	): Promise<ProductDefaultVariantDiagnosticsResponseDto> {
 		return this.adminService.diagnoseCatalogDefaultVariants(
 			id,
-			query.sampleLimit
+			query.sampleLimit,
+			getAdminActor(req)
 		) as Promise<ProductDefaultVariantDiagnosticsResponseDto>
 	}
 
@@ -230,10 +260,12 @@ export class AdminController {
 	})
 	@ApiOkResponse({ type: ProductDefaultVariantRepairResponseDto })
 	async repairCatalogMissingDefaultVariants(
-		@Param('id', ParseUUIDPipe) id: string
+		@Param('id', ParseUUIDPipe) id: string,
+		@Req() req: AuthRequest
 	): Promise<ProductDefaultVariantRepairResponseDto> {
 		return this.adminService.repairCatalogMissingDefaultVariants(
-			id
+			id,
+			getAdminActor(req)
 		) as Promise<ProductDefaultVariantRepairResponseDto>
 	}
 
@@ -244,11 +276,13 @@ export class AdminController {
 	@ApiOkResponse({ type: ProductDefaultVariantPriceMismatchRepairResponseDto })
 	async repairCatalogDefaultVariantPriceMismatches(
 		@Param('id', ParseUUIDPipe) id: string,
-		@Body() dto: RepairDefaultVariantPriceMismatchDtoReq
+		@Body() dto: RepairDefaultVariantPriceMismatchDtoReq,
+		@Req() req: AuthRequest
 	): Promise<ProductDefaultVariantPriceMismatchRepairResponseDto> {
 		return this.adminService.repairCatalogDefaultVariantPriceMismatches(
 			id,
-			dto
+			dto,
+			getAdminActor(req)
 		) as Promise<ProductDefaultVariantPriceMismatchRepairResponseDto>
 	}
 
@@ -256,10 +290,12 @@ export class AdminController {
 	@ApiOperation({ summary: 'Get MoySklad stock sync diagnostics for catalog' })
 	@ApiOkResponse({ type: AdminMoySkladStockDiagnosticsReportDto })
 	async getCatalogMoySkladStockDiagnostics(
-		@Param('id', ParseUUIDPipe) id: string
+		@Param('id', ParseUUIDPipe) id: string,
+		@Req() req: AuthRequest
 	): Promise<AdminMoySkladStockDiagnosticsReportDto> {
 		return this.adminService.getCatalogMoySkladStockDiagnostics(
-			id
+			id,
+			getAdminActor(req)
 		) as Promise<AdminMoySkladStockDiagnosticsReportDto>
 	}
 
@@ -268,28 +304,39 @@ export class AdminController {
 	@ApiOkResponse({ type: AdminCatalogFeatureEntitlementsDto })
 	async updateCatalogFeatureEntitlement(
 		@Param('id', ParseUUIDPipe) id: string,
-		@Body() dto: AdminUpdateCatalogFeatureEntitlementDtoReq
+		@Body() dto: AdminUpdateCatalogFeatureEntitlementDtoReq,
+		@Req() req: AuthRequest
 	): Promise<AdminCatalogFeatureEntitlementsDto> {
-		return this.adminService.updateCatalogFeatureEntitlement(id, dto)
+		return this.adminService.updateCatalogFeatureEntitlement(
+			id,
+			dto,
+			getAdminActor(req)
+		)
 	}
 
 	@Delete('/catalogs/:id')
 	@ApiOperation({ summary: 'Удалить каталог через soft-delete' })
 	@ApiOkResponse({ type: AdminCatalogListItemDto })
 	async deleteCatalog(
-		@Param('id', ParseUUIDPipe) id: string
+		@Param('id', ParseUUIDPipe) id: string,
+		@Req() req: AuthRequest
 	): Promise<AdminCatalogListItemDto> {
-		return this.adminService.deleteCatalog(id) as Promise<AdminCatalogListItemDto>
+		return this.adminService.deleteCatalog(
+			id,
+			getAdminActor(req)
+		) as Promise<AdminCatalogListItemDto>
 	}
 
 	@Delete('/catalogs/:id/content')
 	@ApiOperation({ summary: 'Soft-delete контент каталога, не удаляя каталог' })
 	@ApiOkResponse({ type: AdminDeleteCatalogContentResultDto })
 	async deleteCatalogContent(
-		@Param('id', ParseUUIDPipe) id: string
+		@Param('id', ParseUUIDPipe) id: string,
+		@Req() req: AuthRequest
 	): Promise<AdminDeleteCatalogContentResultDto> {
 		return this.adminService.deleteCatalogContent(
-			id
+			id,
+			getAdminActor(req)
 		) as Promise<AdminDeleteCatalogContentResultDto>
 	}
 
@@ -297,10 +344,12 @@ export class AdminController {
 	@ApiOperation({ summary: 'Восстановить soft-deleted каталог' })
 	@ApiOkResponse({ type: AdminCatalogListItemDto })
 	async restoreCatalog(
-		@Param('id', ParseUUIDPipe) id: string
+		@Param('id', ParseUUIDPipe) id: string,
+		@Req() req: AuthRequest
 	): Promise<AdminCatalogListItemDto> {
 		return this.adminService.restoreCatalog(
-			id
+			id,
+			getAdminActor(req)
 		) as Promise<AdminCatalogListItemDto>
 	}
 
@@ -309,6 +358,80 @@ export class AdminController {
 	@ApiOkResponse({ type: AdminTypeListItemDto, isArray: true })
 	async getTypes(): Promise<AdminTypeListItemDto[]> {
 		return this.adminService.getTypes() as Promise<AdminTypeListItemDto[]>
+	}
+
+	@Get('/geo-admins')
+	@Roles(Role.ADMIN)
+	@ApiOperation({ summary: 'List geo admins with assigned countries and regions' })
+	@ApiOkResponse({ type: AdminGeoAdminListItemDto, isArray: true })
+	async getGeoAdmins(
+		@Req() req: AuthRequest
+	): Promise<AdminGeoAdminListItemDto[]> {
+		return this.adminService.getGeoAdmins(getAdminActor(req)) as Promise<
+			AdminGeoAdminListItemDto[]
+		>
+	}
+
+	@Post('/geo-admins')
+	@Roles(Role.ADMIN)
+	@ApiOperation({ summary: 'Create geo admin with assigned countries and regions' })
+	@ApiCreatedResponse({ type: AdminCreateGeoAdminResponseDto })
+	async createGeoAdmin(
+		@Body() dto: AdminCreateGeoAdminDtoReq,
+		@Req() req: AuthRequest
+	): Promise<AdminCreateGeoAdminResponseDto> {
+		return this.adminService.createGeoAdmin(
+			dto,
+			getAdminActor(req)
+		) as Promise<AdminCreateGeoAdminResponseDto>
+	}
+
+	@Get('/regionalities')
+	@ApiOperation({
+		summary: 'Get country and region directory for admin catalog binding'
+	})
+	@ApiOkResponse({ type: AdminRegionalityListItemDto, isArray: true })
+	async getRegionalities(
+		@Req() req: AuthRequest
+	): Promise<AdminRegionalityListItemDto[]> {
+		return this.adminService.getRegionalities(getAdminActor(req)) as Promise<
+			AdminRegionalityListItemDto[]
+		>
+	}
+
+	@Get('/countries')
+	@ApiOperation({ summary: 'Get country directory for admin catalog binding' })
+	@ApiOkResponse({ type: AdminCountryListItemDto, isArray: true })
+	async getCountries(@Req() req: AuthRequest): Promise<AdminCountryListItemDto[]> {
+		return this.adminService.getCountries(getAdminActor(req)) as Promise<
+			AdminCountryListItemDto[]
+		>
+	}
+
+	@Post('/countries')
+	@ApiOperation({ summary: 'Create country for admin catalog binding' })
+	@ApiCreatedResponse({ type: AdminCountryListItemDto })
+	async createCountry(
+		@Body() dto: AdminCreateCountryDtoReq,
+		@Req() req: AuthRequest
+	): Promise<AdminCountryListItemDto> {
+		return this.adminService.createCountry(
+			dto,
+			getAdminActor(req)
+		) as Promise<AdminCountryListItemDto>
+	}
+
+	@Post('/regionalities')
+	@ApiOperation({ summary: 'Create country and region for admin catalog binding' })
+	@ApiCreatedResponse({ type: AdminRegionalityListItemDto })
+	async createRegionality(
+		@Body() dto: AdminCreateRegionalityDtoReq,
+		@Req() req: AuthRequest
+	): Promise<AdminRegionalityListItemDto> {
+		return this.adminService.createRegionality(
+			dto,
+			getAdminActor(req)
+		) as Promise<AdminRegionalityListItemDto>
 	}
 
 	@Get('/activities')
@@ -357,9 +480,13 @@ export class AdminController {
 	@ApiOperation({ summary: 'Получить список оплат каталога' })
 	@ApiOkResponse({ type: AdminPaymentDto, isArray: true })
 	async getCatalogPayments(
-		@Param('id', ParseUUIDPipe) id: string
+		@Param('id', ParseUUIDPipe) id: string,
+		@Req() req: AuthRequest
 	): Promise<AdminPaymentDto[]> {
-		return this.adminService.getCatalogPayments(id) as Promise<AdminPaymentDto[]>
+		return this.adminService.getCatalogPayments(
+			id,
+			getAdminActor(req)
+		) as Promise<AdminPaymentDto[]>
 	}
 
 	@Get('/promo-codes/:id/payments')
@@ -402,12 +529,14 @@ export class AdminController {
 	async createCatalogPromoPayment(
 		@Param('id', ParseUUIDPipe) id: string,
 		@Body() dto: AdminCreatePromoPaymentDtoReq,
-		@UploadedFile() proof?: UploadedPaymentProofFile
+		@UploadedFile() proof: UploadedPaymentProofFile | undefined,
+		@Req() req: AuthRequest
 	): Promise<AdminPaymentDto> {
 		return this.adminService.createCatalogPromoPayment(
 			id,
 			dto,
-			proof
+			proof,
+			getAdminActor(req)
 		) as Promise<AdminPaymentDto>
 	}
 
@@ -439,12 +568,22 @@ export class AdminController {
 	async createCatalogSubscriptionPayment(
 		@Param('id', ParseUUIDPipe) id: string,
 		@Body() dto: AdminCreateSubscriptionPaymentDtoReq,
-		@UploadedFile() proof?: UploadedPaymentProofFile
+		@UploadedFile() proof: UploadedPaymentProofFile | undefined,
+		@Req() req: AuthRequest
 	): Promise<AdminPaymentDto> {
 		return this.adminService.createCatalogSubscriptionPayment(
 			id,
 			dto,
-			proof
+			proof,
+			getAdminActor(req)
 		) as Promise<AdminPaymentDto>
+	}
+}
+
+function getAdminActor(req: AuthRequest) {
+	if (!req.user) throw new Error('Missing authenticated user')
+	return {
+		id: req.user.id,
+		role: req.user.role
 	}
 }
