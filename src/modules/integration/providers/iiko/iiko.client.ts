@@ -95,7 +95,7 @@ export class IikoClient {
 		}
 
 		const response = await this.requestWithoutAuth<IikoAccessTokenResponse>(
-			'/api/1/access_token',
+			'/api/v2/access_token',
 			{ apiLogin: normalizedApiLogin },
 			[normalizedApiLogin]
 		)

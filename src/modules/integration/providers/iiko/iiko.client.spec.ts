@@ -34,7 +34,7 @@ describe('IikoClient', () => {
 
 		expect(fetchMock).toHaveBeenCalledTimes(3)
 		expect(fetchMock.mock.calls[0][0]).toBe(
-			'https://iiko.example/api/1/access_token'
+			'https://iiko.example/api/v2/access_token'
 		)
 		expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe(
 			'Bearer token-1'
