@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common'
+import { BadRequestException, Logger } from '@nestjs/common'
 
 import {
 	redactProviderSecrets,
@@ -101,11 +101,25 @@ export class IikoClient {
 		}
 
 		const tokenRequest = this.buildAccessTokenRequest(normalizedApiLogin)
-		const response = await this.requestWithoutAuth<IikoAccessTokenResponse>(
-			tokenRequest.endpoint,
-			tokenRequest.body,
-			[normalizedApiLogin, this.appId, this.clientSecret]
-		)
+		let response: IikoAccessTokenResponse
+		try {
+			response = await this.requestWithoutAuth<IikoAccessTokenResponse>(
+				tokenRequest.endpoint,
+				tokenRequest.body,
+				[normalizedApiLogin, this.appId, this.clientSecret]
+			)
+		} catch (error) {
+			if (
+				tokenRequest.endpoint === '/api/1/access_token' &&
+				error instanceof IikoHttpError &&
+				isLegacyAccessTokenUnsupportedError(error.message)
+			) {
+				throw new BadRequestException(
+					'iiko appId and clientSecret are required for this API key. Add iiko Developer Portal credentials and try again.'
+				)
+			}
+			throw error
+		}
 		const token = typeof response.token === 'string' ? response.token.trim() : ''
 		if (!token) {
 			throw new Error('iiko access_token response did not include token')
@@ -127,10 +141,14 @@ export class IikoClient {
 	} {
 		if (this.appId || this.clientSecret) {
 			if (!this.appId) {
-				throw new Error('iiko appId is required when clientSecret is configured')
+				throw new BadRequestException(
+					'iiko appId is required when clientSecret is configured'
+				)
 			}
 			if (!this.clientSecret) {
-				throw new Error('iiko clientSecret is required when appId is configured')
+				throw new BadRequestException(
+					'iiko clientSecret is required when appId is configured'
+				)
 			}
 
 			return {
@@ -459,6 +477,13 @@ function normalizeBaseUrl(value?: string | null): string {
 function normalizeOptionalString(value?: string | null): string | null {
 	const normalized = value?.trim() ?? ''
 	return normalized || null
+}
+
+function isLegacyAccessTokenUnsupportedError(message: string): boolean {
+	return (
+		/does not support\s+\/api\/1\/access_token/i.test(message) &&
+		/use\s+\/api\/v2\/access_token/i.test(message)
+	)
 }
 
 function sleep(ms: number): Promise<void> {

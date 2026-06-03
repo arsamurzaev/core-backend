@@ -71,6 +71,28 @@ describe('IikoClient', () => {
 		)
 	})
 
+	it('explains when an API key requires v2 credentials', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(
+				{
+					correlationId: 'corr-1',
+					errorDescription:
+						'This API key does not support /api/1/access_token. Please use /api/v2/access_token instead.'
+				},
+				403
+			)
+		)
+
+		const client = new IikoClient({
+			apiLogin: 'login',
+			baseUrl: 'https://iiko.example'
+		})
+
+		await expect(client.getOrganizations()).rejects.toThrow(
+			'iiko appId and clientSecret are required for this API key'
+		)
+	})
+
 	it('refreshes token once after 401', async () => {
 		fetchMock
 			.mockResolvedValueOnce(jsonResponse({ token: 'token-1' }))
