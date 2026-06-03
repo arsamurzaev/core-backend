@@ -37,6 +37,8 @@ describe('IikoMetadataCryptoService', () => {
 	it('encrypts apiLogin in stored metadata', () => {
 		const result = service.buildStoredMetadata({
 			apiLogin: 'secret-login',
+			appId: '15',
+			clientSecret: 'client-secret',
 			organizationId: 'organization-1',
 			organizationName: 'Demo',
 			importImages: true
@@ -53,11 +55,25 @@ describe('IikoMetadataCryptoService', () => {
 				ciphertext: expect.any(String)
 			})
 		)
+		expect(result.appId).toBe('15')
+		expect(result.clientSecret).toBeUndefined()
+		expect(result.clientSecretEncrypted).toEqual(
+			expect.objectContaining({
+				format: 'enc-v1',
+				alg: 'aes-256-gcm',
+				keyVersion: 'v1',
+				iv: expect.any(String),
+				tag: expect.any(String),
+				ciphertext: expect.any(String)
+			})
+		)
 	})
 
 	it('decrypts encrypted stored metadata', () => {
 		const stored = service.buildStoredMetadata({
 			apiLogin: 'secret-login',
+			appId: '15',
+			clientSecret: 'client-secret',
 			organizationId: 'organization-1',
 			organizationName: 'Demo',
 			externalMenuId: '81651',
@@ -89,6 +105,8 @@ describe('IikoMetadataCryptoService', () => {
 		expect(service.parseStoredMetadata(stored)).toEqual(
 			buildIikoMetadata({
 				apiLogin: 'secret-login',
+				appId: '15',
+				clientSecret: 'client-secret',
 				organizationId: 'organization-1',
 				organizationName: 'Demo',
 				externalMenuId: '81651',

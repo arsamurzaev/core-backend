@@ -17,6 +17,22 @@ export class UpdateIikoIntegrationDtoReq {
 	@MaxLength(500)
 	apiLogin?: string
 
+	@ApiPropertyOptional({ type: String, nullable: true, example: '15' })
+	@IsOptional()
+	@IsString()
+	@MaxLength(100)
+	appId?: string | null
+
+	@ApiPropertyOptional({
+		type: String,
+		nullable: true,
+		example: 'sk_live_abc123def456'
+	})
+	@IsOptional()
+	@IsString()
+	@MaxLength(1000)
+	clientSecret?: string | null
+
 	@ApiPropertyOptional({
 		type: String,
 		example: '9d97b2a1-0000-0000-0000-000000000001'

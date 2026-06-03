@@ -135,6 +135,8 @@ export class IikoOrderExportService {
 
 		const client = new IikoClient({
 			apiLogin: metadata.apiLogin,
+			appId: metadata.appId,
+			clientSecret: metadata.clientSecret,
 			baseUrl: this.resolveApiBaseUrl()
 		})
 		let hallOrder = resolveHallOrderInfo(order)

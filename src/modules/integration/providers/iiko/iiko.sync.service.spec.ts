@@ -447,7 +447,7 @@ describe('IikoSyncService', () => {
 
 		const service = createService(createRepoMock(), createProductsMock())
 
-		const result = await service.testConnection('login')
+		const result = await service.testConnection({ apiLogin: 'login' })
 
 		expect(getTerminalGroups).toHaveBeenCalledWith(['org-1'], {
 			includeDisabled: true

@@ -39,6 +39,8 @@ const DEFAULT_TOKEN_TTL_MS = 20 * 60 * 1000
 
 type IikoClientConfig = {
 	apiLogin: string
+	appId?: string | null
+	clientSecret?: string | null
 	baseUrl?: string | null
 	timeoutMs?: number
 	tokenTtlMs?: number
@@ -63,6 +65,8 @@ class IikoHttpError extends Error {
 export class IikoClient {
 	private readonly logger = new Logger(IikoClient.name)
 	private readonly apiLogin: string
+	private readonly appId: string | null
+	private readonly clientSecret: string | null
 	private readonly baseUrl: string
 	private readonly timeoutMs: number
 	private readonly tokenTtlMs: number
@@ -75,6 +79,8 @@ export class IikoClient {
 		}
 
 		this.apiLogin = apiLogin
+		this.appId = normalizeOptionalString(config.appId)
+		this.clientSecret = normalizeOptionalString(config.clientSecret)
 		this.baseUrl = normalizeBaseUrl(config.baseUrl)
 		this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS
 		this.tokenTtlMs = config.tokenTtlMs ?? DEFAULT_TOKEN_TTL_MS
@@ -94,10 +100,11 @@ export class IikoClient {
 			return this.tokenCache.token
 		}
 
+		const tokenRequest = this.buildAccessTokenRequest(normalizedApiLogin)
 		const response = await this.requestWithoutAuth<IikoAccessTokenResponse>(
-			'/api/v2/access_token',
-			{ apiLogin: normalizedApiLogin },
-			[normalizedApiLogin]
+			tokenRequest.endpoint,
+			tokenRequest.body,
+			[normalizedApiLogin, this.appId, this.clientSecret]
 		)
 		const token = typeof response.token === 'string' ? response.token.trim() : ''
 		if (!token) {
@@ -112,6 +119,34 @@ export class IikoClient {
 		}
 
 		return token
+	}
+
+	private buildAccessTokenRequest(apiLogin: string): {
+		endpoint: string
+		body: Record<string, string>
+	} {
+		if (this.appId || this.clientSecret) {
+			if (!this.appId) {
+				throw new Error('iiko appId is required when clientSecret is configured')
+			}
+			if (!this.clientSecret) {
+				throw new Error('iiko clientSecret is required when appId is configured')
+			}
+
+			return {
+				endpoint: '/api/v2/access_token',
+				body: {
+					apiKey: apiLogin,
+					appId: this.appId,
+					clientSecret: this.clientSecret
+				}
+			}
+		}
+
+		return {
+			endpoint: '/api/1/access_token',
+			body: { apiLogin }
+		}
 	}
 
 	async getOrganizations(): Promise<IikoOrganizationsResponse> {
@@ -419,6 +454,11 @@ export class IikoClient {
 function normalizeBaseUrl(value?: string | null): string {
 	const normalized = value?.trim() || DEFAULT_API_BASE_URL
 	return normalized.replace(/\/+$/g, '')
+}
+
+function normalizeOptionalString(value?: string | null): string | null {
+	const normalized = value?.trim() ?? ''
+	return normalized || null
 }
 
 function sleep(ms: number): Promise<void> {

@@ -190,6 +190,8 @@ export class IikoSyncService {
 			const metadata = this.metadataCrypto.parseStoredMetadata(locked.metadata)
 			const client = new IikoClient({
 				apiLogin: metadata.apiLogin,
+				appId: metadata.appId,
+				clientSecret: metadata.clientSecret,
 				baseUrl: this.resolveBaseUrl()
 			})
 			await this.reportProgress(options.runId, {
@@ -334,6 +336,8 @@ export class IikoSyncService {
 
 			const client = new IikoClient({
 				apiLogin: metadata.apiLogin,
+				appId: metadata.appId,
+				clientSecret: metadata.clientSecret,
 				baseUrl: this.resolveBaseUrl()
 			})
 			await this.reportProgress(options.runId, {
@@ -430,7 +434,11 @@ export class IikoSyncService {
 		}
 	}
 
-	async testConnection(apiLogin: string): Promise<{
+	async testConnection(credentials: {
+		apiLogin: string
+		appId?: string | null
+		clientSecret?: string | null
+	}): Promise<{
 		ok: true
 		organizations: Array<{ id: string; name: string; isActive: boolean | null }>
 		externalMenus: Array<{ id: string; name: string }>
@@ -444,7 +452,9 @@ export class IikoSyncService {
 		}>
 	}> {
 		const client = new IikoClient({
-			apiLogin,
+			apiLogin: credentials.apiLogin,
+			appId: credentials.appId,
+			clientSecret: credentials.clientSecret,
 			baseUrl: this.resolveBaseUrl()
 		})
 		const [organizationsResponse, menusResponse] = await Promise.all([
@@ -513,6 +523,8 @@ export class IikoSyncService {
 			const metadata = this.metadataCrypto.parseStoredMetadata(locked.metadata)
 			const client = new IikoClient({
 				apiLogin: metadata.apiLogin,
+				appId: metadata.appId,
+				clientSecret: metadata.clientSecret,
 				baseUrl: this.resolveBaseUrl()
 			})
 			const result = await this.applyStopListAvailability({
@@ -544,6 +556,8 @@ export class IikoSyncService {
 
 	async previewExternalMenu(params: {
 		apiLogin: string
+		appId?: string | null
+		clientSecret?: string | null
 		organizationId: string
 		externalMenuId: string
 		externalMenuName?: string | null
@@ -552,6 +566,8 @@ export class IikoSyncService {
 	}): Promise<IikoExternalMenuPreview> {
 		const client = new IikoClient({
 			apiLogin: params.apiLogin,
+			appId: params.appId,
+			clientSecret: params.clientSecret,
 			baseUrl: this.resolveBaseUrl()
 		})
 		const rawMenu = await client.getExternalMenuById({

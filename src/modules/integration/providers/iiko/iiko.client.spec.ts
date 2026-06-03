@@ -34,12 +34,39 @@ describe('IikoClient', () => {
 
 		expect(fetchMock).toHaveBeenCalledTimes(3)
 		expect(fetchMock.mock.calls[0][0]).toBe(
-			'https://iiko.example/api/v2/access_token'
+			'https://iiko.example/api/1/access_token'
 		)
 		expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe(
 			'Bearer token-1'
 		)
 		expect(fetchMock.mock.calls[2][1].headers.Authorization).toBe(
+			'Bearer token-1'
+		)
+	})
+
+	it('gets access token with v2 application credentials', async () => {
+		fetchMock
+			.mockResolvedValueOnce(jsonResponse({ token: 'token-1' }))
+			.mockResolvedValueOnce(jsonResponse({ organizations: [] }))
+
+		const client = new IikoClient({
+			apiLogin: 'login',
+			appId: '15',
+			clientSecret: 'secret-1',
+			baseUrl: 'https://iiko.example'
+		})
+
+		await client.getOrganizations()
+
+		expect(fetchMock.mock.calls[0][0]).toBe(
+			'https://iiko.example/api/v2/access_token'
+		)
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+			apiKey: 'login',
+			appId: '15',
+			clientSecret: 'secret-1'
+		})
+		expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe(
 			'Bearer token-1'
 		)
 	})

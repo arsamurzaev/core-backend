@@ -918,9 +918,13 @@ export class IntegrationService {
 			? this.iikoMetadataCrypto.parseStoredMetadata(existing.metadata)
 			: null
 		const apiLogin = dto.apiLogin
+		const appId = dto.appId
+		const clientSecret = dto.clientSecret
 		const organizationId = dto.organizationId
 		const metadata = this.iikoMetadataCrypto.buildStoredMetadata({
 			apiLogin,
+			appId,
+			clientSecret,
 			organizationId,
 			organizationName: dto.organizationName,
 			externalMenuId: dto.externalMenuId,
@@ -968,9 +972,17 @@ export class IntegrationService {
 			existing.metadata
 		)
 		const apiLogin = dto.apiLogin ?? currentMetadata.apiLogin
+		const appId =
+			dto.appId !== undefined ? dto.appId : currentMetadata.appId
+		const clientSecret =
+			dto.clientSecret !== undefined
+				? dto.clientSecret
+				: currentMetadata.clientSecret
 		const organizationId = dto.organizationId ?? currentMetadata.organizationId
 		const metadata = this.iikoMetadataCrypto.buildStoredMetadata({
 			apiLogin,
+			appId,
+			clientSecret,
 			organizationId,
 			organizationName:
 				dto.organizationName !== undefined
@@ -1058,20 +1070,22 @@ export class IntegrationService {
 		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
 
 		const requestApiLogin = dto.apiLogin?.trim()
-		if (requestApiLogin) {
-			return this.iikoSync.testConnection(requestApiLogin)
-		}
-
+		const requestAppId = dto.appId?.trim()
+		const requestClientSecret = dto.clientSecret?.trim()
 		const existing = await this.repo.findIiko(catalogId)
 		const metadata = existing
 			? this.iikoMetadataCrypto.parseStoredMetadata(existing.metadata)
 			: null
-		const storedApiLogin = metadata?.apiLogin?.trim()
-		if (!storedApiLogin) {
+		const apiLogin = requestApiLogin || metadata?.apiLogin?.trim()
+		if (!apiLogin) {
 			throw new BadRequestException('iiko apiLogin is required')
 		}
 
-		return this.iikoSync.testConnection(storedApiLogin)
+		return this.iikoSync.testConnection({
+			apiLogin,
+			appId: requestAppId || metadata?.appId,
+			clientSecret: requestClientSecret || metadata?.clientSecret
+		})
 	}
 
 	async getIikoTables(): Promise<IikoRestaurantTablesDto> {
@@ -1094,6 +1108,8 @@ export class IntegrationService {
 
 		const client = new IikoClient({
 			apiLogin: metadata.apiLogin,
+			appId: metadata.appId,
+			clientSecret: metadata.clientSecret,
 			baseUrl: this.resolveIikoApiBaseUrl()
 		})
 		const response = await client.getRestaurantSections({
@@ -1229,6 +1245,8 @@ export class IntegrationService {
 			: null
 
 		const apiLogin = dto.apiLogin?.trim() || metadata?.apiLogin
+		const appId = dto.appId?.trim() || metadata?.appId
+		const clientSecret = dto.clientSecret?.trim() || metadata?.clientSecret
 		const organizationId = dto.organizationId?.trim() || metadata?.organizationId
 		const externalMenuId = dto.externalMenuId?.trim() || metadata?.externalMenuId
 
@@ -1244,6 +1262,8 @@ export class IntegrationService {
 
 		const preview = await this.iikoSync.previewExternalMenu({
 			apiLogin,
+			appId,
+			clientSecret,
 			organizationId,
 			externalMenuId,
 			externalMenuName:
@@ -1320,6 +1340,8 @@ export class IntegrationService {
 
 		const client = new IikoClient({
 			apiLogin: metadata.apiLogin,
+			appId: metadata.appId,
+			clientSecret: metadata.clientSecret,
 			baseUrl: this.resolveIikoApiBaseUrl()
 		})
 		let response: Awaited<ReturnType<IikoClient['updateWebhookSettings']>>
@@ -1383,6 +1405,8 @@ export class IntegrationService {
 			try {
 				const client = new IikoClient({
 					apiLogin: metadata.apiLogin,
+					appId: metadata.appId,
+					clientSecret: metadata.clientSecret,
 					baseUrl: this.resolveIikoApiBaseUrl()
 				})
 				await client.updateWebhookSettings({
@@ -3905,6 +3929,8 @@ export class IntegrationService {
 			isActive: integration.isActive,
 			hasApiLogin: Boolean(metadata.apiLogin),
 			apiLoginPreview: maskApiLogin(metadata.apiLogin),
+			appId: metadata.appId,
+			hasClientSecret: Boolean(metadata.clientSecret),
 			organizationId: metadata.organizationId,
 			organizationName: metadata.organizationName,
 			externalMenuId: metadata.externalMenuId,
@@ -4547,6 +4573,8 @@ export class IntegrationService {
 	private assertHasIikoUpdateFields(dto: UpdateIikoIntegrationDtoReq): void {
 		if (
 			dto.apiLogin === undefined &&
+			dto.appId === undefined &&
+			dto.clientSecret === undefined &&
 			dto.organizationId === undefined &&
 			dto.organizationName === undefined &&
 			dto.externalMenuId === undefined &&

@@ -751,7 +751,11 @@ describe('IntegrationService', () => {
 			service.testIikoConnection({ apiLogin: 'iiko-login' })
 		)
 
-		expect(iikoSync.testConnection).toHaveBeenCalledWith('iiko-login')
+		expect(iikoSync.testConnection).toHaveBeenCalledWith({
+			apiLogin: 'iiko-login',
+			appId: undefined,
+			clientSecret: undefined
+		})
 		expect(result.organizations).toHaveLength(1)
 		expect(result.externalMenus).toHaveLength(1)
 	})
@@ -788,7 +792,11 @@ describe('IntegrationService', () => {
 			apiLogin: 'stored-iiko-login',
 			organizationId: 'organization-1'
 		})
-		expect(iikoSync.testConnection).toHaveBeenCalledWith('stored-iiko-login')
+		expect(iikoSync.testConnection).toHaveBeenCalledWith({
+			apiLogin: 'stored-iiko-login',
+			appId: undefined,
+			clientSecret: undefined
+		})
 		expect(result.terminalGroups).toHaveLength(1)
 	})
 

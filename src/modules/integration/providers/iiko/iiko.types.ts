@@ -1,4 +1,4 @@
-export type IikoEncryptedApiLogin = {
+export type IikoEncryptedSecret = {
 	format: 'enc-v1'
 	alg: 'aes-256-gcm'
 	keyVersion: string
@@ -7,11 +7,17 @@ export type IikoEncryptedApiLogin = {
 	ciphertext: string
 }
 
+export type IikoEncryptedApiLogin = IikoEncryptedSecret
+export type IikoEncryptedClientSecret = IikoEncryptedSecret
+
 type IikoOpenString<T extends string> = T | (string & Record<never, never>)
 
 export type StoredIikoMetadata = {
 	apiLogin?: string
 	apiLoginEncrypted?: IikoEncryptedApiLogin
+	appId?: string | null
+	clientSecret?: string | null
+	clientSecretEncrypted?: IikoEncryptedClientSecret
 	organizationId: string
 	organizationName: string | null
 	externalMenuId?: string | null
@@ -34,6 +40,8 @@ export type StoredIikoMetadata = {
 
 export type IikoMetadata = {
 	apiLogin: string
+	appId: string | null
+	clientSecret: string | null
 	organizationId: string
 	organizationName: string | null
 	externalMenuId: string | null

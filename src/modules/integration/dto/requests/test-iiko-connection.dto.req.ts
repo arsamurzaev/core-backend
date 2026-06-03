@@ -7,4 +7,16 @@ export class TestIikoConnectionDtoReq {
 	@IsString()
 	@MaxLength(500)
 	apiLogin?: string
+
+	@ApiPropertyOptional({ type: String, example: '15' })
+	@IsOptional()
+	@IsString()
+	@MaxLength(100)
+	appId?: string
+
+	@ApiPropertyOptional({ type: String, example: 'sk_live_abc123def456' })
+	@IsOptional()
+	@IsString()
+	@MaxLength(1000)
+	clientSecret?: string
 }

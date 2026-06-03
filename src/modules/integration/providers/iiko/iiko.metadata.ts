@@ -8,6 +8,8 @@ import { normalizeRequiredString } from '@/shared/utils'
 
 import {
 	type IikoEncryptedApiLogin,
+	type IikoEncryptedClientSecret,
+	type IikoEncryptedSecret,
 	type IikoMetadata,
 	type IikoWebhookMetadata,
 	type StoredIikoMetadata
@@ -18,7 +20,7 @@ const IIKO_SECRET_ENCRYPTION_ALGORITHM = 'aes-256-gcm'
 const AES_GCM_KEY_BYTES = 32
 const AES_GCM_IV_BYTES = 12
 
-const encryptedApiLoginSchema = z.object({
+const encryptedSecretSchema = z.object({
 	format: z.literal(IIKO_SECRET_ENCRYPTION_FORMAT),
 	alg: z.literal(IIKO_SECRET_ENCRYPTION_ALGORITHM),
 	keyVersion: z.string(),
@@ -30,7 +32,10 @@ const encryptedApiLoginSchema = z.object({
 const storedIikoMetadataSchema = z
 	.object({
 		apiLogin: z.string().optional(),
-		apiLoginEncrypted: encryptedApiLoginSchema.optional(),
+		apiLoginEncrypted: encryptedSecretSchema.optional(),
+		appId: z.string().nullable().optional(),
+		clientSecret: z.string().nullable().optional(),
+		clientSecretEncrypted: encryptedSecretSchema.optional(),
 		organizationId: z.string(),
 		organizationName: z.string().nullable().optional(),
 		externalMenuId: z.string().nullable().optional(),
@@ -75,6 +80,8 @@ const storedIikoMetadataSchema = z
 
 type PartialIikoMetadata = {
 	apiLogin: string
+	appId?: string | null
+	clientSecret?: string | null
 	organizationId: string
 	organizationName?: string | null
 	externalMenuId?: string | null
@@ -98,6 +105,8 @@ type PartialIikoMetadata = {
 export function buildIikoMetadata(input: PartialIikoMetadata): IikoMetadata {
 	return {
 		apiLogin: normalizeRequiredString(input.apiLogin, 'apiLogin'),
+		appId: normalizeOptionalString(input.appId),
+		clientSecret: normalizeOptionalString(input.clientSecret),
 		organizationId: normalizeRequiredString(
 			input.organizationId,
 			'organizationId'
@@ -163,6 +172,14 @@ export class IikoMetadataCryptoService {
 
 		return {
 			apiLoginEncrypted: this.encryptApiLogin(metadata.apiLogin),
+			appId: metadata.appId,
+			...(metadata.clientSecret
+				? {
+						clientSecretEncrypted: this.encryptClientSecret(
+							metadata.clientSecret
+						)
+					}
+				: {}),
 			organizationId: metadata.organizationId,
 			organizationName: metadata.organizationName,
 			externalMenuId: metadata.externalMenuId,
@@ -187,9 +204,12 @@ export class IikoMetadataCryptoService {
 	parseStoredMetadata(metadata: unknown): IikoMetadata {
 		const parsed = storedIikoMetadataSchema.parse(metadata)
 		const apiLogin = this.resolveApiLogin(parsed)
+		const clientSecret = this.resolveClientSecret(parsed)
 
 		return buildIikoMetadata({
 			apiLogin,
+			appId: parsed.appId,
+			clientSecret,
 			organizationId: parsed.organizationId,
 			organizationName: parsed.organizationName,
 			externalMenuId: parsed.externalMenuId,
@@ -224,6 +244,16 @@ export class IikoMetadataCryptoService {
 	}
 
 	private encryptApiLogin(apiLogin: string): IikoEncryptedApiLogin {
+		return this.encryptSecret(apiLogin)
+	}
+
+	private encryptClientSecret(
+		clientSecret: string
+	): IikoEncryptedClientSecret {
+		return this.encryptSecret(clientSecret)
+	}
+
+	private encryptSecret(secret: string): IikoEncryptedSecret {
 		const iv = randomBytes(AES_GCM_IV_BYTES)
 		const cipher = createCipheriv(
 			IIKO_SECRET_ENCRYPTION_ALGORITHM,
@@ -231,7 +261,7 @@ export class IikoMetadataCryptoService {
 			iv
 		)
 		const ciphertext = Buffer.concat([
-			cipher.update(apiLogin, 'utf8'),
+			cipher.update(secret, 'utf8'),
 			cipher.final()
 		])
 		const tag = cipher.getAuthTag()
@@ -247,6 +277,26 @@ export class IikoMetadataCryptoService {
 	}
 
 	private decryptApiLogin(secret: IikoEncryptedApiLogin): string {
+		return this.decryptSecret(secret, 'apiLogin')
+	}
+
+	private resolveClientSecret(metadata: Record<string, unknown>): string | null {
+		if (typeof metadata.clientSecret === 'string') {
+			return normalizeOptionalString(metadata.clientSecret)
+		}
+
+		if (isEncryptedSecret(metadata.clientSecretEncrypted)) {
+			return this.decryptClientSecret(metadata.clientSecretEncrypted)
+		}
+
+		return null
+	}
+
+	private decryptClientSecret(secret: IikoEncryptedClientSecret): string {
+		return this.decryptSecret(secret, 'clientSecret')
+	}
+
+	private decryptSecret(secret: IikoEncryptedSecret, fieldName: string): string {
 		try {
 			const decipher = createDecipheriv(
 				IIKO_SECRET_ENCRYPTION_ALGORITHM,
@@ -260,10 +310,10 @@ export class IikoMetadataCryptoService {
 				decipher.final()
 			]).toString('utf8')
 
-			return normalizeRequiredString(plaintext, 'apiLogin')
+			return normalizeRequiredString(plaintext, fieldName)
 		} catch {
 			throw new BadRequestException(
-				'Could not decrypt iiko apiLogin. Check integration encryption key.'
+				`Could not decrypt iiko ${fieldName}. Check integration encryption key.`
 			)
 		}
 	}
@@ -278,6 +328,10 @@ export class IikoMetadataCryptoService {
 }
 
 function isEncryptedApiLogin(value: unknown): value is IikoEncryptedApiLogin {
+	return isEncryptedSecret(value)
+}
+
+function isEncryptedSecret(value: unknown): value is IikoEncryptedSecret {
 	return (
 		typeof value === 'object' &&
 		value !== null &&

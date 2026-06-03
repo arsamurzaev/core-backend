@@ -222,6 +222,12 @@ export class IikoIntegrationDto {
 	@ApiProperty({ type: String, nullable: true })
 	apiLoginPreview: string | null
 
+	@ApiProperty({ type: String, nullable: true })
+	appId: string | null
+
+	@ApiProperty({ type: Boolean })
+	hasClientSecret: boolean
+
 	@ApiProperty({ type: String })
 	organizationId: string
 
