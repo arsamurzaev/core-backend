@@ -1083,8 +1083,10 @@ export class IntegrationService {
 
 		return this.iikoSync.testConnection({
 			apiLogin,
-			appId: requestAppId || metadata?.appId,
-			clientSecret: requestClientSecret || metadata?.clientSecret
+			...this.resolveIikoAppCredentials({
+				appId: requestAppId || metadata?.appId,
+				clientSecret: requestClientSecret || metadata?.clientSecret
+			})
 		})
 	}
 
@@ -1108,8 +1110,7 @@ export class IntegrationService {
 
 		const client = new IikoClient({
 			apiLogin: metadata.apiLogin,
-			appId: metadata.appId,
-			clientSecret: metadata.clientSecret,
+			...this.resolveIikoAppCredentials(metadata),
 			baseUrl: this.resolveIikoApiBaseUrl()
 		})
 		const response = await client.getRestaurantSections({
@@ -1262,8 +1263,7 @@ export class IntegrationService {
 
 		const preview = await this.iikoSync.previewExternalMenu({
 			apiLogin,
-			appId,
-			clientSecret,
+			...this.resolveIikoAppCredentials({ appId, clientSecret }),
 			organizationId,
 			externalMenuId,
 			externalMenuName:
@@ -1340,8 +1340,7 @@ export class IntegrationService {
 
 		const client = new IikoClient({
 			apiLogin: metadata.apiLogin,
-			appId: metadata.appId,
-			clientSecret: metadata.clientSecret,
+			...this.resolveIikoAppCredentials(metadata),
 			baseUrl: this.resolveIikoApiBaseUrl()
 		})
 		let response: Awaited<ReturnType<IikoClient['updateWebhookSettings']>>
@@ -1405,8 +1404,7 @@ export class IntegrationService {
 			try {
 				const client = new IikoClient({
 					apiLogin: metadata.apiLogin,
-					appId: metadata.appId,
-					clientSecret: metadata.clientSecret,
+					...this.resolveIikoAppCredentials(metadata),
 					baseUrl: this.resolveIikoApiBaseUrl()
 				})
 				await client.updateWebhookSettings({
@@ -3375,6 +3373,21 @@ export class IntegrationService {
 	private resolveIikoApiBaseUrl(): string {
 		const config = this.configService.get('integration', { infer: true })
 		return config?.iikoApiBaseUrl ?? 'https://api-ru.iiko.services'
+	}
+
+	private resolveIikoAppCredentials(credentials?: {
+		appId?: string | null
+		clientSecret?: string | null
+	}): { appId: string | null; clientSecret: string | null } {
+		const config = this.configService.get('integration', { infer: true })
+		return {
+			appId:
+				normalizeOptionalString(credentials?.appId) ??
+				normalizeOptionalString(config?.iikoAppId),
+			clientSecret:
+				normalizeOptionalString(credentials?.clientSecret) ??
+				normalizeOptionalString(config?.iikoClientSecret)
+		}
 	}
 
 	private resolveIikoWebhookBaseUrl(): string {

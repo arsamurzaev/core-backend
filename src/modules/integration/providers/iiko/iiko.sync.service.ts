@@ -190,8 +190,7 @@ export class IikoSyncService {
 			const metadata = this.metadataCrypto.parseStoredMetadata(locked.metadata)
 			const client = new IikoClient({
 				apiLogin: metadata.apiLogin,
-				appId: metadata.appId,
-				clientSecret: metadata.clientSecret,
+				...this.resolveAppCredentials(metadata),
 				baseUrl: this.resolveBaseUrl()
 			})
 			await this.reportProgress(options.runId, {
@@ -336,8 +335,7 @@ export class IikoSyncService {
 
 			const client = new IikoClient({
 				apiLogin: metadata.apiLogin,
-				appId: metadata.appId,
-				clientSecret: metadata.clientSecret,
+				...this.resolveAppCredentials(metadata),
 				baseUrl: this.resolveBaseUrl()
 			})
 			await this.reportProgress(options.runId, {
@@ -453,8 +451,7 @@ export class IikoSyncService {
 	}> {
 		const client = new IikoClient({
 			apiLogin: credentials.apiLogin,
-			appId: credentials.appId,
-			clientSecret: credentials.clientSecret,
+			...this.resolveAppCredentials(credentials),
 			baseUrl: this.resolveBaseUrl()
 		})
 		const [organizationsResponse, menusResponse] = await Promise.all([
@@ -523,8 +520,7 @@ export class IikoSyncService {
 			const metadata = this.metadataCrypto.parseStoredMetadata(locked.metadata)
 			const client = new IikoClient({
 				apiLogin: metadata.apiLogin,
-				appId: metadata.appId,
-				clientSecret: metadata.clientSecret,
+				...this.resolveAppCredentials(metadata),
 				baseUrl: this.resolveBaseUrl()
 			})
 			const result = await this.applyStopListAvailability({
@@ -566,8 +562,7 @@ export class IikoSyncService {
 	}): Promise<IikoExternalMenuPreview> {
 		const client = new IikoClient({
 			apiLogin: params.apiLogin,
-			appId: params.appId,
-			clientSecret: params.clientSecret,
+			...this.resolveAppCredentials(params),
 			baseUrl: this.resolveBaseUrl()
 		})
 		const rawMenu = await client.getExternalMenuById({
@@ -1118,6 +1113,21 @@ export class IikoSyncService {
 	private resolveBaseUrl(): string {
 		const config = this.configService.get('integration', { infer: true })
 		return config?.iikoApiBaseUrl ?? 'https://api-ru.iiko.services'
+	}
+
+	private resolveAppCredentials(credentials?: {
+		appId?: string | null
+		clientSecret?: string | null
+	}): { appId: string | null; clientSecret: string | null } {
+		const config = this.configService.get('integration', { infer: true })
+		return {
+			appId:
+				normalizeOptionalString(credentials?.appId) ??
+				normalizeOptionalString(config?.iikoAppId),
+			clientSecret:
+				normalizeOptionalString(credentials?.clientSecret) ??
+				normalizeOptionalString(config?.iikoClientSecret)
+		}
 	}
 
 	private async invalidateProductCaches(catalogId: string): Promise<void> {

@@ -135,8 +135,7 @@ export class IikoOrderExportService {
 
 		const client = new IikoClient({
 			apiLogin: metadata.apiLogin,
-			appId: metadata.appId,
-			clientSecret: metadata.clientSecret,
+			...this.resolveAppCredentials(metadata),
 			baseUrl: this.resolveApiBaseUrl()
 		})
 		let hallOrder = resolveHallOrderInfo(order)
@@ -590,6 +589,21 @@ export class IikoOrderExportService {
 	private resolveApiBaseUrl(): string {
 		const config = this.configService.get('integration', { infer: true })
 		return config?.iikoApiBaseUrl ?? 'https://api-ru.iiko.services'
+	}
+
+	private resolveAppCredentials(credentials?: {
+		appId?: string | null
+		clientSecret?: string | null
+	}): { appId: string | null; clientSecret: string | null } {
+		const config = this.configService.get('integration', { infer: true })
+		return {
+			appId:
+				normalizeOptionalString(credentials?.appId) ??
+				normalizeOptionalString(config?.iikoAppId),
+			clientSecret:
+				normalizeOptionalString(credentials?.clientSecret) ??
+				normalizeOptionalString(config?.iikoClientSecret)
+		}
 	}
 
 	private async waitForCommandCompletion(
@@ -1265,6 +1279,10 @@ function readString(value: unknown): string | null {
 	if (typeof value !== 'string') return null
 	const normalized = value.trim()
 	return normalized || null
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+	return readString(value)
 }
 
 function readBoolean(value: unknown): boolean | null {

@@ -21,12 +21,16 @@ export const integrationEnv = registerAs<IntegrationInterface>(
 			null
 		const iikoApiBaseUrl =
 			process.env.IIKO_API_BASE_URL?.trim() || 'https://api-ru.iiko.services'
+		const iikoAppId = process.env.IIKO_APP_ID?.trim() || null
+		const iikoClientSecret = process.env.IIKO_CLIENT_SECRET?.trim() || null
 
 		return {
 			integrationWebhookBaseUrl,
 			moySkladWebhookBaseUrl,
 			iikoWebhookBaseUrl,
-			iikoApiBaseUrl
+			iikoApiBaseUrl,
+			iikoAppId,
+			iikoClientSecret
 		}
 	}
 )

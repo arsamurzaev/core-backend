@@ -117,6 +117,7 @@ describe('IntegrationService', () => {
 	let audit: jest.Mocked<AuditService>
 	let products: jest.Mocked<ProductExternalSyncPort>
 	let events: { dispatch: jest.Mock }
+	let configService: { get: jest.Mock }
 
 	const runWithCatalog = <T>(fn: () => Promise<T>) =>
 		RequestContext.run(
@@ -510,6 +511,7 @@ describe('IntegrationService', () => {
 		audit = module.get(AuditService)
 		products = module.get(PRODUCT_EXTERNAL_SYNC_PORT)
 		events = module.get<{ dispatch: jest.Mock }>(DOMAIN_EVENT_DISPATCHER)
+		configService = module.get(ConfigService) as unknown as { get: jest.Mock }
 		jest.spyOn(MoySkladClient.prototype, 'createWebhook').mockResolvedValue({
 			id: 'product-delete-webhook-1',
 			accountId: 'account-1',
@@ -753,8 +755,8 @@ describe('IntegrationService', () => {
 
 		expect(iikoSync.testConnection).toHaveBeenCalledWith({
 			apiLogin: 'iiko-login',
-			appId: undefined,
-			clientSecret: undefined
+			appId: null,
+			clientSecret: null
 		})
 		expect(result.organizations).toHaveLength(1)
 		expect(result.externalMenus).toHaveLength(1)
@@ -794,10 +796,42 @@ describe('IntegrationService', () => {
 		})
 		expect(iikoSync.testConnection).toHaveBeenCalledWith({
 			apiLogin: 'stored-iiko-login',
-			appId: undefined,
-			clientSecret: undefined
+			appId: null,
+			clientSecret: null
 		})
 		expect(result.terminalGroups).toHaveLength(1)
+	})
+
+	it('uses global iiko application credentials from config', async () => {
+		configService.get.mockImplementation((key: string) => {
+			if (key === 'integration') {
+				return {
+					moySkladWebhookBaseUrl: 'https://api.example.test',
+					iikoWebhookBaseUrl: 'https://api.example.test',
+					iikoApiBaseUrl: 'https://iiko.example',
+					iikoAppId: 'env-app',
+					iikoClientSecret: 'env-secret'
+				}
+			}
+			return undefined
+		})
+		iikoSync.testConnection.mockResolvedValue({
+			ok: true,
+			organizations: [],
+			externalMenus: [],
+			priceCategories: [],
+			terminalGroups: []
+		})
+
+		await runWithCatalog(() =>
+			service.testIikoConnection({ apiLogin: 'iiko-login' })
+		)
+
+		expect(iikoSync.testConnection).toHaveBeenCalledWith({
+			apiLogin: 'iiko-login',
+			appId: 'env-app',
+			clientSecret: 'env-secret'
+		})
 	})
 
 	it('previews iiko external menu import', async () => {
