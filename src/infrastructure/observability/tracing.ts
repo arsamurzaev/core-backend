@@ -1,12 +1,12 @@
 import { diag, DiagConsoleLogger, DiagLogLevel } from '@opentelemetry/api'
-import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node'
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 import { resourceFromAttributes } from '@opentelemetry/resources'
-import { NodeSDK } from '@opentelemetry/sdk-node'
 import {
+	BatchSpanProcessor,
 	ParentBasedSampler,
 	TraceIdRatioBasedSampler
 } from '@opentelemetry/sdk-trace-base'
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node'
 import {
 	ATTR_SERVICE_NAME,
 	ATTR_SERVICE_VERSION
@@ -16,7 +16,7 @@ import { resolveObservabilitySettings } from './observability.settings'
 
 const settings = resolveObservabilitySettings()
 
-let sdk: NodeSDK | null = null
+let provider: NodeTracerProvider | null = null
 let initialized = false
 
 export function initTracing() {
@@ -30,7 +30,12 @@ export function initTracing() {
 		diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.INFO)
 	}
 
-	sdk = new NodeSDK({
+	const traceExporter = new OTLPTraceExporter({
+		url: settings.otlpTracesUrl,
+		timeoutMillis: 5000
+	})
+
+	provider = new NodeTracerProvider({
 		resource: resourceFromAttributes({
 			[ATTR_SERVICE_NAME]: settings.serviceName,
 			[ATTR_SERVICE_VERSION]: settings.serviceVersion,
@@ -39,33 +44,20 @@ export function initTracing() {
 		sampler: new ParentBasedSampler({
 			root: new TraceIdRatioBasedSampler(settings.tracesSampleRate)
 		}),
-		traceExporter: new OTLPTraceExporter({
-			url: settings.otlpTracesUrl,
-			timeoutMillis: 5000
-		}),
-		instrumentations: [
-			getNodeAutoInstrumentations({
-				'@opentelemetry/instrumentation-fs': {
-					enabled: false
-				}
-			})
-		]
+		spanProcessors: [new BatchSpanProcessor(traceExporter)]
 	})
 
-	void Promise.resolve(sdk.start()).catch(error => {
-		process.stderr.write(
-			`Failed to start OpenTelemetry SDK: ${
-				error instanceof Error ? error.message : String(error)
-			}\n`
-		)
-	})
+	provider.register()
 
 	const shutdown = () => {
-		if (!sdk) return
+		if (!provider) return
 
-		void Promise.resolve(sdk.shutdown()).catch(error => {
+		const currentProvider = provider
+		provider = null
+
+		void currentProvider.shutdown().catch(error => {
 			process.stderr.write(
-				`Failed to shutdown OpenTelemetry SDK: ${
+				`Failed to shutdown OpenTelemetry provider: ${
 					error instanceof Error ? error.message : String(error)
 				}\n`
 			)

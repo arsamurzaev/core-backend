@@ -2,6 +2,7 @@ import { CartCheckoutMethod } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Type } from 'class-transformer'
 import {
+	IsArray,
 	IsEnum,
 	IsInt,
 	IsNotEmpty,
@@ -9,7 +10,8 @@ import {
 	IsOptional,
 	IsString,
 	MaxLength,
-	Min
+	Min,
+	ValidateNested
 } from 'class-validator'
 
 export class ShareCurrentCartDtoReq {
@@ -144,6 +146,40 @@ export class UpsertCartItemDtoReq {
 	@IsString()
 	@MaxLength(120)
 	guestName?: string
+
+	@ApiPropertyOptional({ type: () => [UpsertCartItemModifierDtoReq] })
+	@IsOptional()
+	@IsArray()
+	@ValidateNested({ each: true })
+	@Type(() => UpsertCartItemModifierDtoReq)
+	modifiers?: UpsertCartItemModifierDtoReq[]
 }
 
 export class PublicUpsertCartItemDtoReq extends UpsertCartItemDtoReq {}
+
+export class UpsertCartItemModifierDtoReq {
+	@ApiProperty({
+		type: String,
+		format: 'uuid',
+		example: '98bb7b9d-56d5-4fbf-996e-2b8060be5dd3'
+	})
+	@IsString()
+	@IsNotEmpty()
+	productModifierGroupId: string
+
+	@ApiProperty({
+		type: String,
+		format: 'uuid',
+		example: '0f4e8b71-3d7f-477d-89f4-b510bbfef9e2'
+	})
+	@IsString()
+	@IsNotEmpty()
+	productModifierOptionId: string
+
+	@ApiPropertyOptional({ type: Number, example: 1 })
+	@IsOptional()
+	@Type(() => Number)
+	@IsInt()
+	@Min(1)
+	quantity?: number
+}

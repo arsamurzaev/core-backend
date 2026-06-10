@@ -128,5 +128,5 @@ function createSyncRunRecord(
 		createdAt: now,
 		updatedAt: now,
 		...overrides
-	} as IntegrationSyncRunRecord
+	}
 }

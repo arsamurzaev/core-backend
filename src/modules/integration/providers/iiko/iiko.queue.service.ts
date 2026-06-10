@@ -343,10 +343,10 @@ export class IikoQueueService implements OnModuleDestroy {
 	): Promise<IntegrationRecord> {
 		const integration = await this.repo.findIiko(catalogId)
 		if (!integration) {
-			throw new ConflictException('iiko integration is not configured')
+			throw new ConflictException('Интеграция iiko не настроена')
 		}
 		if (!integration.isActive) {
-			throw new ConflictException('iiko integration is disabled')
+			throw new ConflictException('Интеграция iiko отключена')
 		}
 		return integration
 	}
@@ -362,7 +362,9 @@ export class IikoQueueService implements OnModuleDestroy {
 			activeRun.status === IntegrationSyncRunStatus.PENDING ||
 			activeRun.status === IntegrationSyncRunStatus.RUNNING
 		) {
-			throw new ConflictException('iiko sync is already queued or running')
+			throw new ConflictException(
+				'Синхронизация iiko уже в очереди или выполняется'
+			)
 		}
 	}
 
@@ -410,7 +412,7 @@ export class IikoQueueService implements OnModuleDestroy {
 			errors: [],
 			progress: {
 				phase: 'COMPLETED',
-				message: 'iiko menu sync completed',
+				message: 'Синхронизация меню iiko завершена',
 				processed: result.totalProducts,
 				total: result.totalProducts,
 				percent: 100,

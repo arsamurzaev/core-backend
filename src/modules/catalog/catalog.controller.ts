@@ -155,6 +155,6 @@ export class CatalogController {
 	async create(
 		@Body() dto: CreateCatalogDtoReq
 	): Promise<CatalogCreateResponseDto> {
-		return this.catalogService.create(dto) as Promise<CatalogCreateResponseDto>
+		return this.catalogService.create(dto)
 	}
 }

@@ -101,6 +101,8 @@ describe('IikoOrderExportService', () => {
 						setOrderExportPayload: jest.fn(),
 						findVariantLinkByVariantId: jest.fn(),
 						findProductLinkByProductId: jest.fn(),
+						findModifierGroupLinkForOrder: jest.fn(),
+						findModifierOptionLinkForOrder: jest.fn(),
 						findExternalItemsByType: jest.fn()
 					}
 				},
@@ -165,6 +167,8 @@ describe('IikoOrderExportService', () => {
 		repo.setOrderExportPayload.mockResolvedValue(exportRecord as any)
 		repo.findVariantLinkByVariantId.mockResolvedValue(null)
 		repo.findProductLinkByProductId.mockResolvedValue(null)
+		repo.findModifierGroupLinkForOrder.mockResolvedValue(null)
+		repo.findModifierOptionLinkForOrder.mockResolvedValue(null)
 		repo.findExternalItemsByType.mockResolvedValue([])
 
 		jest.spyOn(IikoClient.prototype, 'createDeliveryOrder').mockResolvedValue({
@@ -263,6 +267,55 @@ describe('IikoOrderExportService', () => {
 				created: true
 			})
 		)
+	})
+
+	it('adds selected modifiers to iiko product items', async () => {
+		repo.findOrderForExport.mockResolvedValueOnce({
+			...order,
+			products: [
+				{
+					...(order.products[0] as any),
+					unitPrice: 648,
+					lineTotal: 1296,
+					modifiers: [
+						{
+							id: 'cart-modifier-1',
+							productModifierGroupId: 'product-modifier-group-1',
+							productModifierOptionId: 'product-modifier-option-1',
+							catalogModifierGroupId: 'catalog-modifier-group-1',
+							catalogModifierOptionId: 'catalog-modifier-option-1',
+							groupCode: 'iiko-cheese',
+							groupName: 'Cheese',
+							optionCode: 'iiko-extra-cheese',
+							optionName: 'Extra cheese',
+							quantity: 2,
+							unitPrice: 79
+						}
+					]
+				}
+			]
+		} as any)
+		repo.findModifierGroupLinkForOrder.mockResolvedValueOnce({
+			externalId: 'modifier-group-cheese',
+			rawMeta: { actualExternalId: 'modifier-group-cheese' }
+		} as any)
+		repo.findModifierOptionLinkForOrder.mockResolvedValueOnce({
+			externalId: 'modifier-extra-cheese',
+			rawMeta: { actualExternalId: 'modifier-extra-cheese' }
+		} as any)
+
+		await service.exportOrder(exportRecord as any)
+		const payload = repo.setOrderExportPayload.mock.calls[0]?.[1] as any
+
+		expect(payload.order.items[0].price).toBe(490)
+		expect(payload.order.items[0].modifiers).toEqual([
+			{
+				productId: 'modifier-extra-cheese',
+				productGroupId: 'modifier-group-cheese',
+				amount: 2,
+				price: 79
+			}
+		])
 	})
 
 	it('prefers customer checkout phone over catalog contact phone', async () => {
@@ -399,7 +452,7 @@ describe('IikoOrderExportService', () => {
 				createdAt: new Date('2026-05-21T09:00:00.000Z'),
 				updatedAt: new Date('2026-05-21T09:00:00.000Z')
 			}
-		] as any)
+		])
 		repo.findOrderForExport.mockResolvedValueOnce({
 			...order,
 			checkoutMethod: CartCheckoutMethod.PREORDER,

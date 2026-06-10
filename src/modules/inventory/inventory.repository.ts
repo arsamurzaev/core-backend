@@ -684,7 +684,7 @@ export class InventoryRepository {
 		for (const line of lines) {
 			const result = await this.consumeCompletedOrderLine(tx, {
 				...params,
-				line: line as InventoryCompletedOrderLine & { variantId: string }
+				line: line
 			})
 			if ('reason' in result) {
 				return {
@@ -804,7 +804,7 @@ export class InventoryRepository {
 			const result = await this.reserveCartLine(tx, {
 				...params,
 				warehouseId: warehouse.warehouseId,
-				line: line as InventoryCartReservationLine & { variantId: string }
+				line: line
 			})
 			if ('reason' in result) {
 				return {

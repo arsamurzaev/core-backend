@@ -19,10 +19,10 @@ export class InProcessDomainEventBus implements DomainEventBus {
 		handler: DomainEventHandler<TEvent>
 	): () => void {
 		const handlers = this.handlers.get(type) ?? new Set<DomainEventHandler>()
-		handlers.add(handler as DomainEventHandler)
+		handlers.add(handler)
 		this.handlers.set(type, handlers)
 
-		return () => handlers.delete(handler as DomainEventHandler)
+		return () => handlers.delete(handler)
 	}
 
 	async dispatch(event: DomainEvent): Promise<void> {

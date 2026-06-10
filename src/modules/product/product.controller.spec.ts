@@ -112,7 +112,7 @@ describe('ProductController', () => {
 			ok: true
 		}
 		productService.diagnoseDefaultVariantsForCurrentCatalog.mockResolvedValue(
-			response as any
+			response
 		)
 
 		await expect(controller.diagnoseDefaultVariants('5')).resolves.toBe(response)
@@ -135,7 +135,7 @@ describe('ProductController', () => {
 			samples: []
 		}
 		productService.repairDefaultVariantPriceMismatchesForCurrentCatalog.mockResolvedValue(
-			response as any
+			response
 		)
 
 		await expect(

@@ -8,6 +8,15 @@ import {
 } from '@nestjs/common'
 
 import {
+	CAPABILITY_READER_PORT,
+	type CapabilityReaderPort
+} from '@/modules/capability/contracts'
+import {
+	type CatalogPriceListProductPriceContext,
+	CatalogPriceListResolverService
+} from '@/modules/catalog-price-list/public'
+import {
+	applyPriceListContextToProduct,
 	applyProductCommercialFields,
 	EMPTY_VARIANT_SUMMARY,
 	PRODUCT_COMMAND_PORT,
@@ -45,7 +54,12 @@ import {
 	type ProductMappableRecord,
 	ProductMediaMapper
 } from '@/shared/media/product-media.mapper'
-import { effectiveCatalogId, mustCatalogId } from '@/shared/tenancy/ctx'
+import {
+	assertCurrentCatalogCanManageCatalogContent,
+	ctx,
+	effectiveCatalogId,
+	mustCatalogId
+} from '@/shared/tenancy/ctx'
 import {
 	assertHasUpdateFields,
 	normalizeOptionalId,
@@ -53,9 +67,10 @@ import {
 } from '@/shared/utils'
 
 import {
-	buildCategoryProductsPage,
 	type CategoryProductInput,
+	type CategoryProductsPageItem,
 	type CategoryProductsPage as CategoryProductsPagePayload,
+	encodeCategoryProductsCursor,
 	normalizeCategoryName,
 	normalizeCategoryProducts,
 	normalizeCategoryProductsLimit,
@@ -71,9 +86,18 @@ type CategoryProductsPage = CategoryProductsPagePayload<unknown>
 type CategoryOrderItem = Awaited<
 	ReturnType<CategoryRepository['findAll']>
 >[number]
+type CategoryProductRef = Awaited<
+	ReturnType<CategoryRepository['findCategoryProductRefs']>
+>[number]
 type CategoryListOptions = {
 	includeEmpty?: boolean
 	includeInactive?: boolean
+}
+type CategoryProductsReadMode = {
+	applyPriceList: boolean
+	canUseCatalogPriceLists: boolean
+	canUseCatalogSaleUnits: boolean
+	enforcePriceListVisibility: boolean
 }
 type CategoryRemoveOptions = {
 	deleteProducts?: boolean
@@ -99,6 +123,11 @@ export class CategoryService {
 		@Inject(PRODUCT_SELLABLE_READER_PORT)
 		private readonly sellableReader: ProductSellableReader,
 		@Optional()
+		private readonly priceLists?: CatalogPriceListResolverService,
+		@Optional()
+		@Inject(CAPABILITY_READER_PORT)
+		private readonly capabilities?: CapabilityReaderPort,
+		@Optional()
 		@Inject(DOMAIN_EVENT_DISPATCHER)
 		private readonly events?: DomainEventDispatcher
 	) {}
@@ -107,11 +136,25 @@ export class CategoryService {
 		const catalogId = effectiveCatalogId()
 		const includeEmpty = options.includeEmpty !== false
 		const includeInactive = options.includeInactive === true
+		const buyerCatalogId = mustCatalogId()
+		const enforcePriceListVisibility = this.shouldEnforcePriceListVisibility({
+			includeInactive
+		})
+		const canUseCatalogPriceLists =
+			await this.canUseCatalogPriceLists(buyerCatalogId)
+		const canUseCatalogSaleUnits =
+			await this.canUseCatalogSaleUnits(buyerCatalogId)
 		const cacheKey =
 			this.listCacheTtlSec > 0
 				? await this.buildCategoryListCacheKey(catalogId, {
 						includeEmpty,
-						includeInactive
+						includeInactive,
+						readMode: {
+							applyPriceList: true,
+							canUseCatalogPriceLists,
+							canUseCatalogSaleUnits,
+							enforcePriceListVisibility
+						}
 					})
 				: undefined
 
@@ -121,8 +164,20 @@ export class CategoryService {
 		}
 
 		const categories = await this.repo.findAll(catalogId, { includeInactive })
-		const mapped = this.normalizeCategoryListForRead(categories)
-			.map(category => this.mapCategory(category))
+		const orderedCategories = this.normalizeCategoryListForRead(categories)
+		const productCountOverrides = await this.resolveCategoryProductCountOverrides(
+			{
+				catalogId,
+				buyerCatalogId,
+				categories: orderedCategories,
+				includeInactive,
+				enforcePriceListVisibility
+			}
+		)
+		const mapped = orderedCategories
+			.map(category =>
+				this.mapCategory(category, productCountOverrides?.get(category.id))
+			)
 			.filter(category => includeEmpty || category.productCount > 0)
 
 		if (cacheKey) {
@@ -145,6 +200,8 @@ export class CategoryService {
 			cursor?: string
 			limit?: number | string
 			includeInactive?: boolean
+			applyPriceList?: boolean
+			enforcePriceListVisibility?: boolean
 		}
 	) {
 		const catalogId = effectiveCatalogId()
@@ -157,9 +214,22 @@ export class CategoryService {
 		const cacheTtlSec = cursor
 			? this.nextPageCacheTtlSec
 			: this.firstPageCacheTtlSec
+		const applyPriceList = this.shouldApplyPriceList(options)
+		const enforcePriceListVisibility =
+			this.shouldEnforcePriceListVisibility(options)
+		const buyerCatalogId = mustCatalogId()
+		const canUseCatalogPriceLists =
+			await this.canUseCatalogPriceLists(buyerCatalogId)
+		const canUseCatalogSaleUnits =
+			await this.canUseCatalogSaleUnits(buyerCatalogId)
 		const cacheKey =
 			!includeInactive && cacheTtlSec > 0
-				? await this.buildCategoryProductsCacheKey(id, catalogId, cursor, limit)
+				? await this.buildCategoryProductsCacheKey(id, catalogId, cursor, limit, {
+						applyPriceList,
+						canUseCatalogPriceLists,
+						canUseCatalogSaleUnits,
+						enforcePriceListVisibility
+					})
 				: undefined
 
 		if (cacheKey) {
@@ -167,25 +237,22 @@ export class CategoryService {
 			if (cached !== null) return cached
 		}
 
-		const items = await this.repo.findCategoryProductsPage(id, catalogId, {
+		const page = await this.loadVisibleCategoryProductsPage({
+			catalogId,
+			buyerCatalogId,
+			canUseCatalogSaleUnits,
 			cursor,
-			take: limit + 1,
-			includeInactive
-		})
-		const products = items.map(item => item.product)
-		const [commercialMap, variantProjectionMap] = await Promise.all([
-			this.resolveCommercialProjectionMap(catalogId, products),
-			this.variantProjection.resolveForProductIds(
-				products.map(product => product.id)
-			)
-		])
-
-		const page: CategoryProductsPage = buildCategoryProductsPage(
-			items,
+			includeInactive,
 			limit,
-			product =>
-				this.mapProductForCategory(commercialMap, product, variantProjectionMap)
-		)
+			applyPriceList,
+			enforcePriceListVisibility,
+			loadItems: (pageCursor, take) =>
+				this.repo.findCategoryProductsPage(id, catalogId, {
+					cursor: pageCursor,
+					take,
+					includeInactive
+				})
+		})
 
 		if (cacheKey) {
 			await this.cache.setJson(cacheKey, page, cacheTtlSec)
@@ -200,6 +267,8 @@ export class CategoryService {
 			cursor?: string
 			limit?: number | string
 			includeInactive?: boolean
+			applyPriceList?: boolean
+			enforcePriceListVisibility?: boolean
 		}
 	) {
 		const catalogId = effectiveCatalogId()
@@ -212,9 +281,28 @@ export class CategoryService {
 		const cacheTtlSec = cursor
 			? this.nextPageCacheTtlSec
 			: this.firstPageCacheTtlSec
+		const applyPriceList = this.shouldApplyPriceList(options)
+		const enforcePriceListVisibility =
+			this.shouldEnforcePriceListVisibility(options)
+		const buyerCatalogId = mustCatalogId()
+		const canUseCatalogPriceLists =
+			await this.canUseCatalogPriceLists(buyerCatalogId)
+		const canUseCatalogSaleUnits =
+			await this.canUseCatalogSaleUnits(buyerCatalogId)
 		const cacheKey =
 			!includeInactive && cacheTtlSec > 0
-				? await this.buildCategoryProductCardsCacheKey(id, catalogId, cursor, limit)
+				? await this.buildCategoryProductCardsCacheKey(
+						id,
+						catalogId,
+						cursor,
+						limit,
+						{
+							applyPriceList,
+							canUseCatalogPriceLists,
+							canUseCatalogSaleUnits,
+							enforcePriceListVisibility
+						}
+					)
 				: undefined
 
 		if (cacheKey) {
@@ -222,25 +310,22 @@ export class CategoryService {
 			if (cached !== null) return cached
 		}
 
-		const items = await this.repo.findCategoryProductCardsPage(id, catalogId, {
+		const page = await this.loadVisibleCategoryProductsPage({
+			catalogId,
+			buyerCatalogId,
+			canUseCatalogSaleUnits,
 			cursor,
-			take: limit + 1,
-			includeInactive
-		})
-		const products = items.map(item => item.product)
-		const [commercialMap, variantProjectionMap] = await Promise.all([
-			this.resolveCommercialProjectionMap(catalogId, products),
-			this.variantProjection.resolveForProductIds(
-				products.map(product => product.id)
-			)
-		])
-
-		const page: CategoryProductsPage = buildCategoryProductsPage(
-			items,
+			includeInactive,
 			limit,
-			product =>
-				this.mapProductForCategory(commercialMap, product, variantProjectionMap)
-		)
+			applyPriceList,
+			enforcePriceListVisibility,
+			loadItems: (pageCursor, take) =>
+				this.repo.findCategoryProductCardsPage(id, catalogId, {
+					cursor: pageCursor,
+					take,
+					includeInactive
+				})
+		})
 
 		if (cacheKey) {
 			await this.cache.setJson(cacheKey, page, cacheTtlSec)
@@ -250,6 +335,7 @@ export class CategoryService {
 	}
 
 	async create(dto: CreateCategoryDtoReq) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		const parentId = dto.parentId ?? null
 		const imageMediaId = normalizeOptionalId(dto.imageMediaId)
@@ -303,6 +389,7 @@ export class CategoryService {
 	}
 
 	async update(id: string, dto: UpdateCategoryDtoReq) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		const existing = await this.repo.findById(id, catalogId)
 		if (!existing) throw new NotFoundException('Категория не найдена')
@@ -401,6 +488,7 @@ export class CategoryService {
 	}
 
 	async updatePositions(dto: UpdateCategoryPositionsDtoReq) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		const categories = await this.repo.findAll(catalogId)
 		const categoryById = new Map(
@@ -439,6 +527,7 @@ export class CategoryService {
 	}
 
 	async remove(id: string, options: CategoryRemoveOptions = {}) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		const categoryToRemove = await this.repo.findById(id, catalogId)
 		if (!categoryToRemove) throw new NotFoundException('Категория не найдена')
@@ -461,19 +550,83 @@ export class CategoryService {
 
 	private mapCategory<
 		T extends {
+			id?: string
 			_count?: { categoryProducts?: number }
 			imageMedia?: MediaRecord | null
 		}
-	>(category: T) {
+	>(category: T, productCountOverride?: number) {
 		const { _count, ...rest } = category
 
 		return {
 			...rest,
-			...(_count ? { productCount: _count.categoryProducts ?? 0 } : {}),
+			productCount: productCountOverride ?? _count?.categoryProducts ?? 0,
 			imageMedia: category.imageMedia
 				? this.mediaUrl.mapMedia(category.imageMedia)
 				: null
 		}
+	}
+
+	private async resolveCategoryProductCountOverrides(params: {
+		catalogId: string
+		buyerCatalogId: string
+		categories: CategoryOrderItem[]
+		includeInactive: boolean
+		enforcePriceListVisibility: boolean
+	}): Promise<Map<string, number> | null> {
+		if (!params.enforcePriceListVisibility || !this.priceLists) return null
+
+		const priceContext = await this.resolvePriceListContext(
+			params.catalogId,
+			params.buyerCatalogId,
+			[],
+			true
+		)
+		if (!priceContext.priceList) return null
+
+		const categoryIds = params.categories.map(category => category.id)
+		const refs = await this.repo.findCategoryProductRefs(
+			params.catalogId,
+			categoryIds,
+			{ includeInactive: params.includeInactive }
+		)
+		return this.countVisibleCategoryProducts(params, refs)
+	}
+
+	private async countVisibleCategoryProducts(
+		params: {
+			catalogId: string
+			buyerCatalogId: string
+			categories: CategoryOrderItem[]
+		},
+		refs: CategoryProductRef[]
+	): Promise<Map<string, number>> {
+		const counts = new Map<string, number>(
+			params.categories.map(category => [category.id, 0] as const)
+		)
+		const productIds = [...new Set(refs.map(ref => ref.productId))]
+		if (!productIds.length) return counts
+
+		const commercialMap = toProductCommercialFieldsMap(
+			await this.sellableReader.resolveProductsSellable(
+				params.catalogId,
+				productIds,
+				{ buyerCatalogId: params.buyerCatalogId }
+			)
+		)
+
+		for (const ref of refs) {
+			const commercial = commercialMap.get(ref.productId)
+			if (!this.isVisibleByPriceList(commercial)) continue
+			counts.set(ref.categoryId, (counts.get(ref.categoryId) ?? 0) + 1)
+		}
+
+		return counts
+	}
+
+	private isVisibleByPriceList(
+		commercial: ProductCommercialFields | undefined
+	): boolean {
+		return !(commercial?.usesPriceList && commercial.priceState === 'UNKNOWN')
 	}
 
 	private normalizeCategoryListForRead(categories: CategoryOrderItem[]) {
@@ -497,18 +650,157 @@ export class CategoryService {
 		}
 	}
 
+	private async loadVisibleCategoryProductsPage<
+		T extends ProductMappableRecord & { id: string; price?: unknown }
+	>(params: {
+		catalogId: string
+		buyerCatalogId: string
+		canUseCatalogSaleUnits: boolean
+		cursor: string | undefined
+		includeInactive: boolean
+		limit: number
+		applyPriceList: boolean
+		enforcePriceListVisibility: boolean
+		loadItems: (
+			cursor: string | undefined,
+			take: number
+		) => Promise<CategoryProductsPageItem<T>[]>
+	}): Promise<CategoryProductsPage> {
+		const take = params.limit + 1
+		const visibleItems: CategoryProductsPagePayload<unknown>['items'] = []
+		let cursor = params.cursor
+		let nextCursor: string | null = null
+
+		while (visibleItems.length <= params.limit) {
+			const items = await params.loadItems(cursor, take)
+			if (!items.length) break
+
+			const mappedItems = await this.mapCategoryProductItems({
+				catalogId: params.catalogId,
+				buyerCatalogId: params.buyerCatalogId,
+				canUseCatalogSaleUnits: params.canUseCatalogSaleUnits,
+				items,
+				applyPriceList: params.applyPriceList,
+				enforcePriceListVisibility: params.enforcePriceListVisibility
+			})
+
+			for (const item of mappedItems) {
+				if (visibleItems.length >= params.limit) {
+					const lastVisible = visibleItems[visibleItems.length - 1]
+					nextCursor = lastVisible
+						? encodeCategoryProductsCursor({
+								position: lastVisible.position,
+								productId: lastVisible.productId
+							})
+						: null
+					break
+				}
+				visibleItems.push(item)
+			}
+
+			if (nextCursor) break
+
+			const lastRawItem = items[items.length - 1]
+			if (!lastRawItem || items.length < take) break
+
+			cursor = encodeCategoryProductsCursor({
+				position: lastRawItem.position,
+				productId: lastRawItem.productId
+			})
+		}
+
+		return {
+			items: visibleItems,
+			nextCursor
+		}
+	}
+
+	private async mapCategoryProductItems<
+		T extends ProductMappableRecord & { id: string; price?: unknown }
+	>(params: {
+		catalogId: string
+		buyerCatalogId: string
+		canUseCatalogSaleUnits: boolean
+		items: CategoryProductsPageItem<T>[]
+		applyPriceList: boolean
+		enforcePriceListVisibility: boolean
+	}): Promise<CategoryProductsPagePayload<unknown>['items']> {
+		const products = params.items.map(item => item.product)
+		const productIds = products.map(product => product.id)
+		const priceContext = await this.resolvePriceListContext(
+			params.catalogId,
+			params.buyerCatalogId,
+			productIds,
+			params.applyPriceList
+		)
+		const [commercialMap, variantProjectionMap] = await Promise.all([
+			this.resolveCommercialProjectionMap(
+				params.catalogId,
+				products,
+				params.buyerCatalogId,
+				params.applyPriceList
+			),
+			this.variantProjection.resolveForProductIds(productIds, priceContext, {
+				filterUnavailable: params.enforcePriceListVisibility,
+				...(params.canUseCatalogSaleUnits ? {} : { canUseCatalogSaleUnits: false })
+			})
+		])
+
+		return params.items.flatMap(({ product, ...item }) => {
+			const mappedProduct = this.mapProductForCategory(
+				commercialMap,
+				product,
+				params.enforcePriceListVisibility,
+				params.canUseCatalogSaleUnits,
+				priceContext,
+				variantProjectionMap
+			)
+
+			return mappedProduct === null
+				? []
+				: [
+						{
+							...item,
+							product: mappedProduct
+						}
+					]
+		})
+	}
+
 	private mapProductForCategory<
 		T extends ProductMappableRecord & { id: string; price?: unknown }
 	>(
 		commercialMap: ReadonlyMap<string, ProductCommercialFields>,
 		product: T,
+		enforcePriceListVisibility: boolean,
+		canUseCatalogSaleUnits: boolean,
+		priceContext: CatalogPriceListProductPriceContext,
 		variantProjectionMap?: ReadonlyMap<string, ProductVariantProjection>
 	) {
+		const commercial = commercialMap.get(product.id)
+		if (
+			enforcePriceListVisibility &&
+			commercial?.usesPriceList &&
+			commercial.priceState === 'UNKNOWN'
+		) {
+			return null
+		}
+		const readableProduct = applyPriceListContextToProduct(
+			product,
+			priceContext,
+			{
+				filterUnavailable: enforcePriceListVisibility,
+				...(canUseCatalogSaleUnits ? {} : { canUseCatalogSaleUnits: false })
+			}
+		)
 		const mapped = this.mapProductMedia(
-			applyProductCommercialFields(product, commercialMap.get(product.id))
+			applyProductCommercialFields(
+				readableProduct,
+				this.resolveCommercialForRead(commercial, enforcePriceListVisibility)
+			)
 		)
 		const saleUnits = resolveProductSaleUnitsForRead(mapped, {
-			canUseCatalogSaleUnits: true,
+			canUseCatalogSaleUnits,
 			shouldExposeVariants: false
 		})
 		const mappedProduct = { ...mapped } as typeof mapped & {
@@ -538,15 +830,87 @@ export class CategoryService {
 		return this.productMapper.mapProduct(product, MEDIA_LIST_VARIANT_NAMES)
 	}
 
+	private shouldApplyPriceList(options?: { applyPriceList?: boolean }): boolean {
+		return options?.applyPriceList ?? true
+	}
+
+	private shouldEnforcePriceListVisibility(options?: {
+		enforcePriceListVisibility?: boolean
+		includeInactive?: boolean
+	}): boolean {
+		return (
+			options?.enforcePriceListVisibility ??
+			(this.isChildCatalogRead() || options?.includeInactive !== true)
+		)
+	}
+
+	private isChildCatalogRead(): boolean {
+		const store = ctx()
+		return Boolean(store.parentId && store.parentId !== store.catalogId)
+	}
+
+	private resolveCommercialForRead(
+		commercial: ProductCommercialFields | undefined,
+		enforcePriceListVisibility: boolean
+	): ProductCommercialFields | undefined {
+		if (
+			!enforcePriceListVisibility &&
+			commercial?.usesPriceList &&
+			commercial.priceState === 'UNKNOWN'
+		) {
+			return undefined
+		}
+		return commercial
+	}
+
 	private async resolveCommercialProjectionMap(
 		catalogId: string,
-		products: Array<{ id: string }>
+		products: Array<{ id: string }>,
+		buyerCatalogId: string,
+		applyPriceList = true
 	): Promise<Map<string, ProductCommercialFields>> {
 		const projections = await this.sellableReader.resolveProductsSellable(
 			catalogId,
-			products.map(product => product.id)
+			products.map(product => product.id),
+			{
+				buyerCatalogId,
+				...(applyPriceList ? {} : { ignorePriceList: true })
+			}
 		)
 		return toProductCommercialFieldsMap(projections)
+	}
+
+	private async canUseCatalogSaleUnits(catalogId: string): Promise<boolean> {
+		return this.capabilities?.canUseCatalogSaleUnits(catalogId) ?? true
+	}
+
+	private async canUseCatalogPriceLists(catalogId: string): Promise<boolean> {
+		return this.capabilities?.canUseCatalogPriceLists(catalogId) ?? false
+	}
+
+	private resolvePriceListContext(
+		catalogId: string,
+		buyerCatalogId: string,
+		productIds: string[],
+		applyPriceList = true
+	): Promise<CatalogPriceListProductPriceContext> {
+		if (!applyPriceList || !this.priceLists) {
+			return Promise.resolve(this.emptyPriceListContext())
+		}
+		return this.priceLists.resolveProductPriceContext({
+			buyerCatalogId,
+			ownerCatalogId: catalogId,
+			productIds
+		})
+	}
+
+	private emptyPriceListContext(): CatalogPriceListProductPriceContext {
+		return {
+			priceList: null,
+			productPrices: new Map(),
+			variantPrices: new Map(),
+			saleUnitPrices: new Map()
+		}
 	}
 
 	private async prepareCategoryProductsForWrite(
@@ -619,12 +983,10 @@ export class CategoryService {
 		categoryId: string,
 		catalogId: string,
 		cursor: string | undefined,
-		limit: number
+		limit: number,
+		readMode: CategoryProductsReadMode
 	): Promise<string> {
-		const version = await this.cache.getVersion(
-			CATEGORY_PRODUCTS_CACHE_VERSION,
-			catalogId
-		)
+		const versionParts = await this.buildCategoryProductsVersionParts(catalogId)
 		return this.cache.buildKey([
 			'catalog',
 			catalogId,
@@ -632,9 +994,10 @@ export class CategoryService {
 			categoryId,
 			'products',
 			'infinite',
+			...this.buildCategoryProductsReadModeParts(readMode),
 			`limit-${limit}`,
 			cursor ? `cursor-${encodeURIComponent(cursor)}` : 'cursor-first',
-			`v${version}`
+			...versionParts
 		])
 	}
 
@@ -642,12 +1005,10 @@ export class CategoryService {
 		categoryId: string,
 		catalogId: string,
 		cursor: string | undefined,
-		limit: number
+		limit: number,
+		readMode: CategoryProductsReadMode
 	): Promise<string> {
-		const version = await this.cache.getVersion(
-			CATEGORY_PRODUCTS_CACHE_VERSION,
-			catalogId
-		)
+		const versionParts = await this.buildCategoryProductsVersionParts(catalogId)
 		return this.cache.buildKey([
 			'catalog',
 			catalogId,
@@ -656,28 +1017,83 @@ export class CategoryService {
 			'products',
 			'cards',
 			'infinite',
+			...this.buildCategoryProductsReadModeParts(readMode),
 			`limit-${limit}`,
 			cursor ? `cursor-${encodeURIComponent(cursor)}` : 'cursor-first',
-			`v${version}`
+			...versionParts
 		])
+	}
+
+	private buildCategoryProductsReadModeParts(
+		readMode: CategoryProductsReadMode
+	): string[] {
+		return [
+			readMode.canUseCatalogPriceLists ? 'price-lists-on' : 'price-lists-off',
+			readMode.applyPriceList ? 'price-list-apply-on' : 'price-list-apply-off',
+			readMode.enforcePriceListVisibility ? 'price-filter-on' : 'price-filter-off',
+			readMode.canUseCatalogSaleUnits ? 'sale-units-on' : 'sale-units-off'
+		]
+	}
+
+	private async buildCategoryProductsVersionParts(
+		catalogId: string
+	): Promise<string[]> {
+		const buyerCatalogId = mustCatalogId()
+		const version = await this.cache.getVersion(
+			CATEGORY_PRODUCTS_CACHE_VERSION,
+			catalogId
+		)
+		const buyerVersion =
+			buyerCatalogId === catalogId
+				? null
+				: await this.cache.getVersion(
+						CATEGORY_PRODUCTS_CACHE_VERSION,
+						buyerCatalogId
+					)
+
+		return [
+			`buyer-${buyerCatalogId}`,
+			`v${version}`,
+			`bv${buyerVersion ?? version}`
+		]
 	}
 
 	private async buildCategoryListCacheKey(
 		catalogId: string,
-		options: { includeEmpty: boolean; includeInactive: boolean }
+		options: {
+			includeEmpty: boolean
+			includeInactive: boolean
+			readMode: CategoryProductsReadMode
+		}
 	): Promise<string> {
-		const version = await this.cache.getVersion(
+		const buyerCatalogId = mustCatalogId()
+		const listVersion = await this.cache.getVersion(
 			CATEGORY_LIST_CACHE_VERSION,
 			catalogId
 		)
+		const productsVersion = await this.cache.getVersion(
+			CATEGORY_PRODUCTS_CACHE_VERSION,
+			catalogId
+		)
+		const buyerProductsVersion =
+			buyerCatalogId === catalogId
+				? null
+				: await this.cache.getVersion(
+						CATEGORY_PRODUCTS_CACHE_VERSION,
+						buyerCatalogId
+					)
 		return this.cache.buildKey([
 			'catalog',
 			catalogId,
 			'category',
 			'list',
+			`buyer-${buyerCatalogId}`,
+			...this.buildCategoryProductsReadModeParts(options.readMode),
 			options.includeEmpty ? 'include-empty' : 'non-empty',
 			options.includeInactive ? 'include-inactive' : 'active-only',
-			`v${version}`
+			`lv${listVersion}`,
+			`pv${productsVersion}`,
+			`bpv${buyerProductsVersion ?? productsVersion}`
 		])
 	}
 

@@ -1,6 +1,15 @@
 import { CartCheckoutMethod, type Prisma } from '@generated/client'
-import { BadRequestException, Inject, Injectable } from '@nestjs/common'
+import {
+	BadRequestException,
+	Inject,
+	Injectable,
+	Optional
+} from '@nestjs/common'
 
+import {
+	type CatalogPriceListLinePrice,
+	CatalogPriceListResolverService
+} from '@/modules/catalog-price-list/public'
 import {
 	PRODUCT_SELLABLE_READER_PORT,
 	type ProductSellableProjection,
@@ -13,6 +22,7 @@ import {
 
 import {
 	type CartEntityMapOptions,
+	mapCartModifier,
 	mapCartSaleUnit,
 	mapCartVariant,
 	resolveCartItemBaseQuantity,
@@ -64,10 +74,14 @@ type SnapshotCartItem = {
 	productId: string
 	variantId: string | null
 	saleUnitId?: string | null
+	priceListId?: string | null
+	priceListCode?: string | null
+	priceListName?: string | null
 	guestSessionId?: string | null
 	guestName?: string | null
 	variant?: Parameters<typeof mapCartVariant>[0]
 	saleUnit?: Parameters<typeof mapCartSaleUnit>[0]
+	modifiers?: Parameters<typeof mapCartModifier>[0][]
 	quantity: number
 	baseQuantity?: number | null
 	unitPriceSnapshot?: unknown
@@ -100,6 +114,9 @@ type SnapshotSource = SnapshotCartItem & {
 	variantHidden: boolean
 	saleUnitHidden: boolean
 	unitPriceSnapshot: unknown
+	priceListId: string | null
+	priceListCode: string | null
+	priceListName: string | null
 	commercialProjection: ProductSellableProjection
 }
 
@@ -107,7 +124,9 @@ type SnapshotSource = SnapshotCartItem & {
 export class CartOrderSnapshotService {
 	constructor(
 		@Inject(PRODUCT_SELLABLE_READER_PORT)
-		private readonly sellableReader: ProductSellableReader
+		private readonly sellableReader: ProductSellableReader,
+		@Optional()
+		private readonly priceLists?: CatalogPriceListResolverService
 	) {}
 
 	async buildSnapshotItems(
@@ -118,7 +137,9 @@ export class CartOrderSnapshotService {
 	) {
 		const canUseProductVariants = options.canUseProductVariants ?? true
 		const canUseCatalogSaleUnits = options.canUseCatalogSaleUnits ?? true
+		const canUseCatalogModifiers = options.canUseCatalogModifiers ?? true
 		const canExposeSaleUnits = canUseCatalogSaleUnits
+		const canExposeModifiers = canUseCatalogModifiers
 		const snapshotSources = await Promise.all(
 			items.map(async item => {
 				const commercialProjection = await this.resolveCommercialProjection(
@@ -129,18 +150,45 @@ export class CartOrderSnapshotService {
 				const variantId = item.variantId ?? commercialProjection.variantId
 				const saleUnit = canExposeSaleUnits ? (item.saleUnit ?? null) : null
 				const saleUnitId = canExposeSaleUnits ? (item.saleUnitId ?? null) : null
+				const modifiers = canExposeModifiers ? (item.modifiers ?? []) : []
 				const variantHidden = Boolean(variantId && !canUseProductVariants)
 				const saleUnitHidden = Boolean((item.saleUnitId ?? null) && !saleUnitId)
+				const priceListLine = await this.resolvePriceListLine(
+					tx,
+					catalogId,
+					item.product.catalogId ?? catalogId,
+					item.productId,
+					variantId,
+					saleUnitId,
+					commercialProjection
+				)
+				const product =
+					priceListLine.target === 'PRODUCT'
+						? { ...item.product, price: priceListLine.price }
+						: item.product
+				const variant =
+					priceListLine.target === 'VARIANT' && item.variant
+						? { ...item.variant, price: priceListLine.price }
+						: (item.variant ?? null)
+				const pricedSaleUnit =
+					priceListLine.target === 'SALE_UNIT' && saleUnit
+						? { ...saleUnit, price: priceListLine.price }
+						: saleUnit
 
 				return {
 					...item,
+					product,
 					variantId,
 					saleUnitId,
-					variant: item.variant ?? null,
-					saleUnit,
+					variant,
+					saleUnit: pricedSaleUnit,
+					modifiers,
 					variantHidden,
 					saleUnitHidden,
 					unitPriceSnapshot: null,
+					priceListId: priceListLine.priceListId,
+					priceListCode: priceListLine.priceListCode,
+					priceListName: priceListLine.priceListName,
 					commercialProjection
 				}
 			})
@@ -159,10 +207,14 @@ export class CartOrderSnapshotService {
 				productId: item.productId,
 				variantId: item.variantId,
 				saleUnitId: item.saleUnitId ?? null,
+				priceListId: item.priceListId,
+				priceListCode: item.priceListCode,
+				priceListName: item.priceListName,
 				variantHidden: item.variantHidden,
 				saleUnitHidden: item.saleUnitHidden,
 				variant: item.variantHidden ? null : mapCartVariant(item.variant),
 				saleUnit: item.saleUnitHidden ? null : mapCartSaleUnit(item.saleUnit),
+				modifiers: item.modifiers.map(mapCartModifier),
 				guestSessionId: item.guestSessionId ?? null,
 				guestName: item.guestName ?? null,
 				externalProducts:
@@ -216,6 +268,9 @@ export class CartOrderSnapshotService {
 				productId: item.productId ?? '',
 				variantId: item.variantId,
 				saleUnitId: item.saleUnitId,
+				priceListId: item.priceListId,
+				priceListCode: item.priceListCode,
+				priceListName: item.priceListName,
 				guestSessionId: item.guestSessionId,
 				guestName: item.guestName,
 				quantity: item.quantity,
@@ -224,7 +279,8 @@ export class CartOrderSnapshotService {
 				displayPrice: item.displayPrice,
 				unitPrice: item.unitPrice,
 				variant: item.variant,
-				saleUnit: item.saleUnit
+				saleUnit: item.saleUnit,
+				modifiers: item.modifiers
 			})),
 			createdAt: order.createdAt
 		}
@@ -331,7 +387,8 @@ export class CartOrderSnapshotService {
 		})
 		const resolveOptions = {
 			quantity,
-			enforceStock: options.enforceStock ?? false
+			enforceStock: options.enforceStock ?? false,
+			buyerCatalogId: catalogId
 		}
 		const projection = item.variantId
 			? await this.sellableReader.resolveVariantSellable(
@@ -346,8 +403,70 @@ export class CartOrderSnapshotService {
 					resolveOptions
 				)
 
+		if (projection.usesPriceList && projection.priceState === 'UNKNOWN') {
+			throw new BadRequestException('Цена недоступна для выбранного прайс-листа')
+		}
 		this.ensureProjectionCanBeOrdered(projection)
 		return projection
+	}
+
+	private async resolvePriceListLine(
+		tx: Prisma.TransactionClient,
+		buyerCatalogId: string,
+		productCatalogId: string,
+		productId: string,
+		variantId: string | null,
+		saleUnitId: string | null,
+		commercialProjection: ProductSellableProjection
+	): Promise<{
+		priceListId: string | null
+		priceListCode: string | null
+		priceListName: string | null
+		price: string | null
+		target: CatalogPriceListLinePrice['target']
+	}> {
+		if (!commercialProjection.usesPriceList) {
+			return {
+				priceListId: null,
+				priceListCode: null,
+				priceListName: null,
+				price: null,
+				target: null
+			}
+		}
+		if (!this.priceLists) {
+			throw new BadRequestException('Цена недоступна для выбранного прайс-листа')
+		}
+
+		const line = await this.priceLists.resolveLinePrice({
+			buyerCatalogId,
+			ownerCatalogId: productCatalogId,
+			productId,
+			variantId,
+			saleUnitId,
+			mode: commercialProjection.mode,
+			tx
+		})
+		if (!line.priceList) {
+			return {
+				priceListId: null,
+				priceListCode: null,
+				priceListName: null,
+				price: null,
+				target: null
+			}
+		}
+		if (line.price === null) {
+			throw new BadRequestException('Цена недоступна для выбранного прайс-листа')
+		}
+
+		return {
+			priceListId: line.priceList.id,
+			priceListCode: line.priceList.code,
+			priceListName: line.priceList.name,
+			price: line.price,
+			target: line.target
+		}
 	}
 
 	private resolveSnapshotBaseQuantity(item: SnapshotSource): number {
@@ -388,6 +507,7 @@ export class CartOrderSnapshotService {
 			...item,
 			product,
 			variant,
+			modifiers: item.modifiers,
 			unitPriceSnapshot: null
 		}
 	}
@@ -476,10 +596,24 @@ function readFiniteNumber(value: unknown): number | null {
 	}
 	if (typeof value === 'bigint') return Number(value)
 	if (typeof value === 'object' && value !== null) {
-		const candidate = value as { toNumber?: () => unknown }
+		const candidate = value as {
+			toNumber?: () => unknown
+			toString?: () => string
+		}
 		if (typeof candidate.toNumber === 'function') {
-			const parsed = candidate.toNumber()
-			return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : null
+			try {
+				const parsed = candidate.toNumber()
+				if (typeof parsed === 'number' && Number.isFinite(parsed)) return parsed
+			} catch {
+				// Fall back to a custom toString implementation below.
+			}
+		}
+		if (
+			typeof candidate.toString === 'function' &&
+			candidate.toString !== Object.prototype.toString
+		) {
+			const parsed = Number(candidate.toString())
+			return Number.isFinite(parsed) ? parsed : null
 		}
 	}
 	return null

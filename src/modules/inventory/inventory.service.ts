@@ -1,5 +1,5 @@
 import type { Prisma } from '@generated/client'
-import { type CatalogInventoryMode, Role } from '@generated/enums'
+import { Role } from '@generated/enums'
 import {
 	BadRequestException,
 	ForbiddenException,
@@ -543,8 +543,7 @@ export class InventoryService {
 		await this.featureEntitlements.assertCanUseInternalInventory(catalogId)
 
 		const settings = await this.repo.findCatalogInventorySettings(catalogId)
-		const inventoryMode =
-			settings?.inventoryMode ?? ('NONE' as CatalogInventoryMode)
+		const inventoryMode = settings?.inventoryMode ?? 'NONE'
 		if (inventoryMode !== CATALOG_INVENTORY_MODE_INTERNAL) {
 			throw new ForbiddenException(
 				`${CAPABILITY_INVENTORY_INTERNAL} requires INTERNAL inventory mode`

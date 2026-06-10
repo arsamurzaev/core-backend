@@ -3,9 +3,17 @@ import {
 	ProductVariantKind,
 	ProductVariantStatus
 } from '@generated/enums'
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
+import {
+	CAPABILITY_READER_PORT,
+	type CapabilityReaderPort
+} from '@/modules/capability/contracts'
+import {
+	type CatalogPriceListProductPriceContext,
+	CatalogPriceListResolverService
+} from '@/modules/catalog-price-list/public'
 
 import type {
 	ProductSellableAvailabilityState,
@@ -66,7 +74,14 @@ type ProductVariantRow = ProductSellableRow['variants'][number]
 
 @Injectable()
 export class ProductSellableService implements ProductSellableReader {
-	constructor(private readonly prisma: PrismaService) {}
+	constructor(
+		private readonly prisma: PrismaService,
+		@Optional()
+		private readonly priceLists?: CatalogPriceListResolverService,
+		@Optional()
+		@Inject(CAPABILITY_READER_PORT)
+		private readonly capabilities?: CapabilityReaderPort
+	) {}
 
 	async resolveProductSellable(
 		catalogId: string,
@@ -78,7 +93,19 @@ export class ProductSellableService implements ProductSellableReader {
 			throw new NotFoundException('Товар не найден')
 		}
 
-		return this.buildProjection(product, options)
+		const priceContext = await this.resolvePriceContext({
+			buyerCatalogId: options.buyerCatalogId ?? catalogId,
+			ownerCatalogId: catalogId,
+			productIds: [product.id],
+			...(options.ignorePriceList === true ? { ignorePriceList: true } : {})
+		})
+
+		return this.buildProjection(
+			product,
+			options,
+			priceContext,
+			await this.resolveBuyerFeatures(options.buyerCatalogId ?? catalogId)
+		)
 	}
 
 	async resolveProductsSellable(
@@ -90,8 +117,20 @@ export class ProductSellableService implements ProductSellableReader {
 		if (!uniqueProductIds.length) return new Map()
 
 		const products = await this.findProducts(catalogId, uniqueProductIds)
+		const features = await this.resolveBuyerFeatures(
+			options.buyerCatalogId ?? catalogId
+		)
+		const priceContext = await this.resolvePriceContext({
+			buyerCatalogId: options.buyerCatalogId ?? catalogId,
+			ownerCatalogId: catalogId,
+			productIds: products.map(product => product.id),
+			...(options.ignorePriceList === true ? { ignorePriceList: true } : {})
+		})
 		return new Map(
-			products.map(product => [product.id, this.buildProjection(product, options)])
+			products.map(product => [
+				product.id,
+				this.buildProjection(product, options, priceContext, features)
+			])
 		)
 	}
 
@@ -129,14 +168,41 @@ export class ProductSellableService implements ProductSellableReader {
 		})
 	}
 
+	private resolvePriceContext(params: {
+		buyerCatalogId: string
+		ownerCatalogId: string
+		productIds: string[]
+		ignorePriceList?: boolean
+	}): Promise<CatalogPriceListProductPriceContext> {
+		if (params.ignorePriceList) return Promise.resolve(this.emptyPriceContext())
+		if (this.priceLists) {
+			return this.priceLists.resolveProductPriceContext(params)
+		}
+		return Promise.resolve(this.emptyPriceContext())
+	}
+
+	private emptyPriceContext(): CatalogPriceListProductPriceContext {
+		return {
+			priceList: null,
+			productPrices: new Map(),
+			variantPrices: new Map(),
+			saleUnitPrices: new Map()
+		}
+	}
+
 	private buildProjection(
 		product: ProductSellableRow,
-		options: ProductSellableResolveOptions
+		options: ProductSellableResolveOptions,
+		priceContext: CatalogPriceListProductPriceContext,
+		features: {
+			canUseCatalogSaleUnits: boolean
+			canUseProductVariants: boolean
+		}
 	): ProductSellableProjection {
 		const defaultVariant = this.findDefaultVariant(product.variants)
-		const matrixVariants = product.variants.filter(variant =>
-			this.isMatrixVariant(variant)
-		)
+		const matrixVariants = features.canUseProductVariants
+			? product.variants.filter(variant => this.isMatrixVariant(variant))
+			: []
 		const mode = matrixVariants.length ? 'MATRIX' : 'SIMPLE'
 		const selectedVariant = options.variantId
 			? (product.variants.find(variant => variant.id === options.variantId) ??
@@ -152,10 +218,14 @@ export class ProductSellableService implements ProductSellableReader {
 			defaultVariant
 		)
 		const prices = priceCandidates
-			.map(variant => this.resolveDisplayPrice(variant))
+			.map(variant =>
+				this.resolveDisplayPrice(product, variant, mode, priceContext, features)
+			)
 			.filter((price): price is number => price !== null)
 		const legacyPrice = this.toNumber(product.price)
-		const canUseLegacyPrice = this.canUseLegacyProductPrice(mode, selectedVariant)
+		const canUseLegacyPrice =
+			!priceContext.priceList &&
+			this.canUseLegacyProductPrice(mode, selectedVariant)
 		const resolvedPrices = prices.length
 			? prices
 			: canUseLegacyPrice && legacyPrice !== null
@@ -166,6 +236,11 @@ export class ProductSellableService implements ProductSellableReader {
 		const availabilityCandidates = selectedVariant
 			? [selectedVariant]
 			: this.resolveAvailabilityCandidates(product.variants, mode, defaultVariant)
+		const pricedAvailabilityCandidates = priceContext.priceList
+			? availabilityCandidates.filter(variant =>
+					this.hasPriceListPrice(product, variant, mode, priceContext, features)
+				)
+			: availabilityCandidates
 
 		return {
 			catalogId: product.catalogId,
@@ -180,10 +255,14 @@ export class ProductSellableService implements ProductSellableReader {
 			maxPrice: this.formatPrice(maxPrice),
 			availabilityState: this.resolveAvailabilityState(
 				product.status,
-				availabilityCandidates,
+				pricedAvailabilityCandidates,
 				options
 			),
-			stock: this.resolveTotalStock(availabilityCandidates)
+			stock: this.resolveTotalStock(pricedAvailabilityCandidates),
+			usesPriceList: Boolean(priceContext.priceList),
+			priceListId: priceContext.priceList?.id ?? null,
+			priceListCode: priceContext.priceList?.code ?? null,
+			priceListName: priceContext.priceList?.name ?? null
 		}
 	}
 
@@ -244,13 +323,103 @@ export class ProductSellableService implements ProductSellableReader {
 		)
 	}
 
-	private resolveDisplayPrice(variant: ProductVariantRow): number | null {
-		const defaultSaleUnit = this.resolveDefaultSaleUnit(variant)
+	private resolveDisplayPrice(
+		product: ProductSellableRow,
+		variant: ProductVariantRow,
+		mode: 'SIMPLE' | 'MATRIX',
+		priceContext: CatalogPriceListProductPriceContext,
+		features: {
+			canUseCatalogSaleUnits: boolean
+			canUseProductVariants: boolean
+		}
+	): number | null {
+		if (priceContext.priceList) {
+			return this.resolvePriceListDisplayPrice(
+				product,
+				variant,
+				mode,
+				priceContext,
+				features
+			)
+		}
+
+		const defaultSaleUnit = features.canUseCatalogSaleUnits
+			? this.resolveDefaultSaleUnit(variant)
+			: null
 		return this.toNumber(defaultSaleUnit?.price ?? variant.price)
 	}
 
 	private resolveDefaultSaleUnit(variant: ProductVariantRow) {
 		return variant.saleUnits?.[0] ?? null
+	}
+
+	private resolvePriceListDisplayPrice(
+		product: ProductSellableRow,
+		variant: ProductVariantRow,
+		mode: 'SIMPLE' | 'MATRIX',
+		priceContext: CatalogPriceListProductPriceContext,
+		features: {
+			canUseCatalogSaleUnits: boolean
+			canUseProductVariants: boolean
+		}
+	): number | null {
+		if (features.canUseCatalogSaleUnits) {
+			const saleUnits = variant.saleUnits ?? []
+			if (saleUnits.length > 0) {
+				const saleUnitPrice = saleUnits
+					.map(saleUnit => priceContext.saleUnitPrices.get(saleUnit.id) ?? null)
+					.find((price): price is string => price !== null)
+				return saleUnitPrice !== undefined ? this.toNumber(saleUnitPrice) : null
+			}
+		}
+
+		if (mode === 'MATRIX' && this.isMatrixVariant(variant)) {
+			return this.toNumber(priceContext.variantPrices.get(variant.id))
+		}
+
+		return this.toNumber(priceContext.productPrices.get(product.id))
+	}
+
+	private hasPriceListPrice(
+		product: ProductSellableRow,
+		variant: ProductVariantRow,
+		mode: 'SIMPLE' | 'MATRIX',
+		priceContext: CatalogPriceListProductPriceContext,
+		features: {
+			canUseCatalogSaleUnits: boolean
+			canUseProductVariants: boolean
+		}
+	): boolean {
+		return (
+			this.resolvePriceListDisplayPrice(
+				product,
+				variant,
+				mode,
+				priceContext,
+				features
+			) !== null
+		)
+	}
+
+	private async resolveBuyerFeatures(catalogId: string): Promise<{
+		canUseCatalogSaleUnits: boolean
+		canUseProductVariants: boolean
+	}> {
+		if (!this.capabilities) {
+			return {
+				canUseCatalogSaleUnits: true,
+				canUseProductVariants: true
+			}
+		}
+
+		const [canUseCatalogSaleUnits, canUseProductVariants] = await Promise.all([
+			this.capabilities.canUseCatalogSaleUnits(catalogId),
+			this.capabilities.canUseProductVariants(catalogId)
+		])
+		return {
+			canUseCatalogSaleUnits,
+			canUseProductVariants
+		}
 	}
 
 	private resolvePriceState(minPrice: number | null, maxPrice: number | null) {

@@ -5,7 +5,8 @@ import {
 	ForbiddenException,
 	Inject,
 	Injectable,
-	NotFoundException
+	NotFoundException,
+	Optional
 } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
@@ -13,6 +14,10 @@ import {
 	CAPABILITY_READER_PORT,
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
+import {
+	type CatalogPriceListLinePrice,
+	CatalogPriceListResolverService
+} from '@/modules/catalog-price-list/public'
 import {
 	PRODUCT_MAINTENANCE_PORT,
 	PRODUCT_SELLABLE_READER_PORT,
@@ -29,12 +34,17 @@ import {
 	type CartResolvedLineSnapshot,
 	type CartVariantSnapshotSource
 } from './cart-line-pricing.service'
+import {
+	CartModifierSelectionService,
+	type ResolvedCartModifier
+} from './cart-modifier-selection.service'
 import { CartVariantSelectionService } from './cart-variant-selection.service'
 import {
 	MAX_CART_ITEMS,
 	MAX_ITEM_QUANTITY,
 	normalizeCartItemInput,
 	type NormalizedCartItemInput,
+	type NormalizedCartItemModifierInput,
 	resolveCartItemBaseQuantity,
 	type UpsertCartItemInput
 } from './cart.utils'
@@ -88,8 +98,12 @@ type ExistingCartItem = {
 	deleteAt: Date | null
 	quantity: number
 	saleUnitId: string | null
+	modifierSignature: string
 	baseQuantity: number | null
 	unitPriceSnapshot: Prisma.Decimal | null
+	priceListId: string | null
+	priceListCode: string | null
+	priceListName: string | null
 	guestSessionId: string | null
 	guestName: string | null
 }
@@ -100,8 +114,12 @@ const existingCartItemSelect = {
 	deleteAt: true,
 	quantity: true,
 	saleUnitId: true,
+	modifierSignature: true,
 	baseQuantity: true,
 	unitPriceSnapshot: true,
+	priceListId: true,
+	priceListCode: true,
+	priceListName: true,
 	guestSessionId: true,
 	guestName: true
 } satisfies Prisma.CartItemSelect
@@ -133,7 +151,26 @@ function getActiveCartLineQuantity(items: ExistingCartItem[]) {
 	)
 }
 
-type ResolvedCartItemInput = NormalizedCartItemInput & CartResolvedLineSnapshot
+function buildCartModifierInputSignature(
+	modifiers: NormalizedCartItemModifierInput[]
+): string {
+	return modifiers
+		.map(
+			modifier =>
+				`${modifier.productModifierGroupId}:${modifier.productModifierOptionId}x${modifier.quantity}`
+		)
+		.sort()
+		.join('|')
+}
+
+type ResolvedCartItemInput = NormalizedCartItemInput &
+	CartResolvedLineSnapshot & {
+		modifierSignature: string
+		resolvedModifiers: ResolvedCartModifier[]
+		priceListId: string | null
+		priceListCode: string | null
+		priceListName: string | null
+	}
 
 export type CartLineMutationResult = {
 	cartId: string
@@ -148,13 +185,16 @@ export class CartLineService {
 		private readonly prisma: PrismaService,
 		private readonly inventoryReservation: CartInventoryReservationService,
 		private readonly linePricing: CartLinePricingService,
+		private readonly modifierSelection: CartModifierSelectionService,
 		private readonly variantSelection: CartVariantSelectionService,
 		@Inject(CAPABILITY_READER_PORT)
 		private readonly capabilities: CapabilityReaderPort,
 		@Inject(PRODUCT_MAINTENANCE_PORT)
 		private readonly productMaintenance: ProductMaintenancePort,
 		@Inject(PRODUCT_SELLABLE_READER_PORT)
-		private readonly sellableReader: ProductSellableReader
+		private readonly sellableReader: ProductSellableReader,
+		@Optional()
+		private readonly priceLists?: CatalogPriceListResolverService
 	) {}
 
 	async upsertItem(
@@ -200,6 +240,7 @@ export class CartLineService {
 						productId: true,
 						variantId: true,
 						saleUnitId: true,
+						modifierSignature: true,
 						guestSessionId: true
 					}
 				})
@@ -223,6 +264,7 @@ export class CartLineService {
 						productId: item.productId,
 						variantId: item.variantId,
 						saleUnitId: item.saleUnitId,
+						modifierSignature: item.modifierSignature,
 						guestSessionId: item.guestSessionId,
 						deleteAt: null
 					},
@@ -277,6 +319,25 @@ export class CartLineService {
 	): Promise<CartLineMutationResult> {
 		const cart = await this.findCartContextOrThrow(cartId, tx)
 		this.ensureCartIsOpen(cart.status, cart.tableSessionStatus)
+		const usesReservationFlow = this.inventoryReservation.shouldReserveCartStock(
+			cart.status,
+			cart.inventoryMode
+		)
+
+		if (input.quantity === 0) {
+			const existingItems = await this.findExistingItems(
+				tx,
+				cart.id,
+				input.productId,
+				input.variantId,
+				input.saleUnitId,
+				buildCartModifierInputSignature(input.modifiers ?? []),
+				input.guestSessionId ?? null
+			)
+			const changed = await this.archiveActiveCartItems(tx, existingItems)
+
+			return this.finalizeCartLineChange(tx, cart, changed, usesReservationFlow)
+		}
 
 		const productSnapshot = await this.ensureProductInCatalog(
 			tx,
@@ -290,12 +351,9 @@ export class CartLineService {
 				{ tx }
 			)
 		}
-		const usesReservationFlow = this.inventoryReservation.shouldReserveCartStock(
-			cart.status,
-			cart.inventoryMode
-		)
 		const features = await this.capabilities.getCurrentFeatures(cart.catalogId)
 		const canExposeSaleUnits = features.canUseCatalogSaleUnits
+		const canUseCatalogModifiers = features.canUseCatalogModifiers
 		const featureAwareInput = canExposeSaleUnits
 			? input
 			: { ...input, saleUnitId: null }
@@ -303,7 +361,8 @@ export class CartLineService {
 			tx,
 			productSnapshot.catalogId ?? cart.catalogId,
 			featureAwareInput,
-			usesReservationFlow ? INVENTORY_MODE_NONE : cart.inventoryMode
+			usesReservationFlow ? INVENTORY_MODE_NONE : cart.inventoryMode,
+			{ buyerCatalogId: cart.catalogId }
 		)
 		const variantSnapshot = await this.ensureVariantMatchesProduct(
 			tx,
@@ -314,29 +373,63 @@ export class CartLineService {
 			tx,
 			variantId,
 			variantId && canExposeSaleUnits ? featureAwareInput.saleUnitId : null,
-			{ useDefaultWhenMissing: Boolean(variantId && canExposeSaleUnits) }
+			{ rejectWhenMissing: Boolean(variantId && canExposeSaleUnits) }
 		)
+		const resolvedModifiers = await this.modifierSelection.resolveModifiers(tx, {
+			productId: input.productId,
+			variantId,
+			canUseCatalogModifiers,
+			modifiers: input.modifiers ?? []
+		})
 		const commercialQuantity = resolveCartItemBaseQuantity({
 			quantity: input.quantity,
 			saleUnit
 		})
+		const productCatalogId = productSnapshot.catalogId ?? cart.catalogId
 		const commercialProjection = await this.resolveCommercialProjection(
-			productSnapshot.catalogId ?? cart.catalogId,
+			productCatalogId,
+			cart.catalogId,
 			input.productId,
 			variantId,
 			commercialQuantity,
 			usesReservationFlow ? INVENTORY_MODE_NONE : cart.inventoryMode
 		)
+		const priceListLine = await this.resolvePriceListLine(
+			tx,
+			cart.catalogId,
+			productCatalogId,
+			input.productId,
+			variantId,
+			saleUnit?.id ?? null,
+			commercialProjection
+		)
+		const pricedProductSnapshot =
+			priceListLine.target === 'PRODUCT'
+				? { ...productSnapshot, price: priceListLine.price }
+				: productSnapshot
+		const pricedVariantSnapshot =
+			priceListLine.target === 'VARIANT' && variantSnapshot
+				? { ...variantSnapshot, price: priceListLine.price }
+				: variantSnapshot
+		const pricedSaleUnit =
+			priceListLine.target === 'SALE_UNIT' && saleUnit
+				? { ...saleUnit, price: priceListLine.price }
+				: saleUnit
 		const resolvedInput: ResolvedCartItemInput = {
 			...input,
 			variantId,
-			saleUnitId: saleUnit?.id ?? null,
+			saleUnitId: pricedSaleUnit?.id ?? null,
+			modifierSignature: resolvedModifiers.signature,
+			resolvedModifiers: resolvedModifiers.items,
+			priceListId: priceListLine.priceListId,
+			priceListCode: priceListLine.priceListCode,
+			priceListName: priceListLine.priceListName,
 			...this.linePricing.resolveLineSnapshot({
 				variantId,
-				saleUnit,
+				saleUnit: pricedSaleUnit,
 				quantity: input.quantity,
-				productSnapshot,
-				variantSnapshot,
+				productSnapshot: pricedProductSnapshot,
+				variantSnapshot: pricedVariantSnapshot,
 				commercialProjection
 			})
 		}
@@ -347,7 +440,8 @@ export class CartLineService {
 			resolvedInput.productId,
 			resolvedInput.variantId,
 			resolvedInput.saleUnitId,
-			resolvedInput.guestSessionId
+			resolvedInput.modifierSignature,
+			resolvedInput.guestSessionId ?? null
 		)
 		const activeExistingQuantity = getActiveCartLineQuantity(existingItems)
 
@@ -390,6 +484,15 @@ export class CartLineService {
 			resolvedInput
 		)
 
+		return this.finalizeCartLineChange(tx, cart, changed, usesReservationFlow)
+	}
+
+	private async finalizeCartLineChange(
+		tx: Prisma.TransactionClient,
+		cart: CartContext,
+		changed: boolean,
+		usesReservationFlow: boolean
+	): Promise<CartLineMutationResult> {
 		if (!changed) {
 			return { cartId: cart.id, changed: false }
 		}
@@ -419,6 +522,24 @@ export class CartLineService {
 			inventoryCacheCatalogIds: reserveEffect.inventoryCacheCatalogIds,
 			inventoryDomainEvents: reserveEffect.inventoryDomainEvents
 		}
+	}
+
+	private async archiveActiveCartItems(
+		tx: Prisma.TransactionClient,
+		existingItems: ExistingCartItem[]
+	): Promise<boolean> {
+		const activeIds = existingItems
+			.filter(item => !item.deleteAt)
+			.map(item => item.id)
+
+		if (!activeIds.length) return false
+
+		await tx.cartItem.updateMany({
+			where: { id: { in: activeIds } },
+			data: { deleteAt: new Date() }
+		})
+
+		return true
 	}
 
 	private async findCartContextOrThrow(
@@ -531,7 +652,8 @@ export class CartLineService {
 	}
 
 	private async resolveCommercialProjection(
-		catalogId: string,
+		productCatalogId: string,
+		buyerCatalogId: string,
 		productId: string,
 		variantId: string | null,
 		quantity: number,
@@ -546,20 +668,79 @@ export class CartLineService {
 
 		if (variantId) {
 			return this.sellableReader.resolveVariantSellable(
-				catalogId,
+				productCatalogId,
 				productId,
 				variantId,
-				options
+				{ ...options, buyerCatalogId }
 			)
 		}
 
 		const projection = await this.sellableReader.resolveProductSellable(
-			catalogId,
+			productCatalogId,
 			productId,
-			options
+			{ ...options, buyerCatalogId }
 		)
 
 		return projection.requiresVariantSelection ? null : projection
+	}
+
+	private async resolvePriceListLine(
+		tx: Prisma.TransactionClient,
+		buyerCatalogId: string,
+		productCatalogId: string,
+		productId: string,
+		variantId: string | null,
+		saleUnitId: string | null,
+		commercialProjection: ProductSellableProjection | null
+	): Promise<{
+		priceListId: string | null
+		priceListCode: string | null
+		priceListName: string | null
+		price: string | null
+		target: CatalogPriceListLinePrice['target']
+	}> {
+		if (!commercialProjection?.usesPriceList) {
+			return {
+				priceListId: null,
+				priceListCode: null,
+				priceListName: null,
+				price: null,
+				target: null
+			}
+		}
+		if (!this.priceLists) {
+			throw new BadRequestException('Цена недоступна для выбранного прайс-листа')
+		}
+
+		const line = await this.priceLists.resolveLinePrice({
+			buyerCatalogId,
+			ownerCatalogId: productCatalogId,
+			productId,
+			variantId,
+			saleUnitId,
+			mode: commercialProjection.mode,
+			tx
+		})
+		if (!line.priceList) {
+			return {
+				priceListId: null,
+				priceListCode: null,
+				priceListName: null,
+				price: null,
+				target: null
+			}
+		}
+		if (line.price === null) {
+			throw new BadRequestException('Цена недоступна для выбранного прайс-листа')
+		}
+
+		return {
+			priceListId: line.priceList.id,
+			priceListCode: line.priceList.code,
+			priceListName: line.priceList.name,
+			price: line.price,
+			target: line.target
+		}
 	}
 
 	private async ensureVariantMatchesProduct(
@@ -616,6 +797,7 @@ export class CartLineService {
 		productId: string,
 		variantId: string | null,
 		saleUnitId: string | null,
+		modifierSignature: string,
 		guestSessionId: string | null
 	): Promise<ExistingCartItem[]> {
 		const exact = await tx.cartItem.findFirst({
@@ -624,6 +806,7 @@ export class CartLineService {
 				productId,
 				variantId,
 				saleUnitId,
+				modifierSignature,
 				guestSessionId
 			},
 			select: existingCartItemSelect
@@ -635,6 +818,7 @@ export class CartLineService {
 					productId,
 					variantId,
 					saleUnitId,
+					modifierSignature,
 					guestSessionId
 				},
 				select: existingCartItemSelect
@@ -649,6 +833,7 @@ export class CartLineService {
 				where: {
 					cartId,
 					productId,
+					modifierSignature,
 					guestSessionId,
 					deleteAt: null
 				},
@@ -660,13 +845,30 @@ export class CartLineService {
 
 		if (!saleUnitId) return []
 
+		if (!variantId) {
+			const sameSaleUnitMatches = await tx.cartItem.findMany({
+				where: {
+					cartId,
+					productId,
+					saleUnitId,
+					modifierSignature,
+					guestSessionId
+				},
+				select: existingCartItemSelect
+			})
+			if (sameSaleUnitMatches.length) {
+				return sortCartLineMatches(sameSaleUnitMatches)
+			}
+		}
+
 		const legacyDefaultSaleUnit = await tx.cartItem.findFirst({
 			where: {
 				cartId,
 				productId,
 				variantId,
 				guestSessionId,
-				saleUnitId: null
+				saleUnitId: null,
+				modifierSignature
 			},
 			select: existingCartItemSelect
 		})
@@ -704,9 +906,13 @@ export class CartLineService {
 				Boolean(primary.deleteAt) ||
 				primary.quantity !== input.quantity ||
 				primary.saleUnitId !== input.saleUnitId ||
+				primary.modifierSignature !== input.modifierSignature ||
 				primary.baseQuantity !== input.baseQuantity ||
-				primary.guestSessionId !== input.guestSessionId ||
-				primary.guestName !== input.guestName ||
+				primary.priceListId !== input.priceListId ||
+				primary.priceListCode !== input.priceListCode ||
+				primary.priceListName !== input.priceListName ||
+				primary.guestSessionId !== (input.guestSessionId ?? null) ||
+				primary.guestName !== (input.guestName ?? null) ||
 				!this.linePricing.isSameMoney(
 					primary.unitPriceSnapshot,
 					input.unitPriceSnapshot
@@ -719,9 +925,13 @@ export class CartLineService {
 						quantity: input.quantity,
 						baseQuantity: input.baseQuantity,
 						unitPriceSnapshot: input.unitPriceSnapshot,
+						priceListId: input.priceListId,
+						priceListCode: input.priceListCode,
+						priceListName: input.priceListName,
 						saleUnitId: input.saleUnitId,
-						guestSessionId: input.guestSessionId,
-						guestName: input.guestName,
+						modifierSignature: input.modifierSignature,
+						guestSessionId: input.guestSessionId ?? null,
+						guestName: input.guestName ?? null,
 						deleteAt: null
 					}
 				})
@@ -734,24 +944,61 @@ export class CartLineService {
 				})
 			}
 
-			return shouldUpdatePrimary || duplicateActiveIds.length > 0
+			await this.replaceCartItemModifiers(tx, primary.id, input.resolvedModifiers)
+
+			return (
+				shouldUpdatePrimary ||
+				duplicateActiveIds.length > 0 ||
+				input.resolvedModifiers.length > 0
+			)
 		}
 
-		await tx.cartItem.create({
+		const created = await tx.cartItem.create({
 			data: {
 				cartId,
 				productId: input.productId,
 				variantId: input.variantId,
 				saleUnitId: input.saleUnitId,
+				modifierSignature: input.modifierSignature,
 				quantity: input.quantity,
 				baseQuantity: input.baseQuantity,
 				unitPriceSnapshot: input.unitPriceSnapshot,
-				guestSessionId: input.guestSessionId,
-				guestName: input.guestName
-			}
+				priceListId: input.priceListId,
+				priceListCode: input.priceListCode,
+				priceListName: input.priceListName,
+				guestSessionId: input.guestSessionId ?? null,
+				guestName: input.guestName ?? null
+			},
+			select: { id: true }
 		})
+		await this.replaceCartItemModifiers(tx, created.id, input.resolvedModifiers)
 
 		return true
+	}
+
+	private async replaceCartItemModifiers(
+		tx: Prisma.TransactionClient,
+		cartItemId: string,
+		modifiers: ResolvedCartModifier[]
+	): Promise<void> {
+		await tx.cartItemModifier.deleteMany({ where: { cartItemId } })
+		if (!modifiers.length) return
+
+		await tx.cartItemModifier.createMany({
+			data: modifiers.map(modifier => ({
+				cartItemId,
+				productModifierGroupId: modifier.productModifierGroupId,
+				productModifierOptionId: modifier.productModifierOptionId,
+				catalogModifierGroupId: modifier.catalogModifierGroupId,
+				catalogModifierOptionId: modifier.catalogModifierOptionId,
+				groupCode: modifier.groupCode,
+				groupName: modifier.groupName,
+				optionCode: modifier.optionCode,
+				optionName: modifier.optionName,
+				quantity: modifier.quantity,
+				unitPriceSnapshot: modifier.unitPriceSnapshot
+			}))
+		})
 	}
 
 	private ensureCartIsOpen(
@@ -765,7 +1012,7 @@ export class CartLineService {
 			tableSessionStatus &&
 			tableSessionStatus !== CartTableSessionStatus.OPEN
 		) {
-			throw new BadRequestException('hall table session is not open')
+			throw new BadRequestException('Сессия стола не открыта')
 		}
 	}
 

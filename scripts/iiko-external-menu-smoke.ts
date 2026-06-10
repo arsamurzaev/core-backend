@@ -1,18 +1,19 @@
 import 'dotenv/config'
 
 import { IntegrationProvider } from '../prisma/generated/enums.js'
-import { createPrismaClient, validateDatabaseEnv } from './db-console/prisma.js'
 import { IikoClient } from '../src/modules/integration/providers/iiko/iiko.client'
 import {
 	buildIikoExternalMenuPreview,
-	normalizeIikoExternalMenu,
-	type IikoExternalMenuPreview
+	type IikoExternalMenuPreview,
+	normalizeIikoExternalMenu
 } from '../src/modules/integration/providers/iiko/iiko.external-menu-normalizer'
 import { IikoMetadataCryptoService } from '../src/modules/integration/providers/iiko/iiko.metadata'
 import type {
 	IikoExternalMenuResponse,
 	IikoPriceCategory
 } from '../src/modules/integration/providers/iiko/iiko.types'
+
+import { createPrismaClient, validateDatabaseEnv } from './db-console/prisma.js'
 
 const DEFAULT_EXTERNAL_MENU_ID = '81651'
 const DEFAULT_MENU_VERSION = 4
@@ -90,7 +91,9 @@ async function run() {
 	const externalMenu =
 		externalMenus.find(item => item.id === options.externalMenuId) ?? null
 	if (!externalMenu) {
-		const known = externalMenus.map(item => `${item.name} (${item.id})`).join(', ')
+		const known = externalMenus
+			.map(item => `${item.name} (${item.id})`)
+			.join(', ')
 		throw new Error(
 			`External menu ${options.externalMenuId} was not returned by /api/2/menu.${known ? ` Known menus: ${known}` : ''}`
 		)
@@ -198,7 +201,9 @@ function resolvePriceCategoryCandidates(
 	if (selectedId) {
 		const found = priceCategories.find(item => item.id === selectedId)
 		if (!found) {
-			throw new Error(`Price category ${selectedId} was not returned by /api/2/menu`)
+			throw new Error(
+				`Price category ${selectedId} was not returned by /api/2/menu`
+			)
 		}
 		return [found]
 	}
@@ -231,7 +236,8 @@ function parseCliOptions(args: string[]): CliOptions {
 			DEFAULT_EXTERNAL_MENU_ID,
 		organizationId: normalizeOptionalString(env.IIKO_SMOKE_ORGANIZATION_ID),
 		priceCategoryId: normalizeOptionalString(env.IIKO_SMOKE_PRICE_CATEGORY_ID),
-		menuVersion: normalizeInteger(env.IIKO_SMOKE_MENU_VERSION) ?? DEFAULT_MENU_VERSION,
+		menuVersion:
+			normalizeInteger(env.IIKO_SMOKE_MENU_VERSION) ?? DEFAULT_MENU_VERSION,
 		fromDb: false,
 		catalogId: normalizeOptionalString(env.IIKO_SMOKE_CATALOG_ID),
 		integrationId: normalizeOptionalString(env.IIKO_SMOKE_INTEGRATION_ID),
@@ -389,7 +395,9 @@ function printHumanSummary(result: {
 	console.log(
 		`Organization: ${result.organization.name} (${result.organization.id})`
 	)
-	console.log(`External menu: ${result.externalMenu.name} (${result.externalMenu.id})`)
+	console.log(
+		`External menu: ${result.externalMenu.name} (${result.externalMenu.id})`
+	)
 	console.log(
 		`Discovery: organizations=${result.discovery.organizations}, menus=${result.discovery.externalMenus}, priceCategories=${result.discovery.priceCategories}`
 	)

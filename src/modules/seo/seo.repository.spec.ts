@@ -28,7 +28,7 @@ describe('SeoRepository', () => {
 			title: 'Store',
 			ogMedia: { connect: { id: 'media-1' } },
 			twitterMedia: { connect: { id: 'media-2' } }
-		} as any)
+		})
 
 		expect(prisma.seoSetting.findFirst).toHaveBeenCalledWith({
 			where: {
@@ -54,7 +54,7 @@ describe('SeoRepository', () => {
 
 		const result = await repository.update('seo-1', 'catalog-1', {
 			title: 'Store'
-		} as any)
+		})
 
 		expect(result).toBeNull()
 		expect(prisma.seoSetting.update).not.toHaveBeenCalled()

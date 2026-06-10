@@ -41,6 +41,8 @@ import {
 	type IikoStopListAvailabilityItem,
 	type IikoStopListAvailabilityResult,
 	type IntegrationProductLinkRecord,
+	type IntegrationProductModifierGroupInput,
+	type IntegrationProductModifierOptionInput,
 	type IntegrationRecord,
 	IntegrationRepository
 } from '../../integration.repository'
@@ -60,6 +62,7 @@ import type {
 	IikoStopListItem,
 	IikoSyncCategory,
 	IikoSyncMenu,
+	IikoSyncModifierGroup,
 	IikoSyncProduct,
 	IikoSyncSizePrice,
 	IikoTerminalGroup,
@@ -75,6 +78,8 @@ const PRODUCT_SLUG_MAX_LENGTH = 255
 const PRODUCT_SKU_MAX_LENGTH = 100
 const DEFAULT_SIZE_EXTERNAL_ID = 'default'
 const DEFAULT_VARIANT_STOCK = 0
+const MODIFIER_CODE_MAX_LENGTH = 100
+const MODIFIER_CODE_PREFIX = 'iiko'
 
 export type IikoCatalogSyncResult = {
 	ok: true
@@ -183,7 +188,7 @@ export class IikoSyncService {
 		const staleBefore = new Date(Date.now() - SYNC_LOCK_TIMEOUT_MS)
 		const locked = await this.repo.beginIikoSync(catalogId, staleBefore)
 		if (!locked) {
-			throw new ConflictException('iiko sync is already running')
+			throw new ConflictException('Синхронизация iiko уже выполняется')
 		}
 
 		try {
@@ -195,13 +200,13 @@ export class IikoSyncService {
 			})
 			await this.reportProgress(options.runId, {
 				phase: 'FETCHING_MENU',
-				message: 'Fetching iiko external menu',
+				message: 'Загружаем внешнее меню iiko',
 				processed: 0,
 				total: null
 			})
 
 			if (!metadata.externalMenuId) {
-				throw new BadRequestException('iiko external menu is not configured')
+				throw new BadRequestException('Внешнее меню iiko не настроено')
 			}
 
 			const rawMenu = await client.getExternalMenuById({
@@ -265,7 +270,7 @@ export class IikoSyncService {
 
 			await this.reportProgress(options.runId, {
 				phase: 'COMPLETED',
-				message: 'iiko menu sync completed',
+				message: 'Синхронизация меню iiko завершена',
 				processed: products.length,
 				total: products.length
 			})
@@ -311,7 +316,7 @@ export class IikoSyncService {
 		const staleBefore = new Date(Date.now() - SYNC_LOCK_TIMEOUT_MS)
 		const locked = await this.repo.beginIikoSync(catalogId, staleBefore)
 		if (!locked) {
-			throw new ConflictException('iiko sync is already running')
+			throw new ConflictException('Синхронизация iiko уже выполняется')
 		}
 
 		try {
@@ -320,17 +325,17 @@ export class IikoSyncService {
 				productId
 			})
 			if (!localProduct) {
-				throw new NotFoundException('Product was not found')
+				throw new NotFoundException('Товар не найден')
 			}
 
 			const link = await this.repo.findProductLinkByProductId(locked.id, productId)
 			if (!link) {
-				throw new NotFoundException('Product is not linked to iiko')
+				throw new NotFoundException('Товар не связан с iiko')
 			}
 
 			const metadata = this.metadataCrypto.parseStoredMetadata(locked.metadata)
 			if (!metadata.externalMenuId) {
-				throw new BadRequestException('iiko external menu is not configured')
+				throw new BadRequestException('Внешнее меню iiko не настроено')
 			}
 
 			const client = new IikoClient({
@@ -340,7 +345,7 @@ export class IikoSyncService {
 			})
 			await this.reportProgress(options.runId, {
 				phase: 'FETCHING_MENU',
-				message: 'Fetching iiko external menu',
+				message: 'Загружаем внешнее меню iiko',
 				processed: 0,
 				total: null
 			})
@@ -368,14 +373,12 @@ export class IikoSyncService {
 				product => product.id === link.externalId
 			)
 			if (!externalProduct) {
-				throw new NotFoundException(
-					'iiko product was not found in selected external menu'
-				)
+				throw new NotFoundException('Товар iiko не найден в выбранном внешнем меню')
 			}
 
 			await this.reportProgress(options.runId, {
 				phase: 'SYNCING_PRODUCTS',
-				message: 'Syncing iiko product',
+				message: 'Синхронизируем товар iiko',
 				processed: 0,
 				total: 1
 			})
@@ -513,7 +516,7 @@ export class IikoSyncService {
 		const staleBefore = new Date(Date.now() - SYNC_LOCK_TIMEOUT_MS)
 		const locked = await this.repo.beginIikoSync(catalogId, staleBefore)
 		if (!locked) {
-			throw new ConflictException('iiko sync is already running')
+			throw new ConflictException('Синхронизация iiko уже выполняется')
 		}
 
 		try {
@@ -765,7 +768,7 @@ export class IikoSyncService {
 				processed += 1
 				await this.reportProgress(params.runId, {
 					phase: 'SYNCING_PRODUCTS',
-					message: `Syncing iiko products: ${processed}/${params.products.length}`,
+					message: `Синхронизируем товары iiko: ${processed}/${params.products.length}`,
 					processed,
 					total: params.products.length
 				})
@@ -886,6 +889,14 @@ export class IikoSyncService {
 			iikoProduct: product,
 			priceOptions
 		})
+		await this.syncProductModifiers({
+			catalogId: context.catalogId,
+			integrationId: context.integration.id,
+			productId: localProduct.id,
+			iikoProduct: product,
+			priceOptions,
+			variantsBySizeId: variantStats.variantsBySizeId
+		})
 
 		await this.repo.upsertProductLink({
 			integrationId: context.integration.id,
@@ -922,6 +933,7 @@ export class IikoSyncService {
 		deletedVariants: number
 		skippedVariants: number
 		updated: boolean
+		variantsBySizeId: Map<string, string>
 	}> {
 		if (params.priceOptions.length <= 1) {
 			const option = params.priceOptions[0] ?? null
@@ -940,13 +952,22 @@ export class IikoSyncService {
 					externalIds: [],
 					requiredMissingSyncs: 2
 				})
+			const defaultVariant = await this.repo.findDefaultProductVariant(
+				params.product.id
+			)
+			const variantsBySizeId = new Map<string, string>()
+			if (defaultVariant) {
+				variantsBySizeId.set(DEFAULT_SIZE_EXTERNAL_ID, defaultVariant.id)
+				if (option?.sizeId) variantsBySizeId.set(option.sizeId, defaultVariant.id)
+			}
 
 			return {
 				createdVariants: ensured ? 1 : 0,
 				updatedVariants: ensured === false ? 0 : 0,
 				deletedVariants,
 				skippedVariants: 0,
-				updated: Boolean(ensured) || deletedVariants > 0
+				updated: Boolean(ensured) || deletedVariants > 0,
+				variantsBySizeId
 			}
 		}
 
@@ -963,6 +984,7 @@ export class IikoSyncService {
 		let updatedVariants = 0
 		let skippedVariants = 0
 		const externalIds: string[] = []
+		const variantsBySizeId = new Map<string, string>()
 
 		for (const option of params.priceOptions) {
 			try {
@@ -996,6 +1018,7 @@ export class IikoSyncService {
 				} else if (result.updated) {
 					updatedVariants += 1
 				}
+				variantsBySizeId.set(option.sizeId, result.variant.id)
 			} catch (error) {
 				skippedVariants += 1
 				this.logger.warn(
@@ -1021,7 +1044,40 @@ export class IikoSyncService {
 				createdVariants > 0 ||
 				updatedVariants > 0 ||
 				deletedVariants > 0 ||
-				skippedVariants > 0
+				skippedVariants > 0,
+			variantsBySizeId
+		}
+	}
+
+	private async syncProductModifiers(params: {
+		catalogId: string
+		integrationId: string
+		productId: string
+		iikoProduct: IikoSyncProduct
+		priceOptions: IikoPriceOption[]
+		variantsBySizeId: Map<string, string>
+	}): Promise<void> {
+		if (!(await this.canSyncCatalogModifiers(params.catalogId))) return
+
+		const groups = buildIikoProductModifierGroups({
+			product: params.iikoProduct,
+			priceOptions: params.priceOptions,
+			variantsBySizeId: params.variantsBySizeId
+		})
+		await this.repo.syncIikoProductModifiers({
+			catalogId: params.catalogId,
+			integrationId: params.integrationId,
+			productId: params.productId,
+			groups
+		})
+	}
+
+	private async canSyncCatalogModifiers(catalogId: string): Promise<boolean> {
+		try {
+			await this.featureAssertions.assertCanUseCatalogModifiers(catalogId)
+			return true
+		} catch {
+			return false
 		}
 	}
 
@@ -1189,6 +1245,138 @@ function resolveProductBasePrice(options: IikoPriceOption[]): number | null {
 		options.find(option => option.isDefault) ??
 		[...options].sort((left, right) => (left.price ?? 0) - (right.price ?? 0))[0]
 	return selected?.price ?? null
+}
+
+function buildIikoProductModifierGroups(params: {
+	product: IikoSyncProduct
+	priceOptions: IikoPriceOption[]
+	variantsBySizeId: Map<string, string>
+}): IntegrationProductModifierGroupInput[] {
+	const sourceGroups = Array.isArray(params.product.groupModifiers)
+		? params.product.groupModifiers
+		: []
+	const result: IntegrationProductModifierGroupInput[] = []
+	const seenGroups = new Set<string>()
+
+	for (const [index, group] of sourceGroups.entries()) {
+		if (group.isHidden === true) continue
+		const options = buildIikoProductModifierOptions(group)
+		if (!options.length) continue
+
+		const variantId =
+			params.priceOptions.length > 1 && group.sizeId
+				? (params.variantsBySizeId.get(group.sizeId) ?? null)
+				: null
+		const code = buildModifierCode(group.code ?? group.id ?? group.name)
+		const scopeKey = variantId ?? 'product'
+		const dedupeKey = `${scopeKey}:${code}`
+		if (seenGroups.has(dedupeKey)) continue
+		seenGroups.add(dedupeKey)
+
+		const minSelected = Math.max(0, Math.trunc(group.minQuantity ?? 0))
+		const maxSelected = normalizePositiveModifierQuantity(group.maxQuantity)
+		const boundedMaxSelected =
+			maxSelected !== null && maxSelected < minSelected ? minSelected : maxSelected
+
+		result.push({
+			externalId: normalizeOptionalString(group.id) ?? `${code}:${index + 1}`,
+			externalCode: normalizeOptionalString(group.code),
+			code,
+			name: normalizeProductName(group.name),
+			description: normalizeOptionalString(group.description),
+			variantId,
+			isRequired: minSelected > 0,
+			minSelected,
+			maxSelected: boundedMaxSelected,
+			isActive: true,
+			displayOrder: group.displayOrder ?? index,
+			rawMeta: buildModifierRawMeta(params.product, group),
+			options
+		})
+	}
+
+	return result
+}
+
+function buildIikoProductModifierOptions(
+	group: IikoSyncModifierGroup
+): IntegrationProductModifierOptionInput[] {
+	const result: IntegrationProductModifierOptionInput[] = []
+	const seenCodes = new Set<string>()
+
+	for (const [index, option] of group.options.entries()) {
+		if (option.isHidden === true) continue
+		const code = buildUniqueModifierCode(
+			buildModifierCode(option.code ?? option.id ?? option.name),
+			seenCodes
+		)
+		const maxQuantity =
+			normalizePositiveModifierQuantity(option.maxQuantity) ??
+			normalizePositiveModifierQuantity(group.maxQuantity)
+		const defaultAmount = Math.max(0, Math.trunc(option.defaultAmount ?? 0))
+
+		result.push({
+			externalId: normalizeOptionalString(option.id) ?? `${code}:${index + 1}`,
+			externalCode: normalizeOptionalString(option.code),
+			code,
+			name: normalizeProductName(option.name),
+			description: normalizeOptionalString(option.description),
+			price: normalizePrice(option.price) ?? 0,
+			maxQuantity,
+			isDefault: defaultAmount > 0,
+			isAvailable: true,
+			displayOrder: option.displayOrder ?? index,
+			rawMeta: buildModifierRawMeta(null, option)
+		})
+	}
+
+	return result
+}
+
+function buildModifierCode(value: unknown): string {
+	const source = normalizeOptionalString(value) ?? 'modifier'
+	const slug = slugify(source.replace(/[_-]+/g, ' '), {
+		lower: true,
+		strict: true,
+		locale: 'ru'
+	})
+	const hash = createHash('sha1').update(source).digest('hex').slice(0, 8)
+	const body = slug || hash
+	const code = `${MODIFIER_CODE_PREFIX}-${body}`
+	return code.slice(0, MODIFIER_CODE_MAX_LENGTH)
+}
+
+function buildUniqueModifierCode(code: string, seen: Set<string>): string {
+	if (!seen.has(code)) {
+		seen.add(code)
+		return code
+	}
+
+	let index = 2
+	while (seen.has(`${code}-${index}`.slice(0, MODIFIER_CODE_MAX_LENGTH))) {
+		index += 1
+	}
+	const unique = `${code}-${index}`.slice(0, MODIFIER_CODE_MAX_LENGTH)
+	seen.add(unique)
+	return unique
+}
+
+function buildModifierRawMeta(
+	product: IikoSyncProduct | null,
+	value: IikoSyncModifierGroup | IikoSyncModifierGroup['options'][number]
+): Prisma.InputJsonValue {
+	return toPrismaInputJson({
+		provider: 'iiko',
+		source: product?.rawMeta ? 'external_menu' : 'nomenclature',
+		productId: product?.id ?? null,
+		raw: value.rawMeta ?? null
+	})
+}
+
+function normalizePositiveModifierQuantity(value: unknown): number | null {
+	const numberValue = Number(value)
+	if (!Number.isFinite(numberValue) || numberValue <= 0) return null
+	return Math.trunc(numberValue)
 }
 
 function buildVariantExternalId(

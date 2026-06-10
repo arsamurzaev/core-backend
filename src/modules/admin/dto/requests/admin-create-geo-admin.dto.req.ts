@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
-import { Transform } from 'class-transformer'
+import { Transform, type TransformFnParams } from 'class-transformer'
 import {
 	IsArray,
 	IsNotEmpty,
@@ -18,9 +18,7 @@ export class AdminCreateGeoAdminDtoReq {
 	})
 	@IsOptional()
 	@ValidateIf((_, value) => hasOptionalText(value))
-	@Transform(({ value }) =>
-		typeof value === 'string' ? value.trim() || undefined : value
-	)
+	@Transform(({ value }: TransformFnParams) => normalizeOptionalText(value))
 	@IsString({ message: 'Логин должен быть строкой' })
 	@MinLength(3, { message: 'Логин не должен быть короче 3 символов' })
 	@MaxLength(25, { message: 'Логин не должен превышать 25 символов' })
@@ -32,9 +30,7 @@ export class AdminCreateGeoAdminDtoReq {
 	})
 	@IsOptional()
 	@ValidateIf((_, value) => hasOptionalText(value))
-	@Transform(({ value }) =>
-		typeof value === 'string' ? value.trim() || undefined : value
-	)
+	@Transform(({ value }: TransformFnParams) => normalizeOptionalText(value))
 	@IsString({ message: 'Пароль должен быть строкой' })
 	@MinLength(8, { message: 'Пароль не должен быть короче 8 символов' })
 	@MaxLength(25, { message: 'Пароль не должен превышать 25 символов' })
@@ -71,4 +67,10 @@ export class AdminCreateGeoAdminDtoReq {
 function hasOptionalText(value: unknown) {
 	if (value === undefined || value === null) return false
 	return typeof value === 'string' ? Boolean(value.trim()) : true
+}
+
+function normalizeOptionalText(value: unknown): unknown {
+	if (typeof value !== 'string') return value
+	const trimmed = value.trim()
+	return trimmed || undefined
 }

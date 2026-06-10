@@ -55,9 +55,13 @@ export const cartSelect = {
 			productId: true,
 			variantId: true,
 			saleUnitId: true,
+			modifierSignature: true,
 			quantity: true,
 			baseQuantity: true,
 			unitPriceSnapshot: true,
+			priceListId: true,
+			priceListCode: true,
+			priceListName: true,
 			guestSessionId: true,
 			guestName: true,
 			createdAt: true,
@@ -140,6 +144,26 @@ export const cartSelect = {
 					isActive: true,
 					displayOrder: true
 				}
+			},
+			modifiers: {
+				select: {
+					id: true,
+					productModifierGroupId: true,
+					productModifierOptionId: true,
+					catalogModifierGroupId: true,
+					catalogModifierOptionId: true,
+					groupCode: true,
+					groupName: true,
+					optionCode: true,
+					optionName: true,
+					quantity: true,
+					unitPriceSnapshot: true
+				},
+				orderBy: [
+					{ groupName: 'asc' as const },
+					{ optionName: 'asc' as const },
+					{ id: 'asc' as const }
+				]
 			}
 		},
 		orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }]

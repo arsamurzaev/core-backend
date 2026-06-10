@@ -139,17 +139,24 @@ export function decodeCategoryProductsCursor(
 export function buildCategoryProductsPage<TProductIn, TProductOut>(
 	items: CategoryProductsPageItem<TProductIn>[],
 	limit: number,
-	mapProduct: (product: TProductIn) => TProductOut
+	mapProduct: (product: TProductIn) => TProductOut | null
 ): CategoryProductsPage<TProductOut> {
 	const hasMore = items.length > limit
 	const pageItems = hasMore ? items.slice(0, limit) : items
 	const lastItem = pageItems[pageItems.length - 1]
 
 	return {
-		items: pageItems.map(({ product, ...item }) => ({
-			...item,
-			product: mapProduct(product)
-		})),
+		items: pageItems.flatMap(({ product, ...item }) => {
+			const mappedProduct = mapProduct(product)
+			return mappedProduct === null
+				? []
+				: [
+						{
+							...item,
+							product: mappedProduct
+						}
+					]
+		}),
 		nextCursor:
 			hasMore && lastItem
 				? encodeCategoryProductsCursor({

@@ -66,6 +66,9 @@ const checkoutCartSelect = {
 			quantity: true,
 			baseQuantity: true,
 			unitPriceSnapshot: true,
+			priceListId: true,
+			priceListCode: true,
+			priceListName: true,
 			guestSessionId: true,
 			guestName: true,
 			product: {
@@ -133,6 +136,26 @@ const checkoutCartSelect = {
 					isActive: true,
 					displayOrder: true
 				}
+			},
+			modifiers: {
+				select: {
+					id: true,
+					productModifierGroupId: true,
+					productModifierOptionId: true,
+					catalogModifierGroupId: true,
+					catalogModifierOptionId: true,
+					groupCode: true,
+					groupName: true,
+					optionCode: true,
+					optionName: true,
+					quantity: true,
+					unitPriceSnapshot: true
+				},
+				orderBy: [
+					{ groupName: 'asc' as const },
+					{ optionName: 'asc' as const },
+					{ id: 'asc' as const }
+				]
 			}
 		},
 		orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }]
@@ -203,6 +226,7 @@ export class OrderCheckoutService {
 				{
 					canUseProductVariants: features.canUseProductVariants,
 					canUseCatalogSaleUnits: features.canUseCatalogSaleUnits,
+					canUseCatalogModifiers: features.canUseCatalogModifiers,
 					enforceStock: this.shouldEnforceStockOnCheckout(inventoryMode)
 				}
 			)
@@ -223,12 +247,8 @@ export class OrderCheckoutService {
 					isDelivery: cart.checkoutMethod === CartCheckoutMethod.DELIVERY,
 					address: this.orderSnapshot.resolveDeliveryAddress(cart),
 					checkoutMethod: cart.checkoutMethod,
-					checkoutData: (cart.checkoutData ?? undefined) as
-						| Prisma.InputJsonValue
-						| undefined,
-					checkoutContacts: (cart.checkoutContacts ?? undefined) as
-						| Prisma.InputJsonValue
-						| undefined,
+					checkoutData: cart.checkoutData ?? undefined,
+					checkoutContacts: cart.checkoutContacts ?? undefined,
 					paymentProof: [],
 					products: snapshotItems,
 					totalAmount: this.resolveTotalAmount(snapshotItems)

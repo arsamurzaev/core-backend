@@ -27,7 +27,7 @@ export type ProductVariantProjection = {
 	variantPickerOptions: ProductVariantPickerOption[]
 }
 
-type ProductVariantPickerSource = Omit<
+export type ProductVariantPickerSource = Omit<
 	ProductVariantPickerOptionRecord,
 	'productId'
 > & {
@@ -95,9 +95,16 @@ type SaleUnitPickerSource = {
 	displayOrder?: number | null
 }
 
+type VariantPriceOptions = {
+	canUseCatalogSaleUnits?: boolean
+}
+
 function resolveDefaultSaleUnit(
-	variant: { saleUnits?: SaleUnitPickerSource[] | null } | null | undefined
+	variant: { saleUnits?: SaleUnitPickerSource[] | null } | null | undefined,
+	options: VariantPriceOptions = {}
 ): SaleUnitPickerSource | null {
+	if (options.canUseCatalogSaleUnits === false) return null
+
 	const saleUnits = Array.isArray(variant?.saleUnits)
 		? variant.saleUnits.filter(
 				(unit): unit is SaleUnitPickerSource =>
@@ -118,9 +125,10 @@ function resolveDefaultSaleUnit(
 }
 
 function resolveVariantDisplayPrice(
-	variant: ProductVariantPickerSource
+	variant: ProductVariantPickerSource,
+	options: VariantPriceOptions = {}
 ): unknown {
-	return resolveDefaultSaleUnit(variant)?.price ?? variant.price
+	return resolveDefaultSaleUnit(variant, options)?.price ?? variant.price
 }
 
 function resolveVariantMaxQuantity(
@@ -193,10 +201,11 @@ export function compareVariantPickerOptions(
 }
 
 export function mapVariantPickerOption(
-	variant: ProductVariantPickerSource
+	variant: ProductVariantPickerSource,
+	options: VariantPriceOptions = {}
 ): ProductVariantPickerOption {
-	const defaultSaleUnit = resolveDefaultSaleUnit(variant)
-	const displayPrice = resolveVariantDisplayPrice(variant)
+	const defaultSaleUnit = resolveDefaultSaleUnit(variant, options)
+	const displayPrice = resolveVariantDisplayPrice(variant, options)
 
 	return {
 		id: variant.id,
@@ -213,7 +222,8 @@ export function mapVariantPickerOption(
 
 export function buildVariantPickerOptionsFromVariants(
 	variants: ProductVariantPickerSource[],
-	summary: ProductVariantSummary
+	summary: ProductVariantSummary,
+	options: VariantPriceOptions = {}
 ): ProductVariantPickerOption[] {
 	if (!shouldBuildVariantPickerOptions(summary)) {
 		return []
@@ -227,7 +237,55 @@ export function buildVariantPickerOptionsFromVariants(
 		)
 		.slice()
 		.sort(compareVariantPickerOptions)
-		.map(mapVariantPickerOption)
+		.map(variant => mapVariantPickerOption(variant, options))
+}
+
+function resolveVariantTotalStock(
+	variants: ProductVariantPickerSource[]
+): number | null {
+	if (!variants.length) return 0
+	if (variants.some(variant => variant.stock === null)) return null
+	return variants.reduce(
+		(sum, variant) => sum + Math.max(0, variant.stock ?? 0),
+		0
+	)
+}
+
+export function buildVariantSummaryFromVariants(
+	variants: ProductVariantPickerSource[],
+	options: VariantPriceOptions = {}
+): ProductVariantSummary {
+	const activeVariants = variants.filter(
+		variant =>
+			!isDefaultVariant(variant) &&
+			variant.status !== ProductVariantStatus.DISABLED
+	)
+
+	if (!activeVariants.length) {
+		return { ...EMPTY_VARIANT_SUMMARY }
+	}
+
+	const prices = activeVariants
+		.map(variant => toNumberValue(resolveVariantDisplayPrice(variant, options)))
+		.filter((price): price is number => price !== null)
+	if (!prices.length) {
+		return {
+			...EMPTY_VARIANT_SUMMARY,
+			activeCount: activeVariants.length,
+			totalStock: resolveVariantTotalStock(activeVariants),
+			singleVariantId: activeVariants.length === 1 ? activeVariants[0].id : null
+		}
+	}
+	const minPrice = Math.min(...prices)
+	const maxPrice = Math.max(...prices)
+
+	return {
+		minPrice: minPrice.toFixed(2),
+		maxPrice: maxPrice.toFixed(2),
+		activeCount: activeVariants.length,
+		totalStock: resolveVariantTotalStock(activeVariants),
+		singleVariantId: activeVariants.length === 1 ? activeVariants[0].id : null
+	}
 }
 
 export function buildVariantSummaryMap(
@@ -242,14 +300,15 @@ export function buildVariantSummaryMap(
 }
 
 export function buildVariantPickerOptionsMap(
-	variants: ProductVariantPickerOptionRecord[]
+	variants: ProductVariantPickerOptionRecord[],
+	options: VariantPriceOptions = {}
 ): Map<string, ProductVariantPickerOption[]> {
 	const map = new Map<string, ProductVariantPickerOption[]>()
 
 	for (const variant of variants.slice().sort(compareVariantPickerOptions)) {
-		const options = map.get(variant.productId) ?? []
-		options.push(mapVariantPickerOption(variant))
-		map.set(variant.productId, options)
+		const productOptions = map.get(variant.productId) ?? []
+		productOptions.push(mapVariantPickerOption(variant, options))
+		map.set(variant.productId, productOptions)
 	}
 
 	return map

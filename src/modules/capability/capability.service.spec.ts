@@ -60,7 +60,7 @@ describe('CapabilityService', () => {
 		expect(
 			result.items.find(item => item.key === CAPABILITY_PRODUCT_VARIANTS)
 				?.disabledReason
-		).toContain('Requires')
+		).toContain('Требуется функция')
 	})
 
 	it('asserts against effective capabilities', async () => {

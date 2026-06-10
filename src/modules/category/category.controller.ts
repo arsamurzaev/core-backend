@@ -65,7 +65,7 @@ export class CategoryController {
 		required: false,
 		type: Boolean,
 		description:
-			'Если false, вернет только категории с активными товарами. По умолчанию true.'
+			'Для владельца каталога может вернуть пустые категории. Для клиента пустые категории скрываются.'
 	})
 	@ApiOkResponse({
 		description: 'Список категорий',
@@ -78,13 +78,16 @@ export class CategoryController {
 		@Req() req: AuthRequest,
 		@Query('includeEmpty') includeEmpty?: string
 	) {
+		const canReadInactive = canReadInactiveCatalogProducts(
+			req?.user,
+			RequestContext.get()?.ownerUserId
+		)
 		setPrivateNoStoreHeaders(res)
 		return this.categoryService.getAll({
-			includeEmpty: parseBooleanQuery(includeEmpty, true),
-			includeInactive: canReadInactiveCatalogProducts(
-				req?.user,
-				RequestContext.get()?.ownerUserId
-			)
+			includeEmpty: canReadInactive
+				? parseBooleanQuery(includeEmpty, true)
+				: false,
+			includeInactive: canReadInactive
 		})
 	}
 
@@ -298,7 +301,7 @@ export class CategoryController {
 		name: 'deleteProducts',
 		required: false,
 		type: Boolean,
-		description: 'Если true, soft-delete всех активных товаров категории'
+		description: 'Если true, мягко удаляет все активные товары категории'
 	})
 	@ApiOkResponse({ description: 'Категория удалена', type: OkResponseDto })
 	@ApiNotFoundResponse({ description: 'Категория не найдена' })

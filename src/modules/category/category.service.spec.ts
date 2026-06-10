@@ -2,10 +2,13 @@ import { ProductVariantStatus } from '@generated/enums'
 import { BadRequestException, NotFoundException } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 
+import { CAPABILITY_READER_PORT } from '@/modules/capability/contracts'
+import { CatalogPriceListResolverService } from '@/modules/catalog-price-list/public'
 import {
 	PRODUCT_COMMAND_PORT,
 	PRODUCT_SELLABLE_READER_PORT,
 	type ProductCommandPort,
+	type ProductSellableProjection,
 	type ProductSellableReader,
 	ProductVariantCardProjectionService
 } from '@/modules/product/public'
@@ -35,6 +38,11 @@ describe('CategoryService', () => {
 	let productCommands: jest.Mocked<ProductCommandPort>
 	let sellableReader: jest.Mocked<ProductSellableReader>
 	let variantProjection: jest.Mocked<ProductVariantCardProjectionService>
+	let priceLists: jest.Mocked<CatalogPriceListResolverService>
+	let capabilities: {
+		canUseCatalogPriceLists: jest.Mock
+		canUseCatalogSaleUnits: jest.Mock
+	}
 
 	const runWithCatalog = <T>(fn: () => Promise<T>) =>
 		RequestContext.run(
@@ -45,6 +53,39 @@ describe('CategoryService', () => {
 			},
 			fn
 		)
+
+	const runWithChildCatalog = <T>(fn: () => Promise<T>) =>
+		RequestContext.run(
+			{
+				requestId: 'req-1',
+				host: 'child.example.test',
+				catalogId: 'child-catalog-1',
+				parentId: 'catalog-1'
+			},
+			fn
+		)
+
+	const createSellableProjection = (
+		overrides: Partial<ProductSellableProjection> = {}
+	): ProductSellableProjection => ({
+		catalogId: 'catalog-1',
+		productId: 'product-1',
+		mode: 'SIMPLE',
+		variantId: null,
+		defaultVariantId: null,
+		requiresVariantSelection: false,
+		priceState: 'UNKNOWN',
+		displayPrice: null,
+		minPrice: null,
+		maxPrice: null,
+		availabilityState: 'AVAILABLE',
+		stock: null,
+		usesPriceList: false,
+		priceListId: null,
+		priceListCode: null,
+		priceListName: null,
+		...overrides
+	})
 
 	beforeEach(async () => {
 		const module: TestingModule = await Test.createTestingModule({
@@ -62,6 +103,7 @@ describe('CategoryService', () => {
 						softDelete: jest.fn(),
 						findProductsByIds: jest.fn(),
 						findProductIdsByCategory: jest.fn(),
+						findCategoryProductRefs: jest.fn(),
 						findCategoryProductPositions: jest.fn(),
 						findCategoryProductsPage: jest.fn(),
 						findCategoryProductCardsPage: jest.fn()
@@ -106,39 +148,37 @@ describe('CategoryService', () => {
 					}
 				},
 				{
+					provide: CatalogPriceListResolverService,
+					useValue: {
+						resolveProductPriceContext: jest.fn().mockResolvedValue({
+							priceList: null,
+							productPrices: new Map(),
+							variantPrices: new Map(),
+							saleUnitPrices: new Map()
+						})
+					}
+				},
+				{
+					provide: CAPABILITY_READER_PORT,
+					useValue: {
+						canUseCatalogPriceLists: jest.fn().mockResolvedValue(false),
+						canUseCatalogSaleUnits: jest.fn().mockResolvedValue(true)
+					}
+				},
+				{
 					provide: PRODUCT_SELLABLE_READER_PORT,
 					useValue: {
 						resolveProductSellable: jest
 							.fn()
-							.mockImplementation((catalogId: string, productId: string) => ({
-								catalogId,
-								productId,
-								mode: 'SIMPLE',
-								variantId: null,
-								defaultVariantId: null,
-								requiresVariantSelection: false,
-								priceState: 'UNKNOWN',
-								displayPrice: null,
-								minPrice: null,
-								maxPrice: null,
-								availabilityState: 'AVAILABLE',
-								stock: null
-							})),
+							.mockImplementation((catalogId: string, productId: string) =>
+								createSellableProjection({ catalogId, productId })
+							),
 						resolveProductsSellable: jest.fn(
-							async (_catalogId: string, productIds: string[]) =>
+							async (catalogId: string, productIds: string[]) =>
 								new Map(
 									productIds.map(productId => [
 										productId,
-										{
-											priceState: 'UNKNOWN',
-											displayPrice: null,
-											minPrice: null,
-											maxPrice: null,
-											availabilityState: 'AVAILABLE',
-											stock: null,
-											defaultVariantId: null,
-											requiresVariantSelection: false
-										}
+										createSellableProjection({ catalogId, productId })
 									])
 								)
 						),
@@ -159,6 +199,8 @@ describe('CategoryService', () => {
 		productCommands = module.get(PRODUCT_COMMAND_PORT)
 		sellableReader = module.get(PRODUCT_SELLABLE_READER_PORT)
 		variantProjection = module.get(ProductVariantCardProjectionService)
+		priceLists = module.get(CatalogPriceListResolverService)
+		capabilities = module.get(CAPABILITY_READER_PORT)
 
 		cache.buildKey.mockImplementation(parts =>
 			parts
@@ -228,6 +270,83 @@ describe('CategoryService', () => {
 		)
 
 		expect(result.map(category => category.id)).toEqual(['child-filled'])
+	})
+
+	it('counts only products visible in active price list for storefront category lists', async () => {
+		repo.findAll.mockResolvedValue([
+			{
+				id: 'only-hidden',
+				parentId: null,
+				position: 0,
+				name: 'Only hidden',
+				_count: { categoryProducts: 2 },
+				imageMedia: null
+			},
+			{
+				id: 'has-visible',
+				parentId: null,
+				position: 1,
+				name: 'Has visible',
+				_count: { categoryProducts: 2 },
+				imageMedia: null
+			}
+		] as any)
+		priceLists.resolveProductPriceContext.mockResolvedValueOnce({
+			priceList: { id: 'price-list-1', code: 'retail', name: 'Retail' },
+			productPrices: new Map(),
+			variantPrices: new Map(),
+			saleUnitPrices: new Map()
+		})
+		repo.findCategoryProductRefs.mockResolvedValue([
+			{ categoryId: 'only-hidden', productId: 'hidden-1' },
+			{ categoryId: 'only-hidden', productId: 'hidden-2' },
+			{ categoryId: 'has-visible', productId: 'hidden-2' },
+			{ categoryId: 'has-visible', productId: 'visible-1' }
+		])
+		sellableReader.resolveProductsSellable.mockResolvedValueOnce(
+			new Map([
+				[
+					'hidden-1',
+					createSellableProjection({
+						productId: 'hidden-1',
+						usesPriceList: true,
+						priceState: 'UNKNOWN'
+					})
+				],
+				[
+					'hidden-2',
+					createSellableProjection({
+						productId: 'hidden-2',
+						usesPriceList: true,
+						priceState: 'UNKNOWN'
+					})
+				],
+				[
+					'visible-1',
+					createSellableProjection({
+						productId: 'visible-1',
+						usesPriceList: true,
+						priceState: 'KNOWN',
+						displayPrice: '900.00',
+						minPrice: '900.00',
+						maxPrice: '900.00'
+					})
+				]
+			])
+		)
+
+		const result = await runWithCatalog(() =>
+			service.getAll({ includeEmpty: false })
+		)
+
+		expect(repo.findCategoryProductRefs).toHaveBeenCalledWith(
+			'catalog-1',
+			['only-hidden', 'has-visible'],
+			{ includeInactive: false }
+		)
+		expect(result.map(category => [category.id, category.productCount])).toEqual([
+			['has-visible', 1]
+		])
 	})
 
 	it('returns cached categories list when cache is warm', async () => {
@@ -391,11 +510,11 @@ describe('CategoryService', () => {
 			{ cursor: undefined, take: 3, includeInactive: false }
 		)
 		expect(repo.findCategoryProductsPage).not.toHaveBeenCalled()
-		expect(variantProjection.resolveForProductIds).toHaveBeenCalledWith([
-			'p1',
-			'p2',
-			'p3'
-		])
+		expect(variantProjection.resolveForProductIds).toHaveBeenCalledWith(
+			['p1', 'p2', 'p3'],
+			expect.objectContaining({ priceList: null }),
+			{ filterUnavailable: true }
+		)
 		expect(result.items[0]?.product).toHaveProperty('productAttributes', [])
 		expect(result.items[0]?.product).not.toHaveProperty('variants')
 		expect(result.items[0]?.product).toHaveProperty('saleUnits', [
@@ -420,6 +539,54 @@ describe('CategoryService', () => {
 		})
 	})
 
+	it('does not expose sale units in category product cards when the feature is disabled', async () => {
+		capabilities.canUseCatalogSaleUnits.mockResolvedValueOnce(false)
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
+		repo.findCategoryProductCardsPage.mockResolvedValue([
+			{
+				productId: 'p1',
+				position: 0,
+				product: {
+					id: 'p1',
+					media: [],
+					integrationLinks: [],
+					productAttributes: [],
+					variants: [
+						{
+							id: 'default-variant',
+							variantKey: 'default',
+							kind: 'DEFAULT',
+							saleUnits: [
+								{
+									id: 'sale-unit-piece',
+									name: 'Piece',
+									price: '690.00',
+									baseQuantity: '1.0000',
+									isDefault: true,
+									displayOrder: 0
+								}
+							]
+						}
+					]
+				}
+			}
+		] as any)
+
+		const result = await runWithCatalog(() =>
+			service.getProductCardsByCategory('cat-1', { limit: 2 })
+		)
+
+		expect(result.items[0]?.product).toHaveProperty('saleUnits', [])
+		expect(variantProjection.resolveForProductIds).toHaveBeenCalledWith(
+			['p1'],
+			expect.objectContaining({ priceList: null }),
+			{ filterUnavailable: true, canUseCatalogSaleUnits: false }
+		)
+	})
+
 	it('adds commercial projection fields to category product cards', async () => {
 		repo.findById.mockResolvedValue({
 			id: 'cat-1',
@@ -442,7 +609,7 @@ describe('CategoryService', () => {
 			new Map([
 				[
 					'p1',
-					{
+					createSellableProjection({
 						catalogId: 'catalog-1',
 						productId: 'p1',
 						mode: 'SIMPLE',
@@ -455,7 +622,7 @@ describe('CategoryService', () => {
 						maxPrice: '1500.00',
 						availabilityState: 'AVAILABLE',
 						stock: 7
-					}
+					})
 				]
 			])
 		)
@@ -466,7 +633,8 @@ describe('CategoryService', () => {
 
 		expect(sellableReader.resolveProductsSellable).toHaveBeenCalledWith(
 			'catalog-1',
-			['p1']
+			['p1'],
+			{ buyerCatalogId: 'catalog-1' }
 		)
 		expect(result.items[0]?.product).toMatchObject({
 			id: 'p1',
@@ -480,6 +648,399 @@ describe('CategoryService', () => {
 			defaultVariantId: 'variant-1',
 			requiresVariantSelection: false
 		})
+	})
+
+	it('hides category products without active price-list price', async () => {
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
+		repo.findCategoryProductCardsPage.mockResolvedValue([
+			{
+				productId: 'legacy-product',
+				position: 0,
+				product: {
+					id: 'legacy-product',
+					price: null,
+					media: [],
+					integrationLinks: [],
+					productAttributes: []
+				}
+			},
+			{
+				productId: 'priced-product',
+				position: 1,
+				product: {
+					id: 'priced-product',
+					price: null,
+					media: [],
+					integrationLinks: [],
+					productAttributes: []
+				}
+			}
+		] as any)
+		sellableReader.resolveProductsSellable.mockResolvedValueOnce(
+			new Map([
+				[
+					'legacy-product',
+					createSellableProjection({
+						productId: 'legacy-product',
+						priceState: 'UNKNOWN',
+						displayPrice: null,
+						minPrice: null,
+						maxPrice: null,
+						availabilityState: 'AVAILABLE',
+						stock: null,
+						defaultVariantId: null,
+						requiresVariantSelection: false,
+						usesPriceList: true
+					})
+				],
+				[
+					'priced-product',
+					createSellableProjection({
+						productId: 'priced-product',
+						priceState: 'KNOWN',
+						displayPrice: '1200.00',
+						minPrice: '1200.00',
+						maxPrice: '1200.00',
+						availabilityState: 'AVAILABLE',
+						stock: 4,
+						defaultVariantId: 'variant-1',
+						requiresVariantSelection: false,
+						usesPriceList: true
+					})
+				]
+			])
+		)
+
+		const result = await runWithCatalog(() =>
+			service.getProductCardsByCategory('cat-1', { limit: 2 })
+		)
+
+		expect(result.items.map(item => item.productId)).toEqual(['priced-product'])
+		expect(result.items[0]?.product).toMatchObject({
+			id: 'priced-product',
+			price: '1200.00'
+		})
+	})
+
+	it('continues category pagination past products hidden by active price list', async () => {
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
+		repo.findCategoryProductCardsPage
+			.mockResolvedValueOnce([
+				{
+					productId: 'hidden-1',
+					position: 0,
+					product: {
+						id: 'hidden-1',
+						price: null,
+						media: [],
+						integrationLinks: [],
+						productAttributes: []
+					}
+				},
+				{
+					productId: 'hidden-2',
+					position: 1,
+					product: {
+						id: 'hidden-2',
+						price: null,
+						media: [],
+						integrationLinks: [],
+						productAttributes: []
+					}
+				},
+				{
+					productId: 'hidden-3',
+					position: 2,
+					product: {
+						id: 'hidden-3',
+						price: null,
+						media: [],
+						integrationLinks: [],
+						productAttributes: []
+					}
+				}
+			] as any)
+			.mockResolvedValueOnce([
+				{
+					productId: 'priced-product',
+					position: 3,
+					product: {
+						id: 'priced-product',
+						price: null,
+						media: [],
+						integrationLinks: [],
+						productAttributes: []
+					}
+				}
+			] as any)
+		sellableReader.resolveProductsSellable
+			.mockResolvedValueOnce(
+				new Map(
+					['hidden-1', 'hidden-2', 'hidden-3'].map(productId => [
+						productId,
+						createSellableProjection({
+							productId,
+							priceState: 'UNKNOWN',
+							displayPrice: null,
+							minPrice: null,
+							maxPrice: null,
+							availabilityState: 'AVAILABLE',
+							stock: null,
+							defaultVariantId: null,
+							requiresVariantSelection: false,
+							usesPriceList: true
+						})
+					])
+				)
+			)
+			.mockResolvedValueOnce(
+				new Map([
+					[
+						'priced-product',
+						createSellableProjection({
+							productId: 'priced-product',
+							priceState: 'KNOWN',
+							displayPrice: '1200.00',
+							minPrice: '1200.00',
+							maxPrice: '1200.00',
+							availabilityState: 'AVAILABLE',
+							stock: 4,
+							defaultVariantId: 'variant-1',
+							requiresVariantSelection: false,
+							usesPriceList: true
+						})
+					]
+				])
+			)
+
+		const result = await runWithCatalog(() =>
+			service.getProductCardsByCategory('cat-1', { limit: 2 })
+		)
+
+		const nextCursor = Buffer.from(
+			JSON.stringify({ position: 2, productId: 'hidden-3' })
+		).toString('base64')
+		expect(repo.findCategoryProductCardsPage.mock.calls).toContainEqual([
+			'cat-1',
+			'catalog-1',
+			{ cursor: undefined, take: 3, includeInactive: false }
+		])
+		expect(repo.findCategoryProductCardsPage.mock.calls).toContainEqual([
+			'cat-1',
+			'catalog-1',
+			{ cursor: nextCursor, take: 3, includeInactive: false }
+		])
+		expect(result.items.map(item => item.productId)).toEqual(['priced-product'])
+		expect(result.nextCursor).toBeNull()
+	})
+
+	it('applies active price-list sale unit prices to category products', async () => {
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
+		repo.findCategoryProductCardsPage.mockResolvedValue([
+			{
+				productId: 'p1',
+				position: 0,
+				product: {
+					id: 'p1',
+					price: '1200.00',
+					media: [],
+					integrationLinks: [],
+					productAttributes: [],
+					variants: [
+						{
+							id: 'variant-default',
+							kind: 'DEFAULT',
+							variantKey: 'default',
+							price: '1200.00',
+							attributes: [],
+							saleUnits: [
+								{
+									id: 'sale-unit-piece',
+									name: 'шт',
+									price: '1200.00',
+									baseQuantity: '1.0000',
+									isDefault: true,
+									displayOrder: 0
+								}
+							]
+						}
+					]
+				}
+			}
+		] as any)
+		priceLists.resolveProductPriceContext.mockResolvedValueOnce({
+			priceList: { id: 'price-list-1', code: 'retail', name: 'Retail' },
+			productPrices: new Map(),
+			variantPrices: new Map(),
+			saleUnitPrices: new Map([['sale-unit-piece', '250.00']])
+		})
+		sellableReader.resolveProductsSellable.mockResolvedValueOnce(
+			new Map([
+				[
+					'p1',
+					createSellableProjection({
+						productId: 'p1',
+						priceState: 'KNOWN',
+						displayPrice: '250.00',
+						minPrice: '250.00',
+						maxPrice: '250.00',
+						availabilityState: 'AVAILABLE',
+						stock: null,
+						defaultVariantId: 'variant-default',
+						requiresVariantSelection: false,
+						usesPriceList: true
+					})
+				]
+			])
+		)
+
+		const result = await runWithCatalog(() =>
+			service.getProductCardsByCategory('cat-1', { limit: 2 })
+		)
+
+		expect(result.items[0]?.product).toMatchObject({
+			id: 'p1',
+			price: '250.00',
+			displayPrice: '250.00',
+			saleUnits: [
+				expect.objectContaining({
+					id: 'sale-unit-piece',
+					price: '250.00'
+				})
+			]
+		})
+		expect(variantProjection.resolveForProductIds).toHaveBeenCalledWith(
+			['p1'],
+			expect.objectContaining({
+				priceList: { id: 'price-list-1', code: 'retail', name: 'Retail' }
+			}),
+			{ filterUnavailable: true }
+		)
+	})
+
+	it('does not apply price-list visibility in includeInactive category reads', async () => {
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
+		repo.findCategoryProductsPage.mockResolvedValue([
+			{
+				productId: 'legacy-product',
+				position: 0,
+				product: {
+					id: 'legacy-product',
+					price: null,
+					media: [],
+					integrationLinks: [],
+					productAttributes: []
+				}
+			}
+		] as any)
+		sellableReader.resolveProductsSellable.mockResolvedValueOnce(
+			new Map([
+				[
+					'legacy-product',
+					createSellableProjection({
+						productId: 'legacy-product',
+						priceState: 'UNKNOWN',
+						displayPrice: null,
+						minPrice: null,
+						maxPrice: null,
+						availabilityState: 'AVAILABLE',
+						stock: null,
+						defaultVariantId: null,
+						requiresVariantSelection: false,
+						usesPriceList: true
+					})
+				]
+			])
+		)
+
+		const result = await runWithCatalog(() =>
+			service.getProductsByCategory('cat-1', {
+				limit: 2,
+				includeInactive: true
+			})
+		)
+
+		expect(sellableReader.resolveProductsSellable).toHaveBeenCalledWith(
+			'catalog-1',
+			['legacy-product'],
+			{ buyerCatalogId: 'catalog-1' }
+		)
+		expect(variantProjection.resolveForProductIds).toHaveBeenCalledWith(
+			['legacy-product'],
+			expect.objectContaining({ priceList: null }),
+			{ filterUnavailable: false }
+		)
+		expect(result.items.map(item => item.productId)).toEqual(['legacy-product'])
+	})
+
+	it('applies price-list visibility in includeInactive child category reads', async () => {
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
+		repo.findCategoryProductsPage.mockResolvedValue([
+			{
+				productId: 'legacy-product',
+				position: 0,
+				product: {
+					id: 'legacy-product',
+					price: null,
+					media: [],
+					integrationLinks: [],
+					productAttributes: []
+				}
+			}
+		] as any)
+		sellableReader.resolveProductsSellable.mockResolvedValueOnce(
+			new Map([
+				[
+					'legacy-product',
+					createSellableProjection({
+						productId: 'legacy-product',
+						priceState: 'UNKNOWN',
+						displayPrice: null,
+						minPrice: null,
+						maxPrice: null,
+						availabilityState: 'AVAILABLE',
+						stock: null,
+						defaultVariantId: null,
+						requiresVariantSelection: false,
+						usesPriceList: true
+					})
+				]
+			])
+		)
+
+		const result = await runWithChildCatalog(() =>
+			service.getProductsByCategory('cat-1', {
+				limit: 2,
+				includeInactive: true
+			})
+		)
+
+		expect(sellableReader.resolveProductsSellable).toHaveBeenCalledWith(
+			'catalog-1',
+			['legacy-product'],
+			{ buyerCatalogId: 'child-catalog-1' }
+		)
+		expect(variantProjection.resolveForProductIds).toHaveBeenCalledWith(
+			['legacy-product'],
+			expect.objectContaining({ priceList: null }),
+			{ filterUnavailable: true }
+		)
+		expect(result.items).toEqual([])
 	})
 
 	it('returns page and nextCursor when more items exist', async () => {
@@ -548,7 +1109,7 @@ describe('CategoryService', () => {
 			items: [{ productId: 'p1', position: 0, product: { id: 'p1', media: [] } }],
 			nextCursor: null
 		}
-		cache.getJson.mockResolvedValue(cached as any)
+		cache.getJson.mockResolvedValue(cached)
 
 		const result = await runWithCatalog(() =>
 			service.getProductsByCategory('cat-1', { limit: 2 })
@@ -559,6 +1120,42 @@ describe('CategoryService', () => {
 		expect(cache.getJson.mock.calls.length).toBeGreaterThan(0)
 	})
 
+	it('separates category product cache by read mode', async () => {
+		serviceState.firstPageCacheTtlSec = 120
+
+		repo.findById.mockResolvedValue({
+			id: 'cat-1',
+			catalogId: 'catalog-1'
+		} as any)
+		repo.findCategoryProductsPage.mockResolvedValue([])
+		capabilities.canUseCatalogSaleUnits.mockResolvedValueOnce(false)
+
+		await runWithCatalog(() =>
+			service.getProductsByCategory('cat-1', { limit: 2 })
+		)
+
+		const cacheKey = cache.getJson.mock.calls[0]?.[0] as string
+		expect(cacheKey).toContain('price-lists-off')
+		expect(cacheKey).toContain('price-list-apply-on')
+		expect(cacheKey).toContain('price-filter-on')
+		expect(cacheKey).toContain('sale-units-off')
+	})
+
+	it('separates category list cache by read mode', async () => {
+		serviceState.listCacheTtlSec = 120
+
+		repo.findAll.mockResolvedValue([])
+		capabilities.canUseCatalogSaleUnits.mockResolvedValueOnce(false)
+
+		await runWithCatalog(() => service.getAll())
+
+		const cacheKey = cache.getJson.mock.calls[0]?.[0] as string
+		expect(cacheKey).toContain('price-lists-off')
+		expect(cacheKey).toContain('price-list-apply-on')
+		expect(cacheKey).toContain('price-filter-on')
+		expect(cacheKey).toContain('sale-units-off')
+	})
+
 	it('skips category products cache in includeInactive mode', async () => {
 		serviceState.firstPageCacheTtlSec = 120
 
@@ -566,7 +1163,7 @@ describe('CategoryService', () => {
 			id: 'cat-1',
 			catalogId: 'catalog-1'
 		} as any)
-		repo.findCategoryProductsPage.mockResolvedValue([] as any)
+		repo.findCategoryProductsPage.mockResolvedValue([])
 
 		await runWithCatalog(() =>
 			service.getProductsByCategory('cat-1', {
@@ -595,11 +1192,11 @@ describe('CategoryService', () => {
 			{ id: 'p2' },
 			{ id: 'p3' },
 			{ id: 'p4' }
-		] as any)
+		])
 		repo.findCategoryProductPositions.mockResolvedValue([
 			{ productId: 'p1', position: 10 },
 			{ productId: 'p2', position: 12 }
-		] as any)
+		])
 		repo.update.mockResolvedValue({
 			id: 'cat-1',
 			imageMedia: null,
@@ -639,7 +1236,7 @@ describe('CategoryService', () => {
 			{ id: 'p1' },
 			{ id: 'p2' },
 			{ id: 'p3' }
-		] as any)
+		])
 		repo.findAll.mockResolvedValue([
 			{ id: 'cat-1', parentId: null, position: 0, name: 'Test category' }
 		] as any)
@@ -677,6 +1274,20 @@ describe('CategoryService', () => {
 				}
 			})
 		])
+	})
+
+	it('rejects category creation from child catalog', async () => {
+		await expect(
+			runWithChildCatalog(() =>
+				service.create({
+					name: 'Child category'
+				})
+			)
+		).rejects.toThrow(
+			'Дочерний каталог не может управлять товарами, категориями, брендами и справочниками каталога'
+		)
+
+		expect(repo.create).not.toHaveBeenCalled()
 	})
 
 	it('rebuilds global positions when category position changes', async () => {

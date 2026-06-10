@@ -140,12 +140,12 @@ describe('CatalogSeoSyncService', () => {
 				buffer: imageBuffer,
 				contentType: 'image/png',
 				size: imageBuffer.length
-			} as any)
+			})
 			.mockResolvedValueOnce({
 				buffer: imageBuffer,
 				contentType: 'image/png',
 				size: imageBuffer.length
-			} as any)
+			})
 		s3Service.uploadGeneratedAsset
 			.mockResolvedValueOnce({
 				ok: true,

@@ -234,9 +234,9 @@ describe('MoySkladSyncService', () => {
 			created: false,
 			assigned: false,
 			changed: false
-		} as any)
+		})
 		repo.archiveMissingIntegratedProductVariants.mockResolvedValue(0)
-		repo.findCatalogInventoryMode.mockResolvedValue('EXTERNAL' as any)
+		repo.findCatalogInventoryMode.mockResolvedValue('EXTERNAL')
 		repo.syncManagedProductCategories.mockResolvedValue({
 			added: 0,
 			removed: 0
@@ -517,7 +517,7 @@ describe('MoySkladSyncService', () => {
 				deleteAt: null
 			} as any)
 		repo.upsertProductLink.mockResolvedValue({ id: 'link-1' } as any)
-		repo.findProductLinksByIntegration.mockResolvedValue([] as any)
+		repo.findProductLinksByIntegration.mockResolvedValue([])
 		repo.finishMoySkladSync.mockResolvedValue(integration as any)
 
 		jest
@@ -577,7 +577,7 @@ describe('MoySkladSyncService', () => {
 
 		repo.beginMoySkladSync.mockResolvedValue(integration as any)
 		repo.findMoySklad.mockResolvedValue(integration as any)
-		repo.findProductLinksByIntegration.mockResolvedValue([] as any)
+		repo.findProductLinksByIntegration.mockResolvedValue([])
 		repo.finishMoySkladSync.mockResolvedValue(integration as any)
 		jest
 			.spyOn(MoySkladClient.prototype, 'getAllAssortment')
@@ -692,7 +692,7 @@ describe('MoySkladSyncService', () => {
 			deleteAt: null
 		} as any)
 		repo.upsertProductLink.mockResolvedValue({ id: 'product-link' } as any)
-		repo.findProductLinksByIntegration.mockResolvedValue([] as any)
+		repo.findProductLinksByIntegration.mockResolvedValue([])
 		repo.findProductById.mockResolvedValue({
 			id: 'local-product',
 			catalogId,
@@ -709,13 +709,13 @@ describe('MoySkladSyncService', () => {
 				key: 'moysklad_size',
 				displayName: 'Size',
 				displayOrder: 1
-			} as any)
+			})
 			.mockResolvedValueOnce({
 				id: 'attr-color',
 				key: 'moysklad_color',
 				displayName: 'Color',
 				displayOrder: 2
-			} as any)
+			})
 		repo.upsertIntegratedProductVariant.mockResolvedValue({
 			variant: {
 				id: 'local-variant',
@@ -884,11 +884,20 @@ describe('MoySkladSyncService', () => {
 		])
 		repo.updateLinkedVariantStock.mockResolvedValue({
 			changed: true,
-			productId: 'product-with-variants'
+			productId: 'product-with-variants',
+			variantId: 'variant-1',
+			previousStock: null,
+			nextStock: 3
 		})
 		repo.touchVariantLinkStockSynced.mockResolvedValue(1)
 		repo.recomputeProductStatusFromVariants.mockResolvedValue(true)
-		repo.updateLinkedProductStock.mockResolvedValue(true)
+		repo.updateLinkedProductStock.mockResolvedValue({
+			changed: true,
+			productId: 'product-simple',
+			variantId: null,
+			previousStock: null,
+			nextStock: 5
+		})
 		repo.touchProductLinkStockSynced.mockResolvedValue(1)
 		repo.finishMoySkladSync.mockResolvedValue(integration as any)
 
@@ -988,7 +997,7 @@ describe('MoySkladSyncService', () => {
 
 		repo.beginMoySkladSync.mockResolvedValue(integration as any)
 		repo.findMoySklad.mockResolvedValue(integration as any)
-		repo.findCatalogInventoryMode.mockResolvedValue('INTERNAL' as any)
+		repo.findCatalogInventoryMode.mockResolvedValue('INTERNAL')
 		repo.finishMoySkladSync.mockResolvedValue(integration as any)
 
 		const stockSpy = jest
@@ -1123,18 +1132,18 @@ describe('MoySkladSyncService', () => {
 				id: 'category-root',
 				name: 'Shoes',
 				parentId: null
-			} as any)
+			})
 			.mockResolvedValueOnce({
 				id: 'category-child',
 				name: 'Sneakers',
 				parentId: 'category-root'
-			} as any)
+			})
 		repo.upsertCategoryLink.mockResolvedValue({ id: 'category-link-1' } as any)
 		repo.syncManagedProductCategories.mockResolvedValue({
 			added: 1,
 			removed: 0
 		})
-		repo.findProductLinksByIntegration.mockResolvedValue([] as any)
+		repo.findProductLinksByIntegration.mockResolvedValue([])
 		repo.finishMoySkladSync.mockResolvedValue(integration as any)
 
 		jest
@@ -1344,7 +1353,7 @@ describe('MoySkladSyncService', () => {
 			priceTypeName: 'Retail',
 			importImages: false,
 			syncStock: true
-		})
+		} as any)
 		repo.beginMoySkladSync.mockResolvedValue(integration as any)
 		repo.findMoySklad.mockResolvedValue(integration as any)
 		repo.findProductLinkByExternalId.mockResolvedValue({
@@ -1469,7 +1478,7 @@ describe('MoySkladSyncService', () => {
 			created: false,
 			updated: false,
 			imagesImported: 0
-		} as any)
+		})
 		jest
 			.spyOn(MoySkladClient.prototype, 'getAllAssortment')
 			.mockResolvedValue([presentProduct] as any)
@@ -1539,7 +1548,7 @@ describe('MoySkladSyncService', () => {
 			created: false,
 			updated: false,
 			imagesImported: 0
-		} as any)
+		})
 		jest
 			.spyOn(MoySkladClient.prototype, 'getAllAssortment')
 			.mockResolvedValue([presentProduct] as any)
@@ -1780,7 +1789,7 @@ describe('MoySkladSyncService', () => {
 			key: 'moysklad_size',
 			displayName: 'Size',
 			displayOrder: 1
-		} as any)
+		})
 		repo.upsertIntegratedProductVariant
 			.mockResolvedValueOnce({
 				variant: {

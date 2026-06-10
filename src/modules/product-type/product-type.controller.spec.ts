@@ -45,7 +45,7 @@ describe('ProductTypeController', () => {
 	})
 
 	it('passes includeArchived query to catalog list service', async () => {
-		service.getAll.mockResolvedValue([] as any)
+		service.getAll.mockResolvedValue([])
 
 		await controller.getAll('yes')
 
@@ -53,7 +53,7 @@ describe('ProductTypeController', () => {
 	})
 
 	it('passes false includeArchived query to system templates service', async () => {
-		service.getSystemTemplates.mockResolvedValue([] as any)
+		service.getSystemTemplates.mockResolvedValue([])
 
 		await controller.getSystemTemplates('0')
 

@@ -27,11 +27,11 @@ export class CatalogFeatureEntitlementGuard implements CanActivate {
 
 		const catalogId = RequestContext.get()?.catalogId
 		if (!catalogId) {
-			throw new ForbiddenException('Catalog context is required')
+			throw new ForbiddenException('Контекст каталога обязателен')
 		}
 
 		if (!(await this.entitlements.canUse(catalogId, feature))) {
-			throw new ForbiddenException('Feature is not enabled for this catalog')
+			throw new ForbiddenException('Функция не включена для этого каталога')
 		}
 
 		return true

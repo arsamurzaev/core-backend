@@ -412,6 +412,18 @@ export class AdminCatalogConfigListItemDto {
 
 	@ApiProperty({
 		type: Boolean,
+		description: 'Whether the catalog can use product modifiers.'
+	})
+	canUseCatalogModifiers: boolean
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Whether the catalog can use catalog price lists.'
+	})
+	canUseCatalogPriceLists: boolean
+
+	@ApiProperty({
+		type: Boolean,
 		description:
 			'Whether the catalog can use the paid internal inventory feature.'
 	})
@@ -428,6 +440,12 @@ export class AdminCatalogConfigListItemDto {
 		description: 'Whether the catalog can use iiko integration.'
 	})
 	canUseIikoIntegration: boolean
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Whether the catalog can use 1C integration.'
+	})
+	canUseOneCIntegration: boolean
 }
 
 export class AdminCatalogFeatureEntitlementItemDto {

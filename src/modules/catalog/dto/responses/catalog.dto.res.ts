@@ -103,6 +103,9 @@ export class CatalogSettingsDto {
 
 	@ApiProperty({ type: String, nullable: true })
 	yandexVerification: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	activePriceListId: string | null
 }
 
 export class CatalogCurrentFeaturesDto {
@@ -126,6 +129,18 @@ export class CatalogCurrentFeaturesDto {
 		description: 'Whether the current catalog can use catalog sale units.'
 	})
 	canUseCatalogSaleUnits: boolean
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Whether the current catalog can use product modifiers.'
+	})
+	canUseCatalogModifiers: boolean
+
+	@ApiProperty({
+		type: Boolean,
+		description: 'Whether the current catalog can use catalog price lists.'
+	})
+	canUseCatalogPriceLists: boolean
 
 	@ApiProperty({
 		type: Boolean,

@@ -60,8 +60,8 @@ import { AdminCreateCatalogDtoReq } from './dto/requests/admin-create-catalog.dt
 import { AdminCreateCountryDtoReq } from './dto/requests/admin-create-country.dto.req'
 import { AdminCreateGeoAdminDtoReq } from './dto/requests/admin-create-geo-admin.dto.req'
 import { AdminCreatePromoCodeDtoReq } from './dto/requests/admin-create-promo-code.dto.req'
-import { AdminCreateRegionalityDtoReq } from './dto/requests/admin-create-regionality.dto.req'
 import { AdminCreatePromoPaymentDtoReq } from './dto/requests/admin-create-promo-payment.dto.req'
+import { AdminCreateRegionalityDtoReq } from './dto/requests/admin-create-regionality.dto.req'
 import { AdminCreateSubscriptionPaymentDtoReq } from './dto/requests/admin-create-subscription-payment.dto.req'
 import { AdminDefaultVariantDiagnosticsQueryDtoReq } from './dto/requests/admin-default-variant-maintenance.dto.req'
 import {
@@ -96,7 +96,7 @@ export class AdminController {
 
 	@Get('/domain-events/outbox')
 	@Roles(Role.ADMIN)
-	@ApiOperation({ summary: 'List domain event outbox rows' })
+	@ApiOperation({ summary: 'Получить записи outbox доменных событий' })
 	@ApiOkResponse({ type: AdminDomainEventOutboxListDto })
 	async getDomainEventOutbox(
 		@Query() query: AdminDomainEventOutboxQueryDtoReq
@@ -106,7 +106,9 @@ export class AdminController {
 
 	@Get('/domain-events/outbox/stats')
 	@Roles(Role.ADMIN)
-	@ApiOperation({ summary: 'Get domain event outbox status counters' })
+	@ApiOperation({
+		summary: 'Получить счетчики статусов outbox доменных событий'
+	})
 	@ApiOkResponse({ type: AdminDomainEventOutboxStatsDto })
 	async getDomainEventOutboxStats(): Promise<AdminDomainEventOutboxStatsDto> {
 		return this.domainEventOutbox.stats()
@@ -114,7 +116,9 @@ export class AdminController {
 
 	@Post('/domain-events/outbox/:id/retry')
 	@Roles(Role.ADMIN)
-	@ApiOperation({ summary: 'Retry one pending or failed domain event' })
+	@ApiOperation({
+		summary: 'Повторить одно ожидающее или ошибочное доменное событие'
+	})
 	@ApiOkResponse({ type: AdminDomainEventOutboxActionResultDto })
 	async retryDomainEventOutboxItem(
 		@Param('id', ParseUUIDPipe) id: string
@@ -124,7 +128,7 @@ export class AdminController {
 
 	@Post('/domain-events/outbox/retry-failed')
 	@Roles(Role.ADMIN)
-	@ApiOperation({ summary: 'Retry failed domain events by optional filters' })
+	@ApiOperation({ summary: 'Повторить ошибочные доменные события по фильтрам' })
 	@ApiOkResponse({ type: AdminDomainEventOutboxActionResultDto })
 	async retryFailedDomainEvents(
 		@Body() dto: AdminRetryFailedDomainEventsDtoReq
@@ -134,7 +138,9 @@ export class AdminController {
 
 	@Post('/domain-events/outbox/drain')
 	@Roles(Role.ADMIN)
-	@ApiOperation({ summary: 'Manually drain pending/failed domain events' })
+	@ApiOperation({
+		summary: 'Вручную обработать ожидающие и ошибочные доменные события'
+	})
 	@ApiOkResponse({ type: AdminDomainEventOutboxActionResultDto })
 	async drainDomainEventOutbox(
 		@Body() dto: AdminDrainDomainEventOutboxDtoReq
@@ -144,7 +150,7 @@ export class AdminController {
 
 	@Post('/domain-events/outbox/cleanup')
 	@Roles(Role.ADMIN)
-	@ApiOperation({ summary: 'Delete old processed domain events' })
+	@ApiOperation({ summary: 'Удалить старые обработанные доменные события' })
 	@ApiOkResponse({ type: AdminDomainEventOutboxCleanupResultDto })
 	async cleanupDomainEventOutbox(
 		@Body() dto: AdminCleanupDomainEventOutboxDtoReq
@@ -159,27 +165,22 @@ export class AdminController {
 		@Query() query: AdminCatalogsQueryDtoReq,
 		@Req() req: AuthRequest
 	): Promise<AdminCatalogListItemDto[]> {
-		return this.adminService.getCatalogs(query, getAdminActor(req)) as Promise<
-			AdminCatalogListItemDto[]
-		>
+		return this.adminService.getCatalogs(query, getAdminActor(req))
 	}
 
 	@Post('/catalogs')
-	@ApiOperation({ summary: 'Create catalog with generated owner credentials' })
+	@ApiOperation({ summary: 'Создать каталог с учетными данными владельца' })
 	@ApiCreatedResponse({ type: AdminCreateCatalogResponseDto })
 	async createCatalog(
 		@Body() dto: AdminCreateCatalogDtoReq,
 		@Req() req: AuthRequest
 	): Promise<AdminCreateCatalogResponseDto> {
-		return this.adminService.createCatalog(
-			dto,
-			getAdminActor(req)
-		) as Promise<AdminCreateCatalogResponseDto>
+		return this.adminService.createCatalog(dto, getAdminActor(req))
 	}
 
 	@Post('/catalogs/:id/duplicate')
 	@ApiOperation({
-		summary: 'Duplicate catalog with generated owner credentials'
+		summary: 'Дублировать каталог с учетными данными владельца'
 	})
 	@ApiCreatedResponse({ type: AdminCreateCatalogResponseDto })
 	async duplicateCatalog(
@@ -187,26 +188,19 @@ export class AdminController {
 		@Body() dto: AdminDuplicateCatalogDtoReq,
 		@Req() req: AuthRequest
 	): Promise<AdminCreateCatalogResponseDto> {
-		return this.adminService.duplicateCatalog(
-			id,
-			dto,
-			getAdminActor(req)
-		) as Promise<AdminCreateCatalogResponseDto>
+		return this.adminService.duplicateCatalog(id, dto, getAdminActor(req))
 	}
 
 	@Post('/catalogs/:id/owner-password/reset')
 	@ApiOperation({
-		summary: 'Reset catalog owner password to default and return credentials'
+		summary: 'Сбросить пароль владельца каталога и вернуть учетные данные'
 	})
 	@ApiOkResponse({ type: AdminCreateCatalogResponseDto })
 	async resetCatalogOwnerPassword(
 		@Param('id', ParseUUIDPipe) id: string,
 		@Req() req: AuthRequest
 	): Promise<AdminCreateCatalogResponseDto> {
-		return this.adminService.resetCatalogOwnerPassword(
-			id,
-			getAdminActor(req)
-		) as Promise<AdminCreateCatalogResponseDto>
+		return this.adminService.resetCatalogOwnerPassword(id, getAdminActor(req))
 	}
 
 	@Patch('/catalogs/:id')
@@ -217,29 +211,22 @@ export class AdminController {
 		@Body() dto: AdminUpdateCatalogDtoReq,
 		@Req() req: AuthRequest
 	): Promise<AdminCatalogListItemDto> {
-		return this.adminService.updateCatalog(
-			id,
-			dto,
-			getAdminActor(req)
-		) as Promise<AdminCatalogListItemDto>
+		return this.adminService.updateCatalog(id, dto, getAdminActor(req))
 	}
 
 	@Get('/catalogs/:id/features')
-	@ApiOperation({ summary: 'Get catalog feature entitlements' })
+	@ApiOperation({ summary: 'Получить доступные функции каталога' })
 	@ApiOkResponse({ type: AdminCatalogFeatureEntitlementsDto })
 	async getCatalogFeatureEntitlements(
 		@Param('id', ParseUUIDPipe) id: string,
 		@Req() req: AuthRequest
 	): Promise<AdminCatalogFeatureEntitlementsDto> {
-		return this.adminService.getCatalogFeatureEntitlements(
-			id,
-			getAdminActor(req)
-		)
+		return this.adminService.getCatalogFeatureEntitlements(id, getAdminActor(req))
 	}
 
 	@Get('/catalogs/:id/maintenance/default-variants/diagnostics')
 	@ApiOperation({
-		summary: 'Diagnose legacy default variant consistency for catalog'
+		summary: 'Проверить технические вариации каталога'
 	})
 	@ApiOkResponse({ type: ProductDefaultVariantDiagnosticsResponseDto })
 	async diagnoseCatalogDefaultVariants(
@@ -256,7 +243,7 @@ export class AdminController {
 
 	@Post('/catalogs/:id/maintenance/default-variants/repair')
 	@ApiOperation({
-		summary: 'Repair missing technical default variants for catalog'
+		summary: 'Восстановить недостающие технические вариации каталога'
 	})
 	@ApiOkResponse({ type: ProductDefaultVariantRepairResponseDto })
 	async repairCatalogMissingDefaultVariants(
@@ -271,7 +258,7 @@ export class AdminController {
 
 	@Post('/catalogs/:id/maintenance/default-variants/price-mismatches/repair')
 	@ApiOperation({
-		summary: 'Dry-run or repair legacy product price mirror mismatches'
+		summary: 'Проверить или исправить расхождения legacy-цен товара'
 	})
 	@ApiOkResponse({ type: ProductDefaultVariantPriceMismatchRepairResponseDto })
 	async repairCatalogDefaultVariantPriceMismatches(
@@ -287,7 +274,9 @@ export class AdminController {
 	}
 
 	@Get('/catalogs/:id/integrations/moysklad/stock-diagnostics')
-	@ApiOperation({ summary: 'Get MoySklad stock sync diagnostics for catalog' })
+	@ApiOperation({
+		summary: 'Получить диагностику синхронизации остатков MoySklad'
+	})
 	@ApiOkResponse({ type: AdminMoySkladStockDiagnosticsReportDto })
 	async getCatalogMoySkladStockDiagnostics(
 		@Param('id', ParseUUIDPipe) id: string,
@@ -300,7 +289,7 @@ export class AdminController {
 	}
 
 	@Patch('/catalogs/:id/features')
-	@ApiOperation({ summary: 'Enable or disable a catalog feature entitlement' })
+	@ApiOperation({ summary: 'Включить или отключить функцию каталога' })
 	@ApiOkResponse({ type: AdminCatalogFeatureEntitlementsDto })
 	async updateCatalogFeatureEntitlement(
 		@Param('id', ParseUUIDPipe) id: string,
@@ -315,123 +304,107 @@ export class AdminController {
 	}
 
 	@Delete('/catalogs/:id')
-	@ApiOperation({ summary: 'Удалить каталог через soft-delete' })
+	@ApiOperation({ summary: 'Удалить каталог мягким удалением' })
 	@ApiOkResponse({ type: AdminCatalogListItemDto })
 	async deleteCatalog(
 		@Param('id', ParseUUIDPipe) id: string,
 		@Req() req: AuthRequest
 	): Promise<AdminCatalogListItemDto> {
-		return this.adminService.deleteCatalog(
-			id,
-			getAdminActor(req)
-		) as Promise<AdminCatalogListItemDto>
+		return this.adminService.deleteCatalog(id, getAdminActor(req))
 	}
 
 	@Delete('/catalogs/:id/content')
-	@ApiOperation({ summary: 'Soft-delete контент каталога, не удаляя каталог' })
+	@ApiOperation({ summary: 'Архивировать контент каталога, не удаляя каталог' })
 	@ApiOkResponse({ type: AdminDeleteCatalogContentResultDto })
 	async deleteCatalogContent(
 		@Param('id', ParseUUIDPipe) id: string,
 		@Req() req: AuthRequest
 	): Promise<AdminDeleteCatalogContentResultDto> {
-		return this.adminService.deleteCatalogContent(
-			id,
-			getAdminActor(req)
-		) as Promise<AdminDeleteCatalogContentResultDto>
+		return this.adminService.deleteCatalogContent(id, getAdminActor(req))
 	}
 
 	@Post('/catalogs/:id/restore')
-	@ApiOperation({ summary: 'Восстановить soft-deleted каталог' })
+	@ApiOperation({ summary: 'Восстановить мягко удаленный каталог' })
 	@ApiOkResponse({ type: AdminCatalogListItemDto })
 	async restoreCatalog(
 		@Param('id', ParseUUIDPipe) id: string,
 		@Req() req: AuthRequest
 	): Promise<AdminCatalogListItemDto> {
-		return this.adminService.restoreCatalog(
-			id,
-			getAdminActor(req)
-		) as Promise<AdminCatalogListItemDto>
+		return this.adminService.restoreCatalog(id, getAdminActor(req))
 	}
 
 	@Get('/types')
 	@ApiOperation({ summary: 'Получить список типов каталогов для админки' })
 	@ApiOkResponse({ type: AdminTypeListItemDto, isArray: true })
 	async getTypes(): Promise<AdminTypeListItemDto[]> {
-		return this.adminService.getTypes() as Promise<AdminTypeListItemDto[]>
+		return this.adminService.getTypes()
 	}
 
 	@Get('/geo-admins')
 	@Roles(Role.ADMIN)
-	@ApiOperation({ summary: 'List geo admins with assigned countries and regions' })
+	@ApiOperation({
+		summary: 'Получить гео-админов с назначенными странами и регионами'
+	})
 	@ApiOkResponse({ type: AdminGeoAdminListItemDto, isArray: true })
 	async getGeoAdmins(
 		@Req() req: AuthRequest
 	): Promise<AdminGeoAdminListItemDto[]> {
-		return this.adminService.getGeoAdmins(getAdminActor(req)) as Promise<
-			AdminGeoAdminListItemDto[]
-		>
+		return this.adminService.getGeoAdmins(getAdminActor(req))
 	}
 
 	@Post('/geo-admins')
 	@Roles(Role.ADMIN)
-	@ApiOperation({ summary: 'Create geo admin with assigned countries and regions' })
+	@ApiOperation({
+		summary: 'Создать гео-админа с назначенными странами и регионами'
+	})
 	@ApiCreatedResponse({ type: AdminCreateGeoAdminResponseDto })
 	async createGeoAdmin(
 		@Body() dto: AdminCreateGeoAdminDtoReq,
 		@Req() req: AuthRequest
 	): Promise<AdminCreateGeoAdminResponseDto> {
-		return this.adminService.createGeoAdmin(
-			dto,
-			getAdminActor(req)
-		) as Promise<AdminCreateGeoAdminResponseDto>
+		return this.adminService.createGeoAdmin(dto, getAdminActor(req))
 	}
 
 	@Get('/regionalities')
 	@ApiOperation({
-		summary: 'Get country and region directory for admin catalog binding'
+		summary: 'Получить справочник стран и регионов для привязки каталога'
 	})
 	@ApiOkResponse({ type: AdminRegionalityListItemDto, isArray: true })
 	async getRegionalities(
 		@Req() req: AuthRequest
 	): Promise<AdminRegionalityListItemDto[]> {
-		return this.adminService.getRegionalities(getAdminActor(req)) as Promise<
-			AdminRegionalityListItemDto[]
-		>
+		return this.adminService.getRegionalities(getAdminActor(req))
 	}
 
 	@Get('/countries')
-	@ApiOperation({ summary: 'Get country directory for admin catalog binding' })
+	@ApiOperation({ summary: 'Получить справочник стран для привязки каталога' })
 	@ApiOkResponse({ type: AdminCountryListItemDto, isArray: true })
-	async getCountries(@Req() req: AuthRequest): Promise<AdminCountryListItemDto[]> {
-		return this.adminService.getCountries(getAdminActor(req)) as Promise<
-			AdminCountryListItemDto[]
-		>
+	async getCountries(
+		@Req() req: AuthRequest
+	): Promise<AdminCountryListItemDto[]> {
+		return this.adminService.getCountries(getAdminActor(req))
 	}
 
 	@Post('/countries')
-	@ApiOperation({ summary: 'Create country for admin catalog binding' })
+	@ApiOperation({ summary: 'Создать страну для привязки каталога' })
 	@ApiCreatedResponse({ type: AdminCountryListItemDto })
 	async createCountry(
 		@Body() dto: AdminCreateCountryDtoReq,
 		@Req() req: AuthRequest
 	): Promise<AdminCountryListItemDto> {
-		return this.adminService.createCountry(
-			dto,
-			getAdminActor(req)
-		) as Promise<AdminCountryListItemDto>
+		return this.adminService.createCountry(dto, getAdminActor(req))
 	}
 
 	@Post('/regionalities')
-	@ApiOperation({ summary: 'Create country and region for admin catalog binding' })
+	@ApiOperation({
+		summary: 'Создать страну и регион для привязки каталога'
+	})
 	@ApiCreatedResponse({ type: AdminRegionalityListItemDto })
 	async createRegionality(
 		@Body() dto: AdminCreateRegionalityDtoReq,
 		@Req() req: AuthRequest
 	): Promise<AdminRegionalityListItemDto> {
-		return this.adminService.createRegionality(
-			dto,
-			getAdminActor(req)
-		) as Promise<AdminRegionalityListItemDto>
+		return this.adminService.createRegionality(dto, getAdminActor(req))
 	}
 
 	@Get('/activities')
@@ -440,9 +413,7 @@ export class AdminController {
 	async getActivities(
 		@Query('typeId') typeId?: string
 	): Promise<AdminActivityListItemDto[]> {
-		return this.adminService.getActivities(typeId) as Promise<
-			AdminActivityListItemDto[]
-		>
+		return this.adminService.getActivities(typeId)
 	}
 
 	@Post('/activities')
@@ -451,18 +422,14 @@ export class AdminController {
 	async createActivity(
 		@Body() dto: AdminCreateActivityDtoReq
 	): Promise<AdminActivityListItemDto> {
-		return this.adminService.createActivity(
-			dto
-		) as Promise<AdminActivityListItemDto>
+		return this.adminService.createActivity(dto)
 	}
 
 	@Get('/promo-codes')
 	@ApiOperation({ summary: 'Получить список промокодов для админки' })
 	@ApiOkResponse({ type: AdminPromoCodeListItemDto, isArray: true })
 	async getPromoCodes(): Promise<AdminPromoCodeListItemDto[]> {
-		return this.adminService.getPromoCodes() as Promise<
-			AdminPromoCodeListItemDto[]
-		>
+		return this.adminService.getPromoCodes()
 	}
 
 	@Post('/promo-codes')
@@ -471,9 +438,7 @@ export class AdminController {
 	async createPromoCode(
 		@Body() dto: AdminCreatePromoCodeDtoReq
 	): Promise<AdminPromoCodeListItemDto> {
-		return this.adminService.createPromoCode(
-			dto
-		) as Promise<AdminPromoCodeListItemDto>
+		return this.adminService.createPromoCode(dto)
 	}
 
 	@Get('/catalogs/:id/payments')
@@ -515,7 +480,7 @@ export class AdminController {
 				proof: {
 					type: 'string',
 					format: 'binary',
-					description: 'PDF, JPEG, PNG or WebP payment confirmation'
+					description: 'Подтверждение оплаты в формате PDF, JPEG, PNG или WebP'
 				}
 			}
 		}
@@ -554,7 +519,7 @@ export class AdminController {
 				proof: {
 					type: 'string',
 					format: 'binary',
-					description: 'PDF, JPEG, PNG or WebP payment confirmation'
+					description: 'Подтверждение оплаты в формате PDF, JPEG, PNG или WebP'
 				}
 			}
 		}
@@ -581,7 +546,7 @@ export class AdminController {
 }
 
 function getAdminActor(req: AuthRequest) {
-	if (!req.user) throw new Error('Missing authenticated user')
+	if (!req.user) throw new Error('Не найден авторизованный пользователь')
 	return {
 		id: req.user.id,
 		role: req.user.role

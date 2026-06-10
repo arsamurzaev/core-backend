@@ -20,7 +20,11 @@ describe('product commercial fields mapper', () => {
 				minPrice: '1200.00',
 				maxPrice: '1200.00',
 				availabilityState: 'AVAILABLE',
-				stock: 4
+				stock: 4,
+				usesPriceList: true,
+				priceListId: 'price-list-1',
+				priceListCode: 'retail',
+				priceListName: 'Розница'
 			})
 		).toEqual({
 			priceState: 'KNOWN',
@@ -30,7 +34,11 @@ describe('product commercial fields mapper', () => {
 			availabilityState: 'AVAILABLE',
 			stock: 4,
 			defaultVariantId: 'variant-1',
-			requiresVariantSelection: false
+			requiresVariantSelection: false,
+			usesPriceList: true,
+			priceListId: 'price-list-1',
+			priceListCode: 'retail',
+			priceListName: 'Розница'
 		})
 	})
 
@@ -51,7 +59,11 @@ describe('product commercial fields mapper', () => {
 						minPrice: '900.00',
 						maxPrice: '1500.00',
 						availabilityState: 'AVAILABLE',
-						stock: 8
+						stock: 8,
+						usesPriceList: false,
+						priceListId: null,
+						priceListCode: null,
+						priceListName: null
 					}
 				]
 			])
@@ -65,7 +77,11 @@ describe('product commercial fields mapper', () => {
 			availabilityState: 'AVAILABLE',
 			stock: 8,
 			defaultVariantId: 'default-variant',
-			requiresVariantSelection: true
+			requiresVariantSelection: true,
+			usesPriceList: false,
+			priceListId: null,
+			priceListCode: null,
+			priceListName: null
 		})
 	})
 
@@ -81,7 +97,11 @@ describe('product commercial fields mapper', () => {
 					availabilityState: 'AVAILABLE',
 					stock: 3,
 					defaultVariantId: 'variant-1',
-					requiresVariantSelection: false
+					requiresVariantSelection: false,
+					usesPriceList: true,
+					priceListId: 'price-list-1',
+					priceListCode: 'retail',
+					priceListName: 'Розница'
 				}
 			)
 		).toEqual(
@@ -106,7 +126,11 @@ describe('product commercial fields mapper', () => {
 					availabilityState: 'AVAILABLE',
 					stock: null,
 					defaultVariantId: null,
-					requiresVariantSelection: false
+					requiresVariantSelection: false,
+					usesPriceList: true,
+					priceListId: 'price-list-1',
+					priceListCode: 'retail',
+					priceListName: 'Розница'
 				}
 			)
 		).toEqual(
@@ -127,12 +151,32 @@ describe('product commercial fields mapper', () => {
 			availabilityState: 'AVAILABLE',
 			stock: null,
 			defaultVariantId: null,
-			requiresVariantSelection: false
+			requiresVariantSelection: false,
+			usesPriceList: false,
+			priceListId: null,
+			priceListCode: null,
+			priceListName: null
 		})
 		expect(buildFallbackProductCommercialFields({ price: 500 })).toEqual(
 			expect.objectContaining({
 				priceState: 'KNOWN',
 				displayPrice: '500.00'
+			})
+		)
+	})
+
+	it('formats object prices with their own toString context', () => {
+		const decimalLike = {
+			value: '750.00',
+			toString(this: { value: string }) {
+				return this.value
+			}
+		}
+
+		expect(buildFallbackProductCommercialFields({ price: decimalLike })).toEqual(
+			expect.objectContaining({
+				priceState: 'KNOWN',
+				displayPrice: '750.00'
 			})
 		)
 	})

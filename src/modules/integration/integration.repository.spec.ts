@@ -557,6 +557,117 @@ describe('IntegrationRepository', () => {
 		)
 	})
 
+	it('keeps manual display labels for existing integrated variant enum values', async () => {
+		const createdVariant = {
+			id: 'variant-1',
+			productId: 'product-1',
+			sku: 'SKU-SMALL',
+			variantKey: 'iiko_size=size-small',
+			stock: 7,
+			price: 150,
+			status: ProductVariantStatus.ACTIVE,
+			isAvailable: true,
+			deleteAt: null
+		}
+		const db = {
+			integrationVariantLink: {
+				findUnique: jest.fn().mockResolvedValue(null),
+				create: jest.fn().mockResolvedValue({ id: 'variant-link-1' })
+			},
+			productVariant: {
+				findUnique: jest.fn().mockResolvedValue(null),
+				create: jest.fn().mockResolvedValue(createdVariant),
+				updateMany: jest.fn().mockResolvedValue({ count: 0 })
+			},
+			variantAttribute: {
+				updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+				findUnique: jest.fn().mockResolvedValue(null),
+				create: jest.fn().mockResolvedValue({ id: 'variant-attribute-1' })
+			},
+			attributeEnumValue: {
+				findFirst: jest.fn().mockResolvedValue({
+					id: 'enum-size-small',
+					displayName: 'Размер',
+					deleteAt: null
+				}),
+				update: jest.fn(),
+				aggregate: jest.fn(),
+				create: jest.fn()
+			},
+			attributeEnumValueAlias: {
+				findFirst: jest.fn()
+			}
+		}
+		const prisma = {
+			$transaction: jest.fn((callback: (tx: typeof db) => unknown) => callback(db))
+		}
+		const repo = new IntegrationRepository(prisma as any)
+
+		await repo.upsertIntegratedProductVariant({
+			catalogId: 'catalog-1',
+			integrationId: 'integration-1',
+			productId: 'product-1',
+			externalId: 'iiko-product-1:size-small',
+			sku: 'SKU-SMALL',
+			variantKey: 'iiko_size=size-small',
+			price: 150,
+			stock: 7,
+			status: ProductVariantStatus.ACTIVE,
+			attributes: [
+				{
+					attributeId: 'size-attribute',
+					value: 'size-small',
+					displayName: 'Small'
+				}
+			]
+		})
+
+		expect(db.attributeEnumValue.update).not.toHaveBeenCalled()
+		expect(db.variantAttribute.create).toHaveBeenCalledWith({
+			data: {
+				variantId: 'variant-1',
+				attributeId: 'size-attribute',
+				enumValueId: 'enum-size-small'
+			}
+		})
+	})
+
+	it('keeps manual display labels for existing imported mapping enum values', async () => {
+		const currentEnumValue = {
+			id: 'enum-size-xl',
+			displayName: 'Размер XL',
+			deleteAt: null
+		}
+		const db = {
+			catalog: {
+				findFirst: jest.fn().mockResolvedValue({ typeId: 'catalog-type-1' })
+			},
+			attribute: {
+				findFirst: jest.fn().mockResolvedValue({ id: 'attribute-size' })
+			},
+			attributeEnumValue: {
+				findFirst: jest.fn().mockResolvedValue(currentEnumValue),
+				update: jest.fn()
+			}
+		}
+		const repo = new IntegrationRepository(db as any)
+
+		const result = await repo.upsertMoySkladImportedEnumValue(
+			'catalog-1',
+			'attribute-size',
+			{
+				value: 'xl',
+				displayName: 'XL'
+			}
+		)
+
+		expect(result).toEqual({
+			enumValue: currentEnumValue,
+			created: false
+		})
+		expect(db.attributeEnumValue.update).not.toHaveBeenCalled()
+	})
+
 	it('rejects creating a MoySklad matrix variant without attributes', async () => {
 		const db = {
 			integrationVariantLink: {

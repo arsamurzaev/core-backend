@@ -212,6 +212,22 @@ export class ObservabilityService {
 		return this.settings.metricsPath
 	}
 
+	get isMetricsTokenConfigured(): boolean {
+		return Boolean(this.settings.metricsToken)
+	}
+
+	get requiresMetricsToken(): boolean {
+		return this.settings.deploymentEnvironment === 'production'
+	}
+
+	isMetricsRequestAuthorized(token: string | null | undefined): boolean {
+		if (!this.settings.metricsToken) {
+			return !this.requiresMetricsToken
+		}
+
+		return token === this.settings.metricsToken
+	}
+
 	get contentType(): string {
 		return this.registry.contentType
 	}

@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common'
 
-import { mustCatalogId } from '@/shared/tenancy/ctx'
+import {
+	assertCurrentCatalogCanManageCatalogContent,
+	mustCatalogId
+} from '@/shared/tenancy/ctx'
 
 import { ApplyProductTypeChangeDtoReq } from './dto/requests/apply-product-type-change.dto.req'
 import { CreateProductDtoReq } from './dto/requests/create-product.dto.req'
@@ -151,6 +154,7 @@ export class ProductService {
 	}
 
 	async repairMissingDefaultVariantsForCurrentCatalog() {
+		assertCurrentCatalogCanManageCatalogContent()
 		return this.maintenance.repairMissingDefaultVariantsForCatalog(
 			mustCatalogId()
 		)
@@ -166,6 +170,7 @@ export class ProductService {
 	async repairDefaultVariantPriceMismatchesForCurrentCatalog(
 		options?: ProductDefaultVariantPriceMismatchRepairOptions
 	) {
+		assertCurrentCatalogCanManageCatalogContent()
 		return this.maintenance.repairDefaultVariantPriceMismatchesForCatalog(
 			mustCatalogId(),
 			options

@@ -124,6 +124,15 @@ describe('IntegrationController', () => {
 				combos: 0,
 				variants: 1
 			},
+			diff: {
+				newItems: 0,
+				matchedItems: 0,
+				changedItems: 0,
+				priceChanges: 0,
+				nameChanges: 0,
+				unchangedItems: 0,
+				missingLinkedItems: 0
+			},
 			categories: [],
 			items: []
 		})
@@ -351,7 +360,7 @@ describe('IntegrationController', () => {
 	})
 
 	it('delegates order export history to service', async () => {
-		service.getMoySkladOrderExports.mockResolvedValue([] as any)
+		service.getMoySkladOrderExports.mockResolvedValue([])
 
 		const result = await controller.getMoySkladOrderExports('10')
 
@@ -360,7 +369,7 @@ describe('IntegrationController', () => {
 	})
 
 	it('delegates iiko order export history to service', async () => {
-		service.getIikoOrderExports.mockResolvedValue([] as any)
+		service.getIikoOrderExports.mockResolvedValue([])
 
 		const result = await controller.getIikoOrderExports('5')
 
@@ -386,7 +395,7 @@ describe('IntegrationController', () => {
 	})
 
 	it('delegates sync run history to service', async () => {
-		service.getMoySkladRuns.mockResolvedValue([] as any)
+		service.getMoySkladRuns.mockResolvedValue([])
 
 		const result = await controller.getMoySkladRuns('10')
 

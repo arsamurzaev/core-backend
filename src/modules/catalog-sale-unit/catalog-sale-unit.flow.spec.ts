@@ -48,7 +48,11 @@ function createCommercialProjection() {
 		minPrice: '1000.00',
 		maxPrice: '1000.00',
 		availabilityState: 'AVAILABLE' as const,
-		stock: 120
+		stock: 120,
+		usesPriceList: false,
+		priceListId: null,
+		priceListCode: null,
+		priceListName: null
 	}
 }
 

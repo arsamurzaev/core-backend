@@ -63,14 +63,14 @@ describe('error-message.utils', () => {
 				constraints: {
 					whitelistValidation: 'property unexpectedField should not exist'
 				}
-			} as ValidationError,
+			},
 			{
 				property: 'name',
 				constraints: {
 					isString: 'name must be a string',
 					isNotEmpty: 'name should not be empty'
 				}
-			} as ValidationError
+			}
 		]
 
 		expect(collectValidationErrorMessages(errors)).toEqual([

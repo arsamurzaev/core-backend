@@ -511,7 +511,7 @@ describe('IntegrationService', () => {
 		audit = module.get(AuditService)
 		products = module.get(PRODUCT_EXTERNAL_SYNC_PORT)
 		events = module.get<{ dispatch: jest.Mock }>(DOMAIN_EVENT_DISPATCHER)
-		configService = module.get(ConfigService) as unknown as { get: jest.Mock }
+		configService = module.get<{ get: jest.Mock }>(ConfigService)
 		jest.spyOn(MoySkladClient.prototype, 'createWebhook').mockResolvedValue({
 			id: 'product-delete-webhook-1',
 			accountId: 'account-1',
@@ -591,7 +591,7 @@ describe('IntegrationService', () => {
 			}
 		}
 		repo.findIiko.mockResolvedValue(null)
-		repo.upsertIiko.mockResolvedValue(iikoRecord as any)
+		repo.upsertIiko.mockResolvedValue(iikoRecord)
 
 		const result = await runWithCatalog(() =>
 			service.upsertIiko({
@@ -648,7 +648,7 @@ describe('IntegrationService', () => {
 				terminalGroupId: 'terminal-1',
 				webhook
 			}
-		} as any)
+		})
 		repo.updateIiko.mockImplementation(
 			async (_catalogId, params) =>
 				({
@@ -703,7 +703,7 @@ describe('IntegrationService', () => {
 					lastError: null
 				}
 			}
-		} as any)
+		})
 		repo.updateIiko.mockImplementation(
 			async (_catalogId, params) =>
 				({
@@ -770,7 +770,7 @@ describe('IntegrationService', () => {
 				apiLogin: 'stored-iiko-login',
 				organizationId: 'organization-1'
 			}
-		} as any)
+		})
 		iikoSync.testConnection.mockResolvedValue({
 			ok: true,
 			organizations: [{ id: 'org-1', name: 'Demo', isActive: true }],
@@ -844,7 +844,7 @@ describe('IntegrationService', () => {
 				externalMenuId: '81651',
 				priceCategoryId: 'price-1'
 			}
-		} as any)
+		})
 		iikoSync.previewExternalMenu.mockResolvedValue({
 			ok: true,
 			source: 'external_menu',
@@ -1131,7 +1131,7 @@ describe('IntegrationService', () => {
 		repo.findMoySklad.mockResolvedValue({
 			...integrationRecord,
 			lastSyncError: 'Authorization: Bearer moysklad-secret-token'
-		} as any)
+		})
 		repo.findLatestActiveSyncRun.mockResolvedValue({
 			...syncRunRecord,
 			error: 'access_token=moysklad-secret-token'
@@ -1232,7 +1232,7 @@ describe('IntegrationService', () => {
 				}
 			}
 		}
-		repo.findIiko.mockResolvedValue(iikoRecord as any)
+		repo.findIiko.mockResolvedValue(iikoRecord)
 		const updateWebhookSettings = jest
 			.spyOn(IikoClient.prototype, 'updateWebhookSettings')
 			.mockResolvedValue({ correlationId: 'corr-1' })
@@ -1273,7 +1273,7 @@ describe('IntegrationService', () => {
 					lastError: null
 				}
 			}
-		} as any)
+		})
 		jest
 			.spyOn(IikoClient.prototype, 'updateWebhookSettings')
 			.mockRejectedValue(
@@ -1329,7 +1329,7 @@ describe('IntegrationService', () => {
 			createdAt: new Date('2026-05-28T09:10:00.000Z'),
 			updatedAt: new Date('2026-05-28T09:10:00.000Z')
 		}
-		repo.findIikoById.mockResolvedValue(iikoRecord as any)
+		repo.findIikoById.mockResolvedValue(iikoRecord)
 		repo.createWebhookEventIfNew.mockResolvedValue({
 			event: storedEvent,
 			created: true
@@ -1402,7 +1402,7 @@ describe('IntegrationService', () => {
 				}
 			}
 		}
-		repo.findIikoById.mockResolvedValue(iikoRecord as any)
+		repo.findIikoById.mockResolvedValue(iikoRecord)
 
 		await service.receiveIikoWebhook({
 			integrationId: 'iiko-integration-1',
@@ -1446,7 +1446,7 @@ describe('IntegrationService', () => {
 				}
 			}
 		}
-		repo.findIikoById.mockResolvedValue(iikoRecord as any)
+		repo.findIikoById.mockResolvedValue(iikoRecord)
 		iikoQueue.enqueueStockWebhookSync.mockResolvedValue({
 			ok: true,
 			queued: true,
@@ -1477,7 +1477,7 @@ describe('IntegrationService', () => {
 	})
 
 	it('loads MoySklad order export reference options from provider', async () => {
-		repo.findMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.findMoySklad.mockResolvedValue(integrationRecord)
 		jest
 			.spyOn(MoySkladClient.prototype, 'getAllOrganizations')
 			.mockResolvedValue([
@@ -1487,7 +1487,7 @@ describe('IntegrationService', () => {
 					code: 'ORG',
 					archived: false
 				}
-			] as any)
+			])
 		jest
 			.spyOn(MoySkladClient.prototype, 'getAllCounterparties')
 			.mockResolvedValue([
@@ -1497,7 +1497,7 @@ describe('IntegrationService', () => {
 					externalCode: 'site-agent',
 					archived: false
 				}
-			] as any)
+			])
 		jest.spyOn(MoySkladClient.prototype, 'getAllStores').mockResolvedValue([
 			{
 				id: 'store-2',
@@ -1509,7 +1509,7 @@ describe('IntegrationService', () => {
 				name: 'Основной склад',
 				archived: false
 			}
-		] as any)
+		])
 
 		const result = await runWithCatalog(() =>
 			service.getMoySkladOrderExportRefs()
@@ -1538,7 +1538,7 @@ describe('IntegrationService', () => {
 	})
 
 	it('previews MoySklad characteristic mapping without running sync or upserts', async () => {
-		repo.findMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.findMoySklad.mockResolvedValue(integrationRecord)
 		repo.findMoySkladMappingPreviewAttributes.mockResolvedValue([
 			{
 				id: 'attribute-color',
@@ -1570,7 +1570,7 @@ describe('IntegrationService', () => {
 					}
 				]
 			}
-		] as any)
+		])
 		jest.spyOn(MoySkladClient.prototype, 'getAllVariants').mockResolvedValue([
 			{
 				id: 'variant-1',
@@ -1595,7 +1595,7 @@ describe('IntegrationService', () => {
 					}
 				]
 			}
-		] as any)
+		])
 
 		const result = await runWithCatalog(() => service.previewMoySkladMapping())
 
@@ -1668,7 +1668,7 @@ describe('IntegrationService', () => {
 	})
 
 	it('applies MoySklad mapping by linking existing dictionaries and creating trusted imports', async () => {
-		repo.findMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.findMoySklad.mockResolvedValue(integrationRecord)
 		repo.findMoySkladVariantAttributeById.mockImplementation(
 			async (_catalogId: string, attributeId: string) => {
 				if (attributeId === 'attribute-color') {
@@ -1677,7 +1677,7 @@ describe('IntegrationService', () => {
 						key: 'color',
 						displayName: 'Color',
 						displayOrder: 1
-					} as any
+					}
 				}
 				if (attributeId === 'attribute-size') {
 					return {
@@ -1685,7 +1685,7 @@ describe('IntegrationService', () => {
 						key: 'moysklad_size',
 						displayName: 'Size',
 						displayOrder: 2
-					} as any
+					}
 				}
 				return null
 			}
@@ -1698,7 +1698,7 @@ describe('IntegrationService', () => {
 				displayOrder: 2
 			},
 			created: true
-		} as any)
+		})
 		repo.upsertMoySkladEnumValueAlias.mockResolvedValue({
 			enumValue: {
 				id: 'value-green',
@@ -1810,7 +1810,7 @@ describe('IntegrationService', () => {
 	})
 
 	it('skips trusted-only auto-created attributes for untrusted mapping apply', async () => {
-		repo.findMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.findMoySklad.mockResolvedValue(integrationRecord)
 
 		const result = await runWithCatalog(() =>
 			service.applyMoySkladMapping({
@@ -1954,7 +1954,7 @@ describe('IntegrationService', () => {
 	})
 
 	it('rejects enabling order export on update without required refs', async () => {
-		repo.findMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.findMoySklad.mockResolvedValue(integrationRecord)
 
 		await expect(
 			runWithCatalog(() =>
@@ -1973,7 +1973,7 @@ describe('IntegrationService', () => {
 
 	it('upserts moysklad settings and syncs scheduler', async () => {
 		repo.findMoySklad.mockResolvedValue(null)
-		repo.upsertMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.upsertMoySklad.mockResolvedValue(integrationRecord)
 
 		const result = await runWithCatalog(() =>
 			service.upsertMoySklad({
@@ -2019,8 +2019,8 @@ describe('IntegrationService', () => {
 			...integrationRecord,
 			lastSyncAt: new Date('2026-03-23T13:00:00.000Z')
 		}
-		repo.findMoySklad.mockResolvedValue(syncedIntegration as any)
-		repo.upsertMoySklad.mockResolvedValue(syncedIntegration as any)
+		repo.findMoySklad.mockResolvedValue(syncedIntegration)
+		repo.upsertMoySklad.mockResolvedValue(syncedIntegration)
 
 		await runWithCatalog(() =>
 			service.upsertMoySklad({
@@ -2058,7 +2058,7 @@ describe('IntegrationService', () => {
 				lastStockSyncedAt: '2026-03-23T12:15:00.000Z'
 			})
 		}
-		repo.findMoySklad.mockResolvedValue(existingWithStockFreshness as any)
+		repo.findMoySklad.mockResolvedValue(existingWithStockFreshness)
 		repo.updateMoySklad.mockResolvedValue({
 			...integrationRecord,
 			isActive: false,
@@ -2072,7 +2072,7 @@ describe('IntegrationService', () => {
 				scheduleTimezone: 'Europe/Moscow',
 				lastStockSyncedAt: '2026-03-23T12:15:00.000Z'
 			})
-		} as any)
+		})
 
 		const result = await runWithCatalog(() =>
 			service.updateMoySklad({
@@ -2113,8 +2113,8 @@ describe('IntegrationService', () => {
 	})
 
 	it('removes integration and scheduler', async () => {
-		repo.findMoySklad.mockResolvedValue(integrationRecord as any)
-		repo.softDeleteMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.findMoySklad.mockResolvedValue(integrationRecord)
+		repo.softDeleteMoySklad.mockResolvedValue(integrationRecord)
 
 		const result = await runWithCatalog(() => service.removeMoySklad())
 
@@ -2212,14 +2212,12 @@ describe('IntegrationService', () => {
 					lastError: null
 				}
 			})
-		} as any)
+		})
 		repo.createWebhookEventIfNew.mockResolvedValue({
 			created: true,
 			event: { id: 'event-1' }
 		} as any)
-		repo.patchMoySkladStockWebhookMetadata.mockResolvedValue(
-			integrationRecord as any
-		)
+		repo.patchMoySkladStockWebhookMetadata.mockResolvedValue(integrationRecord)
 		queue.enqueueStockWebhookDrain.mockResolvedValue({
 			ok: true,
 			queued: true,
@@ -2273,14 +2271,12 @@ describe('IntegrationService', () => {
 					lastError: null
 				}
 			})
-		} as any)
+		})
 		repo.createWebhookEventIfNew.mockResolvedValue({
 			created: false,
 			event: { id: 'event-1' }
 		} as any)
-		repo.patchMoySkladStockWebhookMetadata.mockResolvedValue(
-			integrationRecord as any
-		)
+		repo.patchMoySkladStockWebhookMetadata.mockResolvedValue(integrationRecord)
 
 		await service.receiveMoySkladStockWebhook({
 			integrationId: 'integration-1',
@@ -2315,7 +2311,7 @@ describe('IntegrationService', () => {
 					lastError: null
 				}
 			})
-		} as any)
+		})
 		repo.findProductLinksByIntegration.mockResolvedValue([
 			{
 				id: 'link-1',
@@ -2328,7 +2324,7 @@ describe('IntegrationService', () => {
 		] as any)
 		products.softDeleteExternalProduct.mockResolvedValue(true)
 		repo.patchMoySkladProductDeleteWebhookMetadata.mockResolvedValue(
-			integrationRecord as any
+			integrationRecord
 		)
 
 		await service.receiveMoySkladProductDeleteWebhook({
@@ -2393,7 +2389,7 @@ describe('IntegrationService', () => {
 					lastError: null
 				}
 			})
-		} as any)
+		})
 		repo.softDeleteIntegratedVariantByExternalId.mockResolvedValue({
 			deleted: true,
 			productId: 'product-1',
@@ -2402,7 +2398,7 @@ describe('IntegrationService', () => {
 		repo.recomputeProductStatusFromVariants.mockResolvedValue(true)
 		products.recomputeProductCommercialState.mockResolvedValue(true)
 		repo.patchMoySkladProductDeleteWebhookMetadata.mockResolvedValue(
-			integrationRecord as any
+			integrationRecord
 		)
 
 		await service.receiveMoySkladProductDeleteWebhook({
@@ -2481,14 +2477,14 @@ describe('IntegrationService', () => {
 					lastError: null
 				}
 			})
-		} as any)
+		})
 		queue.enqueueProductWebhookSync.mockResolvedValue({
 			ok: true,
 			queued: true,
 			jobId: 'product-webhook-job-1'
 		})
 		repo.patchMoySkladProductChangeWebhookMetadata.mockResolvedValue(
-			integrationRecord as any
+			integrationRecord
 		)
 
 		await service.receiveMoySkladProductChangeWebhook({
@@ -2548,14 +2544,14 @@ describe('IntegrationService', () => {
 					lastError: null
 				}
 			})
-		} as any)
+		})
 		queue.enqueueProductFolderWebhookSync.mockResolvedValue({
 			ok: true,
 			queued: true,
 			jobId: 'folder-webhook-job-1'
 		})
 		repo.patchMoySkladProductFolderWebhookMetadata.mockResolvedValue(
-			integrationRecord as any
+			integrationRecord
 		)
 
 		await service.receiveMoySkladProductFolderWebhook({

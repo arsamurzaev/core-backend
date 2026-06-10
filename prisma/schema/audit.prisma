@@ -46,12 +46,12 @@ model AuditEvent {
   correlationId String? @map("correlation_id") @db.VarChar(100)
   sessionId     String? @map("session_id") @db.VarChar(191)
 
-  ip        String? @db.VarChar(64)
-  userAgent String? @map("user_agent") @db.Text
-  method    String? @db.VarChar(10)
-  host      String? @db.VarChar(255)
-  path      String? @db.VarChar(1024)
-  statusCode Int?  @map("status_code")
+  ip         String? @db.VarChar(64)
+  userAgent  String? @map("user_agent") @db.Text
+  method     String? @db.VarChar(10)
+  host       String? @db.VarChar(255)
+  path       String? @db.VarChar(1024)
+  statusCode Int?    @map("status_code")
 
   reason  String? @db.Text
   message String? @db.Text

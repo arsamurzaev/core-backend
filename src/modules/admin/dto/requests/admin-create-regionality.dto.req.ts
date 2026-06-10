@@ -27,7 +27,8 @@ export class AdminCreateRegionalityDtoReq {
 	@ApiPropertyOptional({
 		type: String,
 		format: 'uuid',
-		description: 'Existing country id. If provided, countryName/countryCode are ignored.'
+		description:
+			'Existing country id. If provided, countryName/countryCode are ignored.'
 	})
 	@IsOptional()
 	@IsString()
@@ -61,9 +62,7 @@ export class AdminCreateRegionalityDtoReq {
 		example: 'RU',
 		description: 'If omitted, generated from countryName.'
 	})
-	@Transform(({ value }: { value: unknown }) =>
-		trimOptionalUppercaseCode(value)
-	)
+	@Transform(({ value }: { value: unknown }) => trimOptionalUppercaseCode(value))
 	@IsOptional()
 	@IsString()
 	@Matches(REGIONALITY_CODE_PATTERN)
@@ -82,9 +81,7 @@ export class AdminCreateRegionalityDtoReq {
 		example: 'RU-CE',
 		description: 'If omitted, generated from countryCode and regionName.'
 	})
-	@Transform(({ value }: { value: unknown }) =>
-		trimOptionalUppercaseCode(value)
-	)
+	@Transform(({ value }: { value: unknown }) => trimOptionalUppercaseCode(value))
 	@IsOptional()
 	@IsString()
 	@Matches(REGIONALITY_CODE_PATTERN)

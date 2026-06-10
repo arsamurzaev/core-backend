@@ -204,9 +204,9 @@ export class CatalogDomainService {
 
 	private async requireCatalogDomain(id: string, catalogId: string) {
 		const domain = await this.domains.findById(id)
-		if (!domain) throw new NotFoundException('Domain not found')
+		if (!domain) throw new NotFoundException('Домен не найден')
 		if (domain.catalogId !== catalogId) {
-			throw new ForbiddenException('Domain belongs to another catalog')
+			throw new ForbiddenException('Домен принадлежит другому каталогу')
 		}
 		return domain
 	}

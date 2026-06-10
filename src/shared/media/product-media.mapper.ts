@@ -72,7 +72,7 @@ export class ProductMediaMapper {
 				)
 				.filter((item): item is NonNullable<typeof item> => item !== null),
 			integration: this.mapIntegration(integrationLinks)
-		} as ProductMediaMapped<T>
+		}
 	}
 
 	private mapVariantIntegrations<T extends Record<string, unknown>>(

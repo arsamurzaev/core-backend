@@ -18,6 +18,13 @@ export type UpsertCartItemInput = {
 	quantity: number
 	guestSessionId?: string | null
 	guestName?: string | null
+	modifiers?: UpsertCartItemModifierInput[]
+}
+
+export type UpsertCartItemModifierInput = {
+	productModifierGroupId: string
+	productModifierOptionId: string
+	quantity?: number
 }
 
 export type NormalizedCartItemInput = {
@@ -25,8 +32,15 @@ export type NormalizedCartItemInput = {
 	variantId: string | null
 	saleUnitId: string | null
 	quantity: number
-	guestSessionId: string | null
-	guestName: string | null
+	guestSessionId?: string | null
+	guestName?: string | null
+	modifiers?: NormalizedCartItemModifierInput[]
+}
+
+export type NormalizedCartItemModifierInput = {
+	productModifierGroupId: string
+	productModifierOptionId: string
+	quantity: number
 }
 
 type CartEntityLike = {
@@ -80,15 +94,20 @@ type CartItemLike = {
 	productId: string
 	variantId: string | null
 	saleUnitId?: string | null
+	modifierSignature?: string | null
 	quantity: number
 	baseQuantity?: number | null
 	unitPriceSnapshot?: unknown
+	priceListId?: string | null
+	priceListCode?: string | null
+	priceListName?: string | null
 	guestSessionId?: string | null
 	guestName?: string | null
 	createdAt: unknown
 	updatedAt: unknown
 	variant?: CartVariantLike | null
 	saleUnit?: CartSaleUnitLike | null
+	modifiers?: CartModifierLike[] | null
 	product: {
 		id: string
 		name: string
@@ -124,6 +143,20 @@ type CartSaleUnitLike = {
 	displayOrder: number
 }
 
+type CartModifierLike = {
+	id: string
+	productModifierGroupId?: string | null
+	productModifierOptionId?: string | null
+	catalogModifierGroupId?: string | null
+	catalogModifierOptionId?: string | null
+	groupCode: string
+	groupName: string
+	optionCode: string
+	optionName: string
+	quantity: number
+	unitPriceSnapshot: unknown
+}
+
 type CartVariantAttributeLike = {
 	attribute: {
 		id: string
@@ -142,6 +175,7 @@ type CartVariantAttributeLike = {
 export type CartEntityMapOptions = {
 	canUseProductVariants?: boolean
 	canUseCatalogSaleUnits?: boolean
+	canUseCatalogModifiers?: boolean
 }
 
 function sortCartVariantAttributes(
@@ -165,6 +199,7 @@ function buildCartItemLineKey(
 	item: CartItemLike,
 	options: {
 		canExposeSaleUnits: boolean
+		canExposeModifiers: boolean
 		canUseProductVariants: boolean
 	}
 ): string {
@@ -176,8 +211,24 @@ function buildCartItemLineKey(
 		options.canExposeSaleUnits
 			? (trimToNull(item.saleUnitId) ?? 'default')
 			: 'default',
+		options.canExposeModifiers
+			? (trimToNull(item.modifierSignature) ??
+				buildModifierSignatureFromCartItem(item))
+			: 'default',
 		trimToNull(item.guestSessionId) ?? 'default'
 	].join(':')
+}
+
+function buildModifierSignatureFromCartItem(item: CartItemLike): string {
+	const parts = (item.modifiers ?? [])
+		.map(modifier => {
+			const optionId = trimToNull(modifier.productModifierOptionId)
+			if (!optionId) return null
+			return `${optionId}x${Math.max(1, Math.trunc(modifier.quantity || 1))}`
+		})
+		.filter((part): part is string => Boolean(part))
+		.sort()
+	return parts.join('|')
 }
 
 function mergeCartItemQuantity(
@@ -193,6 +244,7 @@ function mergeDuplicateCartItems(
 	items: CartItemLike[],
 	options: {
 		canExposeSaleUnits: boolean
+		canExposeModifiers: boolean
 		canUseProductVariants: boolean
 	}
 ): CartItemLike[] {
@@ -300,6 +352,7 @@ export function normalizeCartItemInput(
 	const guestSessionId = normalizeOptionalText(input.guestSessionId, 64)
 	const guestName = normalizeOptionalText(input.guestName, 120)
 	const quantity = input.quantity
+	const modifiers = normalizeCartItemModifiers(input.modifiers)
 
 	if (!productId) {
 		throw new BadRequestException('Поле productId обязательно')
@@ -317,8 +370,46 @@ export function normalizeCartItemInput(
 		saleUnitId,
 		quantity,
 		guestSessionId,
-		guestName
+		guestName,
+		modifiers
 	}
+}
+
+function normalizeCartItemModifiers(
+	modifiers: UpsertCartItemModifierInput[] | undefined
+): NormalizedCartItemModifierInput[] {
+	const map = new Map<string, NormalizedCartItemModifierInput>()
+	for (const modifier of modifiers ?? []) {
+		const productModifierGroupId = modifier.productModifierGroupId?.trim()
+		const productModifierOptionId = modifier.productModifierOptionId?.trim()
+		const quantity = modifier.quantity ?? 1
+		if (!productModifierGroupId) {
+			throw new BadRequestException('Не указана группа модификатора')
+		}
+		if (!productModifierOptionId) {
+			throw new BadRequestException('Не указана опция модификатора')
+		}
+		if (!Number.isInteger(quantity) || quantity < 1) {
+			throw new BadRequestException('Количество модификатора должно быть больше 0')
+		}
+		const key = `${productModifierGroupId}:${productModifierOptionId}`
+		const current = map.get(key)
+		if (current) {
+			current.quantity += quantity
+			continue
+		}
+		map.set(key, {
+			productModifierGroupId,
+			productModifierOptionId,
+			quantity
+		})
+	}
+
+	return [...map.values()].sort(
+		(left, right) =>
+			left.productModifierGroupId.localeCompare(right.productModifierGroupId) ||
+			left.productModifierOptionId.localeCompare(right.productModifierOptionId)
+	)
 }
 
 function readFiniteNumber(value: unknown): number | null {
@@ -336,7 +427,17 @@ function readFiniteNumber(value: unknown): number | null {
 		if (typeof candidate.toNumber === 'function') {
 			const toNumber = candidate.toNumber as () => unknown
 			const parsed: unknown = toNumber()
-			return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : null
+			if (typeof parsed === 'number' && Number.isFinite(parsed)) {
+				return parsed
+			}
+		}
+		const toString = (value as { toString?: unknown }).toString
+		if (
+			typeof toString === 'function' &&
+			toString !== Object.prototype.toString
+		) {
+			const parsed = Number((toString as () => string).call(value))
+			return Number.isFinite(parsed) ? parsed : null
 		}
 	}
 	return null
@@ -363,6 +464,7 @@ export function resolveCartItemUnitPriceCents(item: {
 	product: { price: unknown; productAttributes?: PriceAttributeLike[] | null }
 	variant?: { price: unknown } | null
 	saleUnit?: { price: unknown } | null
+	modifiers?: CartModifierLike[] | null
 	unitPriceSnapshot?: unknown
 }): number {
 	return resolveLinePricing(item).unitPriceCents
@@ -372,6 +474,7 @@ export function resolveCartItemPricing(item: {
 	product: { price: unknown; productAttributes?: PriceAttributeLike[] | null }
 	variant?: { price: unknown } | null
 	saleUnit?: { price: unknown } | null
+	modifiers?: CartModifierLike[] | null
 	unitPriceSnapshot?: unknown
 	quantity: number
 }) {
@@ -410,34 +513,62 @@ export function mapCartEntity(
 ) {
 	const canUseProductVariants = options.canUseProductVariants ?? true
 	const canUseCatalogSaleUnits = options.canUseCatalogSaleUnits ?? true
+	const canUseCatalogModifiers = options.canUseCatalogModifiers ?? true
 	const canExposeSaleUnits = canUseCatalogSaleUnits
+	const canExposeModifiers = canUseCatalogModifiers
 	const cartItems = mergeDuplicateCartItems(cart.items, {
 		canExposeSaleUnits,
+		canExposeModifiers,
 		canUseProductVariants
 	})
 	const pricedItems = cartItems.map(item => {
 		const itemVariant = canUseProductVariants ? (item.variant ?? null) : null
 		const itemSaleUnit = canExposeSaleUnits ? (item.saleUnit ?? null) : null
+		const itemModifiers = canExposeModifiers ? (item.modifiers ?? []) : []
+		const hasPriceListSnapshot = Boolean(item.priceListId)
 		const shouldUseSnapshot =
-			(canUseProductVariants || !item.variantId) &&
-			(canExposeSaleUnits || !(item.saleUnitId ?? null))
+			toOptionalMoney(item.unitPriceSnapshot) !== null &&
+			(hasPriceListSnapshot ||
+				((canUseProductVariants || !item.variantId) &&
+					(canExposeSaleUnits || !(item.saleUnitId ?? null))))
 		const pricingSource = {
 			...item,
 			variant: itemVariant,
 			saleUnit: itemSaleUnit,
+			modifiers: itemModifiers,
 			unitPriceSnapshot: shouldUseSnapshot ? item.unitPriceSnapshot : null
 		}
 		const pricing = resolveCartItemPricing(pricingSource)
+		const itemPriceSnapshot = shouldUseSnapshot
+			? toOptionalMoney(item.unitPriceSnapshot)
+			: null
 
-		return { item, itemVariant, itemSaleUnit, pricing }
+		return {
+			item,
+			itemVariant,
+			itemSaleUnit,
+			itemModifiers,
+			itemPriceSnapshot,
+			pricing
+		}
 	})
 
 	const items = pricedItems.map(
-		({ item, itemVariant, itemSaleUnit, pricing }) => {
+		({
+			item,
+			itemVariant,
+			itemSaleUnit,
+			itemModifiers,
+			itemPriceSnapshot,
+			pricing
+		}) => {
 			const primaryMedia = item.product.media?.[0]?.media ?? null
 			const hasKnownDisplayPrice =
 				toOptionalMoney(
-					itemSaleUnit?.price ?? itemVariant?.price ?? item.product.price
+					itemPriceSnapshot ??
+						itemSaleUnit?.price ??
+						itemVariant?.price ??
+						item.product.price
 				) !== null
 
 			return {
@@ -445,10 +576,14 @@ export function mapCartEntity(
 				productId: item.productId,
 				variantId: canUseProductVariants ? item.variantId : null,
 				saleUnitId: canExposeSaleUnits ? (item.saleUnitId ?? null) : null,
+				priceListId: item.priceListId ?? null,
+				priceListCode: item.priceListCode ?? null,
+				priceListName: item.priceListName ?? null,
 				guestSessionId: item.guestSessionId ?? null,
 				guestName: item.guestName ?? null,
 				quantity: item.quantity,
 				baseQuantity: resolveMappedCartItemBaseQuantity(item, itemSaleUnit),
+				unitPriceSnapshot: itemPriceSnapshot,
 				product: {
 					id: item.product.id,
 					name: item.product.name,
@@ -456,8 +591,12 @@ export function mapCartEntity(
 					price: hasKnownDisplayPrice ? pricing.unitPrice : null,
 					media: primaryMedia && mapMedia ? mapMedia(primaryMedia) : null
 				},
-				variant: mapCartVariant(itemVariant),
-				saleUnit: mapCartSaleUnit(itemSaleUnit),
+				variant: mapCartVariant(
+					itemVariant,
+					itemSaleUnit ? undefined : itemPriceSnapshot
+				),
+				saleUnit: mapCartSaleUnit(itemSaleUnit, itemPriceSnapshot),
+				modifiers: itemModifiers.map(mapCartModifier),
 				baseUnitPrice: pricing.baseUnitPrice,
 				unitPrice: pricing.unitPrice,
 				discountPercent: pricing.discountPercent,
@@ -516,6 +655,22 @@ export function mapCartEntity(
 	}
 }
 
+export function mapCartModifier(modifier: CartModifierLike) {
+	return {
+		id: modifier.id,
+		productModifierGroupId: modifier.productModifierGroupId ?? null,
+		productModifierOptionId: modifier.productModifierOptionId ?? null,
+		catalogModifierGroupId: modifier.catalogModifierGroupId ?? null,
+		catalogModifierOptionId: modifier.catalogModifierOptionId ?? null,
+		groupCode: modifier.groupCode,
+		groupName: modifier.groupName,
+		optionCode: modifier.optionCode,
+		optionName: modifier.optionName,
+		quantity: Math.max(1, Math.trunc(modifier.quantity || 1)),
+		unitPrice: toCents(modifier.unitPriceSnapshot) / 100
+	}
+}
+
 function normalizeOptionalText(
 	value: string | null | undefined,
 	maxLength: number
@@ -547,7 +702,10 @@ export function mapCartTableSession(session?: CartTableSessionLike | null) {
 	}
 }
 
-export function mapCartSaleUnit(saleUnit?: CartSaleUnitLike | null) {
+export function mapCartSaleUnit(
+	saleUnit?: CartSaleUnitLike | null,
+	priceOverride?: unknown
+) {
 	if (!saleUnit) return null
 
 	return {
@@ -557,7 +715,7 @@ export function mapCartSaleUnit(saleUnit?: CartSaleUnitLike | null) {
 		code: saleUnit.code,
 		name: saleUnit.name,
 		baseQuantity: toNumber(saleUnit.baseQuantity),
-		price: toCents(saleUnit.price) / 100,
+		price: toCents(priceOverride ?? saleUnit.price) / 100,
 		barcode: saleUnit.barcode ?? null,
 		isDefault: saleUnit.isDefault,
 		isActive: saleUnit.isActive,
@@ -565,7 +723,10 @@ export function mapCartSaleUnit(saleUnit?: CartSaleUnitLike | null) {
 	}
 }
 
-export function mapCartVariant(variant?: CartVariantLike | null) {
+export function mapCartVariant(
+	variant?: CartVariantLike | null,
+	priceOverride?: unknown
+) {
 	if (!variant) return null
 	const attributes = sortCartVariantAttributes(variant.attributes ?? []).map(
 		attribute => ({
@@ -587,7 +748,7 @@ export function mapCartVariant(variant?: CartVariantLike | null) {
 		sku: variant.sku,
 		variantKey: variant.variantKey,
 		label: buildCartVariantLabel(variant),
-		price: toOptionalMoney(variant.price),
+		price: toOptionalMoney(priceOverride ?? variant.price),
 		stock: variant.stock,
 		status: variant.status,
 		isAvailable: variant.isAvailable,

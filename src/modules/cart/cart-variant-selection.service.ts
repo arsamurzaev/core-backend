@@ -22,6 +22,7 @@ const INVENTORY_MODE_NONE: CatalogInventoryMode = 'NONE'
 
 type EnsureCartVariantPurchasableInput = {
 	catalogId: string
+	buyerCatalogId?: string | null
 	productId: string
 	variantId: string
 	quantity: number
@@ -41,7 +42,8 @@ export class CartVariantSelectionService {
 		tx: Prisma.TransactionClient,
 		catalogId: string,
 		input: NormalizedCartItemInput,
-		inventoryMode: CatalogInventoryMode
+		inventoryMode: CatalogInventoryMode,
+		options: { buyerCatalogId?: string | null } = {}
 	): Promise<string | null> {
 		const canUseVariants =
 			await this.capabilities.canUseProductVariants(catalogId)
@@ -79,13 +81,15 @@ export class CartVariantSelectionService {
 				input,
 				inventoryMode,
 				{
-					requireExplicitSelection: false
+					requireExplicitSelection: false,
+					buyerCatalogId: options.buyerCatalogId
 				}
 			)
 		}
 
 		return this.resolveImplicitProductVariantId(catalogId, input, inventoryMode, {
-			requireExplicitSelection: true
+			requireExplicitSelection: true,
+			buyerCatalogId: options.buyerCatalogId
 		})
 	}
 
@@ -115,14 +119,17 @@ export class CartVariantSelectionService {
 		catalogId: string,
 		input: NormalizedCartItemInput,
 		inventoryMode: CatalogInventoryMode,
-		options: { requireExplicitSelection: boolean }
+		options: { buyerCatalogId?: string | null; requireExplicitSelection: boolean }
 	): Promise<string | null> {
 		const sellable = await this.sellableReader.resolveProductSellable(
 			catalogId,
 			input.productId,
 			{
 				quantity: input.quantity,
-				enforceStock: this.shouldEnforceStock(inventoryMode)
+				enforceStock: this.shouldEnforceStock(inventoryMode),
+				...(options.buyerCatalogId
+					? { buyerCatalogId: options.buyerCatalogId }
+					: {})
 			}
 		)
 
@@ -146,7 +153,8 @@ export class CartVariantSelectionService {
 				input.variantId,
 				{
 					quantity: input.quantity,
-					enforceStock: this.shouldEnforceStock(input.inventoryMode)
+					enforceStock: this.shouldEnforceStock(input.inventoryMode),
+					...(input.buyerCatalogId ? { buyerCatalogId: input.buyerCatalogId } : {})
 				}
 			)
 		} catch (error) {

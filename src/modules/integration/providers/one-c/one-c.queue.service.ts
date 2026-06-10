@@ -601,14 +601,14 @@ export class OneCQueueService implements OnModuleInit, OnModuleDestroy {
 					? await this.oneC.executePriceSyncRun({
 							catalogId: prepared.catalogId,
 							runId: prepared.runId,
-							dto: prepared.dto as RunOneCPriceSyncDtoReq,
+							dto: prepared.dto,
 							jobId
 						})
 					: prepared.mode === IntegrationSyncRunMode.STOCK
 						? await this.oneC.executeStockSyncRun({
 								catalogId: prepared.catalogId,
 								runId: prepared.runId,
-								dto: prepared.dto as RunOneCStockSyncDtoReq,
+								dto: prepared.dto,
 								jobId
 							})
 						: prepared.mode === IntegrationSyncRunMode.VARIANT

@@ -133,11 +133,11 @@ describe('InventoryService', () => {
 			inventoryMode: 'INTERNAL'
 		} as any)
 		repo.existsWarehouseCode.mockResolvedValue(false)
-		repo.findWarehouses.mockResolvedValue([warehouseRecord] as any)
-		repo.findWarehouseById.mockResolvedValue(warehouseRecord as any)
-		repo.createWarehouse.mockResolvedValue(warehouseRecord as any)
-		repo.updateWarehouse.mockResolvedValue(warehouseRecord as any)
-		repo.softDeleteWarehouse.mockResolvedValue(warehouseRecord as any)
+		repo.findWarehouses.mockResolvedValue([warehouseRecord])
+		repo.findWarehouseById.mockResolvedValue(warehouseRecord)
+		repo.createWarehouse.mockResolvedValue(warehouseRecord)
+		repo.updateWarehouse.mockResolvedValue(warehouseRecord)
+		repo.softDeleteWarehouse.mockResolvedValue(warehouseRecord)
 		repo.resyncWarehouseVariantStocks.mockResolvedValue([])
 		repo.findWarehouseBalances.mockResolvedValue([])
 		repo.findWarehouseMovements.mockResolvedValue([])
@@ -511,8 +511,8 @@ describe('InventoryService', () => {
 			audit,
 			observability,
 			cache,
-			events as any,
-			outbox as any
+			events,
+			outbox
 		)
 		repo.reserveCartStock.mockResolvedValue({
 			ok: true,
@@ -680,7 +680,7 @@ describe('InventoryService', () => {
 			observability,
 			cache,
 			undefined,
-			outbox as any
+			outbox
 		)
 		repo.consumeCompletedOrderStock.mockResolvedValue({
 			ok: true,
@@ -830,7 +830,7 @@ describe('InventoryService', () => {
 			audit,
 			observability,
 			cache,
-			events as any
+			events
 		)
 		repo.releaseExpiredReservations.mockResolvedValue({
 			releasedReservations: 1,

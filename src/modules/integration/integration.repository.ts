@@ -9,6 +9,7 @@ import {
 	IntegrationSyncSnapshotCompleteness,
 	IntegrationSyncStatus,
 	IntegrationWebhookEventStatus,
+	ProductModifierScope,
 	ProductStatus,
 	ProductVariantKind,
 	ProductVariantStatus
@@ -75,6 +76,18 @@ function isIikoStopListItemStopped(
 
 function buildIikoVariantExternalId(productId: string, sizeId: string): string {
 	return `${productId}:${sizeId}`
+}
+
+function buildContextualModifierExternalId(parts: string[]): string {
+	const normalized = parts
+		.map(part => part.trim())
+		.filter(Boolean)
+		.join(':')
+	if (normalized.length <= 128) return normalized
+
+	const hash = createHash('sha1').update(normalized).digest('hex').slice(0, 16)
+	const prefix = parts[0]?.trim().slice(0, 80) || 'iiko-modifier'
+	return `${prefix}:${hash}`.slice(0, 128)
 }
 
 function resolveDefaultProductVariant(
@@ -197,6 +210,30 @@ const variantLinkSelect = {
 	missingSyncCount: true,
 	skippedReason: true,
 	lastExternalError: true,
+	rawMeta: true,
+	createdAt: true,
+	updatedAt: true
+}
+
+const modifierGroupLinkSelect = {
+	id: true,
+	integrationId: true,
+	catalogModifierGroupId: true,
+	productModifierGroupId: true,
+	externalId: true,
+	externalCode: true,
+	rawMeta: true,
+	createdAt: true,
+	updatedAt: true
+}
+
+const modifierOptionLinkSelect = {
+	id: true,
+	integrationId: true,
+	catalogModifierOptionId: true,
+	productModifierOptionId: true,
+	externalId: true,
+	externalCode: true,
 	rawMeta: true,
 	createdAt: true,
 	updatedAt: true
@@ -418,7 +455,7 @@ function mergeJsonObject(
 	return {
 		...base,
 		...patch
-	} as Prisma.InputJsonValue
+	}
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
@@ -438,6 +475,21 @@ function cloneJsonRecord(
 	}
 
 	return { ...(value as Record<string, Prisma.InputJsonValue>) }
+}
+
+function toPrismaInputJson(value: unknown): Prisma.InputJsonValue {
+	return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue
+}
+
+function mergeInputJsonObject(
+	value: unknown,
+	patch: Record<string, Prisma.InputJsonValue>
+): Prisma.InputJsonValue {
+	const base =
+		value && typeof value === 'object' && !Array.isArray(value)
+			? (value as Record<string, Prisma.InputJsonValue>)
+			: {}
+	return toPrismaInputJson({ ...base, ...patch })
 }
 
 function readStringRecord(value: unknown): Record<string, string> {
@@ -477,6 +529,16 @@ export type IntegrationProductPreviewRecord =
 export type IntegrationVariantLinkRecord =
 	Prisma.IntegrationVariantLinkGetPayload<{
 		select: typeof variantLinkSelect
+	}>
+
+export type IntegrationModifierGroupLinkRecord =
+	Prisma.IntegrationModifierGroupLinkGetPayload<{
+		select: typeof modifierGroupLinkSelect
+	}>
+
+export type IntegrationModifierOptionLinkRecord =
+	Prisma.IntegrationModifierOptionLinkGetPayload<{
+		select: typeof modifierOptionLinkSelect
 	}>
 
 export type ProductSyncRecord = Prisma.ProductGetPayload<{
@@ -554,6 +616,36 @@ export type IntegrationVariantAttributeDefinitionInput =
 		attributeDisplayName?: string | null
 		displayOrder: number
 	}
+
+export type IntegrationProductModifierOptionInput = {
+	externalId: string
+	externalCode?: string | null
+	code: string
+	name: string
+	description?: string | null
+	price: number
+	maxQuantity?: number | null
+	isDefault?: boolean
+	isAvailable?: boolean
+	displayOrder?: number
+	rawMeta?: Prisma.InputJsonValue
+}
+
+export type IntegrationProductModifierGroupInput = {
+	externalId: string
+	externalCode?: string | null
+	code: string
+	name: string
+	description?: string | null
+	variantId?: string | null
+	isRequired?: boolean
+	minSelected?: number
+	maxSelected?: number | null
+	isActive?: boolean
+	displayOrder?: number
+	rawMeta?: Prisma.InputJsonValue
+	options: IntegrationProductModifierOptionInput[]
+}
 
 export type CategorySyncRecord = Prisma.CategoryGetPayload<{
 	select: typeof categorySyncSelect
@@ -935,7 +1027,7 @@ export class IntegrationRepository {
 
 		await this.prisma.integration.update({
 			where: { id: existing.id },
-			data: { metadata: metadata as Prisma.InputJsonValue }
+			data: { metadata: metadata }
 		})
 
 		return this.findMoySkladById(integrationId)
@@ -964,7 +1056,7 @@ export class IntegrationRepository {
 
 		await this.prisma.integration.update({
 			where: { id: existing.id },
-			data: { metadata: metadata as Prisma.InputJsonValue }
+			data: { metadata: metadata }
 		})
 
 		return this.findMoySkladById(integrationId)
@@ -993,7 +1085,7 @@ export class IntegrationRepository {
 
 		await this.prisma.integration.update({
 			where: { id: existing.id },
-			data: { metadata: metadata as Prisma.InputJsonValue }
+			data: { metadata: metadata }
 		})
 
 		return this.findMoySkladById(integrationId)
@@ -1022,7 +1114,7 @@ export class IntegrationRepository {
 
 		await this.prisma.integration.update({
 			where: { id: existing.id },
-			data: { metadata: metadata as Prisma.InputJsonValue }
+			data: { metadata: metadata }
 		})
 
 		return this.findMoySkladById(integrationId)
@@ -2529,6 +2621,596 @@ export class IntegrationRepository {
 		})
 	}
 
+	findDefaultProductVariant(
+		productId: string,
+		tx?: Prisma.TransactionClient
+	): Promise<ProductVariantSyncRecord | null> {
+		const db = tx || this.prisma
+		return db.productVariant.findFirst({
+			where: {
+				productId,
+				deleteAt: null,
+				OR: [
+					{ kind: ProductVariantKind.DEFAULT },
+					{ variantKey: DEFAULT_VARIANT_KEY }
+				]
+			},
+			orderBy: { createdAt: 'asc' },
+			select: productVariantSyncSelect
+		})
+	}
+
+	async syncIikoProductModifiers(
+		params: {
+			catalogId: string
+			integrationId: string
+			productId: string
+			groups: IntegrationProductModifierGroupInput[]
+		},
+		tx?: Prisma.TransactionClient
+	): Promise<{ groups: number; options: number }> {
+		const run = async (db: Prisma.TransactionClient | PrismaService) => {
+			const now = new Date()
+			const groups = params.groups.filter(group => group.options.length > 0)
+			const product = await db.product.findFirst({
+				where: {
+					id: params.productId,
+					catalogId: params.catalogId,
+					deleteAt: null
+				},
+				select: {
+					id: true,
+					variants: {
+						where: { deleteAt: null },
+						select: { id: true }
+					}
+				}
+			})
+			if (!product) return { groups: 0, options: 0 }
+
+			const variantIds = new Set(product.variants.map(variant => variant.id))
+			for (const group of groups) {
+				if (group.variantId && !variantIds.has(group.variantId)) {
+					throw new BadRequestException(
+						'Modifier variant does not belong to product'
+					)
+				}
+			}
+
+			const incomingKeys = new Set(
+				groups.map(group => {
+					const scopeKey = group.variantId ?? 'product'
+					return `${scopeKey}:${group.code}`
+				})
+			)
+			const managedGroups = await db.productModifierGroup.findMany({
+				where: {
+					productId: params.productId,
+					integrationLinks: { some: { integrationId: params.integrationId } }
+				},
+				select: {
+					id: true,
+					scopeKey: true,
+					code: true
+				}
+			})
+			const staleGroupIds = managedGroups
+				.filter(group => !incomingKeys.has(`${group.scopeKey}:${group.code}`))
+				.map(group => group.id)
+			if (staleGroupIds.length) {
+				await db.productModifierOption.updateMany({
+					where: { productModifierGroupId: { in: staleGroupIds } },
+					data: { deleteAt: now, isAvailable: false }
+				})
+				await db.productModifierGroup.updateMany({
+					where: { id: { in: staleGroupIds } },
+					data: { deleteAt: now, isActive: false }
+				})
+			}
+
+			const existingProductGroups = await db.productModifierGroup.findMany({
+				where: { productId: params.productId },
+				select: {
+					id: true,
+					scopeKey: true,
+					code: true
+				}
+			})
+			const existingProductGroupByKey = new Map(
+				existingProductGroups.map(group => [
+					`${group.scopeKey}:${group.code}`,
+					group
+				])
+			)
+
+			let optionCount = 0
+			for (const group of groups) {
+				const catalogGroup = await this.upsertIikoCatalogModifierGroup(db, {
+					catalogId: params.catalogId,
+					integrationId: params.integrationId,
+					group
+				})
+				const scope = group.variantId
+					? ProductModifierScope.VARIANT
+					: ProductModifierScope.PRODUCT
+				const scopeKey = group.variantId ?? 'product'
+				const productGroupData = {
+					productId: params.productId,
+					variantId: group.variantId ?? null,
+					catalogModifierGroupId: catalogGroup.id,
+					scope,
+					scopeKey,
+					code: group.code,
+					name: group.name,
+					description: group.description ?? null,
+					isRequired: group.isRequired ?? false,
+					minSelected: group.minSelected ?? 0,
+					maxSelected: group.maxSelected ?? null,
+					isActive: group.isActive ?? true,
+					displayOrder: group.displayOrder ?? 0,
+					rawMeta: mergeInputJsonObject(group.rawMeta, {
+						provider: 'iiko',
+						actualExternalId: group.externalId,
+						integrationId: params.integrationId
+					}),
+					deleteAt: null
+				}
+				const existingProductGroup = existingProductGroupByKey.get(
+					`${scopeKey}:${group.code}`
+				)
+				const productGroup = existingProductGroup
+					? await db.productModifierGroup.update({
+							where: { id: existingProductGroup.id },
+							data: productGroupData,
+							select: { id: true }
+						})
+					: await db.productModifierGroup.create({
+							data: productGroupData,
+							select: { id: true }
+						})
+
+				await this.upsertIntegrationModifierGroupLink(db, {
+					integrationId: params.integrationId,
+					externalId: buildContextualModifierExternalId([
+						params.productId,
+						scopeKey,
+						group.externalId
+					]),
+					externalCode: group.externalCode ?? null,
+					catalogModifierGroupId: catalogGroup.id,
+					productModifierGroupId: productGroup.id,
+					rawMeta: mergeInputJsonObject(group.rawMeta, {
+						provider: 'iiko',
+						context: 'product_modifier_group',
+						actualExternalId: group.externalId
+					})
+				})
+
+				await db.productModifierOption.updateMany({
+					where: { productModifierGroupId: productGroup.id },
+					data: { deleteAt: now, isAvailable: false }
+				})
+
+				for (const option of group.options) {
+					const catalogOption = await this.upsertIikoCatalogModifierOption(db, {
+						catalogId: params.catalogId,
+						integrationId: params.integrationId,
+						option
+					})
+					await db.catalogModifierGroupOption.upsert({
+						where: {
+							groupId_optionId: {
+								groupId: catalogGroup.id,
+								optionId: catalogOption.id
+							}
+						},
+						update: {
+							defaultPrice: option.price,
+							isDefault: option.isDefault ?? false,
+							isActive: option.isAvailable ?? true,
+							displayOrder: option.displayOrder ?? 0,
+							deleteAt: null
+						},
+						create: {
+							groupId: catalogGroup.id,
+							optionId: catalogOption.id,
+							defaultPrice: option.price,
+							isDefault: option.isDefault ?? false,
+							isActive: option.isAvailable ?? true,
+							displayOrder: option.displayOrder ?? 0
+						}
+					})
+
+					const productOption = await db.productModifierOption.upsert({
+						where: {
+							productModifierGroupId_code: {
+								productModifierGroupId: productGroup.id,
+								code: option.code
+							}
+						},
+						update: {
+							catalogModifierOptionId: catalogOption.id,
+							name: option.name,
+							price: option.price,
+							maxQuantity: option.maxQuantity ?? null,
+							isDefault: option.isDefault ?? false,
+							isAvailable: option.isAvailable ?? true,
+							displayOrder: option.displayOrder ?? 0,
+							rawMeta: mergeInputJsonObject(option.rawMeta, {
+								provider: 'iiko',
+								actualExternalId: option.externalId,
+								actualGroupExternalId: group.externalId,
+								integrationId: params.integrationId
+							}),
+							deleteAt: null
+						},
+						create: {
+							productModifierGroupId: productGroup.id,
+							catalogModifierOptionId: catalogOption.id,
+							code: option.code,
+							name: option.name,
+							price: option.price,
+							maxQuantity: option.maxQuantity ?? null,
+							isDefault: option.isDefault ?? false,
+							isAvailable: option.isAvailable ?? true,
+							displayOrder: option.displayOrder ?? 0,
+							rawMeta: mergeInputJsonObject(option.rawMeta, {
+								provider: 'iiko',
+								actualExternalId: option.externalId,
+								actualGroupExternalId: group.externalId,
+								integrationId: params.integrationId
+							})
+						},
+						select: { id: true }
+					})
+
+					await this.upsertIntegrationModifierOptionLink(db, {
+						integrationId: params.integrationId,
+						externalId: buildContextualModifierExternalId([
+							params.productId,
+							scopeKey,
+							group.externalId,
+							option.externalId
+						]),
+						externalCode: option.externalCode ?? null,
+						catalogModifierOptionId: catalogOption.id,
+						productModifierOptionId: productOption.id,
+						rawMeta: mergeInputJsonObject(option.rawMeta, {
+							provider: 'iiko',
+							context: 'product_modifier_option',
+							actualExternalId: option.externalId,
+							actualGroupExternalId: group.externalId
+						})
+					})
+					optionCount += 1
+				}
+			}
+
+			return { groups: groups.length, options: optionCount }
+		}
+
+		if (tx) return run(tx)
+		return this.prisma.$transaction(run)
+	}
+
+	findModifierGroupLinkForOrder(
+		integrationId: string,
+		params: {
+			productModifierGroupId?: string | null
+			catalogModifierGroupId?: string | null
+		}
+	): Promise<IntegrationModifierGroupLinkRecord | null> {
+		const where =
+			params.catalogModifierGroupId || params.productModifierGroupId
+				? {
+						integrationId,
+						OR: [
+							...(params.catalogModifierGroupId
+								? [
+										{
+											catalogModifierGroupId: params.catalogModifierGroupId
+										}
+									]
+								: []),
+							...(params.productModifierGroupId
+								? [
+										{
+											productModifierGroupId: params.productModifierGroupId
+										}
+									]
+								: [])
+						]
+					}
+				: { integrationId, id: '__never__' }
+
+		return this.prisma.integrationModifierGroupLink.findFirst({
+			where,
+			orderBy: [
+				{ productModifierGroupId: 'asc' },
+				{ catalogModifierGroupId: 'asc' },
+				{ createdAt: 'asc' }
+			],
+			select: modifierGroupLinkSelect
+		})
+	}
+
+	findModifierOptionLinkForOrder(
+		integrationId: string,
+		params: {
+			productModifierOptionId?: string | null
+			catalogModifierOptionId?: string | null
+		}
+	): Promise<IntegrationModifierOptionLinkRecord | null> {
+		const where =
+			params.catalogModifierOptionId || params.productModifierOptionId
+				? {
+						integrationId,
+						OR: [
+							...(params.catalogModifierOptionId
+								? [
+										{
+											catalogModifierOptionId: params.catalogModifierOptionId
+										}
+									]
+								: []),
+							...(params.productModifierOptionId
+								? [
+										{
+											productModifierOptionId: params.productModifierOptionId
+										}
+									]
+								: [])
+						]
+					}
+				: { integrationId, id: '__never__' }
+
+		return this.prisma.integrationModifierOptionLink.findFirst({
+			where,
+			orderBy: [
+				{ productModifierOptionId: 'asc' },
+				{ catalogModifierOptionId: 'asc' },
+				{ createdAt: 'asc' }
+			],
+			select: modifierOptionLinkSelect
+		})
+	}
+
+	private async upsertIikoCatalogModifierGroup(
+		db: Prisma.TransactionClient | PrismaService,
+		params: {
+			catalogId: string
+			integrationId: string
+			group: IntegrationProductModifierGroupInput
+		}
+	): Promise<{ id: string }> {
+		const linked = await db.integrationModifierGroupLink.findUnique({
+			where: {
+				integrationId_externalId: {
+					integrationId: params.integrationId,
+					externalId: params.group.externalId
+				}
+			},
+			select: modifierGroupLinkSelect
+		})
+		const linkedGroup = linked?.catalogModifierGroupId
+			? await db.catalogModifierGroup.findFirst({
+					where: {
+						id: linked.catalogModifierGroupId,
+						catalogId: params.catalogId
+					},
+					select: { id: true }
+				})
+			: null
+		const existing =
+			linkedGroup ??
+			(await db.catalogModifierGroup.findUnique({
+				where: {
+					catalogId_code: {
+						catalogId: params.catalogId,
+						code: params.group.code
+					}
+				},
+				select: { id: true }
+			}))
+		const data = {
+			isRequired: params.group.isRequired ?? false,
+			minSelected: params.group.minSelected ?? 0,
+			maxSelected: params.group.maxSelected ?? null,
+			isActive: params.group.isActive ?? true,
+			displayOrder: params.group.displayOrder ?? 0,
+			rawMeta: mergeInputJsonObject(params.group.rawMeta, {
+				provider: 'iiko',
+				actualExternalId: params.group.externalId,
+				integrationId: params.integrationId
+			}),
+			deleteAt: null
+		}
+		const group = existing
+			? await db.catalogModifierGroup.update({
+					where: { id: existing.id },
+					data,
+					select: { id: true }
+				})
+			: await db.catalogModifierGroup.create({
+					data: {
+						catalogId: params.catalogId,
+						code: params.group.code,
+						name: params.group.name,
+						description: params.group.description ?? null,
+						...data
+					},
+					select: { id: true }
+				})
+
+		await this.upsertIntegrationModifierGroupLink(db, {
+			integrationId: params.integrationId,
+			externalId: params.group.externalId,
+			externalCode: params.group.externalCode ?? null,
+			catalogModifierGroupId: group.id,
+			productModifierGroupId: null,
+			rawMeta: mergeInputJsonObject(params.group.rawMeta, {
+				provider: 'iiko',
+				context: 'catalog_modifier_group',
+				actualExternalId: params.group.externalId
+			})
+		})
+
+		return group
+	}
+
+	private async upsertIikoCatalogModifierOption(
+		db: Prisma.TransactionClient | PrismaService,
+		params: {
+			catalogId: string
+			integrationId: string
+			option: IntegrationProductModifierOptionInput
+		}
+	): Promise<{ id: string }> {
+		const linked = await db.integrationModifierOptionLink.findUnique({
+			where: {
+				integrationId_externalId: {
+					integrationId: params.integrationId,
+					externalId: params.option.externalId
+				}
+			},
+			select: modifierOptionLinkSelect
+		})
+		const linkedOption = linked?.catalogModifierOptionId
+			? await db.catalogModifierOption.findFirst({
+					where: {
+						id: linked.catalogModifierOptionId,
+						catalogId: params.catalogId
+					},
+					select: { id: true }
+				})
+			: null
+		const existing =
+			linkedOption ??
+			(await db.catalogModifierOption.findUnique({
+				where: {
+					catalogId_code: {
+						catalogId: params.catalogId,
+						code: params.option.code
+					}
+				},
+				select: { id: true }
+			}))
+		const data = {
+			defaultPrice: params.option.price,
+			isActive: params.option.isAvailable ?? true,
+			displayOrder: params.option.displayOrder ?? 0,
+			rawMeta: mergeInputJsonObject(params.option.rawMeta, {
+				provider: 'iiko',
+				actualExternalId: params.option.externalId,
+				integrationId: params.integrationId
+			}),
+			deleteAt: null
+		}
+		const option = existing
+			? await db.catalogModifierOption.update({
+					where: { id: existing.id },
+					data,
+					select: { id: true }
+				})
+			: await db.catalogModifierOption.create({
+					data: {
+						catalogId: params.catalogId,
+						code: params.option.code,
+						name: params.option.name,
+						description: params.option.description ?? null,
+						...data
+					},
+					select: { id: true }
+				})
+
+		await this.upsertIntegrationModifierOptionLink(db, {
+			integrationId: params.integrationId,
+			externalId: params.option.externalId,
+			externalCode: params.option.externalCode ?? null,
+			catalogModifierOptionId: option.id,
+			productModifierOptionId: null,
+			rawMeta: mergeInputJsonObject(params.option.rawMeta, {
+				provider: 'iiko',
+				context: 'catalog_modifier_option',
+				actualExternalId: params.option.externalId
+			})
+		})
+
+		return option
+	}
+
+	private upsertIntegrationModifierGroupLink(
+		db: Prisma.TransactionClient | PrismaService,
+		params: {
+			integrationId: string
+			externalId: string
+			externalCode?: string | null
+			catalogModifierGroupId?: string | null
+			productModifierGroupId?: string | null
+			rawMeta?: Prisma.InputJsonValue
+		}
+	) {
+		return db.integrationModifierGroupLink.upsert({
+			where: {
+				integrationId_externalId: {
+					integrationId: params.integrationId,
+					externalId: params.externalId
+				}
+			},
+			update: {
+				externalCode: params.externalCode ?? null,
+				catalogModifierGroupId: params.catalogModifierGroupId ?? null,
+				productModifierGroupId: params.productModifierGroupId ?? null,
+				rawMeta: params.rawMeta
+			},
+			create: {
+				integrationId: params.integrationId,
+				externalId: params.externalId,
+				externalCode: params.externalCode ?? null,
+				catalogModifierGroupId: params.catalogModifierGroupId ?? null,
+				productModifierGroupId: params.productModifierGroupId ?? null,
+				rawMeta: params.rawMeta
+			},
+			select: modifierGroupLinkSelect
+		})
+	}
+
+	private upsertIntegrationModifierOptionLink(
+		db: Prisma.TransactionClient | PrismaService,
+		params: {
+			integrationId: string
+			externalId: string
+			externalCode?: string | null
+			catalogModifierOptionId?: string | null
+			productModifierOptionId?: string | null
+			rawMeta?: Prisma.InputJsonValue
+		}
+	) {
+		return db.integrationModifierOptionLink.upsert({
+			where: {
+				integrationId_externalId: {
+					integrationId: params.integrationId,
+					externalId: params.externalId
+				}
+			},
+			update: {
+				externalCode: params.externalCode ?? null,
+				catalogModifierOptionId: params.catalogModifierOptionId ?? null,
+				productModifierOptionId: params.productModifierOptionId ?? null,
+				rawMeta: params.rawMeta
+			},
+			create: {
+				integrationId: params.integrationId,
+				externalId: params.externalId,
+				externalCode: params.externalCode ?? null,
+				catalogModifierOptionId: params.catalogModifierOptionId ?? null,
+				productModifierOptionId: params.productModifierOptionId ?? null,
+				rawMeta: params.rawMeta
+			},
+			select: modifierOptionLinkSelect
+		})
+	}
+
 	async findMoySkladMappingPreviewAttributes(
 		catalogId: string
 	): Promise<MappingPreviewAttributeRecord[]> {
@@ -2737,11 +3419,10 @@ export class IntegrationRepository {
 			select: mappingApplyEnumValueSelect
 		})
 		if (current) {
-			if (current.deleteAt || current.displayName !== params.displayName) {
+			if (current.deleteAt) {
 				const enumValue = await db.attributeEnumValue.update({
 					where: { id: current.id },
 					data: {
-						displayName: params.displayName,
 						deleteAt: null
 					},
 					select: mappingApplyEnumValueSelect
@@ -2907,7 +3588,7 @@ export class IntegrationRepository {
 
 		await this.prisma.integration.update({
 			where: { id: existing.id },
-			data: { metadata: metadata as Prisma.InputJsonValue }
+			data: { metadata: metadata }
 		})
 
 		return true
@@ -5052,11 +5733,10 @@ export class IntegrationRepository {
 			}
 		})
 		if (current) {
-			if (current.deleteAt || current.displayName !== displayName) {
+			if (current.deleteAt) {
 				await db.attributeEnumValue.update({
 					where: { id: current.id },
 					data: {
-						displayName,
 						deleteAt: null
 					}
 				})

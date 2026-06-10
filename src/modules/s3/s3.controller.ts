@@ -68,7 +68,11 @@ export class S3Controller {
 	@ApiBadRequestResponse({ description: 'Ошибка запроса' })
 	@ApiForbiddenResponse({ description: 'Доступ запрещён' })
 	async presignUpload(@Body() dto: PresignUploadDtoReq) {
-		return this.s3Service.createPresignedUpload(dto.contentType, dto)
+		return this.s3Service.createPresignedUpload(
+			dto.contentType,
+			dto,
+			dto.contentLength
+		)
 	}
 
 	@Post('/images/presign-post')
@@ -238,7 +242,7 @@ export class S3Controller {
 		return interval(1000).pipe(
 			startWith(0),
 			switchMap(() => from(this.s3Service.getUploadStatus(id))),
-			map(status => ({ data: status }) as MessageEvent),
+			map(status => ({ data: status })),
 			takeWhile(event => {
 				const status = (event.data as UploadQueueStatusDto).status
 				return status !== 'completed' && status !== 'failed'

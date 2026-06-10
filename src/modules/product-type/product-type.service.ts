@@ -23,7 +23,11 @@ import {
 	DOMAIN_EVENT_DISPATCHER,
 	type DomainEventDispatcher
 } from '@/shared/domain-events/domain-events.contract'
-import { mustCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
+import {
+	assertCurrentCatalogCanManageCatalogContent,
+	mustCatalogId,
+	mustTypeId
+} from '@/shared/tenancy/ctx'
 import {
 	assertHasUpdateFields,
 	normalizeNullableTrimmedString
@@ -94,6 +98,7 @@ export class ProductTypeService {
 	}
 
 	async create(dto: CreateProductTypeDtoReq) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		await this.featureEntitlements.assertCanUseProductTypes(catalogId)
 		const name = normalizeProductTypeName(dto.name)
@@ -141,6 +146,7 @@ export class ProductTypeService {
 		templateId: string,
 		dto: CreateProductTypeFromTemplateDtoReq
 	) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		await this.featureEntitlements.assertCanUseProductTypes(catalogId)
 		const template = this.requireProductType(
@@ -188,6 +194,7 @@ export class ProductTypeService {
 	}
 
 	async update(id: string, dto: UpdateProductTypeDtoReq) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		await this.featureEntitlements.assertCanUseProductTypes(catalogId)
 		const current = this.requireProductType(
@@ -247,6 +254,7 @@ export class ProductTypeService {
 	}
 
 	async archive(id: string) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		await this.featureEntitlements.assertCanUseProductTypes(catalogId)
 		const archived = await this.repo.archiveCatalogType(id, catalogId)

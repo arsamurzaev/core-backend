@@ -1,4 +1,12 @@
-import { Controller, Get, Header, NotFoundException, Res } from '@nestjs/common'
+import {
+	Controller,
+	ForbiddenException,
+	Get,
+	Header,
+	Headers,
+	NotFoundException,
+	Res
+} from '@nestjs/common'
 import { ApiExcludeController } from '@nestjs/swagger'
 import { SkipThrottle } from '@nestjs/throttler'
 import type { Response } from 'express'
@@ -19,9 +27,19 @@ export class ObservabilityController {
 
 	@Get(observabilitySettings.metricsPath)
 	@Header('Cache-Control', 'no-store')
-	async metrics(@Res({ passthrough: true }) res: Response) {
+	async metrics(
+		@Res({ passthrough: true }) res: Response,
+		@Headers('authorization') authorization?: string,
+		@Headers('x-observability-token') metricsToken?: string
+	) {
 		if (!this.observability.isMetricsEnabled) {
 			throw new NotFoundException('Эндпоинт метрик отключён')
+		}
+
+		const bearerToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim()
+		const token = metricsToken?.trim() || bearerToken
+		if (!this.observability.isMetricsRequestAuthorized(token)) {
+			throw new ForbiddenException('Нет доступа к метрикам')
 		}
 
 		res.setHeader('Content-Type', this.observability.contentType)

@@ -57,7 +57,7 @@ export class DomainEventOutboxRepository implements DomainEventOutboxWriter {
 			},
 			orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }],
 			select: domainEventOutboxSelect
-		}) as Promise<DomainEventOutboxRecord[]>
+		})
 	}
 
 	findProcessableByIds(ids: string[]): Promise<DomainEventOutboxRecord[]> {
@@ -76,7 +76,7 @@ export class DomainEventOutboxRepository implements DomainEventOutboxWriter {
 			},
 			orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }],
 			select: domainEventOutboxSelect
-		}) as Promise<DomainEventOutboxRecord[]>
+		})
 	}
 
 	findDueForProcessing(params: {

@@ -67,6 +67,21 @@ describe('CartLinePricingService', () => {
 		)
 	})
 
+	it('rejects omitted sale unit when explicit selection is required', async () => {
+		tx.productVariantSaleUnit.findFirst.mockResolvedValue({
+			id: 'sale-unit-default',
+			variantId: 'variant-1',
+			baseQuantity: 12,
+			price: 900
+		})
+
+		await expect(
+			service.resolveSaleUnit(tx as never, 'variant-1', null, {
+				rejectWhenMissing: true
+			})
+		).rejects.toThrow('Выберите единицу продажи')
+	})
+
 	it('builds line snapshot from sale unit price and base quantity', () => {
 		const snapshot = service.resolveLineSnapshot({
 			variantId: 'variant-1',
@@ -121,7 +136,11 @@ describe('CartLinePricingService', () => {
 				minPrice: '1200.00',
 				maxPrice: '1200.00',
 				availabilityState: 'AVAILABLE',
-				stock: 5
+				stock: 5,
+				usesPriceList: false,
+				priceListId: null,
+				priceListCode: null,
+				priceListName: null
 			}
 		})
 
@@ -150,7 +169,11 @@ describe('CartLinePricingService', () => {
 				minPrice: null,
 				maxPrice: null,
 				availabilityState: 'AVAILABLE',
-				stock: 5
+				stock: 5,
+				usesPriceList: false,
+				priceListId: null,
+				priceListCode: null,
+				priceListName: null
 			}
 		})
 
@@ -162,5 +185,28 @@ describe('CartLinePricingService', () => {
 
 	it('compares money values with decimal-like inputs', () => {
 		expect(service.isSameMoney({ toNumber: () => 100.004 }, 100)).toBe(true)
+	})
+
+	it('falls back to decimal-like toString when toNumber is not usable', () => {
+		const decimalLike = {
+			toNumber: () => Number.NaN,
+			toString: () => '350.00'
+		}
+
+		const snapshot = service.resolveLineSnapshot({
+			variantId: null,
+			saleUnit: null,
+			quantity: 2,
+			productSnapshot: {
+				price: decimalLike as never,
+				productAttributes: []
+			},
+			variantSnapshot: null
+		})
+
+		expect(snapshot).toEqual({
+			baseQuantity: 2,
+			unitPriceSnapshot: 350
+		})
 	})
 })

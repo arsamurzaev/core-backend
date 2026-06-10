@@ -1080,7 +1080,7 @@ export class OneCIntegrationRepository {
 				externalId: { in: externalIds }
 			},
 			select: oneCProductLinkPreviewSelect
-		}) as Promise<OneCProductLinkPreviewRecord[]>
+		})
 	}
 
 	findProductStockLinksByExternalIds(params: {
@@ -1099,7 +1099,7 @@ export class OneCIntegrationRepository {
 				externalId: { in: externalIds }
 			},
 			select: oneCProductStockLinkPreviewSelect
-		}) as Promise<OneCProductStockLinkPreviewRecord[]>
+		})
 	}
 
 	findVariantLinksByExternalIds(params: {
@@ -1118,7 +1118,7 @@ export class OneCIntegrationRepository {
 				externalId: { in: externalIds }
 			},
 			select: oneCVariantLinkPreviewSelect
-		}) as Promise<OneCVariantLinkPreviewRecord[]>
+		})
 	}
 
 	findProductsByIds(params: {
@@ -1137,7 +1137,7 @@ export class OneCIntegrationRepository {
 				deleteAt: null
 			},
 			select: oneCProductPreviewSelect
-		}) as Promise<OneCProductPreviewRecord[]>
+		})
 	}
 
 	findStockProductsByIds(params: {
@@ -1157,7 +1157,7 @@ export class OneCIntegrationRepository {
 				deleteAt: null
 			},
 			select: oneCProductStockPreviewSelect
-		}) as Promise<OneCProductStockPreviewRecord[]>
+		})
 	}
 
 	findProductsBySkus(params: {
@@ -1174,7 +1174,7 @@ export class OneCIntegrationRepository {
 				deleteAt: null
 			},
 			select: oneCProductPreviewSelect
-		}) as Promise<OneCProductPreviewRecord[]>
+		})
 	}
 
 	findStockProductsBySkus(params: {
@@ -1191,7 +1191,7 @@ export class OneCIntegrationRepository {
 				deleteAt: null
 			},
 			select: oneCProductStockPreviewSelect
-		}) as Promise<OneCProductStockPreviewRecord[]>
+		})
 	}
 
 	findVariantsByIds(params: {
@@ -1213,7 +1213,7 @@ export class OneCIntegrationRepository {
 				}
 			},
 			select: oneCVariantPreviewSelect
-		}) as Promise<OneCVariantPreviewRecord[]>
+		})
 	}
 
 	findVariantsBySkus(params: {
@@ -1233,7 +1233,7 @@ export class OneCIntegrationRepository {
 				}
 			},
 			select: oneCVariantPreviewSelect
-		}) as Promise<OneCVariantPreviewRecord[]>
+		})
 	}
 
 	findVariantsByProductVariantKeys(params: {
@@ -1266,7 +1266,7 @@ export class OneCIntegrationRepository {
 				}))
 			},
 			select: oneCVariantPreviewSelect
-		}) as Promise<OneCVariantPreviewRecord[]>
+		})
 	}
 
 	async touchProductLinkPriceSynced(

@@ -245,6 +245,41 @@ export type IikoExternalMenuPrice = {
 	taxCategoryId?: string | null
 }
 
+export type IikoModifierRestrictions = {
+	minQuantity?: number | null
+	maxQuantity?: number | null
+	freeQuantity?: number | null
+	byDefault?: number | string | null
+	hideIfDefaultQuantity?: boolean | null
+}
+
+export type IikoExternalMenuModifierItem = {
+	sku?: string | null
+	name?: string | null
+	description?: string | null
+	restrictions?: IikoModifierRestrictions[] | null
+	itemId?: string | null
+	isHidden?: boolean | null
+	prices?: IikoExternalMenuPrice[] | null
+	position?: number | null
+	independentQuantity?: boolean | null
+	productCategoryId?: string | null
+	measureUnitType?: string | null
+	buttonImageUrl?: string | null
+}
+
+export type IikoExternalMenuModifierGroup = {
+	name?: string | null
+	description?: string | null
+	restrictions?: IikoModifierRestrictions | null
+	items?: IikoExternalMenuModifierItem[] | null
+	canBeDivided?: boolean | null
+	itemGroupId?: string | null
+	isHidden?: boolean | null
+	childModifiersHaveMinMaxRestrictions?: boolean | null
+	sku?: string | null
+}
+
 export type IikoExternalMenuItemSize = {
 	id?: string | null
 	sizeId?: string | null
@@ -255,7 +290,7 @@ export type IikoExternalMenuItemSize = {
 	isHidden?: boolean | null
 	buttonImageUrl?: string | null
 	prices?: IikoExternalMenuPrice[] | null
-	itemModifierGroups?: unknown[] | null
+	itemModifierGroups?: IikoExternalMenuModifierGroup[] | null
 }
 
 export type IikoExternalMenuItem = {
@@ -325,6 +360,37 @@ export type IikoSyncSizePrice = {
 	rawMeta?: unknown
 }
 
+export type IikoSyncModifierOption = {
+	id: string
+	code?: string | null
+	name: string
+	description?: string | null
+	price?: number | null
+	minQuantity?: number | null
+	maxQuantity?: number | null
+	defaultAmount?: number | null
+	isHidden?: boolean | null
+	displayOrder?: number | null
+	rawMeta?: unknown
+}
+
+export type IikoSyncModifierGroup = {
+	id: string
+	code?: string | null
+	name: string
+	description?: string | null
+	sizeId?: string | null
+	minQuantity?: number | null
+	maxQuantity?: number | null
+	defaultAmount?: number | null
+	freeQuantity?: number | null
+	isHidden?: boolean | null
+	childModifiersHaveMinMaxRestrictions?: boolean | null
+	displayOrder?: number | null
+	options: IikoSyncModifierOption[]
+	rawMeta?: unknown
+}
+
 export type IikoSyncProduct = {
 	id: string
 	code?: string | null
@@ -337,8 +403,8 @@ export type IikoSyncProduct = {
 	productCategoryId?: string | null
 	measureUnit?: string | null
 	sizePrices?: IikoSyncSizePrice[] | null
-	modifiers?: unknown[] | null
-	groupModifiers?: unknown[] | null
+	modifiers?: IikoSyncModifierOption[] | null
+	groupModifiers?: IikoSyncModifierGroup[] | null
 	imageLinks?: string[] | null
 	parentGroup?: string | null
 	order?: number | null
@@ -450,7 +516,16 @@ export type IikoCreateDeliveryOrderItem = {
 	productSizeId?: string | null
 	amount: number
 	price: number
+	modifiers?: IikoCreateDeliveryOrderModifier[] | null
 	comment?: string | null
+	positionId?: string | null
+}
+
+export type IikoCreateDeliveryOrderModifier = {
+	productId: string
+	amount: number
+	productGroupId?: string | null
+	price?: number | null
 	positionId?: string | null
 }
 

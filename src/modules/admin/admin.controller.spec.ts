@@ -19,6 +19,12 @@ describe('AdminController', () => {
 		>
 	>
 	let outbox: jest.Mocked<DomainEventOutboxDiagnosticsService>
+	const req = {
+		user: {
+			id: 'admin-1',
+			role: 'ADMIN'
+		}
+	} as any
 
 	beforeEach(async () => {
 		const module: TestingModule = await overrideControllerAuthGuards(
@@ -76,10 +82,13 @@ describe('AdminController', () => {
 		}
 		service.deleteCatalogContent.mockResolvedValue(result)
 
-		await expect(controller.deleteCatalogContent('catalog-1')).resolves.toBe(
+		await expect(controller.deleteCatalogContent('catalog-1', req)).resolves.toBe(
 			result
 		)
-		expect(service.deleteCatalogContent).toHaveBeenCalledWith('catalog-1')
+		expect(service.deleteCatalogContent).toHaveBeenCalledWith('catalog-1', {
+			id: 'admin-1',
+			role: 'ADMIN'
+		})
 	})
 
 	it('delegates MoySklad stock diagnostics to service', async () => {
@@ -110,10 +119,11 @@ describe('AdminController', () => {
 		service.getCatalogMoySkladStockDiagnostics.mockResolvedValue(result)
 
 		await expect(
-			controller.getCatalogMoySkladStockDiagnostics('catalog-1')
+			controller.getCatalogMoySkladStockDiagnostics('catalog-1', req)
 		).resolves.toBe(result)
 		expect(service.getCatalogMoySkladStockDiagnostics).toHaveBeenCalledWith(
-			'catalog-1'
+			'catalog-1',
+			{ id: 'admin-1', role: 'ADMIN' }
 		)
 	})
 
@@ -129,13 +139,18 @@ describe('AdminController', () => {
 		service.diagnoseCatalogDefaultVariants.mockResolvedValue(result)
 
 		await expect(
-			controller.diagnoseCatalogDefaultVariants('catalog-1', {
-				sampleLimit: 5
-			})
+			controller.diagnoseCatalogDefaultVariants(
+				'catalog-1',
+				{
+					sampleLimit: 5
+				},
+				req
+			)
 		).resolves.toBe(result)
 		expect(service.diagnoseCatalogDefaultVariants).toHaveBeenCalledWith(
 			'catalog-1',
-			5
+			5,
+			{ id: 'admin-1', role: 'ADMIN' }
 		)
 	})
 
@@ -148,10 +163,11 @@ describe('AdminController', () => {
 		service.repairCatalogMissingDefaultVariants.mockResolvedValue(result)
 
 		await expect(
-			controller.repairCatalogMissingDefaultVariants('catalog-1')
+			controller.repairCatalogMissingDefaultVariants('catalog-1', req)
 		).resolves.toBe(result)
 		expect(service.repairCatalogMissingDefaultVariants).toHaveBeenCalledWith(
-			'catalog-1'
+			'catalog-1',
+			{ id: 'admin-1', role: 'ADMIN' }
 		)
 	})
 
@@ -171,11 +187,14 @@ describe('AdminController', () => {
 		service.repairCatalogDefaultVariantPriceMismatches.mockResolvedValue(result)
 
 		await expect(
-			controller.repairCatalogDefaultVariantPriceMismatches('catalog-1', dto)
+			controller.repairCatalogDefaultVariantPriceMismatches('catalog-1', dto, req)
 		).resolves.toBe(result)
 		expect(
 			service.repairCatalogDefaultVariantPriceMismatches
-		).toHaveBeenCalledWith('catalog-1', dto)
+		).toHaveBeenCalledWith('catalog-1', dto, {
+			id: 'admin-1',
+			role: 'ADMIN'
+		})
 	})
 
 	it('delegates one domain event outbox retry to diagnostics service', async () => {

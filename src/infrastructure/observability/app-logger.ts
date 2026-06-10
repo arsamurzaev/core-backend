@@ -216,7 +216,7 @@ export class AppLogger implements LoggerService {
 			entry.timestamp as string,
 			serializeMessage(entry.message),
 			context,
-			stack
+			typeof entry.stack === 'string' ? entry.stack : stack
 		)
 
 		const line = this.settings.jsonLogsEnabled ? jsonLine : textLine

@@ -170,7 +170,7 @@ describe('AttributeService', () => {
 		})
 	})
 
-	it('allows only display order updates for imported enum values', async () => {
+	it('allows display label and order updates for imported enum values', async () => {
 		repo.findById.mockResolvedValue(enumAttribute as any)
 		repo.findEnumValue.mockResolvedValue({
 			id: 'enum-id',
@@ -178,18 +178,20 @@ describe('AttributeService', () => {
 		} as any)
 		repo.updateEnumValue.mockResolvedValue({
 			id: 'enum-id',
+			displayName: 'Manual name',
 			displayOrder: 5,
 			source: 'IMPORTED'
 		} as any)
 
 		await service.updateEnumValue('attribute-id', 'enum-id', {
+			displayName: 'Manual name',
 			displayOrder: 5
 		})
 
 		expect(repo.updateEnumValue).toHaveBeenCalledWith(
 			'enum-id',
 			'attribute-id',
-			{ displayOrder: 5 },
+			{ displayName: 'Manual name', displayOrder: 5 },
 			null
 		)
 	})
@@ -203,7 +205,7 @@ describe('AttributeService', () => {
 
 		await expect(
 			service.updateEnumValue('attribute-id', 'enum-id', {
-				displayName: 'Manual name'
+				value: 'manual-value'
 			})
 		).rejects.toBeInstanceOf(BadRequestException)
 

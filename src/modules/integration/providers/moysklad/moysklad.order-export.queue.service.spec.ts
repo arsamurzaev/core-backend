@@ -178,7 +178,7 @@ describe('MoySkladOrderExportQueueService', () => {
 	})
 
 	it('does not create an export record when order export is disabled', async () => {
-		repo.findMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.findMoySklad.mockResolvedValue(integrationRecord)
 		metadataCrypto.parseStoredMetadata.mockReturnValue({
 			token: 'token',
 			priceTypeName: 'Retail',
@@ -205,7 +205,7 @@ describe('MoySkladOrderExportQueueService', () => {
 	})
 
 	it('creates a pending export and enqueues a compact BullMQ job', async () => {
-		repo.findMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.findMoySklad.mockResolvedValue(integrationRecord)
 		repo.createPendingOrderExport.mockResolvedValue(exportRecord as any)
 		metadataCrypto.parseStoredMetadata.mockReturnValue({
 			token: 'token',
@@ -266,7 +266,7 @@ describe('MoySkladOrderExportQueueService', () => {
 		repo.findMoySklad.mockResolvedValue({
 			...integrationRecord,
 			id: 'integration:1'
-		} as any)
+		})
 		repo.createPendingOrderExport.mockResolvedValue({
 			...exportRecord,
 			integrationId: 'integration:1',

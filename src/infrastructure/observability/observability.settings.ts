@@ -7,6 +7,7 @@ export type ObservabilitySettings = {
 	deploymentEnvironment: string
 	metricsEnabled: boolean
 	metricsPath: string
+	metricsToken?: string
 	jsonLogsEnabled: boolean
 	logFilePath?: string
 	tracesEnabled: boolean
@@ -71,6 +72,7 @@ export function resolveObservabilitySettings(
 		env.OBSERVABILITY_METRICS_PATH,
 		DEFAULT_METRICS_PATH
 	)
+	const metricsToken = env.OBSERVABILITY_METRICS_TOKEN?.trim() || undefined
 	const otlpTracesUrl = env.OBSERVABILITY_OTLP_TRACES_URL?.trim() || undefined
 	const configuredLogFilePath = env.OBSERVABILITY_LOG_FILE_PATH?.trim()
 	const logFilePath =
@@ -90,6 +92,7 @@ export function resolveObservabilitySettings(
 				env.NODE_ENV !== 'production'
 			),
 		metricsPath,
+		metricsToken,
 		jsonLogsEnabled:
 			enabled &&
 			parseBoolean(env.OBSERVABILITY_JSON_LOGS, env.NODE_ENV === 'production'),

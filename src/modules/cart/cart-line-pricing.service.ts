@@ -33,6 +33,7 @@ export type CartResolvedLineSnapshot = {
 
 type ResolveSaleUnitOptions = {
 	useDefaultWhenMissing?: boolean
+	rejectWhenMissing?: boolean
 }
 
 @Injectable()
@@ -77,9 +78,9 @@ export class CartLinePricingService {
 			return saleUnit
 		}
 
-		if (!options.useDefaultWhenMissing) return null
+		if (!options.useDefaultWhenMissing && !options.rejectWhenMissing) return null
 
-		return tx.productVariantSaleUnit.findFirst({
+		const defaultSaleUnit = await tx.productVariantSaleUnit.findFirst({
 			where: {
 				variantId,
 				isActive: true,
@@ -97,6 +98,11 @@ export class CartLinePricingService {
 				{ createdAt: 'asc' as const }
 			]
 		})
+		if (!defaultSaleUnit) return null
+		if (options.rejectWhenMissing) {
+			throw new BadRequestException('Выберите единицу продажи')
+		}
+		return defaultSaleUnit
 	}
 
 	resolveLineSnapshot(params: {
@@ -198,15 +204,30 @@ export class CartLinePricingService {
 
 	private readFiniteNumber(value: unknown): number {
 		if (typeof value === 'number') return value
-		if (typeof value === 'string') return Number(value)
+		if (typeof value === 'string' && value.trim()) return Number(value)
 		if (typeof value === 'bigint') return Number(value)
-		if (this.hasToNumber(value)) return value.toNumber()
+		if (typeof value === 'object' && value !== null) {
+			const candidate = value as {
+				toNumber?: () => unknown
+				toString?: () => string
+			}
+			if (typeof candidate.toNumber === 'function') {
+				try {
+					const parsed = candidate.toNumber()
+					if (typeof parsed === 'number' && Number.isFinite(parsed)) {
+						return parsed
+					}
+				} catch {
+					// Fall back to a custom toString implementation below.
+				}
+			}
+			if (
+				typeof candidate.toString === 'function' &&
+				candidate.toString !== Object.prototype.toString
+			) {
+				return Number(candidate.toString())
+			}
+		}
 		return Number.NaN
-	}
-
-	private hasToNumber(value: unknown): value is { toNumber: () => number } {
-		if (typeof value !== 'object' || value === null) return false
-		const candidate = value as { toNumber?: unknown }
-		return typeof candidate.toNumber === 'function'
 	}
 }

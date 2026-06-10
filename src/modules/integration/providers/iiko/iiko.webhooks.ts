@@ -96,7 +96,7 @@ export function normalizeIikoWebhookPayload(
 		normalizeWebhookPayloadJson(payload)
 	)
 	if (!isRecord(normalizedPayload)) {
-		throw new BadRequestException('iiko webhook payload must be a JSON object')
+		throw new BadRequestException('Тело вебхука iiko должно быть JSON-объектом')
 	}
 
 	const eventInfo = resolveIikoWebhookEventInfo(normalizedPayload)
@@ -263,7 +263,7 @@ function normalizeWebhookPayloadJson(payload: unknown): unknown {
 
 	const trimmed = raw.trim()
 	if (!trimmed) {
-		throw new BadRequestException('iiko webhook payload must not be empty')
+		throw new BadRequestException('Тело вебхука iiko не должно быть пустым')
 	}
 
 	if (looksLikeFormPayload(trimmed)) {
@@ -273,7 +273,7 @@ function normalizeWebhookPayloadJson(payload: unknown): unknown {
 	try {
 		return JSON.parse(trimmed)
 	} catch {
-		throw new BadRequestException('iiko webhook payload must be valid JSON')
+		throw new BadRequestException('Тело вебхука iiko должно быть валидным JSON')
 	}
 }
 

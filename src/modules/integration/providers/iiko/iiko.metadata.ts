@@ -175,9 +175,7 @@ export class IikoMetadataCryptoService {
 			appId: metadata.appId,
 			...(metadata.clientSecret
 				? {
-						clientSecretEncrypted: this.encryptClientSecret(
-							metadata.clientSecret
-						)
+						clientSecretEncrypted: this.encryptClientSecret(metadata.clientSecret)
 					}
 				: {}),
 			organizationId: metadata.organizationId,
@@ -247,9 +245,7 @@ export class IikoMetadataCryptoService {
 		return this.encryptSecret(apiLogin)
 	}
 
-	private encryptClientSecret(
-		clientSecret: string
-	): IikoEncryptedClientSecret {
+	private encryptClientSecret(clientSecret: string): IikoEncryptedClientSecret {
 		return this.encryptSecret(clientSecret)
 	}
 

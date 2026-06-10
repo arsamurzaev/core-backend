@@ -88,8 +88,8 @@ describe('ProductTypeService', () => {
 		repo.findCatalog.mockResolvedValue({
 			id: catalogId,
 			typeId: catalogTypeId
-		} as any)
-		repo.findAttributesByIds.mockResolvedValue([enumAttribute] as any)
+		})
+		repo.findAttributesByIds.mockResolvedValue([enumAttribute])
 		repo.findImportedEnumAttributeIds.mockResolvedValue([])
 		repo.getCatalogTypeSchemaUpdateImpact.mockResolvedValue({
 			boundProductCount: 0,
@@ -140,8 +140,23 @@ describe('ProductTypeService', () => {
 		expectCatalogProductTypeInvalidation()
 	})
 
+	it('rejects product type creation from child catalog', async () => {
+		await expect(
+			runWithChildCatalog(() =>
+				service.create({
+					name: 'Child type',
+					attributes: []
+				})
+			)
+		).rejects.toThrow(
+			'Дочерний каталог не может управлять товарами, категориями, брендами и справочниками каталога'
+		)
+
+		expect(repo.create).not.toHaveBeenCalled()
+	})
+
 	it('rejects variant attributes that are not enum attributes', async () => {
-		repo.findAttributesByIds.mockResolvedValue([stringAttribute] as any)
+		repo.findAttributesByIds.mockResolvedValue([stringAttribute])
 
 		await expect(
 			runWithCatalog(() =>
@@ -185,7 +200,7 @@ describe('ProductTypeService', () => {
 					updatedAt: new Date()
 				}
 			]
-		} as any)
+		})
 		repo.existsCode.mockImplementation(
 			async (_scope, code) => code === 'mens-shoes'
 		)
@@ -647,7 +662,7 @@ describe('ProductTypeService', () => {
 			createdAt: new Date(),
 			updatedAt: new Date(),
 			attributes: []
-		} as any)
+		})
 		repo.updateSystemTemplate.mockResolvedValue({ id: 'template-id' } as any)
 		repo.archiveSystemTemplate.mockResolvedValue(true)
 
@@ -683,6 +698,19 @@ describe('ProductTypeService', () => {
 				requestId: 'test',
 				host: 'test.local',
 				catalogId,
+				typeId: catalogTypeId
+			},
+			fn
+		)
+	}
+
+	function runWithChildCatalog<T>(fn: () => T): T {
+		return RequestContext.run(
+			{
+				requestId: 'test',
+				host: 'child.test.local',
+				catalogId: 'child-catalog-id',
+				parentId: catalogId,
 				typeId: catalogTypeId
 			},
 			fn

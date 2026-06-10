@@ -17,7 +17,7 @@ export function serializeDomainEvent(
 	return {
 		...event,
 		occurredAt: event.occurredAt.toISOString()
-	} as unknown as Prisma.InputJsonValue
+	}
 }
 
 export function deserializeDomainEvent(payload: unknown): DomainEvent {

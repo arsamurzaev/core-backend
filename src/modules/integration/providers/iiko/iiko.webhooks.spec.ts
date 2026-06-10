@@ -105,13 +105,13 @@ describe('iiko webhooks helpers', () => {
 
 	it('rejects invalid webhook payload as a bad request', () => {
 		expect(() => normalizeIikoWebhookPayload('')).toThrow(
-			'iiko webhook payload must not be empty'
+			'Тело вебхука iiko не должно быть пустым'
 		)
 		expect(() => normalizeIikoWebhookPayload('not-json')).toThrow(
-			'iiko webhook payload must be valid JSON'
+			'Тело вебхука iiko должно быть валидным JSON'
 		)
 		expect(() => normalizeIikoWebhookPayload([])).toThrow(
-			'iiko webhook payload must be a JSON object'
+			'Тело вебхука iiko должно быть JSON-объектом'
 		)
 	})
 

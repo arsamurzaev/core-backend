@@ -28,7 +28,7 @@ export class CapabilityGuard implements CanActivate {
 
 		const catalogId = RequestContext.get()?.catalogId
 		if (!catalogId) {
-			throw new ForbiddenException('Catalog context is required')
+			throw new ForbiddenException('Контекст каталога обязателен')
 		}
 
 		await this.capabilities.assert(catalogId, capability)

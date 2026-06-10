@@ -87,7 +87,7 @@ describe('CartOrderSnapshotService', () => {
 			'catalog-1',
 			'product-1',
 			'variant-1',
-			{ quantity: 2, enforceStock: false }
+			{ quantity: 2, enforceStock: false, buyerCatalogId: 'catalog-1' }
 		)
 	})
 
@@ -226,7 +226,78 @@ describe('CartOrderSnapshotService', () => {
 			'catalog-1',
 			'product-1',
 			'default-variant',
-			{ quantity: 24, enforceStock: false }
+			{ quantity: 24, enforceStock: false, buyerCatalogId: 'catalog-1' }
+		)
+	})
+
+	it('uses decimal-like sale unit prices in order snapshots', async () => {
+		const decimalLike = {
+			toNumber: () => Number.NaN,
+			toString: () => '350.00'
+		}
+		sellableReader.resolveVariantSellable.mockResolvedValue({
+			catalogId: 'catalog-1',
+			productId: 'product-1',
+			mode: 'SIMPLE',
+			variantId: 'default-variant',
+			defaultVariantId: 'default-variant',
+			requiresVariantSelection: false,
+			priceState: 'KNOWN',
+			displayPrice: '500.00',
+			minPrice: '500.00',
+			maxPrice: '500.00',
+			availabilityState: 'AVAILABLE',
+			stock: 30
+		})
+
+		const [item] = await service.buildSnapshotItems(tx as never, 'catalog-1', [
+			{
+				id: 'cart-item-1',
+				productId: 'product-1',
+				variantId: 'default-variant',
+				saleUnitId: 'sale-unit-piece',
+				quantity: 2,
+				baseQuantity: 2,
+				unitPriceSnapshot: null,
+				product: {
+					id: 'product-1',
+					catalogId: 'catalog-1',
+					name: 'Product',
+					slug: 'product',
+					price: 500,
+					productAttributes: []
+				},
+				variant: {
+					id: 'default-variant',
+					sku: 'SKU-1',
+					variantKey: 'default',
+					price: 500,
+					stock: 30,
+					status: 'ACTIVE',
+					isAvailable: true,
+					attributes: []
+				},
+				saleUnit: {
+					id: 'sale-unit-piece',
+					variantId: 'default-variant',
+					code: 'piece',
+					name: 'Piece',
+					baseQuantity: 1,
+					price: decimalLike,
+					isDefault: true,
+					isActive: true,
+					displayOrder: 0
+				}
+			}
+		])
+
+		expect(item).toEqual(
+			expect.objectContaining({
+				displayPrice: '350.00',
+				unitPrice: 350,
+				unitPriceSnapshot: 350,
+				lineTotal: 700
+			})
 		)
 	})
 
@@ -308,7 +379,7 @@ describe('CartOrderSnapshotService', () => {
 			'catalog-1',
 			'product-1',
 			'variant-1',
-			{ quantity: 2, enforceStock: false }
+			{ quantity: 2, enforceStock: false, buyerCatalogId: 'catalog-1' }
 		)
 	})
 

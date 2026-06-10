@@ -15,7 +15,10 @@ import {
 	CATEGORY_PRODUCTS_CACHE_VERSION,
 	PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
-import { mustCatalogId } from '@/shared/tenancy/ctx'
+import {
+	assertCurrentCatalogCanManageCatalogContent,
+	mustCatalogId
+} from '@/shared/tenancy/ctx'
 import {
 	assertHasUpdateFields,
 	normalizeNullableTrimmedString
@@ -75,6 +78,7 @@ export class CatalogSaleUnitService {
 	}
 
 	async create(dto: CreateCatalogSaleUnitDtoReq) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		await this.featureEntitlements.assertCanUseCatalogSaleUnits(catalogId)
 		const name = normalizeName(dto.name)
@@ -114,6 +118,7 @@ export class CatalogSaleUnitService {
 	}
 
 	async update(id: string, dto: UpdateCatalogSaleUnitDtoReq) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		await this.featureEntitlements.assertCanUseCatalogSaleUnits(catalogId)
 		this.requireRecord(await this.repo.findById(id, catalogId, true))
@@ -158,6 +163,7 @@ export class CatalogSaleUnitService {
 	}
 
 	async archive(id: string) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		await this.featureEntitlements.assertCanUseCatalogSaleUnits(catalogId)
 		const archived = this.requireUpdated(

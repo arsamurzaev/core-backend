@@ -375,6 +375,49 @@ describe('AdminService', () => {
 		expect(prisma.$transaction).not.toHaveBeenCalled()
 	})
 
+	it('creates trial license with a calendar end date', async () => {
+		const tx = {
+			user: {
+				create: jest.fn().mockResolvedValue({
+					id: 'user-1',
+					name: 'Catalog One',
+					login: 'catalog-one'
+				})
+			},
+			catalog: {
+				create: jest.fn(async ({ data }) =>
+					createAdminCatalogRecord({
+						name: data.name,
+						slug: data.slug,
+						subscriptionEndsAt: data.subscriptionEndsAt
+					})
+				)
+			}
+		}
+		const { service } = createService(tx as any)
+
+		jest.useFakeTimers().setSystemTime(new Date(2026, 5, 10, 15, 30))
+		try {
+			await service.createCatalog({
+				name: 'Catalog One',
+				slug: 'catalog-one',
+				typeId: 'type-1',
+				status: CatalogStatus.PROPOSAL,
+				trialLicenseDays: 14
+			})
+		} finally {
+			jest.useRealTimers()
+		}
+
+		expect(tx.catalog.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				data: expect.objectContaining({
+					subscriptionEndsAt: new Date(2026, 5, 24)
+				})
+			})
+		)
+	})
+
 	it('exposes inventory mode and entitlement in admin catalog config', async () => {
 		const { prisma, service } = createService()
 		prisma.catalog.findMany.mockResolvedValue([
@@ -582,7 +625,11 @@ describe('AdminService', () => {
 		})
 		prisma.regionality.findMany.mockResolvedValue([
 			{ id: 'region-chechnya', countryId: 'country-ru', parentId: null },
-			{ id: 'region-grozny', countryId: 'country-ru', parentId: 'region-chechnya' },
+			{
+				id: 'region-grozny',
+				countryId: 'country-ru',
+				parentId: 'region-chechnya'
+			},
 			{ id: 'region-kz', countryId: 'country-kz', parentId: null }
 		])
 
@@ -613,7 +660,7 @@ describe('AdminService', () => {
 				name: 'Geo Admin',
 				role: Role.GEO_ADMIN,
 				countries: [
-					{ id: 'country-ru', code: 'RU', name: 'Р РѕСЃСЃРёСЏ', deleteAt: null }
+					{ id: 'country-ru', code: 'RU', name: 'Россия', deleteAt: null }
 				],
 				regions: [],
 				deleteAt: null,
@@ -640,13 +687,13 @@ describe('AdminService', () => {
 		const country = {
 			id: 'country-ru',
 			code: 'RU',
-			name: 'Р РѕСЃСЃРёСЏ',
+			name: 'Россия',
 			deleteAt: null
 		}
 		const region = {
 			id: 'region-chechnya',
 			code: 'RU-CHECHENSKAYA-RESPUBLIKA',
-			name: 'Р§РµС‡РµРЅСЃРєР°СЏ СЂРµСЃРїСѓР±Р»РёРєР°',
+			name: 'Чеченская республика',
 			countryId: country.id,
 			parentId: null,
 			countryCode: country.code,
@@ -709,7 +756,7 @@ describe('AdminService', () => {
 		const country = {
 			id: 'country-ru',
 			code: 'RU',
-			name: 'Р РѕСЃСЃРёСЏ',
+			name: 'Россия',
 			deleteAt: null
 		}
 		prisma.country.findMany.mockResolvedValue([country])
@@ -1141,6 +1188,39 @@ describe('AdminService', () => {
 		expect(cache.bumpVersion).toHaveBeenCalledWith(
 			CATALOG_CACHE_VERSION,
 			'catalog-1'
+		)
+	})
+
+	it('updates trial license with a calendar end date', async () => {
+		const tx = createTransactionMock()
+		const { prisma, service } = createService(tx)
+		prisma.catalog.findUnique.mockResolvedValueOnce({
+			id: 'catalog-1',
+			slug: 'catalog-one',
+			typeId: 'type-1',
+			userId: 'user-1',
+			metrics: []
+		})
+		tx.catalog.update.mockResolvedValueOnce(
+			createAdminCatalogRecord({
+				subscriptionEndsAt: new Date(2026, 5, 24)
+			})
+		)
+
+		jest.useFakeTimers().setSystemTime(new Date(2026, 5, 10, 15, 30))
+		try {
+			await service.updateCatalog('catalog-1', { trialLicenseDays: 14 })
+		} finally {
+			jest.useRealTimers()
+		}
+
+		expect(tx.catalog.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: 'catalog-1' },
+				data: expect.objectContaining({
+					subscriptionEndsAt: new Date(2026, 5, 24)
+				})
+			})
 		)
 	})
 

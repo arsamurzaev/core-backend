@@ -138,6 +138,7 @@ const productAttributeSelect = {
 
 const productVariantSaleUnitSelect = {
 	id: true,
+	variantId: true,
 	catalogSaleUnitId: true,
 	code: true,
 	name: true,
@@ -340,6 +341,30 @@ export class CategoryRepository {
 		})
 
 		return links.map(link => link.productId)
+	}
+
+	async findCategoryProductRefs(
+		catalogId: string,
+		categoryIds: string[],
+		options: { includeInactive?: boolean } = {}
+	) {
+		if (!categoryIds.length) return []
+
+		return this.prisma.categoryProduct.findMany({
+			where: {
+				categoryId: { in: categoryIds },
+				category: { catalogId, deleteAt: null },
+				product: {
+					catalogId,
+					deleteAt: null,
+					...(options.includeInactive ? {} : { status: ProductStatus.ACTIVE })
+				}
+			},
+			select: {
+				categoryId: true,
+				productId: true
+			}
+		})
 	}
 
 	async findCategoryProductPositions(

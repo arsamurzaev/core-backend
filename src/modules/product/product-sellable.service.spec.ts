@@ -356,6 +356,319 @@ describe('ProductSellableService', () => {
 		)
 	})
 
+	it('uses product price from active price list for simple products', async () => {
+		const priceLists = {
+			resolveProductPriceContext: jest.fn().mockResolvedValue({
+				priceList: { id: 'price-list-1', code: 'retail', name: 'Retail' },
+				productPrices: new Map([['product-1', '850.00']]),
+				variantPrices: new Map(),
+				saleUnitPrices: new Map()
+			})
+		}
+		service = new ProductSellableService(prisma as never, priceLists as never)
+		prisma.product.findFirst.mockResolvedValue({
+			id: 'product-1',
+			catalogId: 'catalog-1',
+			price: 990,
+			status: ProductStatus.ACTIVE,
+			variants: [
+				{
+					id: 'default-variant',
+					variantKey: 'default',
+					kind: ProductVariantKind.DEFAULT,
+					price: 1200,
+					stock: 2,
+					status: ProductVariantStatus.ACTIVE,
+					isAvailable: true,
+					attributes: []
+				}
+			]
+		})
+
+		await expect(
+			service.resolveProductSellable('catalog-1', 'product-1', {
+				buyerCatalogId: 'child-catalog-1'
+			})
+		).resolves.toEqual(
+			expect.objectContaining({
+				priceState: 'KNOWN',
+				displayPrice: '850.00',
+				usesPriceList: true,
+				priceListId: 'price-list-1',
+				priceListCode: 'retail',
+				priceListName: 'Retail'
+			})
+		)
+		expect(priceLists.resolveProductPriceContext).toHaveBeenCalledWith({
+			buyerCatalogId: 'child-catalog-1',
+			ownerCatalogId: 'catalog-1',
+			productIds: ['product-1']
+		})
+	})
+
+	it('ignores price-list sale unit prices when sale units are disabled', async () => {
+		const priceLists = {
+			resolveProductPriceContext: jest.fn().mockResolvedValue({
+				priceList: { id: 'price-list-1', code: 'retail', name: 'Retail' },
+				productPrices: new Map([['product-1', '850.00']]),
+				variantPrices: new Map(),
+				saleUnitPrices: new Map([['sale-unit-box', '250.00']])
+			})
+		}
+		const capabilities = {
+			canUseCatalogSaleUnits: jest.fn().mockResolvedValue(false),
+			canUseProductVariants: jest.fn().mockResolvedValue(true)
+		}
+		service = new ProductSellableService(
+			prisma as never,
+			priceLists as never,
+			capabilities as never
+		)
+		prisma.product.findFirst.mockResolvedValue({
+			id: 'product-1',
+			catalogId: 'catalog-1',
+			price: 990,
+			status: ProductStatus.ACTIVE,
+			variants: [
+				{
+					id: 'default-variant',
+					variantKey: 'default',
+					kind: ProductVariantKind.DEFAULT,
+					price: 1200,
+					stock: 2,
+					status: ProductVariantStatus.ACTIVE,
+					isAvailable: true,
+					attributes: [],
+					saleUnits: [
+						{
+							id: 'sale-unit-box',
+							price: 6000,
+							baseQuantity: 12,
+							isDefault: true,
+							displayOrder: 0
+						}
+					]
+				}
+			]
+		})
+
+		await expect(
+			service.resolveProductSellable('catalog-1', 'product-1', {
+				buyerCatalogId: 'catalog-1'
+			})
+		).resolves.toEqual(
+			expect.objectContaining({
+				priceState: 'KNOWN',
+				displayPrice: '850.00',
+				usesPriceList: true
+			})
+		)
+		expect(capabilities.canUseCatalogSaleUnits).toHaveBeenCalledWith('catalog-1')
+	})
+
+	it('treats products as simple when product variants are disabled', async () => {
+		const capabilities = {
+			canUseCatalogSaleUnits: jest.fn().mockResolvedValue(false),
+			canUseProductVariants: jest.fn().mockResolvedValue(false)
+		}
+		service = new ProductSellableService(
+			prisma as never,
+			undefined,
+			capabilities as never
+		)
+		prisma.product.findFirst.mockResolvedValue({
+			id: 'product-1',
+			catalogId: 'catalog-1',
+			price: 990,
+			status: ProductStatus.ACTIVE,
+			variants: [
+				{
+					id: 'default-variant',
+					variantKey: 'default',
+					kind: ProductVariantKind.DEFAULT,
+					price: 1200,
+					stock: 3,
+					status: ProductVariantStatus.ACTIVE,
+					isAvailable: true,
+					attributes: []
+				},
+				{
+					id: 'variant-s',
+					variantKey: 'size=s',
+					kind: ProductVariantKind.MATRIX,
+					price: 1000,
+					stock: 2,
+					status: ProductVariantStatus.ACTIVE,
+					isAvailable: true,
+					attributes: [{ id: 'attribute-size-s' }]
+				}
+			]
+		})
+
+		await expect(
+			service.resolveProductSellable('catalog-1', 'product-1')
+		).resolves.toEqual(
+			expect.objectContaining({
+				mode: 'SIMPLE',
+				variantId: 'default-variant',
+				requiresVariantSelection: false,
+				priceState: 'KNOWN',
+				displayPrice: '1200.00',
+				stock: 3
+			})
+		)
+	})
+
+	it('ignores active price list when legacy pricing is requested', async () => {
+		const priceLists = {
+			resolveProductPriceContext: jest.fn().mockResolvedValue({
+				priceList: { id: 'price-list-1', code: 'retail', name: 'Retail' },
+				productPrices: new Map([['product-1', '850.00']]),
+				variantPrices: new Map(),
+				saleUnitPrices: new Map()
+			})
+		}
+		service = new ProductSellableService(prisma as never, priceLists as never)
+		prisma.product.findFirst.mockResolvedValue({
+			id: 'product-1',
+			catalogId: 'catalog-1',
+			price: 990,
+			status: ProductStatus.ACTIVE,
+			variants: [
+				{
+					id: 'default-variant',
+					variantKey: 'default',
+					kind: ProductVariantKind.DEFAULT,
+					price: 1200,
+					stock: 2,
+					status: ProductVariantStatus.ACTIVE,
+					isAvailable: true,
+					attributes: []
+				}
+			]
+		})
+
+		await expect(
+			service.resolveProductSellable('catalog-1', 'product-1', {
+				buyerCatalogId: 'child-catalog-1',
+				ignorePriceList: true
+			})
+		).resolves.toEqual(
+			expect.objectContaining({
+				priceState: 'KNOWN',
+				displayPrice: '1200.00',
+				usesPriceList: false,
+				priceListId: null,
+				priceListCode: null,
+				priceListName: null
+			})
+		)
+		expect(priceLists.resolveProductPriceContext).not.toHaveBeenCalled()
+	})
+
+	it('hides matrix variants without active price-list prices from summary', async () => {
+		const priceLists = {
+			resolveProductPriceContext: jest.fn().mockResolvedValue({
+				priceList: { id: 'price-list-1', code: 'retail', name: 'Retail' },
+				productPrices: new Map(),
+				variantPrices: new Map([['variant-m', '1500.00']]),
+				saleUnitPrices: new Map()
+			})
+		}
+		service = new ProductSellableService(prisma as never, priceLists as never)
+		prisma.product.findFirst.mockResolvedValue({
+			id: 'product-1',
+			catalogId: 'catalog-1',
+			price: null,
+			status: ProductStatus.ACTIVE,
+			variants: [
+				{
+					id: 'variant-s',
+					variantKey: 'size=s',
+					kind: ProductVariantKind.MATRIX,
+					price: 1000,
+					stock: 2,
+					status: ProductVariantStatus.ACTIVE,
+					isAvailable: true,
+					attributes: [{ id: 'attribute-size-s' }]
+				},
+				{
+					id: 'variant-m',
+					variantKey: 'size=m',
+					kind: ProductVariantKind.MATRIX,
+					price: 1800,
+					stock: 4,
+					status: ProductVariantStatus.ACTIVE,
+					isAvailable: true,
+					attributes: [{ id: 'attribute-size-m' }]
+				}
+			]
+		})
+
+		await expect(
+			service.resolveProductSellable('catalog-1', 'product-1')
+		).resolves.toEqual(
+			expect.objectContaining({
+				mode: 'MATRIX',
+				priceState: 'KNOWN',
+				displayPrice: '1500.00',
+				minPrice: '1500.00',
+				maxPrice: '1500.00',
+				stock: 4
+			})
+		)
+	})
+
+	it('does not fall back to variant prices when active price list misses sale unit prices', async () => {
+		const priceLists = {
+			resolveProductPriceContext: jest.fn().mockResolvedValue({
+				priceList: { id: 'price-list-1', code: 'retail', name: 'Retail' },
+				productPrices: new Map(),
+				variantPrices: new Map([['variant-s', '1500.00']]),
+				saleUnitPrices: new Map()
+			})
+		}
+		service = new ProductSellableService(prisma as never, priceLists as never)
+		prisma.product.findFirst.mockResolvedValue({
+			id: 'product-1',
+			catalogId: 'catalog-1',
+			price: null,
+			status: ProductStatus.ACTIVE,
+			variants: [
+				{
+					id: 'variant-s',
+					variantKey: 'size=s',
+					kind: ProductVariantKind.MATRIX,
+					price: 1800,
+					stock: 4,
+					status: ProductVariantStatus.ACTIVE,
+					isAvailable: true,
+					attributes: [{ id: 'attribute-size-s' }],
+					saleUnits: [
+						{
+							id: 'sale-unit-s-piece',
+							price: 900,
+							baseQuantity: 1,
+							isDefault: true,
+							displayOrder: 0
+						}
+					]
+				}
+			]
+		})
+
+		await expect(
+			service.resolveProductSellable('catalog-1', 'product-1')
+		).resolves.toEqual(
+			expect.objectContaining({
+				priceState: 'UNKNOWN',
+				displayPrice: null,
+				availabilityState: 'UNAVAILABLE',
+				stock: null
+			})
+		)
+	})
+
 	it('resolves multiple products in one query and skips missing ids', async () => {
 		prisma.product.findMany.mockResolvedValue([
 			{

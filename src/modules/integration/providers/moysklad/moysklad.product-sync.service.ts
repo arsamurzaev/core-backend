@@ -459,7 +459,7 @@ export class MoySkladProductSyncService {
 				tx: params.tx
 			})
 			if (!updatedProduct) {
-				throw new NotFoundException('Product not found')
+				throw new NotFoundException('Товар не найден')
 			}
 			product = updatedProduct
 			updated = true

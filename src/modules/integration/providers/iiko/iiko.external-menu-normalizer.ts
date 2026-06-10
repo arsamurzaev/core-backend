@@ -2,10 +2,15 @@ import type {
 	IikoExternalMenuCategory,
 	IikoExternalMenuItem,
 	IikoExternalMenuItemSize,
+	IikoExternalMenuModifierGroup,
+	IikoExternalMenuModifierItem,
 	IikoExternalMenuPrice,
 	IikoExternalMenuResponse,
+	IikoModifierRestrictions,
 	IikoSyncCategory,
 	IikoSyncMenu,
+	IikoSyncModifierGroup,
+	IikoSyncModifierOption,
 	IikoSyncProduct,
 	IikoSyncSizePrice
 } from './iiko.types'
@@ -264,8 +269,14 @@ function normalizeExternalItem(params: {
 		params.item.buttonImageUrl,
 		...sizePrices.flatMap(size => size.imageLinks ?? [])
 	])
-	const itemModifierGroups = itemSizes.flatMap(size =>
-		Array.isArray(size.itemModifierGroups) ? size.itemModifierGroups : []
+	const itemModifierGroups = itemSizes.flatMap((size, index) =>
+		normalizeExternalModifierGroups({
+			groups: Array.isArray(size.itemModifierGroups)
+				? size.itemModifierGroups
+				: [],
+			sizeId: sizePrices[index]?.sizeId ?? null,
+			organizationId: params.organizationId
+		})
 	)
 	const type = normalizeExternalItemType(params.item.type)
 
@@ -321,6 +332,112 @@ function normalizeExternalSizePrice(params: {
 			isIncludedInMenu: params.size.isHidden === true ? false : price !== null
 		},
 		rawMeta: params.size
+	}
+}
+
+function normalizeExternalModifierGroups(params: {
+	groups: IikoExternalMenuModifierGroup[]
+	sizeId: string | null
+	organizationId: string
+}): IikoSyncModifierGroup[] {
+	return params.groups.flatMap((group, groupIndex) => {
+		const name = normalizeOptionalString(group.name)
+		if (!name || group.isHidden === true) return []
+
+		const options = normalizeExternalModifierItems({
+			items: Array.isArray(group.items) ? group.items : [],
+			organizationId: params.organizationId,
+			groupRestrictions: group.restrictions ?? null,
+			childRestrictionsEnabled: group.childModifiersHaveMinMaxRestrictions === true
+		})
+
+		const restrictions = normalizeRestrictions(group.restrictions)
+		const fallbackId = [
+			params.sizeId ?? DEFAULT_SIZE_EXTERNAL_ID,
+			groupIndex + 1,
+			name
+		]
+			.map(item => normalizeCodePart(item))
+			.filter(Boolean)
+			.join('-')
+
+		return [
+			{
+				id:
+					normalizeOptionalString(group.itemGroupId) ||
+					normalizeOptionalString(group.sku) ||
+					fallbackId,
+				code: normalizeOptionalString(group.sku),
+				name,
+				description: normalizeOptionalString(group.description),
+				sizeId: params.sizeId,
+				minQuantity: restrictions.minQuantity,
+				maxQuantity: restrictions.maxQuantity,
+				defaultAmount: restrictions.byDefault,
+				freeQuantity: restrictions.freeQuantity,
+				isHidden: false,
+				childModifiersHaveMinMaxRestrictions:
+					group.childModifiersHaveMinMaxRestrictions === true,
+				displayOrder: groupIndex,
+				options,
+				rawMeta: group
+			}
+		]
+	})
+}
+
+function normalizeExternalModifierItems(params: {
+	items: IikoExternalMenuModifierItem[]
+	organizationId: string
+	groupRestrictions: IikoModifierRestrictions | null
+	childRestrictionsEnabled: boolean
+}): IikoSyncModifierOption[] {
+	return params.items.flatMap((item, itemIndex) => {
+		const name = normalizeOptionalString(item.name)
+		if (!name || item.isHidden === true) return []
+
+		const restrictions = normalizeRestrictions(
+			params.childRestrictionsEnabled
+				? item.restrictions?.[0]
+				: (item.restrictions?.[0] ?? params.groupRestrictions)
+		)
+		const fallbackId = [itemIndex + 1, name]
+			.map(value => normalizeCodePart(value))
+			.filter(Boolean)
+			.join('-')
+
+		return [
+			{
+				id:
+					normalizeOptionalString(item.itemId) ||
+					normalizeOptionalString(item.sku) ||
+					fallbackId,
+				code: normalizeOptionalString(item.sku),
+				name,
+				description: normalizeOptionalString(item.description),
+				price: resolveExternalPrice(item.prices, params.organizationId) ?? 0,
+				minQuantity: restrictions.minQuantity,
+				maxQuantity: restrictions.maxQuantity,
+				defaultAmount: restrictions.byDefault,
+				isHidden: false,
+				displayOrder:
+					typeof item.position === 'number' && Number.isFinite(item.position)
+						? item.position
+						: itemIndex,
+				rawMeta: item
+			}
+		]
+	})
+}
+
+function normalizeRestrictions(
+	value: IikoModifierRestrictions | null | undefined
+) {
+	return {
+		minQuantity: normalizeNonNegativeInt(value?.minQuantity),
+		maxQuantity: normalizePositiveInt(value?.maxQuantity),
+		freeQuantity: normalizeNonNegativeInt(value?.freeQuantity),
+		byDefault: normalizeNonNegativeInt(value?.byDefault)
 	}
 }
 
@@ -400,6 +517,27 @@ function normalizePrice(value: unknown): number | null {
 	if (value === null || value === undefined || value === '') return null
 	const numberValue = Number(value)
 	return Number.isFinite(numberValue) && numberValue >= 0 ? numberValue : null
+}
+
+function normalizeNonNegativeInt(value: unknown): number | null {
+	const numberValue = Number(value)
+	if (!Number.isFinite(numberValue)) return null
+	return Math.max(0, Math.trunc(numberValue))
+}
+
+function normalizePositiveInt(value: unknown): number | null {
+	const numberValue = normalizeNonNegativeInt(value)
+	return numberValue && numberValue > 0 ? numberValue : null
+}
+
+function normalizeCodePart(value: unknown): string {
+	return (
+		normalizeOptionalString(value)
+			?.toLowerCase()
+			.replace(/[^a-z0-9а-яё]+/gi, '-')
+			.replace(/^-+|-+$/g, '')
+			.slice(0, 48) ?? ''
+	)
 }
 
 function normalizeRevision(value: unknown): number | null {

@@ -56,14 +56,14 @@ model Attribute {
 
   // ─── Связи ───
   // Типы каталога, где доступен этот атрибут
-  types             Type[]
+  types                 Type[]
   // Допустимые значения для ENUM-атрибутов
-  enumValues        AttributeEnumValue[]
-  enumValueAliases  AttributeEnumValueAlias[]
+  enumValues            AttributeEnumValue[]
+  enumValueAliases      AttributeEnumValueAlias[]
   // Значения этого атрибута у товаров
-  productAttributes ProductAttribute[]
+  productAttributes     ProductAttribute[]
   // Значения этого атрибута у вариантов
-  variantAttributes VariantAttribute[]
+  variantAttributes     VariantAttribute[]
   productTypeAttributes ProductTypeAttribute[]
 
   deleteAt  DateTime? @map("delete_at") // Дата удаления 
@@ -108,7 +108,7 @@ model AttributeEnumValue {
   id String @id @default(uuid()) @db.Uuid
 
   // FK на определение атрибута (size, color, brand)
-  attributeId String @map("attribute_id") @db.Uuid
+  attributeId String  @map("attribute_id") @db.Uuid
   catalogId   String? @map("catalog_id") @db.Uuid
 
   // Программное значение (используется в коде, API, URL фильтров)
@@ -158,7 +158,7 @@ model AttributeEnumValue {
 model AttributeEnumValueAlias {
   id String @id @default(uuid()) @db.Uuid
 
-  attributeId String @map("attribute_id") @db.Uuid
+  attributeId String  @map("attribute_id") @db.Uuid
   catalogId   String? @map("catalog_id") @db.Uuid
 
   enumValueId String @map("enum_value_id") @db.Uuid

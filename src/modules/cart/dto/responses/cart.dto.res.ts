@@ -117,6 +117,41 @@ export class CartSaleUnitDto {
 	displayOrder: number
 }
 
+export class CartItemModifierDto {
+	@ApiProperty({ type: String, format: 'uuid' })
+	id: string
+
+	@ApiProperty({ type: String, format: 'uuid', nullable: true })
+	productModifierGroupId: string | null
+
+	@ApiProperty({ type: String, format: 'uuid', nullable: true })
+	productModifierOptionId: string | null
+
+	@ApiProperty({ type: String, format: 'uuid', nullable: true })
+	catalogModifierGroupId: string | null
+
+	@ApiProperty({ type: String, format: 'uuid', nullable: true })
+	catalogModifierOptionId: string | null
+
+	@ApiProperty({ type: String })
+	groupCode: string
+
+	@ApiProperty({ type: String })
+	groupName: string
+
+	@ApiProperty({ type: String })
+	optionCode: string
+
+	@ApiProperty({ type: String })
+	optionName: string
+
+	@ApiProperty({ type: Number, example: 1 })
+	quantity: number
+
+	@ApiProperty({ type: Number, example: 100 })
+	unitPrice: number
+}
+
 export class CartItemDto {
 	@ApiProperty({ type: String, format: 'uuid' })
 	id: string
@@ -130,6 +165,15 @@ export class CartItemDto {
 	@ApiPropertyOptional({ type: String, format: 'uuid', nullable: true })
 	saleUnitId: string | null
 
+	@ApiPropertyOptional({ type: String, format: 'uuid', nullable: true })
+	priceListId: string | null
+
+	@ApiPropertyOptional({ type: String, nullable: true })
+	priceListCode: string | null
+
+	@ApiPropertyOptional({ type: String, nullable: true })
+	priceListName: string | null
+
 	@ApiPropertyOptional({ type: String, nullable: true })
 	guestSessionId: string | null
 
@@ -142,6 +186,14 @@ export class CartItemDto {
 	@ApiProperty({ type: Number, example: 12 })
 	baseQuantity: number
 
+	@ApiPropertyOptional({
+		type: Number,
+		nullable: true,
+		example: 1999,
+		description: 'Снимок цены единицы на момент добавления в корзину'
+	})
+	unitPriceSnapshot: number | null
+
 	@ApiProperty({ type: CartProductShortDto })
 	product: CartProductShortDto
 
@@ -150,6 +202,9 @@ export class CartItemDto {
 
 	@ApiProperty({ type: CartSaleUnitDto, nullable: true })
 	saleUnit: CartSaleUnitDto | null
+
+	@ApiProperty({ type: [CartItemModifierDto] })
+	modifiers: CartItemModifierDto[]
 
 	@ApiProperty({ type: Number, example: 1999 })
 	unitPrice: number
@@ -388,6 +443,15 @@ export class CompletedOrderItemDto {
 
 	@ApiProperty({ type: String, format: 'uuid', nullable: true })
 	saleUnitId: string | null
+
+	@ApiProperty({ type: String, format: 'uuid', nullable: true })
+	priceListId: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	priceListCode: string | null
+
+	@ApiProperty({ type: String, nullable: true })
+	priceListName: string | null
 
 	@ApiProperty({ type: String, nullable: true })
 	guestSessionId: string | null

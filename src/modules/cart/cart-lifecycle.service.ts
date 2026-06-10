@@ -234,11 +234,11 @@ export class CartLifecycleService {
 	): Promise<CloseHallTableSessionResult> {
 		const session = cart.tableSession
 		if (!session) {
-			throw new BadRequestException('hall table session is not found')
+			throw new BadRequestException('Сессия стола не найдена')
 		}
 
 		if (!this.isActiveHallTableSessionStatus(session.status)) {
-			throw new BadRequestException('hall table session is not active')
+			throw new BadRequestException('Сессия стола не активна')
 		}
 
 		const now = new Date()
@@ -256,7 +256,7 @@ export class CartLifecycleService {
 				}
 			})
 			if (!sessionUpdate.count) {
-				throw new BadRequestException('hall table session is not active')
+				throw new BadRequestException('Сессия стола не активна')
 			}
 
 			const cartUpdate = await tx.cart.updateMany({
@@ -278,7 +278,7 @@ export class CartLifecycleService {
 				}
 			})
 			if (!cartUpdate.count) {
-				throw new BadRequestException('Cart is already closed')
+				throw new BadRequestException('Корзина уже закрыта')
 			}
 
 			const releaseEffect =
@@ -298,7 +298,7 @@ export class CartLifecycleService {
 				select: cartSelect
 			})
 			if (!fresh) {
-				throw new NotFoundException('Cart not found')
+				throw new NotFoundException('Корзина не найдена')
 			}
 
 			return { cart: fresh, releaseEffect }

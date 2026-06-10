@@ -69,10 +69,6 @@ const HALL_ORDER_IIKO_EXPORT_WAIT_INTERVAL_MS =
 	Number(process.env.HALL_ORDER_IIKO_EXPORT_WAIT_INTERVAL_MS ?? 500) || 500
 const INTEGRATION_EXTERNAL_ITEM_TYPE_TABLE = 'TABLE'
 const CART_GUEST_TOKEN_VERSION = 1
-const CART_GUEST_TOKEN_SECRET =
-	process.env.CART_GUEST_TOKEN_SECRET?.trim() ||
-	process.env.INTEGRATION_ENCRYPTION_KEY?.trim() ||
-	'catalog-cart-guest-token-development-secret'
 const TERMINAL_CART_STATUSES = new Set<CartStatus>([
 	CartStatus.CONVERTED,
 	CartStatus.CANCELLED,
@@ -296,7 +292,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	async getHallTableLink(catalogId: string, code: string) {
 		const normalizedCode = normalizeText(code)
 		if (!normalizedCode) {
-			throw new BadRequestException('hall table code is required')
+			throw new BadRequestException('Не указан код стола')
 		}
 
 		const item = await this.findHallIntegrationExternalItemByCode(
@@ -304,7 +300,9 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 			normalizedCode
 		)
 		if (!item) {
-			throw new BadRequestException('iiko table link is invalid or expired')
+			throw new BadRequestException(
+				'Ссылка на стол iiko недействительна или устарела'
+			)
 		}
 
 		const data = this.mapHallIntegrationExternalItem(item)
@@ -400,7 +398,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	) {
 		const normalizedCode = normalizeText(code)
 		if (!normalizedCode) {
-			throw new BadRequestException('hall table code is required')
+			throw new BadRequestException('Не указан код стола')
 		}
 
 		const item = await this.findHallIntegrationExternalItemByCode(
@@ -408,13 +406,15 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 			normalizedCode
 		)
 		if (!item) {
-			throw new BadRequestException('iiko table link is invalid or expired')
+			throw new BadRequestException(
+				'Ссылка на стол iiko недействительна или устарела'
+			)
 		}
 
 		const tableData = this.mapHallIntegrationExternalItem(item)
 		const tableId = normalizeText(tableData.iikoTableId)
 		if (!tableId) {
-			throw new BadRequestException('iiko table id is required for hall order')
+			throw new BadRequestException('Не указан стол iiko для заказа в зале')
 		}
 
 		const activeKey = buildHallTableActiveKey(catalogId, tableId)
@@ -445,7 +445,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		const cart = await this.lookup.findByIdOrThrow(session.cartId)
 		const mappedCart = await this.mapCart(cart)
 		if (!mappedCart.publicKey || !mappedCart.tableSession) {
-			throw new BadRequestException('hall table session cart is invalid')
+			throw new BadRequestException('Корзина не относится к сессии стола')
 		}
 
 		return {
@@ -467,19 +467,19 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		const cart = await this.lookup.findByPublicKeyOrThrow(publicKey)
 		const session = cart.tableSession
 		if (!session) {
-			throw new BadRequestException('hall table session is not found')
+			throw new BadRequestException('Сессия стола не найдена')
 		}
 		if (session.status === CartTableSessionStatus.PENDING_CONFIRMATION) {
 			return { cart: await this.mapCart(cart) }
 		}
 		if (session.status !== CartTableSessionStatus.OPEN) {
-			throw new BadRequestException('hall table session is not open')
+			throw new BadRequestException('Сессия стола не открыта')
 		}
 		this.ensureCartIsOpen(cart.status)
 		this.resolveHallTableGuestSessionId(cart, guestToken)
 
 		if (!cart.items.length) {
-			throw new BadRequestException('Cannot submit an empty cart')
+			throw new BadRequestException('Нельзя отправить пустую корзину')
 		}
 
 		await this.applyHallTableCheckoutInput(cart, session, shareInput)
@@ -667,10 +667,10 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	) {
 		const session = cart.tableSession
 		if (!session) {
-			throw new BadRequestException('hall table session is not found')
+			throw new BadRequestException('Сессия стола не найдена')
 		}
 		if (!this.isActiveHallTableSessionStatus(session.status)) {
-			throw new BadRequestException('hall table session is not active')
+			throw new BadRequestException('Сессия стола не активна')
 		}
 		this.ensureCartIsOpen(cart.status)
 
@@ -882,8 +882,8 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 					statusChangedAt: new Date(),
 					publicKey,
 					checkoutMethod: checkout.checkoutMethod,
-					checkoutData: checkout.checkoutData as Prisma.InputJsonValue,
-					checkoutContacts: checkout.checkoutContacts as Prisma.InputJsonValue
+					checkoutData: checkout.checkoutData,
+					checkoutContacts: checkout.checkoutContacts
 				},
 				select: { id: true }
 			})
@@ -1000,8 +1000,8 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 			data: {
 				...(input.comment !== undefined ? { comment } : {}),
 				checkoutMethod: checkout.checkoutMethod,
-				checkoutData: checkout.checkoutData as Prisma.InputJsonValue,
-				checkoutContacts: checkout.checkoutContacts as Prisma.InputJsonValue
+				checkoutData: checkout.checkoutData,
+				checkoutContacts: checkout.checkoutContacts
 			}
 		})
 	}
@@ -1041,8 +1041,8 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 			})
 
 			data.checkoutMethod = checkout.checkoutMethod
-			data.checkoutData = checkout.checkoutData as Prisma.InputJsonValue
-			data.checkoutContacts = checkout.checkoutContacts as Prisma.InputJsonValue
+			data.checkoutData = checkout.checkoutData
+			data.checkoutContacts = checkout.checkoutContacts
 		}
 
 		if (Object.keys(data).length === 0) return
@@ -1116,7 +1116,8 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 		const features = await this.capabilities.getCurrentFeatures(cart.catalogId)
 		return mapCartEntity(cart, media => this.mediaUrl.mapMedia(media), {
 			canUseProductVariants: features.canUseProductVariants,
-			canUseCatalogSaleUnits: features.canUseCatalogSaleUnits
+			canUseCatalogSaleUnits: features.canUseCatalogSaleUnits,
+			canUseCatalogModifiers: features.canUseCatalogModifiers
 		})
 	}
 
@@ -1137,7 +1138,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	): string {
 		const session = cart.tableSession
 		if (!session) {
-			throw new BadRequestException('hall table session is not found')
+			throw new BadRequestException('Сессия стола не найдена')
 		}
 
 		const payload = this.verifyHallTableGuestTokenOrNull(guestToken, {
@@ -1150,7 +1151,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 
 		if (!payload) {
 			throw new ForbiddenException(
-				`${CART_GUEST_TOKEN_HEADER} is required for hall table guest actions`
+				`Заголовок ${CART_GUEST_TOKEN_HEADER} обязателен для действий гостя за столом`
 			)
 		}
 
@@ -1215,19 +1216,19 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 
 	private ensureHallTableSessionActive(cart: CartEntity) {
 		if (!cart.tableSession) {
-			throw new BadRequestException('hall table session is not found')
+			throw new BadRequestException('Сессия стола не найдена')
 		}
 		if (!this.isActiveHallTableSessionStatus(cart.tableSession.status)) {
-			throw new BadRequestException('hall table session is not active')
+			throw new BadRequestException('Сессия стола не активна')
 		}
 	}
 
 	private ensureHallTableSessionOpen(cart: CartEntity) {
 		if (!cart.tableSession) {
-			throw new BadRequestException('hall table session is not found')
+			throw new BadRequestException('Сессия стола не найдена')
 		}
 		if (cart.tableSession.status !== CartTableSessionStatus.OPEN) {
-			throw new BadRequestException('hall table session is not open')
+			throw new BadRequestException('Сессия стола не открыта')
 		}
 	}
 
@@ -1265,7 +1266,7 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 			mergedData.iikoTableId ?? mergedData.hallTableId ?? mergedData.tableId
 		)
 		if (!tableId) {
-			throw new BadRequestException('iiko table id is required for hall order')
+			throw new BadRequestException('Не указан стол iiko для заказа в зале')
 		}
 
 		return {
@@ -1282,7 +1283,9 @@ export class CartService implements OnModuleInit, OnModuleDestroy {
 	): Promise<Record<string, unknown>> {
 		const item = await this.findHallIntegrationExternalItemByCode(catalogId, code)
 		if (!item) {
-			throw new BadRequestException('iiko table link is invalid or expired')
+			throw new BadRequestException(
+				'Ссылка на стол iiko недействительна или устарела'
+			)
 		}
 
 		return this.mapHallIntegrationExternalItem(item)
@@ -1454,9 +1457,19 @@ function decodeBase64UrlJson(value: string): unknown {
 }
 
 function signCartGuestTokenPayload(encodedPayload: string): string {
-	return createHmac('sha256', CART_GUEST_TOKEN_SECRET)
+	return createHmac('sha256', requireCartGuestTokenSecret())
 		.update(encodedPayload)
 		.digest('base64url')
+}
+
+function requireCartGuestTokenSecret(): string {
+	const secret =
+		process.env.CART_GUEST_TOKEN_SECRET?.trim() ||
+		process.env.INTEGRATION_ENCRYPTION_KEY?.trim()
+	if (secret) return secret
+	throw new Error(
+		'CART_GUEST_TOKEN_SECRET or INTEGRATION_ENCRYPTION_KEY is required for guest cart tokens'
+	)
 }
 
 function safeEqualText(left: string, right: string): boolean {
@@ -1591,10 +1604,6 @@ function isUniqueConstraintError(error: unknown): boolean {
 function resolveIikoCorrelationId(response: unknown): string | null {
 	if (!isRecord(response)) return null
 	return normalizeText(response.correlationId)
-}
-
-function normalizeGuestSessionId(value: unknown): string | null {
-	return normalizeText(value)?.slice(0, 64) ?? null
 }
 
 function generateGuestSessionId(): string {

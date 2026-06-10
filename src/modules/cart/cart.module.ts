@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 
 import { CapabilityModule } from '@/modules/capability/public'
+import { CatalogPriceListModule } from '@/modules/catalog-price-list/public'
 import { IntegrationModule } from '@/modules/integration/public'
 import { InventoryModule } from '@/modules/inventory/public'
 import { ProductModule } from '@/modules/product/public'
@@ -13,6 +14,7 @@ import { CartLinePricingService } from './cart-line-pricing.service'
 import { CartLineService } from './cart-line.service'
 import { CartLookupService } from './cart-lookup.service'
 import { CartManagerSessionService } from './cart-manager-session.service'
+import { CartModifierSelectionService } from './cart-modifier-selection.service'
 import { CartOrderExportService } from './cart-order-export.service'
 import { CartOrderSnapshotService } from './cart-order-snapshot.service'
 import { CartShareService } from './cart-share.service'
@@ -23,7 +25,13 @@ import { CartService } from './cart.service'
 import { OrderCheckoutService } from './order-checkout.service'
 
 @Module({
-	imports: [CapabilityModule, IntegrationModule, InventoryModule, ProductModule],
+	imports: [
+		CapabilityModule,
+		CatalogPriceListModule,
+		IntegrationModule,
+		InventoryModule,
+		ProductModule
+	],
 	controllers: [CartController],
 	providers: [
 		CartService,
@@ -34,6 +42,7 @@ import { OrderCheckoutService } from './order-checkout.service'
 		CartLookupService,
 		CartLifecycleService,
 		CartManagerSessionService,
+		CartModifierSelectionService,
 		CartOrderExportService,
 		CartOrderSnapshotService,
 		CartShareService,

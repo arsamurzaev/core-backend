@@ -1741,10 +1741,7 @@ export class MoySkladSyncService {
 				}
 
 				try {
-					await this.repo.updateSyncRunProgress(
-						runId,
-						snapshot as unknown as Prisma.InputJsonValue
-					)
+					await this.repo.updateSyncRunProgress(runId, snapshot)
 				} catch (error) {
 					this.logger.warn(
 						`Failed to persist MoySklad sync progress for run ${runId}: ${this.renderErrorMessage(error)}`

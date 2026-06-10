@@ -81,7 +81,7 @@ export class CartController {
 
 	@Post('current')
 	@ApiOperation({
-		summary: 'Create or return the current cart by cookie token'
+		summary: 'Создать или вернуть текущую корзину по cookie-токену'
 	})
 	@ApiCreatedResponse({ type: CartResponseDto })
 	async createOrGetCurrent(
@@ -96,7 +96,7 @@ export class CartController {
 	}
 
 	@Get('current')
-	@ApiOperation({ summary: 'Get the current cart by cookie token' })
+	@ApiOperation({ summary: 'Получить текущую корзину по cookie-токену' })
 	@ApiOkResponse({ type: CartResponseDto })
 	async getCurrent(
 		@Req() req: Request,
@@ -120,11 +120,11 @@ export class CartController {
 	@Delete('current')
 	@HttpCode(204)
 	@ApiOperation({
-		summary: 'Delete or detach the current cart by cookie token'
+		summary: 'Удалить или отвязать текущую корзину по cookie-токену'
 	})
 	@ApiNoContentResponse({
 		description:
-			'Current cart was deleted, or detached when it is already assigned to a manager'
+			'Текущая корзина удалена или отвязана, если она уже закреплена за менеджером'
 	})
 	async deleteCurrent(
 		@Req() req: Request,
@@ -145,7 +145,7 @@ export class CartController {
 	}
 
 	@Post('current/share')
-	@ApiOperation({ summary: 'Issue a public key for the current cart' })
+	@ApiOperation({ summary: 'Выдать публичный ключ для текущей корзины' })
 	@ApiBody({ type: ShareCurrentCartDtoReq, required: false })
 	@ApiOkResponse({ type: ShareCartResponseDto })
 	async shareCurrent(
@@ -169,7 +169,7 @@ export class CartController {
 	}
 
 	@Post('current/hall-order')
-	@ApiOperation({ summary: 'Submit the current cart as a hall table order' })
+	@ApiOperation({ summary: 'Отправить текущую корзину как заказ за столом' })
 	@ApiBody({ type: ShareCurrentCartDtoReq, required: false })
 	@ApiOkResponse({ type: CompleteCartOrderResponseDto })
 	async submitCurrentHallOrder(
@@ -193,10 +193,10 @@ export class CartController {
 	}
 
 	@Get('hall-table/:code')
-	@ApiOperation({ summary: 'Resolve a short hall table code for display' })
+	@ApiOperation({ summary: 'Получить данные стола по короткому коду' })
 	@ApiParam({
 		name: 'code',
-		description: 'Short backend-stored hall table code',
+		description: 'Короткий код стола, сохраненный на backend',
 		example: 'Ab7Kp92x'
 	})
 	@ApiOkResponse({ type: HallTableLinkResponseDto })
@@ -209,7 +209,7 @@ export class CartController {
 	@Get('hall-tables')
 	@UseGuards(SessionGuard)
 	@Roles(Role.CATALOG)
-	@ApiOperation({ summary: 'List iiko hall tables with active cart sessions' })
+	@ApiOperation({ summary: 'Список столов iiko с активными корзинами' })
 	@ApiOkResponse({ type: HallTableOverviewResponseDto })
 	async listHallTables() {
 		const catalogId = mustCatalogId()
@@ -219,11 +219,11 @@ export class CartController {
 
 	@Post('hall-table/:code/session')
 	@ApiOperation({
-		summary: 'Create or return a shared cart session for a hall table'
+		summary: 'Создать или вернуть общую сессию корзины для стола'
 	})
 	@ApiParam({
 		name: 'code',
-		description: 'Short backend-stored hall table code',
+		description: 'Короткий код стола, сохраненный на backend',
 		example: 'Ab7Kp92x'
 	})
 	@ApiBody({ type: JoinHallTableSessionDtoReq, required: false })
@@ -242,12 +242,12 @@ export class CartController {
 	}
 
 	@Put('current/items')
-	@ApiOperation({ summary: 'Upsert an item in the current cart' })
+	@ApiOperation({ summary: 'Добавить или обновить позицию в текущей корзине' })
 	@ApiBody({
 		type: UpsertCartItemDtoReq,
 		examples: {
 			base: {
-				summary: 'Add two units of a product',
+				summary: 'Добавить две единицы товара',
 				value: {
 					productId: 'd084ec3f-55cb-4ba4-9f50-c18fd01ea124',
 					variantId: '9f3f4ec2-9f74-4e03-b8cf-95ce5449cb8e',
@@ -270,10 +270,10 @@ export class CartController {
 	}
 
 	@Delete('current/items/:itemId')
-	@ApiOperation({ summary: 'Remove an item from the current cart' })
+	@ApiOperation({ summary: 'Удалить позицию из текущей корзины' })
 	@ApiParam({
 		name: 'itemId',
-		description: 'Cart item id',
+		description: 'ID позиции корзины',
 		example: 'fc31fd15-6f7e-4fb1-a594-34fa14f6ef0c'
 	})
 	@ApiOkResponse({ type: CartResponseDto })
@@ -302,15 +302,16 @@ export class CartController {
 	}
 
 	@Sse('current/sse')
-	@ApiOperation({ summary: 'SSE stream for the current cart' })
+	@ApiOperation({ summary: 'SSE-поток текущей корзины' })
 	@ApiProduces('text/event-stream')
 	@ApiHeader({
 		name: 'Last-Event-ID',
 		required: false,
-		description: 'Last received Redis Stream event id for SSE replay'
+		description: 'ID последнего полученного события Redis Stream для SSE-replay'
 	})
 	@ApiOkResponse({
-		description: 'SSE events: connected, ping, cart.updated, cart.status_changed',
+		description:
+			'SSE-события: connected, ping, cart.updated, cart.status_changed',
 		content: {
 			'text/event-stream': {
 				schema: { type: 'string', example: SSE_EXAMPLE }
@@ -328,10 +329,10 @@ export class CartController {
 
 	@SkipCatalog()
 	@Get('public/:publicKey')
-	@ApiOperation({ summary: 'Get a public cart by public key' })
+	@ApiOperation({ summary: 'Получить публичную корзину по ключу' })
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Public cart key',
+		description: 'Публичный ключ корзины',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiOkResponse({ type: CartResponseDto })
@@ -348,10 +349,10 @@ export class CartController {
 	@Post('public/:publicKey/manager/start')
 	@UseGuards(SessionGuard)
 	@Roles(Role.CATALOG)
-	@ApiOperation({ summary: 'Mark a cart as being processed by a manager' })
+	@ApiOperation({ summary: 'Закрепить корзину за менеджером' })
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Public cart key',
+		description: 'Публичный ключ корзины',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiOkResponse({ type: CartResponseDto })
@@ -367,10 +368,10 @@ export class CartController {
 	@Post('public/:publicKey/manager/heartbeat')
 	@UseGuards(SessionGuard)
 	@Roles(Role.CATALOG)
-	@ApiOperation({ summary: 'Refresh manager presence for a cart' })
+	@ApiOperation({ summary: 'Обновить присутствие менеджера в корзине' })
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Public cart key',
+		description: 'Публичный ключ корзины',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiOkResponse({ type: CartResponseDto })
@@ -387,11 +388,11 @@ export class CartController {
 	@UseGuards(SessionGuard)
 	@Roles(Role.CATALOG)
 	@ApiOperation({
-		summary: 'Move a cart to PAUSED after manager processing'
+		summary: 'Перевести корзину в PAUSED после работы менеджера'
 	})
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Public cart key',
+		description: 'Публичный ключ корзины',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiOkResponse({ type: CartResponseDto })
@@ -408,11 +409,11 @@ export class CartController {
 	@UseGuards(SessionGuard)
 	@Roles(Role.CATALOG)
 	@ApiOperation({
-		summary: 'Convert a shared cart to a completed order'
+		summary: 'Преобразовать общую корзину в завершенный заказ'
 	})
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Public cart key',
+		description: 'Публичный ключ корзины',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiBody({ type: ShareCurrentCartDtoReq, required: false })
@@ -435,11 +436,11 @@ export class CartController {
 	@UseGuards(SessionGuard)
 	@Roles(Role.CATALOG)
 	@ApiOperation({
-		summary: 'Close an open shared hall table cart'
+		summary: 'Закрыть открытую общую корзину стола'
 	})
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Public cart key',
+		description: 'Публичный ключ корзины',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiOkResponse({ type: CartResponseDto })
@@ -456,11 +457,11 @@ export class CartController {
 	@UseGuards(SessionGuard)
 	@Roles(Role.CATALOG)
 	@ApiOperation({
-		summary: 'Reset an open shared hall table cart'
+		summary: 'Сбросить открытую общую корзину стола'
 	})
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Public cart key',
+		description: 'Публичный ключ корзины',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiOkResponse({ type: CartResponseDto })
@@ -477,11 +478,11 @@ export class CartController {
 	@UseGuards(SessionGuard)
 	@Roles(Role.CATALOG)
 	@ApiOperation({
-		summary: 'Confirm a shared hall table cart and send it to iiko'
+		summary: 'Подтвердить общую корзину стола и отправить заказ в iiko'
 	})
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Public cart key',
+		description: 'Публичный ключ корзины',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiBody({ type: ShareCurrentCartDtoReq, required: false })
@@ -502,16 +503,16 @@ export class CartController {
 	@SkipCatalog()
 	@Post('public/:publicKey/hall-order')
 	@ApiOperation({
-		summary: 'Send a public shared hall table cart to waiter confirmation'
+		summary: 'Отправить публичную корзину стола на подтверждение официанту'
 	})
 	@ApiHeader({
 		name: CART_GUEST_TOKEN_HEADER,
 		required: false,
-		description: 'Required for hall table guest actions'
+		description: 'Нужен для действий гостя за столом'
 	})
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Public cart key',
+		description: 'Публичный ключ корзины',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiBody({ type: ShareCurrentCartDtoReq, required: false })
@@ -535,22 +536,22 @@ export class CartController {
 
 	@SkipCatalog()
 	@Put('public/:publicKey/items')
-	@ApiOperation({ summary: 'Upsert an item in a public cart' })
+	@ApiOperation({ summary: 'Добавить или обновить позицию в публичной корзине' })
 	@ApiHeader({
 		name: CART_GUEST_TOKEN_HEADER,
 		required: false,
-		description: 'Required for hall table guest actions'
+		description: 'Нужен для действий гостя за столом'
 	})
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Public cart key',
+		description: 'Публичный ключ корзины',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiBody({
 		type: PublicUpsertCartItemDtoReq,
 		examples: {
 			base: {
-				summary: 'Add a product to the public cart',
+				summary: 'Добавить товар в публичную корзину',
 				value: {
 					productId: 'd084ec3f-55cb-4ba4-9f50-c18fd01ea124',
 					variantId: '9f3f4ec2-9f74-4e03-b8cf-95ce5449cb8e',
@@ -575,20 +576,20 @@ export class CartController {
 
 	@SkipCatalog()
 	@Delete('public/:publicKey/items/:itemId')
-	@ApiOperation({ summary: 'Remove an item from a public cart' })
+	@ApiOperation({ summary: 'Удалить позицию из публичной корзины' })
 	@ApiHeader({
 		name: CART_GUEST_TOKEN_HEADER,
 		required: false,
-		description: 'Required for hall table guest actions'
+		description: 'Нужен для действий гостя за столом'
 	})
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Public cart key',
+		description: 'Публичный ключ корзины',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiParam({
 		name: 'itemId',
-		description: 'Cart item id',
+		description: 'ID позиции корзины',
 		example: 'fc31fd15-6f7e-4fb1-a594-34fa14f6ef0c'
 	})
 	@ApiOkResponse({ type: CartResponseDto })
@@ -607,20 +608,21 @@ export class CartController {
 
 	@SkipCatalog()
 	@Sse('public/:publicKey/sse')
-	@ApiOperation({ summary: 'SSE stream for a public cart' })
+	@ApiOperation({ summary: 'SSE-поток публичной корзины' })
 	@ApiParam({
 		name: 'publicKey',
-		description: 'Public cart key',
+		description: 'Публичный ключ корзины',
 		example: '5f7ec4ac9cc6c392419eec11850d45f1'
 	})
 	@ApiHeader({
 		name: 'Last-Event-ID',
 		required: false,
-		description: 'Last received Redis Stream event id for SSE replay'
+		description: 'ID последнего полученного события Redis Stream для SSE-replay'
 	})
 	@ApiProduces('text/event-stream')
 	@ApiOkResponse({
-		description: 'SSE events: connected, ping, cart.updated, cart.status_changed',
+		description:
+			'SSE-события: connected, ping, cart.updated, cart.status_changed',
 		content: {
 			'text/event-stream': {
 				schema: { type: 'string', example: SSE_EXAMPLE }

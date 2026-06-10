@@ -1,4 +1,5 @@
-﻿import { Test, TestingModule } from '@nestjs/testing'
+﻿import { CatalogPriceListPriceTarget } from '@generated/enums'
+import { Test, TestingModule } from '@nestjs/testing'
 
 import { CapabilityService } from '@/modules/capability/capability.service'
 import {
@@ -65,6 +66,18 @@ describe('ProductService', () => {
 				requestId: 'req-1',
 				host: 'example.test',
 				catalogId: 'catalog-1',
+				typeId: 'type-1'
+			},
+			fn
+		)
+
+	const runWithChildCatalog = <T>(fn: () => Promise<T>) =>
+		RequestContext.run(
+			{
+				requestId: 'req-1',
+				host: 'child.example.test',
+				catalogId: 'child-catalog-1',
+				parentId: 'catalog-1',
 				typeId: 'type-1'
 			},
 			fn
@@ -234,13 +247,19 @@ describe('ProductService', () => {
 							canUseProductTypes: true,
 							canUseProductVariants: true,
 							canUseCatalogSaleUnits: true,
+							canUseCatalogModifiers: false,
+							canUseCatalogPriceLists: false,
 							canUseInternalInventory: false,
-							canUseMoySkladIntegration: true
+							canUseMoySkladIntegration: true,
+							canUseIikoIntegration: false,
+							canUseOneCIntegration: false
 						}),
 						canUseProductVariants: jest.fn().mockResolvedValue(true),
 						assertCanUseProductTypes: jest.fn().mockResolvedValue(undefined),
 						assertCanUseProductVariants: jest.fn().mockResolvedValue(undefined),
-						assertCanUseCatalogSaleUnits: jest.fn().mockResolvedValue(undefined)
+						assertCanUseCatalogSaleUnits: jest.fn().mockResolvedValue(undefined),
+						assertCanUseCatalogModifiers: jest.fn().mockResolvedValue(undefined),
+						assertCanUseCatalogPriceLists: jest.fn().mockResolvedValue(undefined)
 					}
 				},
 				{
@@ -285,7 +304,7 @@ describe('ProductService', () => {
 			id: 'product-type-1',
 			catalogId: 'catalog-1',
 			attributes: []
-		} as any)
+		})
 		repo.findProductValidationRef.mockResolvedValue({
 			id: 'product-1',
 			productTypeId: null,
@@ -507,7 +526,7 @@ describe('ProductService', () => {
 				previousProductPrice: '0.00',
 				nextProductPrice: null
 			}
-		] as any)
+		])
 
 		const result = await runWithCatalog(() =>
 			service.repairDefaultVariantPriceMismatchesForCurrentCatalog({
@@ -553,7 +572,7 @@ describe('ProductService', () => {
 				previousProductPrice: '0.00',
 				nextProductPrice: null
 			}
-		] as any)
+		])
 		repo.applyDefaultVariantPriceMismatchRepairs.mockResolvedValue(['product-1'])
 		repo.findByIdsWithDetails.mockResolvedValue([
 			{ id: 'product-1', slug: 'legacy-product' }
@@ -720,12 +739,12 @@ describe('ProductService', () => {
 	})
 
 	it('returns seeded infinite page with next cursor', async () => {
-		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([])
 		repo.findFilteredProductIdsPageSeeded.mockResolvedValue([
 			{ id: 'product-1', score: '001' },
 			{ id: 'product-2', score: '010' },
 			{ id: 'product-3', score: '100' }
-		] as any)
+		])
 		repo.findByIdsWithAttributes.mockResolvedValue([
 			{ id: 'product-1', media: [] },
 			{ id: 'product-2', media: [] }
@@ -751,12 +770,12 @@ describe('ProductService', () => {
 	})
 
 	it('returns default infinite page with next cursor', async () => {
-		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([])
 		repo.findFilteredProductIdsPageDefault.mockResolvedValue([
 			{ id: 'product-1', updatedAt: new Date('2026-03-12T10:00:00.000Z') },
 			{ id: 'product-2', updatedAt: new Date('2026-03-12T09:00:00.000Z') },
 			{ id: 'product-3', updatedAt: new Date('2026-03-12T08:00:00.000Z') }
-		] as any)
+		])
 		repo.findByIdsWithAttributes.mockResolvedValue([
 			{ id: 'product-1', media: [] },
 			{ id: 'product-2', media: [] }
@@ -781,10 +800,10 @@ describe('ProductService', () => {
 	})
 
 	it('passes productTypeId filter to infinite product query', async () => {
-		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([])
 		repo.findFilteredProductIdsPageDefault.mockResolvedValue([
 			{ id: 'product-1', updatedAt: new Date('2026-03-12T10:00:00.000Z') }
-		] as any)
+		])
 		repo.findByIdsWithAttributes.mockResolvedValue([
 			{ id: 'product-1', media: [] }
 		] as any)
@@ -812,12 +831,12 @@ describe('ProductService', () => {
 	})
 
 	it('returns lightweight infinite cards page with product attributes and without variants', async () => {
-		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([])
 		repo.findFilteredProductIdsPageDefault.mockResolvedValue([
 			{ id: 'product-1', updatedAt: new Date('2026-03-12T10:00:00.000Z') },
 			{ id: 'product-2', updatedAt: new Date('2026-03-12T09:00:00.000Z') },
 			{ id: 'product-3', updatedAt: new Date('2026-03-12T08:00:00.000Z') }
-		] as any)
+		])
 		repo.findByIds.mockResolvedValue([
 			{
 				id: 'product-1',
@@ -828,6 +847,13 @@ describe('ProductService', () => {
 			},
 			{
 				id: 'product-2',
+				media: [],
+				categoryProducts: [],
+				integrationLinks: [],
+				productAttributes: []
+			},
+			{
+				id: 'product-3',
 				media: [],
 				categoryProducts: [],
 				integrationLinks: [],
@@ -843,7 +869,7 @@ describe('ProductService', () => {
 
 		expect(result.items).toHaveLength(2)
 		expect(repo.findByIds).toHaveBeenCalledWith(
-			['product-1', 'product-2'],
+			['product-1', 'product-2', 'product-3'],
 			'catalog-1',
 			false
 		)
@@ -852,11 +878,69 @@ describe('ProductService', () => {
 		expect(result.items[0]).not.toHaveProperty('variants')
 	})
 
+	it('continues infinite cards past products hidden by active price list', async () => {
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([])
+		repo.findFilteredProductIdsPageDefault
+			.mockResolvedValueOnce([
+				{ id: 'hidden-1', updatedAt: new Date('2026-03-12T10:00:00.000Z') },
+				{ id: 'visible-1', updatedAt: new Date('2026-03-12T09:00:00.000Z') },
+				{ id: 'hidden-2', updatedAt: new Date('2026-03-12T08:00:00.000Z') }
+			])
+			.mockResolvedValueOnce([
+				{ id: 'visible-2', updatedAt: new Date('2026-03-12T07:00:00.000Z') }
+			])
+		repo.findByIds.mockImplementation(async (ids: string[]) =>
+			ids.map(
+				id =>
+					({
+						id,
+						media: [],
+						categoryProducts: [],
+						integrationLinks: [],
+						productAttributes: []
+					}) as any
+			)
+		)
+		sellableReader.resolveProductsSellable.mockImplementation(
+			async (_catalogId: string, productIds: string[]) =>
+				new Map(
+					productIds.map(productId => {
+						const isVisible = productId.startsWith('visible')
+						return [
+							productId,
+							{
+								priceState: isVisible ? 'KNOWN' : 'UNKNOWN',
+								displayPrice: isVisible ? '900.00' : null,
+								minPrice: isVisible ? '900.00' : null,
+								maxPrice: isVisible ? '900.00' : null,
+								availabilityState: 'AVAILABLE',
+								stock: null,
+								defaultVariantId: null,
+								requiresVariantSelection: false,
+								usesPriceList: true,
+								priceListId: 'price-list-1',
+								priceListCode: 'retail',
+								priceListName: 'Retail'
+							}
+						]
+					})
+				)
+		)
+
+		const result = await runWithCatalog(() =>
+			service.getInfiniteCards({ limit: '2' })
+		)
+
+		expect(result.items.map(item => item.id)).toEqual(['visible-1', 'visible-2'])
+		expect(result.nextCursor).toBeNull()
+		expect(repo.findFilteredProductIdsPageDefault).toHaveBeenCalledTimes(2)
+	})
+
 	it('passes productTypeId filter to infinite cards and hydrates through current catalog', async () => {
-		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([])
 		repo.findFilteredProductIdsPageDefault.mockResolvedValue([
 			{ id: 'product-1', updatedAt: new Date('2026-03-12T10:00:00.000Z') }
-		] as any)
+		])
 		repo.findByIds.mockResolvedValue([
 			{
 				id: 'product-1',
@@ -892,9 +976,9 @@ describe('ProductService', () => {
 			updatedAt
 		})
 
-		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
-		repo.findFilteredProductIdsPageDefault.mockResolvedValue([] as any)
-		repo.findByIdsWithAttributes.mockResolvedValue([] as any)
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([])
+		repo.findFilteredProductIdsPageDefault.mockResolvedValue([])
+		repo.findByIdsWithAttributes.mockResolvedValue([])
 
 		const result = await runWithCatalog(() =>
 			service.getInfinite({
@@ -923,9 +1007,9 @@ describe('ProductService', () => {
 			score: '009'
 		})
 
-		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
-		repo.findFilteredProductIdsPageSeeded.mockResolvedValue([] as any)
-		repo.findByIdsWithAttributes.mockResolvedValue([] as any)
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([])
+		repo.findFilteredProductIdsPageSeeded.mockResolvedValue([])
+		repo.findByIdsWithAttributes.mockResolvedValue([])
 
 		const result = await runWithCatalog(() =>
 			service.getInfinite({
@@ -954,9 +1038,9 @@ describe('ProductService', () => {
 			score: '009'
 		})
 
-		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
-		repo.findFilteredProductIdsPageSeeded.mockResolvedValue([] as any)
-		repo.findByIdsWithAttributes.mockResolvedValue([] as any)
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([])
+		repo.findFilteredProductIdsPageSeeded.mockResolvedValue([])
+		repo.findByIdsWithAttributes.mockResolvedValue([])
 
 		const result = await runWithCatalog(() =>
 			service.getInfinite({
@@ -983,8 +1067,8 @@ describe('ProductService', () => {
 			{ id: 'discount-start-id', key: 'discountStartAt' },
 			{ id: 'discount-end-id', key: 'discountEndAt' }
 		] as any)
-		repo.findFilteredProductIdsPageDefault.mockResolvedValue([] as any)
-		repo.findByIdsWithAttributes.mockResolvedValue([] as any)
+		repo.findFilteredProductIdsPageDefault.mockResolvedValue([])
+		repo.findByIdsWithAttributes.mockResolvedValue([])
 
 		const result = await runWithCatalog(() =>
 			service.getInfinite({
@@ -1048,10 +1132,10 @@ describe('ProductService', () => {
 	})
 
 	it('passes includeInactive to infinite product loading', async () => {
-		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([])
 		repo.findFilteredProductIdsPageDefault.mockResolvedValue([
 			{ id: 'product-1', updatedAt: new Date('2026-03-12T10:00:00.000Z') }
-		] as any)
+		])
 		repo.findByIdsWithAttributes.mockResolvedValue([
 			{ id: 'product-1', media: [], categoryProducts: [], productAttributes: [] }
 		] as any)
@@ -1081,7 +1165,7 @@ describe('ProductService', () => {
 	it('treats productTypeId as an active recommendations filter', async () => {
 		repo.findRecommendedProductIdsPageDefault.mockResolvedValue([
 			{ id: 'product-4', updatedAt: new Date('2026-03-12T10:00:00.000Z') }
-		] as any)
+		])
 		repo.findByIdsWithAttributes.mockResolvedValue([
 			{ id: 'product-4', media: [], categoryProducts: [], productAttributes: [] }
 		] as any)
@@ -1106,12 +1190,12 @@ describe('ProductService', () => {
 			{ id: 'product-4', score: '001' },
 			{ id: 'product-5', score: '010' },
 			{ id: 'product-6', score: '100' }
-		] as any)
+		])
 		repo.findByIdsWithAttributes.mockResolvedValue([
 			{ id: 'product-4', media: [], categoryProducts: [], productAttributes: [] },
 			{ id: 'product-5', media: [], categoryProducts: [], productAttributes: [] }
 		] as any)
-		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([])
 
 		const result = await runWithCatalog(() =>
 			service.getRecommendationsInfinite({
@@ -1135,7 +1219,7 @@ describe('ProductService', () => {
 	})
 
 	it('returns empty recommendations when no active filters are passed', async () => {
-		repo.findAttributesByTypeAndKeys.mockResolvedValue([] as any)
+		repo.findAttributesByTypeAndKeys.mockResolvedValue([])
 
 		const result = await runWithCatalog(() =>
 			service.getRecommendationsInfinite({
@@ -1159,7 +1243,7 @@ describe('ProductService', () => {
 			items: [{ id: 'product-1', media: [], categories: [] }],
 			nextCursor: null,
 			seed: 'seed-1'
-		} as any)
+		})
 
 		const result = await runWithCatalog(() =>
 			service.getRecommendationsInfiniteCards({
@@ -1187,7 +1271,7 @@ describe('ProductService', () => {
 			],
 			nextCursor: null
 		}
-		cache.getJson.mockResolvedValue(cached as any)
+		cache.getJson.mockResolvedValue(cached)
 
 		const result = await runWithCatalog(() =>
 			service.getUncategorizedInfinite({
@@ -1247,7 +1331,7 @@ describe('ProductService', () => {
 
 	it('skips uncategorized cache in includeInactive mode', async () => {
 		serviceState.uncategorizedFirstPageCacheTtlSec = 120
-		repo.findUncategorizedPage.mockResolvedValue([] as any)
+		repo.findUncategorizedPage.mockResolvedValue([])
 
 		await runWithCatalog(() =>
 			service.getUncategorizedInfinite({
@@ -1348,7 +1432,9 @@ describe('ProductService', () => {
 
 		expect(result).toHaveLength(1)
 		expect(repo.findPopularCards).toHaveBeenCalledWith('catalog-1', false)
-		expect(repo.findVariantSummaries).toHaveBeenCalledWith(['product-1'])
+		expect(repo.findVariantSummaries).toHaveBeenCalledWith(['product-1'], {
+			canUseCatalogSaleUnits: true
+		})
 		expect(repo.findVariantPickerOptions).toHaveBeenCalledWith(['product-1'])
 		expect(repo.findPopular).not.toHaveBeenCalled()
 		expect(result[0]).toHaveProperty('productAttributes', [])
@@ -1435,7 +1521,8 @@ describe('ProductService', () => {
 
 		expect(sellableReader.resolveProductsSellable).toHaveBeenCalledWith(
 			'catalog-1',
-			['product-1']
+			['product-1'],
+			{ buyerCatalogId: 'catalog-1' }
 		)
 		expect(result[0]).toEqual(
 			expect.objectContaining({
@@ -1486,8 +1573,12 @@ describe('ProductService', () => {
 			canUseProductTypes: true,
 			canUseProductVariants: false,
 			canUseCatalogSaleUnits: true,
+			canUseCatalogModifiers: false,
+			canUseCatalogPriceLists: false,
 			canUseInternalInventory: false,
-			canUseMoySkladIntegration: true
+			canUseMoySkladIntegration: true,
+			canUseIikoIntegration: false,
+			canUseOneCIntegration: false
 		})
 		repo.findPopularCards.mockResolvedValue([
 			{
@@ -1547,8 +1638,12 @@ describe('ProductService', () => {
 			canUseProductTypes: true,
 			canUseProductVariants: false,
 			canUseCatalogSaleUnits: true,
+			canUseCatalogModifiers: false,
+			canUseCatalogPriceLists: false,
 			canUseInternalInventory: false,
-			canUseMoySkladIntegration: true
+			canUseMoySkladIntegration: true,
+			canUseIikoIntegration: false,
+			canUseOneCIntegration: false
 		})
 		repo.findPopularCards.mockResolvedValue([
 			{
@@ -1642,8 +1737,12 @@ describe('ProductService', () => {
 			canUseProductTypes: true,
 			canUseProductVariants: false,
 			canUseCatalogSaleUnits: true,
+			canUseCatalogModifiers: false,
+			canUseCatalogPriceLists: false,
 			canUseInternalInventory: false,
-			canUseMoySkladIntegration: true
+			canUseMoySkladIntegration: true,
+			canUseIikoIntegration: false,
+			canUseOneCIntegration: false
 		})
 		repo.findPublicById.mockResolvedValue({
 			id: 'product-1',
@@ -1790,13 +1889,161 @@ describe('ProductService', () => {
 		)
 	})
 
+	it('hides product details when active price list has no product price', async () => {
+		repo.findPublicById.mockResolvedValue({
+			id: 'product-1',
+			price: null,
+			media: [],
+			productType: { id: 'product-type-1', code: 'simple', name: 'Simple' },
+			productAttributes: [],
+			variants: [],
+			categoryProducts: [],
+			integrationLinks: []
+		} as any)
+		sellableReader.resolveProductSellable.mockResolvedValueOnce({
+			priceState: 'UNKNOWN',
+			displayPrice: null,
+			minPrice: null,
+			maxPrice: null,
+			availabilityState: 'AVAILABLE',
+			stock: null,
+			defaultVariantId: null,
+			requiresVariantSelection: false,
+			usesPriceList: true
+		})
+
+		await expect(
+			runWithCatalog(() => service.getById('product-1'))
+		).rejects.toThrow('Товар не найден')
+		expect(sellableReader.resolveProductSellable).toHaveBeenCalledWith(
+			'catalog-1',
+			'product-1',
+			{ buyerCatalogId: 'catalog-1' }
+		)
+	})
+
+	it('does not apply price-list visibility to includeInactive product details', async () => {
+		repo.findPublicById.mockResolvedValue({
+			id: 'product-1',
+			price: null,
+			media: [],
+			productType: { id: 'product-type-1', code: 'simple', name: 'Simple' },
+			productAttributes: [],
+			variants: [],
+			categoryProducts: [],
+			integrationLinks: []
+		} as any)
+		sellableReader.resolveProductSellable.mockResolvedValueOnce({
+			priceState: 'UNKNOWN',
+			displayPrice: null,
+			minPrice: null,
+			maxPrice: null,
+			availabilityState: 'AVAILABLE',
+			stock: null,
+			defaultVariantId: null,
+			requiresVariantSelection: false,
+			usesPriceList: true
+		})
+
+		const result = await runWithCatalog(() =>
+			service.getById('product-1', { includeInactive: true })
+		)
+
+		expect(result).toMatchObject({ id: 'product-1' })
+		expect(sellableReader.resolveProductSellable).toHaveBeenCalledWith(
+			'catalog-1',
+			'product-1',
+			{ buyerCatalogId: 'catalog-1' }
+		)
+	})
+
+	it('applies price-list visibility to includeInactive child product details', async () => {
+		repo.findPublicById.mockResolvedValue({
+			id: 'product-1',
+			price: null,
+			media: [],
+			productType: { id: 'product-type-1', code: 'simple', name: 'Simple' },
+			productAttributes: [],
+			variants: [],
+			categoryProducts: [],
+			integrationLinks: []
+		} as any)
+		sellableReader.resolveProductSellable.mockResolvedValueOnce({
+			priceState: 'UNKNOWN',
+			displayPrice: null,
+			minPrice: null,
+			maxPrice: null,
+			availabilityState: 'AVAILABLE',
+			stock: null,
+			defaultVariantId: null,
+			requiresVariantSelection: false,
+			usesPriceList: true
+		})
+
+		await expect(
+			runWithChildCatalog(() =>
+				service.getById('product-1', { includeInactive: true })
+			)
+		).rejects.toThrow('Товар не найден')
+		expect(sellableReader.resolveProductSellable).toHaveBeenCalledWith(
+			'catalog-1',
+			'product-1',
+			{ buyerCatalogId: 'child-catalog-1' }
+		)
+	})
+
+	it('applies price-list prices to includeInactive product details', async () => {
+		repo.findPublicById.mockResolvedValue({
+			id: 'product-1',
+			price: '100.00',
+			media: [],
+			productType: { id: 'product-type-1', code: 'simple', name: 'Simple' },
+			productAttributes: [],
+			variants: [],
+			categoryProducts: [],
+			integrationLinks: []
+		} as any)
+		sellableReader.resolveProductSellable.mockResolvedValueOnce({
+			priceState: 'KNOWN',
+			displayPrice: '250.00',
+			minPrice: '250.00',
+			maxPrice: '250.00',
+			availabilityState: 'AVAILABLE',
+			stock: null,
+			defaultVariantId: null,
+			requiresVariantSelection: false,
+			usesPriceList: true
+		})
+
+		const result = await runWithCatalog(() =>
+			service.getById('product-1', { includeInactive: true })
+		)
+
+		expect(result).toMatchObject({
+			id: 'product-1',
+			price: '250.00',
+			displayPrice: '250.00',
+			minPrice: '250.00',
+			maxPrice: '250.00'
+		})
+		expect(sellableReader.resolveProductSellable).toHaveBeenCalledWith(
+			'catalog-1',
+			'product-1',
+			{ buyerCatalogId: 'catalog-1' }
+		)
+	})
+
 	it('strips beta product data from details when capabilities are disabled', async () => {
 		capabilities.getCurrentFeatures.mockResolvedValueOnce({
 			canUseProductTypes: false,
 			canUseProductVariants: false,
 			canUseCatalogSaleUnits: false,
+			canUseCatalogModifiers: false,
+			canUseCatalogPriceLists: false,
 			canUseInternalInventory: false,
-			canUseMoySkladIntegration: false
+			canUseMoySkladIntegration: false,
+			canUseIikoIntegration: false,
+			canUseOneCIntegration: false
 		})
 		repo.findPublicById.mockResolvedValue({
 			id: 'product-1',
@@ -1884,7 +2131,7 @@ describe('ProductService', () => {
 	})
 
 	it('allows using one brand for multiple products', async () => {
-		repo.findBrandById.mockResolvedValue({ id: 'brand-1' } as any)
+		repo.findBrandById.mockResolvedValue({ id: 'brand-1' })
 		repo.existsSlug.mockResolvedValue(false)
 		repo.existsName.mockResolvedValue(false)
 		repo.existsSku.mockResolvedValue(false)
@@ -1993,8 +2240,85 @@ describe('ProductService', () => {
 					status: 'ACTIVE',
 					attributes: []
 				})
-			]
+			],
+			undefined
 		)
+	})
+
+	it('rejects product creation from child catalog', async () => {
+		await expect(
+			runWithChildCatalog(() =>
+				service.create({
+					name: 'Child Product',
+					price: 100
+				})
+			)
+		).rejects.toThrow(
+			'Дочерний каталог не может управлять товарами, категориями, брендами и справочниками каталога'
+		)
+
+		expect(repo.create).not.toHaveBeenCalled()
+	})
+
+	it('rejects create price-list variant prices when variants are disabled', async () => {
+		capabilities.assertCanUseProductVariants.mockRejectedValue(
+			new Error('variants disabled')
+		)
+
+		await expect(
+			runWithCatalog(() =>
+				service.create({
+					name: 'Variant Price Product',
+					price: 100,
+					priceListPrices: [
+						{
+							priceListId: 'price-list-1',
+							target: CatalogPriceListPriceTarget.VARIANT,
+							price: 150
+						}
+					]
+				})
+			)
+		).rejects.toThrow('variants disabled')
+
+		expect(capabilities.assertCanUseCatalogPriceLists).toHaveBeenCalledWith(
+			'catalog-1'
+		)
+		expect(capabilities.assertCanUseProductVariants).toHaveBeenCalledWith(
+			'catalog-1'
+		)
+		expect(repo.create).not.toHaveBeenCalled()
+	})
+
+	it('rejects create price-list sale-unit prices when sale units are disabled', async () => {
+		capabilities.assertCanUseCatalogSaleUnits.mockRejectedValue(
+			new Error('sale units disabled')
+		)
+
+		await expect(
+			runWithCatalog(() =>
+				service.create({
+					name: 'Sale Unit Price Product',
+					price: 100,
+					priceListPrices: [
+						{
+							priceListId: 'price-list-1',
+							target: CatalogPriceListPriceTarget.SALE_UNIT,
+							catalogSaleUnitId: 'catalog-sale-unit-piece',
+							price: 150
+						}
+					]
+				})
+			)
+		).rejects.toThrow('sale units disabled')
+
+		expect(capabilities.assertCanUseCatalogPriceLists).toHaveBeenCalledWith(
+			'catalog-1'
+		)
+		expect(capabilities.assertCanUseCatalogSaleUnits).toHaveBeenCalledWith(
+			'catalog-1'
+		)
+		expect(repo.create).not.toHaveBeenCalled()
 	})
 
 	it('creates simple product sale units without product variants capability', async () => {
@@ -2051,7 +2375,8 @@ describe('ProductService', () => {
 					price: 100,
 					saleUnits
 				})
-			]
+			],
+			undefined
 		)
 	})
 
@@ -2093,7 +2418,8 @@ describe('ProductService', () => {
 					variantKey: 'default',
 					price: 125
 				})
-			]
+			],
+			undefined
 		)
 	})
 
@@ -2152,7 +2478,8 @@ describe('ProductService', () => {
 			'catalog-1',
 			expect.any(Object),
 			expect.any(Array),
-			builtVariants
+			builtVariants,
+			undefined
 		)
 		expect(cache.bumpVersion.mock.calls).toContainEqual([
 			CATALOG_TYPE_CACHE_VERSION,
@@ -2197,7 +2524,8 @@ describe('ProductService', () => {
 				productType: { connect: { id: 'product-type-1' } }
 			}),
 			expect.any(Array),
-			expect.any(Array)
+			expect.any(Array),
+			undefined
 		)
 	})
 
@@ -2443,7 +2771,7 @@ describe('ProductService', () => {
 				})
 			)
 		).rejects.toThrow(
-			'Product type product-type-other is not available for this catalog'
+			'Тип товара product-type-other недоступен для этого каталога'
 		)
 		expect(repo.create).not.toHaveBeenCalled()
 	})
@@ -2462,7 +2790,7 @@ describe('ProductService', () => {
 				})
 			)
 		).rejects.toThrow(
-			'Product type archived-product-type is not available for this catalog'
+			'Тип товара archived-product-type недоступен для этого каталога'
 		)
 
 		expect(repo.findProductTypeValidationSchemaById).toHaveBeenCalledWith(
@@ -2648,7 +2976,7 @@ describe('ProductService', () => {
 					]
 				})
 			)
-		).rejects.toThrow('Integrated product variants are managed by integration')
+		).rejects.toThrow('Вариации интеграционного товара управляются интеграцией')
 
 		expect(variantBuilder.build).not.toHaveBeenCalled()
 		expect(repo.setVariants).not.toHaveBeenCalled()
@@ -3393,7 +3721,7 @@ describe('ProductService', () => {
 					productTypeId: 'product-type-1'
 				})
 			)
-		).rejects.toThrow('Integrated product structure is managed by integration')
+		).rejects.toThrow('Структура интеграционного товара управляется интеграцией')
 
 		expect(repo.update).not.toHaveBeenCalled()
 	})
@@ -3737,7 +4065,7 @@ describe('ProductService', () => {
 			runWithCatalog(() =>
 				service.previewProductTypeCompatibility('product-1', {} as any)
 			)
-		).rejects.toThrow('productTypeId is required')
+		).rejects.toThrow('Не указан тип товара')
 
 		expect(repo.findProductTypeCompatibilityPreviewRef).not.toHaveBeenCalled()
 		expect(repo.update).not.toHaveBeenCalled()
@@ -3819,7 +4147,7 @@ describe('ProductService', () => {
 			id: 'product-type-1',
 			catalogId: 'catalog-1',
 			attributes: []
-		} as any)
+		})
 
 		await expect(
 			runWithCatalog(() =>
@@ -4030,7 +4358,7 @@ describe('ProductService', () => {
 		repo.existsName.mockResolvedValue(false)
 		repo.existsSlug.mockResolvedValue(false)
 		repo.existsSku.mockResolvedValue(false)
-		repo.findBrandById.mockResolvedValue({ id: 'brand-1' } as any)
+		repo.findBrandById.mockResolvedValue({ id: 'brand-1' })
 		repo.findById
 			.mockResolvedValueOnce({
 				id: 'product-1',
@@ -4283,7 +4611,7 @@ describe('ProductService', () => {
 		repo.findCategoriesByIds.mockResolvedValue([
 			{ id: 'category-1' },
 			{ id: 'category-2' }
-		] as any)
+		])
 		repo.findById.mockResolvedValue({
 			id: 'product-1',
 			slug: 'first',
@@ -4325,7 +4653,7 @@ describe('ProductService', () => {
 	})
 
 	it('updates category position when categoryId and categoryPosition are passed', async () => {
-		repo.findCategoryById.mockResolvedValue({ id: 'category-1' } as any)
+		repo.findCategoryById.mockResolvedValue({ id: 'category-1' })
 		repo.update.mockResolvedValue({ id: 'product-1', media: [] } as any)
 		repo.findById.mockResolvedValue({ id: 'product-1', media: [] } as any)
 
@@ -4362,7 +4690,7 @@ describe('ProductService', () => {
 		repo.findCategoriesByIds.mockResolvedValue([
 			{ id: 'category-1' },
 			{ id: 'category-2' }
-		] as any)
+		])
 		repo.update.mockResolvedValue({ id: 'product-1', media: [] } as any)
 		repo.findById.mockResolvedValue({ id: 'product-1', media: [] } as any)
 
@@ -4553,8 +4881,8 @@ describe('ProductService', () => {
 		repo.findCategoriesByIds.mockResolvedValue([
 			{ id: 'category-1' },
 			{ id: 'category-2' }
-		] as any)
-		repo.findCategoryById.mockResolvedValue({ id: 'category-3' } as any)
+		])
+		repo.findCategoryById.mockResolvedValue({ id: 'category-3' })
 
 		await expect(
 			runWithCatalog(() =>
@@ -4586,7 +4914,7 @@ describe('ProductService', () => {
 		repo.softDelete.mockResolvedValue({
 			id: 'product-1',
 			mediaIds: ['media-1']
-		} as any)
+		})
 		mediaRepo.findOrphanedByIds.mockResolvedValue([
 			{
 				id: 'media-1',
@@ -4599,7 +4927,7 @@ describe('ProductService', () => {
 					}
 				]
 			}
-		] as any)
+		])
 		mediaRepo.deleteOrphanedByIds.mockResolvedValue(1)
 
 		await expect(
@@ -4641,9 +4969,7 @@ describe('ProductService', () => {
 
 		await expect(
 			runWithCatalog(() => service.remove('product-1'))
-		).rejects.toThrow(
-			'Integrated product deletion is disabled; the product is managed by integration'
-		)
+		).rejects.toThrow('Удаление интеграционного товара отключено')
 
 		expect(repo.softDelete).not.toHaveBeenCalled()
 		expect(productSeoSync.removeProduct).not.toHaveBeenCalled()
@@ -4653,7 +4979,7 @@ describe('ProductService', () => {
 		repo.softDelete.mockResolvedValue({
 			id: 'product-1',
 			mediaIds: ['media-1']
-		} as any)
+		})
 		mediaRepo.findOrphanedByIds.mockResolvedValue([])
 
 		await expect(

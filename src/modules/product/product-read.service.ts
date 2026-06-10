@@ -7,7 +7,8 @@ import {
 	BadRequestException,
 	Inject,
 	Injectable,
-	NotFoundException
+	NotFoundException,
+	Optional
 } from '@nestjs/common'
 import { createHash } from 'crypto'
 
@@ -16,6 +17,10 @@ import {
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
 import type { CatalogCapabilityFlags } from '@/modules/capability/public'
+import {
+	type CatalogPriceListProductPriceContext,
+	CatalogPriceListResolverService
+} from '@/modules/catalog-price-list/public'
 import { SeoRepository } from '@/modules/seo/public'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
@@ -36,7 +41,12 @@ import {
 	type ProductMappableRecord,
 	ProductMediaMapper
 } from '@/shared/media/product-media.mapper'
-import { effectiveCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
+import {
+	ctx,
+	effectiveCatalogId,
+	mustCatalogId,
+	mustTypeId
+} from '@/shared/tenancy/ctx'
 
 import {
 	PRODUCT_SELLABLE_READER_PORT,
@@ -48,6 +58,10 @@ import {
 	toProductCommercialFields,
 	toProductCommercialFieldsMap
 } from './product-commercial-fields.mapper'
+import {
+	applyPriceListContextToProduct,
+	applyPriceListContextToVariant
+} from './product-price-list-read.utils'
 import {
 	type DecodedInfiniteCursor,
 	decodeProductInfiniteCursor,
@@ -75,6 +89,8 @@ import {
 export type ProductReadOptions = {
 	includeInactive?: boolean
 	includeVariantIntegration?: boolean
+	applyPriceList?: boolean
+	enforcePriceListVisibility?: boolean
 }
 
 type ProductReadFeatures = Pick<
@@ -82,6 +98,7 @@ type ProductReadFeatures = Pick<
 	| 'canUseProductTypes'
 	| 'canUseProductVariants'
 	| 'canUseCatalogSaleUnits'
+	| 'canUseCatalogPriceLists'
 	| 'canUseMoySkladIntegration'
 	| 'canUseIikoIntegration'
 >
@@ -102,11 +119,6 @@ type ProductInfiniteSeededRow = Awaited<
 	ReturnType<ProductRepository['findFilteredProductIdsPageSeeded']>
 >[number]
 type ProductInfiniteRow = ProductInfiniteDefaultRow | ProductInfiniteSeededRow
-
-type ProductInfinitePage = {
-	pageRows: ProductInfiniteRow[]
-	hasMore: boolean
-}
 
 type ProductVariantSummary = Omit<ProductVariantSummaryRecord, 'productId'>
 type ProductVariantPickerOption = {
@@ -199,9 +211,16 @@ type SaleUnitPickerSource = {
 	displayOrder?: number | null
 }
 
+type VariantPriceOptions = {
+	canUseCatalogSaleUnits?: boolean
+}
+
 function resolveDefaultSaleUnit(
-	variant: { saleUnits?: SaleUnitPickerSource[] | null } | null | undefined
+	variant: { saleUnits?: SaleUnitPickerSource[] | null } | null | undefined,
+	options: VariantPriceOptions = {}
 ): SaleUnitPickerSource | null {
+	if (options.canUseCatalogSaleUnits === false) return null
+
 	const saleUnits = Array.isArray(variant?.saleUnits)
 		? variant.saleUnits.filter(
 				(unit): unit is SaleUnitPickerSource =>
@@ -222,9 +241,10 @@ function resolveDefaultSaleUnit(
 }
 
 function resolveVariantDisplayPrice(
-	variant: ProductVariantPickerSource
+	variant: ProductVariantPickerSource,
+	options: VariantPriceOptions = {}
 ): unknown {
-	return resolveDefaultSaleUnit(variant)?.price ?? variant.price
+	return resolveDefaultSaleUnit(variant, options)?.price ?? variant.price
 }
 
 function resolveVariantMaxQuantity(
@@ -314,10 +334,11 @@ function compareVariantPickerOptions(
 }
 
 function mapVariantPickerOption(
-	variant: ProductVariantPickerSource
+	variant: ProductVariantPickerSource,
+	options: VariantPriceOptions = {}
 ): ProductVariantPickerOption {
-	const defaultSaleUnit = resolveDefaultSaleUnit(variant)
-	const displayPrice = resolveVariantDisplayPrice(variant)
+	const defaultSaleUnit = resolveDefaultSaleUnit(variant, options)
+	const displayPrice = resolveVariantDisplayPrice(variant, options)
 
 	return {
 		id: variant.id,
@@ -344,7 +365,8 @@ function resolveVariantTotalStock(
 }
 
 function buildVariantSummaryFromVariants(
-	variants: ProductVariantPickerSource[]
+	variants: ProductVariantPickerSource[],
+	options: VariantPriceOptions = {}
 ): ProductVariantSummary {
 	const activeVariants = variants.filter(
 		variant =>
@@ -357,7 +379,7 @@ function buildVariantSummaryFromVariants(
 	}
 
 	const prices = activeVariants
-		.map(variant => toNumberValue(resolveVariantDisplayPrice(variant)))
+		.map(variant => toNumberValue(resolveVariantDisplayPrice(variant, options)))
 		.filter((price): price is number => price !== null)
 	if (!prices.length) {
 		return {
@@ -381,7 +403,8 @@ function buildVariantSummaryFromVariants(
 
 function buildVariantPickerOptionsFromVariants(
 	variants: ProductVariantPickerSource[],
-	summary: ProductVariantSummary
+	summary: ProductVariantSummary,
+	options: VariantPriceOptions = {}
 ): ProductVariantPickerOption[] {
 	if (!shouldBuildVariantPickerOptions(summary)) {
 		return []
@@ -395,7 +418,7 @@ function buildVariantPickerOptionsFromVariants(
 		)
 		.slice()
 		.sort(compareVariantPickerOptions)
-		.map(mapVariantPickerOption)
+		.map(variant => mapVariantPickerOption(variant, options))
 }
 
 function sanitizeVariantForReadFeatures<T extends Record<string, unknown>>(
@@ -517,7 +540,9 @@ export class ProductReadService {
 		@Inject(CAPABILITY_READER_PORT)
 		private readonly capabilities: CapabilityReaderPort,
 		@Inject(PRODUCT_SELLABLE_READER_PORT)
-		private readonly sellableReader: ProductSellableReader
+		private readonly sellableReader: ProductSellableReader,
+		@Optional()
+		private readonly priceLists?: CatalogPriceListResolverService
 	) {}
 
 	// ─── Public read methods ─────────────────────────────────────────────────
@@ -525,6 +550,9 @@ export class ProductReadService {
 	async getAll(options?: ProductReadOptions) {
 		const catalogId = effectiveCatalogId()
 		const includeInactive = options?.includeInactive === true
+		const applyPriceList = this.shouldApplyPriceList(options)
+		const enforcePriceListVisibility =
+			this.shouldEnforcePriceListVisibility(options)
 		const readFeatures = await this.getReadFeatures(catalogId)
 
 		if (includeInactive || !this.cacheTtlSec) {
@@ -533,7 +561,9 @@ export class ProductReadService {
 				products,
 				MEDIA_LIST_VARIANT_NAMES,
 				catalogId,
-				readFeatures
+				readFeatures,
+				applyPriceList,
+				enforcePriceListVisibility
 			)
 		}
 
@@ -546,7 +576,9 @@ export class ProductReadService {
 					products,
 					MEDIA_LIST_VARIANT_NAMES,
 					catalogId,
-					readFeatures
+					readFeatures,
+					applyPriceList,
+					enforcePriceListVisibility
 				)
 			},
 			this.cacheTtlSec
@@ -556,6 +588,9 @@ export class ProductReadService {
 	async getPopular(options?: ProductReadOptions) {
 		const catalogId = effectiveCatalogId()
 		const includeInactive = options?.includeInactive === true
+		const applyPriceList = this.shouldApplyPriceList(options)
+		const enforcePriceListVisibility =
+			this.shouldEnforcePriceListVisibility(options)
 		const readFeatures = await this.getReadFeatures(catalogId)
 
 		if (includeInactive || !this.cacheTtlSec) {
@@ -564,7 +599,9 @@ export class ProductReadService {
 				products,
 				MEDIA_LIST_VARIANT_NAMES,
 				catalogId,
-				readFeatures
+				readFeatures,
+				applyPriceList,
+				enforcePriceListVisibility
 			)
 		}
 
@@ -580,7 +617,9 @@ export class ProductReadService {
 					products,
 					MEDIA_LIST_VARIANT_NAMES,
 					catalogId,
-					readFeatures
+					readFeatures,
+					applyPriceList,
+					enforcePriceListVisibility
 				)
 			},
 			this.cacheTtlSec
@@ -590,6 +629,9 @@ export class ProductReadService {
 	async getPopularCards(options?: ProductReadOptions) {
 		const catalogId = effectiveCatalogId()
 		const includeInactive = options?.includeInactive === true
+		const applyPriceList = this.shouldApplyPriceList(options)
+		const enforcePriceListVisibility =
+			this.shouldEnforcePriceListVisibility(options)
 		const readFeatures = await this.getReadFeatures(catalogId)
 
 		if (includeInactive || !this.cacheTtlSec) {
@@ -598,7 +640,9 @@ export class ProductReadService {
 				products,
 				MEDIA_LIST_VARIANT_NAMES,
 				catalogId,
-				readFeatures
+				readFeatures,
+				applyPriceList,
+				enforcePriceListVisibility
 			)
 		}
 
@@ -614,7 +658,9 @@ export class ProductReadService {
 					products,
 					MEDIA_LIST_VARIANT_NAMES,
 					catalogId,
-					readFeatures
+					readFeatures,
+					applyPriceList,
+					enforcePriceListVisibility
 				)
 			},
 			this.cacheTtlSec
@@ -628,6 +674,9 @@ export class ProductReadService {
 		const catalogId = effectiveCatalogId()
 		const typeId = mustTypeId()
 		const includeInactive = options?.includeInactive === true
+		const applyPriceList = this.shouldApplyPriceList(options)
+		const enforcePriceListVisibility =
+			this.shouldEnforcePriceListVisibility(options)
 		const readFeatures = await this.getReadFeatures(catalogId)
 		const parsed = parseProductInfiniteQuery(query, {
 			defaultLimit: PRODUCT_INFINITE_DEFAULT_LIMIT,
@@ -651,19 +700,22 @@ export class ProductReadService {
 			discountAttributeIds,
 			includeInactive
 		)
-		const rows = await this.loadInfiniteRows(baseQuery, seed, decodedCursor)
-		const { pageRows, hasMore } = this.buildInfinitePage(rows, parsed.limit)
-
-		return {
-			items: await this.loadInfiniteItems(
-				pageRows,
-				catalogId,
-				includeInactive,
-				readFeatures
-			),
-			nextCursor: this.buildInfiniteNextCursor(pageRows, hasMore, seed),
-			seed: seed ?? null
-		}
+		return this.loadVisibleInfiniteItemsPage({
+			baseQuery,
+			seed,
+			decodedCursor,
+			limit: parsed.limit,
+			loadRows: cursor => this.loadInfiniteRows(baseQuery, seed, cursor),
+			loadItems: rows =>
+				this.loadInfiniteItems(
+					rows,
+					catalogId,
+					includeInactive,
+					readFeatures,
+					applyPriceList,
+					enforcePriceListVisibility
+				)
+		})
 	}
 
 	async getInfiniteCards(
@@ -680,6 +732,9 @@ export class ProductReadService {
 		const catalogId = effectiveCatalogId()
 		const typeId = mustTypeId()
 		const includeInactive = options?.includeInactive === true
+		const applyPriceList = this.shouldApplyPriceList(options)
+		const enforcePriceListVisibility =
+			this.shouldEnforcePriceListVisibility(options)
 		const readFeatures = await this.getReadFeatures(catalogId)
 		const parsed = parseProductInfiniteQuery(query, {
 			defaultLimit: PRODUCT_INFINITE_DEFAULT_LIMIT,
@@ -707,19 +762,22 @@ export class ProductReadService {
 			discountAttributeIds,
 			includeInactive
 		)
-		const rows = await this.loadRecommendationRows(baseQuery, seed, decodedCursor)
-		const { pageRows, hasMore } = this.buildInfinitePage(rows, parsed.limit)
-
-		return {
-			items: await this.loadInfiniteItems(
-				pageRows,
-				catalogId,
-				includeInactive,
-				readFeatures
-			),
-			nextCursor: this.buildInfiniteNextCursor(pageRows, hasMore, seed),
-			seed: seed ?? null
-		}
+		return this.loadVisibleInfiniteItemsPage({
+			baseQuery,
+			seed,
+			decodedCursor,
+			limit: parsed.limit,
+			loadRows: cursor => this.loadRecommendationRows(baseQuery, seed, cursor),
+			loadItems: rows =>
+				this.loadInfiniteItems(
+					rows,
+					catalogId,
+					includeInactive,
+					readFeatures,
+					applyPriceList,
+					enforcePriceListVisibility
+				)
+		})
 	}
 
 	async getRecommendationsInfiniteCards(
@@ -736,6 +794,9 @@ export class ProductReadService {
 	}) {
 		const catalogId = effectiveCatalogId()
 		const includeInactive = options?.includeInactive === true
+		const applyPriceList = this.shouldApplyPriceList(options)
+		const enforcePriceListVisibility =
+			this.shouldEnforcePriceListVisibility(options)
 		const readFeatures = await this.getReadFeatures(catalogId)
 		const parsed = parseProductInfiniteQuery(
 			{ cursor: options?.cursor, limit: options?.limit },
@@ -776,7 +837,9 @@ export class ProductReadService {
 						pageRows,
 						MEDIA_LIST_VARIANT_NAMES,
 						catalogId,
-						readFeatures
+						readFeatures,
+						applyPriceList,
+						enforcePriceListVisibility
 					),
 					nextCursor:
 						hasMore && lastRow
@@ -798,6 +861,9 @@ export class ProductReadService {
 	}) {
 		const catalogId = effectiveCatalogId()
 		const includeInactive = options?.includeInactive === true
+		const applyPriceList = this.shouldApplyPriceList(options)
+		const enforcePriceListVisibility =
+			this.shouldEnforcePriceListVisibility(options)
 		const readFeatures = await this.getReadFeatures(catalogId)
 		const parsed = parseProductInfiniteQuery(
 			{ cursor: options?.cursor, limit: options?.limit },
@@ -838,7 +904,9 @@ export class ProductReadService {
 						pageRows,
 						MEDIA_LIST_VARIANT_NAMES,
 						catalogId,
-						readFeatures
+						readFeatures,
+						applyPriceList,
+						enforcePriceListVisibility
 					),
 					nextCursor:
 						hasMore && lastRow
@@ -865,7 +933,13 @@ export class ProductReadService {
 						options?.includeInactive === true
 					)
 		if (!product) throw new NotFoundException('Товар не найден')
-		return this.mapProductWithSeo(product, catalogId, readFeatures)
+		return this.mapProductWithSeo(
+			product,
+			catalogId,
+			readFeatures,
+			this.shouldApplyPriceList(options),
+			this.shouldEnforcePriceListVisibility(options)
+		)
 	}
 
 	async getBySlug(slug: string, options?: ProductReadOptions) {
@@ -885,7 +959,13 @@ export class ProductReadService {
 						options?.includeInactive === true
 					)
 		if (!product) throw new NotFoundException('Товар не найден')
-		return this.mapProductWithSeo(product, catalogId, readFeatures)
+		return this.mapProductWithSeo(
+			product,
+			catalogId,
+			readFeatures,
+			this.shouldApplyPriceList(options),
+			this.shouldEnforcePriceListVisibility(options)
+		)
 	}
 
 	// ─── Private helpers ─────────────────────────────────────────────────────
@@ -910,13 +990,41 @@ export class ProductReadService {
 		return this.capabilities.getCurrentFeatures(catalogId)
 	}
 
+	private shouldApplyPriceList(options?: ProductReadOptions): boolean {
+		return options?.applyPriceList ?? true
+	}
+
+	private shouldEnforcePriceListVisibility(
+		options?: ProductReadOptions
+	): boolean {
+		return (
+			options?.enforcePriceListVisibility ??
+			(this.isChildCatalogRead() || options?.includeInactive !== true)
+		)
+	}
+
+	private isChildCatalogRead(): boolean {
+		const store = ctx()
+		return Boolean(store.parentId && store.parentId !== store.catalogId)
+	}
+
 	private async buildVersionedCacheKey(
 		scope: string,
 		catalogId: string,
 		parts: string[]
 	): Promise<string> {
+		const buyerCatalogId = mustCatalogId()
 		const version = await this.cache.getVersion(scope, catalogId)
-		return this.cache.buildKey([...parts, `v${version}`])
+		const buyerVersion =
+			buyerCatalogId === catalogId
+				? null
+				: await this.cache.getVersion(scope, buyerCatalogId)
+		return this.cache.buildKey([
+			...parts,
+			`buyer-${buyerCatalogId}`,
+			`v${version}`,
+			`bv${buyerVersion ?? version}`
+		])
 	}
 
 	private buildCatalogProductsCacheKey(
@@ -967,10 +1075,16 @@ export class ProductReadService {
 		kind: 'catalog' | 'recommendations',
 		readFeatures: ProductReadFeatures
 	): Promise<string> {
-		const [version, typeVersion] = await Promise.all([
-			this.cache.getVersion(PRODUCTS_CACHE_VERSION, catalogId),
-			this.cache.getVersion(CATALOG_TYPE_CACHE_VERSION, typeId)
-		])
+		const buyerCatalogId = mustCatalogId()
+		const version = await this.cache.getVersion(PRODUCTS_CACHE_VERSION, catalogId)
+		const buyerVersion =
+			buyerCatalogId === catalogId
+				? null
+				: await this.cache.getVersion(PRODUCTS_CACHE_VERSION, buyerCatalogId)
+		const typeVersion = await this.cache.getVersion(
+			CATALOG_TYPE_CACHE_VERSION,
+			typeId
+		)
 		const fingerprint = this.buildInfiniteCardsQueryFingerprint(parsed, seed)
 		return this.cache.buildKey([
 			'catalog',
@@ -980,7 +1094,9 @@ export class ProductReadService {
 			'cards',
 			this.buildReadFeaturesCachePart(readFeatures),
 			fingerprint,
+			`buyer-${buyerCatalogId}`,
 			`v${version}`,
+			`bv${buyerVersion ?? version}`,
 			`t${typeVersion}`
 		])
 	}
@@ -1021,6 +1137,7 @@ export class ProductReadService {
 			features.canUseProductTypes ? 'types-on' : 'types-off',
 			features.canUseProductVariants ? 'variants-on' : 'variants-off',
 			features.canUseCatalogSaleUnits ? 'sale-units-on' : 'sale-units-off',
+			features.canUseCatalogPriceLists ? 'price-lists-on' : 'price-lists-off',
 			features.canUseMoySkladIntegration ? 'moysklad-on' : 'moysklad-off',
 			features.canUseIikoIntegration ? 'iiko-on' : 'iiko-off'
 		].join(':')
@@ -1146,19 +1263,69 @@ export class ProductReadService {
 		})
 	}
 
-	private buildInfinitePage(
-		rows: ProductInfiniteRow[],
+	private async loadVisibleInfiniteItemsPage<
+		TItem extends { id: string }
+	>(params: {
+		baseQuery: ProductFilterQueryBase
+		seed: string | undefined
+		decodedCursor: DecodedInfiniteCursor | null
 		limit: number
-	): ProductInfinitePage {
-		const hasMore = rows.length > limit
-		return { hasMore, pageRows: hasMore ? rows.slice(0, limit) : rows }
+		loadRows: (
+			decodedCursor: DecodedInfiniteCursor | null
+		) => Promise<ProductInfiniteRow[]>
+		loadItems: (rows: ProductInfiniteRow[]) => Promise<TItem[]>
+	}): Promise<{
+		items: TItem[]
+		nextCursor: string | null
+		seed: string | null
+	}> {
+		const take = params.limit + 1
+		const visibleItems: TItem[] = []
+		let decodedCursor = params.decodedCursor
+		let nextCursor: string | null = null
+		let lastVisibleCursor: string | null = null
+
+		while (visibleItems.length <= params.limit) {
+			const rows = await params.loadRows(decodedCursor)
+			if (!rows.length) break
+
+			const items = await params.loadItems(rows)
+			const itemById = new Map(items.map(item => [item.id, item] as const))
+
+			for (const row of rows) {
+				const item = itemById.get(row.id)
+				if (!item) continue
+
+				if (visibleItems.length >= params.limit) {
+					nextCursor = lastVisibleCursor
+					break
+				}
+
+				visibleItems.push(item)
+				lastVisibleCursor = this.encodeInfiniteCursor(row, params.seed)
+			}
+
+			if (nextCursor) break
+
+			const lastRawRow = rows[rows.length - 1]
+			if (!lastRawRow || rows.length < take) break
+			decodedCursor = this.buildDecodedInfiniteCursor(lastRawRow, params.seed)
+		}
+
+		return {
+			items: visibleItems,
+			nextCursor,
+			seed: params.seed ?? null
+		}
 	}
 
 	private async loadInfiniteItems(
 		rows: ProductInfiniteRow[],
 		catalogId: string,
 		includeInactive = false,
-		readFeatures: ProductReadFeatures
+		readFeatures: ProductReadFeatures,
+		applyPriceList = true,
+		enforcePriceListVisibility = true
 	) {
 		const ids = rows.map(row => row.id)
 		const products = await this.repo.findByIdsWithAttributes(
@@ -1170,7 +1337,9 @@ export class ProductReadService {
 			products,
 			MEDIA_LIST_VARIANT_NAMES,
 			catalogId,
-			readFeatures
+			readFeatures,
+			applyPriceList,
+			enforcePriceListVisibility
 		)
 		const byId = new Map(mapped.map(product => [product.id, product] as const))
 		return ids
@@ -1182,7 +1351,9 @@ export class ProductReadService {
 		rows: ProductInfiniteRow[],
 		catalogId: string,
 		includeInactive = false,
-		readFeatures: ProductReadFeatures
+		readFeatures: ProductReadFeatures,
+		applyPriceList = true,
+		enforcePriceListVisibility = true
 	) {
 		const ids = rows.map(row => row.id)
 		const products = await this.repo.findByIds(ids, catalogId, includeInactive)
@@ -1190,7 +1361,9 @@ export class ProductReadService {
 			products,
 			MEDIA_LIST_VARIANT_NAMES,
 			catalogId,
-			readFeatures
+			readFeatures,
+			applyPriceList,
+			enforcePriceListVisibility
 		)
 		const byId = new Map(mapped.map(product => [product.id, product] as const))
 		return ids
@@ -1198,21 +1371,40 @@ export class ProductReadService {
 			.filter((p): p is NonNullable<typeof p> => p !== undefined)
 	}
 
-	private buildInfiniteNextCursor(
-		pageRows: ProductInfiniteRow[],
-		hasMore: boolean,
+	private buildDecodedInfiniteCursor(
+		row: ProductInfiniteRow,
 		seed?: string
-	): string | null {
-		const lastRow = pageRows[pageRows.length - 1]
-		if (!hasMore || !lastRow) return null
-
+	): DecodedInfiniteCursor {
 		if (seed) {
-			const row = lastRow as ProductInfiniteSeededRow
-			return encodeProductSeedCursor(seed, { id: row.id, score: row.score })
+			const seededRow = row as ProductInfiniteSeededRow
+			return {
+				mode: 'seed',
+				seed,
+				cursor: { id: seededRow.id, score: seededRow.score }
+			}
 		}
 
-		const row = lastRow as ProductInfiniteDefaultRow
-		return encodeProductDefaultCursor({ id: row.id, updatedAt: row.updatedAt })
+		const defaultRow = row as ProductInfiniteDefaultRow
+		return {
+			mode: 'default',
+			cursor: { id: defaultRow.id, updatedAt: defaultRow.updatedAt }
+		}
+	}
+
+	private encodeInfiniteCursor(row: ProductInfiniteRow, seed?: string): string {
+		if (seed) {
+			const seededRow = row as ProductInfiniteSeededRow
+			return encodeProductSeedCursor(seed, {
+				id: seededRow.id,
+				score: seededRow.score
+			})
+		}
+
+		const defaultRow = row as ProductInfiniteDefaultRow
+		return encodeProductDefaultCursor({
+			id: defaultRow.id,
+			updatedAt: defaultRow.updatedAt
+		})
 	}
 
 	private async resolveAttributeFilters(
@@ -1285,28 +1477,59 @@ export class ProductReadService {
 	private async mapProductWithSeo(
 		product: ProductDetailsItem | ProductPublicDetailsItem,
 		catalogId: string,
-		readFeatures: ProductReadFeatures
+		readFeatures: ProductReadFeatures,
+		applyPriceList = true,
+		enforcePriceListVisibility = true
 	) {
+		const buyerCatalogId = mustCatalogId()
+		const priceContext = await this.resolvePriceListContext(
+			catalogId,
+			buyerCatalogId,
+			[product.id],
+			applyPriceList
+		)
+		const commercial = await this.resolveCommercialProjection(
+			catalogId,
+			product.id,
+			buyerCatalogId,
+			applyPriceList
+		)
+		if (
+			enforcePriceListVisibility &&
+			commercial.usesPriceList &&
+			commercial.priceState === 'UNKNOWN'
+		) {
+			throw new NotFoundException('Товар не найден')
+		}
+		const readableProduct = applyPriceListContextToProduct(
+			product,
+			priceContext,
+			{
+				filterUnavailable: enforcePriceListVisibility,
+				...(readFeatures.canUseCatalogSaleUnits
+					? {}
+					: { canUseCatalogSaleUnits: false })
+			}
+		)
 		const seo = await this.seoRepo.findByEntity(
 			catalogId,
 			SeoEntityType.PRODUCT,
 			product.id
 		)
-		const variantSources = product.variants as ProductVariantPickerSource[]
+		const variantSources =
+			readableProduct.variants as ProductVariantPickerSource[]
 		const shouldExposeVariants = shouldExposeProductVariantsForProduct(
 			readFeatures,
-			product
+			readableProduct
 		)
 		const variantSummary = shouldExposeVariants
-			? buildVariantSummaryFromVariants(variantSources)
+			? buildVariantSummaryFromVariants(variantSources, {
+					canUseCatalogSaleUnits: readFeatures.canUseCatalogSaleUnits
+				})
 			: { ...EMPTY_VARIANT_SUMMARY }
-		const commercial = await this.resolveCommercialProjection(
-			catalogId,
-			product.id
-		)
 		const mappedProduct = applyProductCommercialFields(
-			this.mapper.mapProduct(product, MEDIA_DETAIL_VARIANT_NAMES),
-			commercial
+			this.mapper.mapProduct(readableProduct, MEDIA_DETAIL_VARIANT_NAMES),
+			this.resolveCommercialForRead(commercial, enforcePriceListVisibility)
 		)
 
 		return sanitizeProductForReadFeatures(
@@ -1318,7 +1541,9 @@ export class ProductReadService {
 				}),
 				variantSummary,
 				variantPickerOptions: shouldExposeVariants
-					? buildVariantPickerOptionsFromVariants(variantSources, variantSummary)
+					? buildVariantPickerOptionsFromVariants(variantSources, variantSummary, {
+							canUseCatalogSaleUnits: readFeatures.canUseCatalogSaleUnits
+						})
 					: [],
 				seo: this.mapSeo(seo)
 			},
@@ -1333,42 +1558,67 @@ export class ProductReadService {
 		products: T[],
 		variantNames: readonly string[],
 		catalogId: string,
-		readFeatures: ProductReadFeatures
+		readFeatures: ProductReadFeatures,
+		applyPriceList = true,
+		enforcePriceListVisibility = true
 	) {
 		if (!products.length) return []
 
+		const buyerCatalogId = mustCatalogId()
+		const priceContext = await this.resolvePriceListContext(
+			catalogId,
+			buyerCatalogId,
+			products.map(product => product.id),
+			applyPriceList
+		)
 		const productIds = products
 			.filter(product =>
 				shouldExposeProductVariantsForProduct(readFeatures, product)
 			)
 			.map(product => product.id)
-		const summaryMap = productIds.length
-			? await this.loadVariantSummaryMap(productIds)
-			: new Map<string, ProductVariantSummary>()
-		const variantPickerProductIds = productIds.filter(productId =>
-			shouldBuildVariantPickerOptions(
-				summaryMap.get(productId) ?? { ...EMPTY_VARIANT_SUMMARY }
+		const { summaryMap, variantPickerOptionsMap } =
+			await this.loadVariantReadMaps(
+				productIds,
+				priceContext,
+				enforcePriceListVisibility,
+				readFeatures.canUseCatalogSaleUnits
 			)
-		)
-		const variantPickerOptionsMap = variantPickerProductIds.length
-			? await this.loadVariantPickerOptionsMap(variantPickerProductIds)
-			: new Map<string, ProductVariantPickerOption[]>()
 		const commercialMap = await this.resolveCommercialProjectionMap(
 			catalogId,
-			products
+			products,
+			buyerCatalogId,
+			applyPriceList
 		)
 
-		return products.map(product => {
+		return products.flatMap(product => {
+			const commercial = commercialMap.get(product.id)
+			if (
+				enforcePriceListVisibility &&
+				commercial?.usesPriceList &&
+				commercial.priceState === 'UNKNOWN'
+			) {
+				return []
+			}
+			const readableProduct = applyPriceListContextToProduct(
+				product,
+				priceContext,
+				{
+					filterUnavailable: enforcePriceListVisibility,
+					...(readFeatures.canUseCatalogSaleUnits
+						? {}
+						: { canUseCatalogSaleUnits: false })
+				}
+			)
 			const shouldExposeVariants = shouldExposeProductVariantsForProduct(
 				readFeatures,
-				product
+				readableProduct
 			)
 			const variantSummary = shouldExposeVariants
 				? (summaryMap.get(product.id) ?? { ...EMPTY_VARIANT_SUMMARY })
 				: { ...EMPTY_VARIANT_SUMMARY }
 			const mappedProduct = applyProductCommercialFields(
-				this.mapper.mapProduct(product, variantNames),
-				commercialMap.get(product.id)
+				this.mapper.mapProduct(readableProduct, variantNames),
+				this.resolveCommercialForRead(commercial, enforcePriceListVisibility)
 			)
 			const saleUnits = resolveProductSaleUnitsForRead(mappedProduct, {
 				canUseCatalogSaleUnits: readFeatures.canUseCatalogSaleUnits,
@@ -1381,21 +1631,28 @@ export class ProductReadService {
 			}
 			delete mappedProductWithoutVariants.variants
 
-			return sanitizeProductForReadFeatures(
-				{
-					...mappedProductWithoutVariants,
-					saleUnits,
-					variantSummary,
-					variantPickerOptions: variantPickerOptionsMap.get(product.id) ?? []
-				},
-				readFeatures,
-				shouldExposeVariants
-			)
+			return [
+				sanitizeProductForReadFeatures(
+					{
+						...mappedProductWithoutVariants,
+						saleUnits,
+						variantSummary,
+						variantPickerOptions: variantPickerOptionsMap.get(product.id) ?? []
+					},
+					readFeatures,
+					shouldExposeVariants
+				)
+			]
 		})
 	}
 
-	private async loadVariantSummaryMap(productIds: string[]) {
-		const summaries = await this.repo.findVariantSummaries(productIds)
+	private async loadVariantSummaryMap(
+		productIds: string[],
+		canUseCatalogSaleUnits = true
+	) {
+		const summaries = await this.repo.findVariantSummaries(productIds, {
+			canUseCatalogSaleUnits
+		})
 		return new Map(
 			summaries.map(summary => {
 				const { productId, ...rest } = summary
@@ -1404,13 +1661,116 @@ export class ProductReadService {
 		)
 	}
 
-	private async loadVariantPickerOptionsMap(productIds: string[]) {
+	private async loadVariantReadMaps(
+		productIds: string[],
+		priceContext: CatalogPriceListProductPriceContext,
+		enforcePriceListVisibility = true,
+		canUseCatalogSaleUnits = true
+	): Promise<{
+		summaryMap: Map<string, ProductVariantSummary>
+		variantPickerOptionsMap: Map<string, ProductVariantPickerOption[]>
+	}> {
+		if (!productIds.length) {
+			return {
+				summaryMap: new Map(),
+				variantPickerOptionsMap: new Map()
+			}
+		}
+
+		if (!priceContext.priceList) {
+			const summaryMap = await this.loadVariantSummaryMap(
+				productIds,
+				canUseCatalogSaleUnits
+			)
+			const variantPickerProductIds = productIds.filter(productId =>
+				shouldBuildVariantPickerOptions(
+					summaryMap.get(productId) ?? { ...EMPTY_VARIANT_SUMMARY }
+				)
+			)
+			return {
+				summaryMap,
+				variantPickerOptionsMap: variantPickerProductIds.length
+					? await this.loadVariantPickerOptionsMap(
+							variantPickerProductIds,
+							canUseCatalogSaleUnits
+						)
+					: new Map<string, ProductVariantPickerOption[]>()
+			}
+		}
+
+		const variantSourcesMap = await this.loadVariantPickerSourcesMap(
+			productIds,
+			priceContext,
+			enforcePriceListVisibility,
+			canUseCatalogSaleUnits
+		)
+		const summaryMap = new Map<string, ProductVariantSummary>()
+		const variantPickerOptionsMap = new Map<
+			string,
+			ProductVariantPickerOption[]
+		>()
+
+		for (const productId of productIds) {
+			const variants = variantSourcesMap.get(productId) ?? []
+			const summary = buildVariantSummaryFromVariants(variants, {
+				canUseCatalogSaleUnits
+			})
+			summaryMap.set(productId, summary)
+			if (shouldBuildVariantPickerOptions(summary)) {
+				variantPickerOptionsMap.set(
+					productId,
+					variants
+						.slice()
+						.sort(compareVariantPickerOptions)
+						.map(variant =>
+							mapVariantPickerOption(variant, { canUseCatalogSaleUnits })
+						)
+				)
+			}
+		}
+
+		return { summaryMap, variantPickerOptionsMap }
+	}
+
+	private async loadVariantPickerSourcesMap(
+		productIds: string[],
+		priceContext: CatalogPriceListProductPriceContext,
+		enforcePriceListVisibility = true,
+		canUseCatalogSaleUnits = true
+	): Promise<Map<string, ProductVariantPickerSource[]>> {
+		const variants = await this.repo.findVariantPickerOptions(productIds)
+		const map = new Map<string, ProductVariantPickerSource[]>()
+
+		for (const variant of variants) {
+			const filtered = applyPriceListContextToVariant(
+				variant.productId,
+				variant,
+				priceContext,
+				{
+					filterUnavailable: enforcePriceListVisibility,
+					...(canUseCatalogSaleUnits ? {} : { canUseCatalogSaleUnits: false })
+				}
+			)
+			if (!filtered) continue
+
+			const options = map.get(variant.productId) ?? []
+			options.push(filtered)
+			map.set(variant.productId, options)
+		}
+
+		return map
+	}
+
+	private async loadVariantPickerOptionsMap(
+		productIds: string[],
+		canUseCatalogSaleUnits = true
+	) {
 		const variants = await this.repo.findVariantPickerOptions(productIds)
 		const map = new Map<string, ProductVariantPickerOption[]>()
 
 		for (const variant of variants.slice().sort(compareVariantPickerOptions)) {
 			const options = map.get(variant.productId) ?? []
-			options.push(mapVariantPickerOption(variant))
+			options.push(mapVariantPickerOption(variant, { canUseCatalogSaleUnits }))
 			map.set(variant.productId, options)
 		}
 
@@ -1419,25 +1779,77 @@ export class ProductReadService {
 
 	private async resolveCommercialProjectionMap(
 		catalogId: string,
-		products: Array<{ id: string }>
+		products: Array<{ id: string }>,
+		buyerCatalogId: string,
+		applyPriceList = true
 	): Promise<Map<string, ProductCommercialFields>> {
 		const projections = await this.sellableReader.resolveProductsSellable(
 			catalogId,
-			products.map(product => product.id)
+			products.map(product => product.id),
+			{
+				buyerCatalogId,
+				...(applyPriceList ? {} : { ignorePriceList: true })
+			}
 		)
 		return toProductCommercialFieldsMap(projections)
 	}
 
 	private async resolveCommercialProjection(
 		catalogId: string,
-		productId: string
+		productId: string,
+		buyerCatalogId: string,
+		applyPriceList = true
 	): Promise<ProductCommercialFields> {
 		const projection = await this.sellableReader.resolveProductSellable(
 			catalogId,
-			productId
+			productId,
+			{
+				buyerCatalogId,
+				...(applyPriceList ? {} : { ignorePriceList: true })
+			}
 		)
 
 		return toProductCommercialFields(projection)
+	}
+
+	private resolveCommercialForRead(
+		commercial: ProductCommercialFields | undefined,
+		enforcePriceListVisibility: boolean
+	): ProductCommercialFields | undefined {
+		if (
+			!enforcePriceListVisibility &&
+			commercial?.usesPriceList &&
+			commercial.priceState === 'UNKNOWN'
+		) {
+			return undefined
+		}
+		return commercial
+	}
+
+	private resolvePriceListContext(
+		catalogId: string,
+		buyerCatalogId: string,
+		productIds: string[],
+		applyPriceList = true
+	): Promise<CatalogPriceListProductPriceContext> {
+		if (!applyPriceList) return Promise.resolve(this.emptyPriceListContext())
+		if (!this.priceLists) {
+			return Promise.resolve(this.emptyPriceListContext())
+		}
+		return this.priceLists.resolveProductPriceContext({
+			buyerCatalogId,
+			ownerCatalogId: catalogId,
+			productIds
+		})
+	}
+
+	private emptyPriceListContext(): CatalogPriceListProductPriceContext {
+		return {
+			priceList: null,
+			productPrices: new Map(),
+			variantPrices: new Map(),
+			saleUnitPrices: new Map()
+		}
 	}
 
 	private mapSeo(seo?: ProductSeoRecord | null): ProductSeoMapped | null {
@@ -1460,6 +1872,9 @@ export class ProductReadService {
 		const catalogId = effectiveCatalogId()
 		const typeId = mustTypeId()
 		const includeInactive = options?.includeInactive === true
+		const applyPriceList = this.shouldApplyPriceList(options)
+		const enforcePriceListVisibility =
+			this.shouldEnforcePriceListVisibility(options)
 		const readFeatures = await this.getReadFeatures(catalogId)
 		const parsed = parseProductInfiniteQuery(query, {
 			defaultLimit: PRODUCT_INFINITE_DEFAULT_LIMIT,
@@ -1505,22 +1920,26 @@ export class ProductReadService {
 					discountAttributeIds,
 					includeInactive
 				)
-				const rows =
-					kind === 'recommendations'
-						? await this.loadRecommendationRows(baseQuery, seed, decodedCursor)
-						: await this.loadInfiniteRows(baseQuery, seed, decodedCursor)
-				const { pageRows, hasMore } = this.buildInfinitePage(rows, parsed.limit)
 
-				return {
-					items: await this.loadInfiniteCardItems(
-						pageRows,
-						catalogId,
-						includeInactive,
-						readFeatures
-					),
-					nextCursor: this.buildInfiniteNextCursor(pageRows, hasMore, seed),
-					seed: seed ?? null
-				}
+				return this.loadVisibleInfiniteItemsPage({
+					baseQuery,
+					seed,
+					decodedCursor,
+					limit: parsed.limit,
+					loadRows: cursor =>
+						kind === 'recommendations'
+							? this.loadRecommendationRows(baseQuery, seed, cursor)
+							: this.loadInfiniteRows(baseQuery, seed, cursor),
+					loadItems: pageRows =>
+						this.loadInfiniteCardItems(
+							pageRows,
+							catalogId,
+							includeInactive,
+							readFeatures,
+							applyPriceList,
+							enforcePriceListVisibility
+						)
+				})
 			},
 			this.cacheTtlSec
 		)

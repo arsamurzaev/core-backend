@@ -70,8 +70,8 @@ export class CartShareService {
 		}
 
 		data.checkoutMethod = checkout.checkoutMethod
-		data.checkoutData = checkout.checkoutData as Prisma.InputJsonValue
-		data.checkoutContacts = checkout.checkoutContacts as Prisma.InputJsonValue
+		data.checkoutData = checkout.checkoutData
+		data.checkoutContacts = checkout.checkoutContacts
 
 		const result = await this.prisma.$transaction(async tx => {
 			if (Object.keys(data).length > 0) {
@@ -152,7 +152,7 @@ export class CartShareService {
 		})
 
 		return {
-			checkoutContacts: checkoutContacts as Record<string, string>,
+			checkoutContacts: checkoutContacts,
 			checkoutData: checkout.checkoutData,
 			checkoutMethod: checkout.checkoutMethod
 		}

@@ -7,7 +7,6 @@ import type {
 } from './domain-event-outbox.repository'
 import { serializeDomainEvent } from './domain-event-outbox.utils'
 import { createDomainEvent } from './domain-event.utils'
-import type { DomainEventBus } from './domain-events.contract'
 
 describe('DomainEventOutboxDispatcher', () => {
 	const event = createDomainEvent({
@@ -26,7 +25,7 @@ describe('DomainEventOutboxDispatcher', () => {
 			id: '44444444-4444-4444-4444-444444444444',
 			eventId: event.eventId,
 			eventType: event.type,
-			payload: serializeDomainEvent(event),
+			payload: serializeDomainEvent(event) as DomainEventOutboxRecord['payload'],
 			status: DomainEventOutboxStatus.PENDING,
 			attempts: 0
 		}
@@ -48,7 +47,7 @@ describe('DomainEventOutboxDispatcher', () => {
 		}
 		const dispatcher = new DomainEventOutboxDispatcher(
 			repo as unknown as DomainEventOutboxRepository,
-			bus as unknown as DomainEventBus
+			bus
 		)
 
 		return { dispatcher, repo, bus, row }

@@ -89,19 +89,19 @@ export class CatalogAdvancedSettingsService {
 	}
 
 	listDomains(): Promise<CatalogDomainDto[]> {
-		return this.domains.listCurrent() as Promise<CatalogDomainDto[]>
+		return this.domains.listCurrent()
 	}
 
 	createDomain(dto: CreateCatalogDomainDtoReq): Promise<CatalogDomainDto> {
-		return this.domains.createCurrent(dto) as Promise<CatalogDomainDto>
+		return this.domains.createCurrent(dto)
 	}
 
 	checkDomain(id: string): Promise<CatalogDomainCheckDto> {
-		return this.domains.checkCurrent(id) as Promise<CatalogDomainCheckDto>
+		return this.domains.checkCurrent(id)
 	}
 
 	disableDomain(id: string): Promise<CatalogDomainDto> {
-		return this.domains.disableCurrent(id) as Promise<CatalogDomainDto>
+		return this.domains.disableCurrent(id)
 	}
 
 	listSaleUnits(options: {

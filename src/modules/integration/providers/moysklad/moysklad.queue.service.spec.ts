@@ -247,7 +247,7 @@ describe('MoySkladQueueService', () => {
 	})
 
 	it('queues manual catalog sync and stores job id', async () => {
-		repo.findMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.findMoySklad.mockResolvedValue(integrationRecord)
 		repo.findLatestActiveSyncRun.mockResolvedValue(null)
 		repo.createSyncRun.mockResolvedValue(syncRunRecord as any)
 		queueMock().add.mockResolvedValue({ id: 'job-1' })
@@ -283,7 +283,7 @@ describe('MoySkladQueueService', () => {
 	})
 
 	it('queues manual product sync and stores job id', async () => {
-		repo.findMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.findMoySklad.mockResolvedValue(integrationRecord)
 		repo.findLatestActiveSyncRun.mockResolvedValue(null)
 		repo.createSyncRun.mockResolvedValue({
 			...syncRunRecord,
@@ -325,7 +325,7 @@ describe('MoySkladQueueService', () => {
 	})
 
 	it('queues manual stock sync and stores job id', async () => {
-		repo.findMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.findMoySklad.mockResolvedValue(integrationRecord)
 		repo.findLatestActiveSyncRun.mockResolvedValue(null)
 		repo.createSyncRun.mockResolvedValue({
 			...syncRunRecord,
@@ -437,7 +437,7 @@ describe('MoySkladQueueService', () => {
 	})
 
 	it('upserts scheduler for enabled integration', async () => {
-		await service.syncSchedulerForIntegration(integrationRecord as any)
+		await service.syncSchedulerForIntegration(integrationRecord)
 
 		expect(metadataCrypto.parseStoredMetadata).toHaveBeenCalledWith(
 			integrationRecord.metadata
@@ -460,7 +460,7 @@ describe('MoySkladQueueService', () => {
 	})
 
 	it('processes scheduled catalog sync run', async () => {
-		repo.findMoySklad.mockResolvedValue(integrationRecord as any)
+		repo.findMoySklad.mockResolvedValue(integrationRecord)
 		repo.createSyncRun.mockResolvedValue({
 			...syncRunRecord,
 			trigger: IntegrationSyncRunTrigger.SCHEDULED
@@ -589,7 +589,7 @@ describe('MoySkladQueueService', () => {
 	})
 
 	it('processes MoySklad product webhook sync run', async () => {
-		repo.findMoySkladById.mockResolvedValue(integrationRecord as any)
+		repo.findMoySkladById.mockResolvedValue(integrationRecord)
 		repo.createSyncRun.mockResolvedValue({
 			...syncRunRecord,
 			mode: IntegrationSyncRunMode.PRODUCT,
@@ -606,7 +606,7 @@ describe('MoySkladQueueService', () => {
 			startedAt: new Date('2026-03-23T12:10:05.000Z')
 		} as any)
 		repo.patchMoySkladProductChangeWebhookMetadata.mockResolvedValue(
-			integrationRecord as any
+			integrationRecord
 		)
 		sync.syncExternalProduct.mockResolvedValue({
 			ok: true,
@@ -691,7 +691,7 @@ describe('MoySkladQueueService', () => {
 	})
 
 	it('processes MoySklad productfolder webhook sync run', async () => {
-		repo.findMoySkladById.mockResolvedValue(integrationRecord as any)
+		repo.findMoySkladById.mockResolvedValue(integrationRecord)
 		repo.createSyncRun.mockResolvedValue({
 			...syncRunRecord,
 			mode: IntegrationSyncRunMode.PRODUCT,
@@ -708,7 +708,7 @@ describe('MoySkladQueueService', () => {
 			startedAt: new Date('2026-03-23T12:10:05.000Z')
 		} as any)
 		repo.patchMoySkladProductFolderWebhookMetadata.mockResolvedValue(
-			integrationRecord as any
+			integrationRecord
 		)
 		sync.syncProductFolder.mockResolvedValue({
 			ok: true,

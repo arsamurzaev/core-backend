@@ -1,4 +1,5 @@
 import {
+	CatalogPriceListPriceTarget,
 	DataType,
 	ProductVariantKind,
 	ProductVariantStatus
@@ -25,7 +26,7 @@ describe('ProductRepository', () => {
 		const prisma = {
 			$transaction: jest.fn(async callback => callback(tx))
 		}
-		const repository = new ProductRepository(prisma)
+		const repository = new ProductRepository(prisma as any)
 
 		await repository.prependProductToCategories('product-1', 'catalog-1', [
 			'category-1',
@@ -63,7 +64,7 @@ describe('ProductRepository', () => {
 		const prisma = {
 			$transaction: jest.fn(async callback => callback(tx))
 		}
-		const repository = new ProductRepository(prisma)
+		const repository = new ProductRepository(prisma as any)
 
 		await repository.syncProductCategories('product-1', 'catalog-1', [
 			'category-2',
@@ -107,7 +108,7 @@ describe('ProductRepository', () => {
 		const prisma = {
 			$transaction: jest.fn(async callback => callback(tx))
 		}
-		const repository = new ProductRepository(prisma)
+		const repository = new ProductRepository(prisma as any)
 
 		await repository.syncProductCategories('product-1', 'catalog-1', [])
 
@@ -140,7 +141,7 @@ describe('ProductRepository', () => {
 		const prisma = {
 			$transaction: jest.fn(async callback => callback(tx))
 		}
-		const repository = new ProductRepository(prisma)
+		const repository = new ProductRepository(prisma as any)
 
 		await repository.upsertCategoryProductPosition(
 			'product-1',
@@ -195,6 +196,48 @@ describe('ProductRepository', () => {
 			'%hm-001%',
 			'%hm-001%'
 		])
+	})
+
+	it('archives sale-unit price-list prices when variant sale units are cleared', async () => {
+		const tx = {
+			productVariantSaleUnit: {
+				findMany: jest
+					.fn()
+					.mockResolvedValue([{ id: 'sale-unit-1' }, { id: 'sale-unit-2' }]),
+				updateMany: jest.fn().mockResolvedValue({ count: 2 })
+			},
+			catalogPriceListPrice: {
+				updateMany: jest.fn().mockResolvedValue({ count: 2 })
+			}
+		}
+		const repository = new ProductRepository({} as any)
+
+		await (repository as any).syncVariantSaleUnits(
+			tx,
+			'catalog-1',
+			'variant-1',
+			[]
+		)
+
+		expect(tx.catalogPriceListPrice.updateMany).toHaveBeenCalledWith({
+			where: {
+				target: CatalogPriceListPriceTarget.SALE_UNIT,
+				deleteAt: null,
+				OR: [
+					{ saleUnitId: { in: ['sale-unit-1', 'sale-unit-2'] } },
+					{ targetId: { in: ['sale-unit-1', 'sale-unit-2'] } }
+				]
+			},
+			data: { deleteAt: expect.any(Date) }
+		})
+		expect(tx.productVariantSaleUnit.updateMany).toHaveBeenCalledWith({
+			where: { variantId: 'variant-1', deleteAt: null },
+			data: {
+				deleteAt: expect.any(Date),
+				isActive: false,
+				isDefault: false
+			}
+		})
 	})
 
 	it('builds product type filter clause', () => {
@@ -808,7 +851,7 @@ describe('ProductRepository', () => {
 		await repository.applyProductTypeChange(
 			'product-1',
 			'catalog-1',
-			{ productType: { connect: { id: 'product-type-1' } } } as any,
+			{ productType: { connect: { id: 'product-type-1' } } },
 			['material-attribute']
 		)
 
@@ -857,7 +900,7 @@ describe('ProductRepository', () => {
 
 		await repository.update(
 			'product-1',
-			{ productType: { disconnect: true } } as any,
+			{ productType: { disconnect: true } },
 			'catalog-1',
 			undefined,
 			undefined,
@@ -1450,8 +1493,13 @@ describe('ProductRepository', () => {
 			productAttribute: {
 				createMany: jest.fn()
 			},
+			attributeEnumValue: {
+				findFirst: jest.fn().mockResolvedValue(null),
+				create: jest.fn().mockResolvedValue({ id: 'enum-size-s' })
+			},
 			variantAttribute: {
-				updateMany: jest.fn()
+				updateMany: jest.fn(),
+				createMany: jest.fn()
 			},
 			productVariant: {
 				updateMany: jest.fn(),
@@ -1467,13 +1515,13 @@ describe('ProductRepository', () => {
 
 		await expect(
 			repository.create(
+				'catalog-1',
 				{
 					name: 'Product',
 					slug: 'product',
 					sku: 'PRODUCT',
 					price: 100,
-					status: 'ACTIVE',
-					catalog: { connect: { id: 'catalog-1' } }
+					status: 'ACTIVE'
 				} as any,
 				[],
 				[
@@ -1483,7 +1531,7 @@ describe('ProductRepository', () => {
 						price: 100,
 						stock: 0,
 						status: 'DISABLED',
-						attributes: []
+						attributes: [{ attributeId: 'attribute-size', value: 's' }]
 					}
 				] as any
 			)

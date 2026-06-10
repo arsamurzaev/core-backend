@@ -46,6 +46,10 @@ model CartItem {
   quantity          Int      @default(1)
   baseQuantity      Int?     @map("base_quantity")
   unitPriceSnapshot Decimal? @map("unit_price_snapshot") @db.Decimal(12, 2)
+  modifierSignature String   @default("") @map("modifier_signature") @db.VarChar(1000)
+  priceListId       String?  @map("price_list_id") @db.Uuid
+  priceListCode     String?  @map("price_list_code") @db.VarChar(100)
+  priceListName     String?  @map("price_list_name") @db.VarChar(255)
   guestSessionId    String?  @map("guest_session_id") @db.VarChar(64)
   guestName         String?  @map("guest_name") @db.VarChar(120)
 
@@ -56,6 +60,8 @@ model CartItem {
   variantId             String?                 @map("variant_id") @db.Uuid
   saleUnit              ProductVariantSaleUnit? @relation(fields: [saleUnitId], references: [id], onDelete: SetNull)
   saleUnitId            String?                 @map("sale_unit_id") @db.Uuid
+  priceList             CatalogPriceList?       @relation(fields: [priceListId], references: [id], onDelete: SetNull)
+  modifiers             CartItemModifier[]
   inventoryReservations InventoryReservation[]
 
   deleteAt  DateTime? @map("delete_at") // Дата удаления 
@@ -66,6 +72,8 @@ model CartItem {
   @@index([cartId, guestSessionId, deleteAt])
   @@index([variantId])
   @@index([saleUnitId])
+  @@index([priceListId])
+  @@index([cartId, productId, variantId, saleUnitId, guestSessionId, modifierSignature])
   @@map("cart_items")
 }
 

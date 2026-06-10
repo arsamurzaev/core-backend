@@ -88,7 +88,7 @@ export class IikoImageImportService {
 		)
 		if (!replaced) {
 			await this.cleanupUploaded(uploadedKeys)
-			throw new NotFoundException('Product was not found')
+			throw new NotFoundException('Товар не найден')
 		}
 
 		await this.cleanupOrphanedMedia(previousMediaIds, params.catalogId)

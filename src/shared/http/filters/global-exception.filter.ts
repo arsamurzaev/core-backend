@@ -33,7 +33,7 @@ const HTTP_STATUS_VALUES = new Set<number>(
 
 function toHttpStatus(status: number): HttpStatus {
 	return HTTP_STATUS_VALUES.has(status)
-		? (status as HttpStatus)
+		? status
 		: HttpStatus.INTERNAL_SERVER_ERROR
 }
 

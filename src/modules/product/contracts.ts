@@ -22,6 +22,8 @@ export type ProductSellableAvailabilityState =
 
 export type ProductSellableResolveOptions = {
 	variantId?: string | null
+	buyerCatalogId?: string | null
+	ignorePriceList?: boolean
 	quantity?: number
 	enforceStock?: boolean
 }
@@ -39,6 +41,10 @@ export type ProductSellableProjection = {
 	maxPrice: string | null
 	availabilityState: ProductSellableAvailabilityState
 	stock: number | null
+	usesPriceList: boolean
+	priceListId: string | null
+	priceListCode: string | null
+	priceListName: string | null
 }
 
 export type ProductExternalDefaultVariantInput = {

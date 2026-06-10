@@ -1,4 +1,6 @@
-﻿import { RequestContext } from './request-context'
+import { ForbiddenException } from '@nestjs/common'
+
+import { RequestContext } from './request-context'
 
 export const ctx = () => RequestContext.mustGet()
 
@@ -12,6 +14,19 @@ export const mustTypeId = (): string => {
 	const id = RequestContext.mustGet().typeId
 	if (!id) throw new Error('В RequestContext отсутствует typeId')
 	return id
+}
+
+export const isChildCatalogContext = (): boolean => {
+	const store = RequestContext.mustGet()
+	return Boolean(store.parentId && store.parentId !== store.catalogId)
+}
+
+export const assertCurrentCatalogCanManageCatalogContent = (): void => {
+	if (!isChildCatalogContext()) return
+
+	throw new ForbiddenException(
+		'Дочерний каталог не может управлять товарами, категориями, брендами и справочниками каталога'
+	)
 }
 
 /**

@@ -371,7 +371,7 @@ export class IntegrationService {
 		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
 		const integration = await this.repo.findIiko(catalogId)
 		if (!integration) {
-			throw new NotFoundException('iiko integration is not configured')
+			throw new NotFoundException('Интеграция iiko не настроена')
 		}
 
 		return this.mapIikoIntegration(integration)
@@ -389,8 +389,8 @@ export class IntegrationService {
 		return {
 			configured: Boolean(integration),
 			integration: integration ? this.mapIikoIntegration(integration) : null,
-			activeRun: activeRun ? (this.mapSyncRun(activeRun) as IikoSyncRunDto) : null,
-			lastRun: lastRun ? (this.mapSyncRun(lastRun) as IikoSyncRunDto) : null
+			activeRun: activeRun ? this.mapSyncRun(activeRun) : null,
+			lastRun: lastRun ? this.mapSyncRun(lastRun) : null
 		}
 	}
 
@@ -403,7 +403,7 @@ export class IntegrationService {
 			normalizedLimit,
 			IntegrationProvider.IIKO
 		)
-		return runs.map(run => this.mapSyncRun(run) as IikoSyncRunDto)
+		return runs.map(run => this.mapSyncRun(run))
 	}
 
 	async getIikoRunProgress(runId: string): Promise<IikoSyncProgressDto> {
@@ -419,7 +419,7 @@ export class IntegrationService {
 		}
 
 		const metadata = this.normalizeSyncRunMetadata(run)
-		return this.mapSyncRunProgress(run, metadata.progress) as IikoSyncProgressDto
+		return this.mapSyncRunProgress(run, metadata.progress)
 	}
 
 	async getIikoOrderExports(
@@ -433,7 +433,7 @@ export class IntegrationService {
 			normalizedLimit,
 			IntegrationProvider.IIKO
 		)
-		return exports.map(item => this.mapOrderExport(item) as IikoOrderExportDto)
+		return exports.map(item => this.mapOrderExport(item))
 	}
 
 	async getIikoWebhookEvents(
@@ -444,7 +444,7 @@ export class IntegrationService {
 		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
 		const integration = await this.repo.findIiko(catalogId)
 		if (!integration) {
-			throw new NotFoundException('iiko integration is not configured')
+			throw new NotFoundException('Интеграция iiko не настроена')
 		}
 
 		const events = await this.repo.findWebhookEvents({
@@ -475,10 +475,10 @@ export class IntegrationService {
 
 		const integration = await this.repo.findIikoById(storedEvent.integrationId)
 		if (!integration || integration.catalogId !== catalogId) {
-			throw new NotFoundException('iiko integration is not configured')
+			throw new NotFoundException('Интеграция iiko не настроена')
 		}
 		if (!integration.isActive) {
-			throw new ConflictException('iiko integration is disabled')
+			throw new ConflictException('Интеграция iiko отключена')
 		}
 		const metadata = this.iikoMetadataCrypto.parseStoredMetadata(
 			integration.metadata
@@ -498,7 +498,7 @@ export class IntegrationService {
 			event.organizationId &&
 			event.organizationId !== metadata.organizationId
 		) {
-			throw new ForbiddenException('Invalid iiko webhook organization')
+			throw new ForbiddenException('Неверная организация вебхука iiko')
 		}
 
 		await this.processIikoWebhookEvent({
@@ -965,15 +965,14 @@ export class IntegrationService {
 		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
 		const existing = await this.repo.findIiko(catalogId)
 		if (!existing) {
-			throw new NotFoundException('iiko integration is not configured')
+			throw new NotFoundException('Интеграция iiko не настроена')
 		}
 
 		const currentMetadata = this.iikoMetadataCrypto.parseStoredMetadata(
 			existing.metadata
 		)
 		const apiLogin = dto.apiLogin ?? currentMetadata.apiLogin
-		const appId =
-			dto.appId !== undefined ? dto.appId : currentMetadata.appId
+		const appId = dto.appId !== undefined ? dto.appId : currentMetadata.appId
 		const clientSecret =
 			dto.clientSecret !== undefined
 				? dto.clientSecret
@@ -1046,7 +1045,7 @@ export class IntegrationService {
 			isActive: dto.isActive
 		})
 		if (!integration) {
-			throw new NotFoundException('iiko integration is not configured')
+			throw new NotFoundException('Интеграция iiko не настроена')
 		}
 
 		return this.mapIikoIntegration(integration)
@@ -1057,7 +1056,7 @@ export class IntegrationService {
 		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
 		const integration = await this.repo.softDeleteIiko(catalogId)
 		if (!integration) {
-			throw new NotFoundException('iiko integration is not configured')
+			throw new NotFoundException('Интеграция iiko не настроена')
 		}
 
 		return { ok: true }
@@ -1095,10 +1094,10 @@ export class IntegrationService {
 		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
 		const integration = await this.repo.findIiko(catalogId)
 		if (!integration) {
-			throw new NotFoundException('iiko integration is not configured')
+			throw new NotFoundException('Интеграция iiko не настроена')
 		}
 		if (!integration.isActive) {
-			throw new ConflictException('iiko integration is disabled')
+			throw new ConflictException('Интеграция iiko отключена')
 		}
 
 		const metadata = this.iikoMetadataCrypto.parseStoredMetadata(
@@ -1135,7 +1134,7 @@ export class IntegrationService {
 					const name = normalizeOptionalString(table.name)
 					return {
 						id: normalizeOptionalString(table.id) ?? '',
-						publicCode: null as string | null,
+						publicCode: null,
 						number,
 						displayNumber: resolveIikoTableDisplayNumber(name, number),
 						name,
@@ -1309,10 +1308,10 @@ export class IntegrationService {
 		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
 		const integration = await this.repo.findIiko(catalogId)
 		if (!integration) {
-			throw new NotFoundException('iiko integration is not configured')
+			throw new NotFoundException('Интеграция iiko не настроена')
 		}
 		if (!integration.isActive) {
-			throw new ConflictException('iiko integration is disabled')
+			throw new ConflictException('Интеграция iiko отключена')
 		}
 
 		const metadata = this.iikoMetadataCrypto.parseStoredMetadata(
@@ -1376,7 +1375,7 @@ export class IntegrationService {
 		})
 		const updated = await this.repo.findIikoById(integration.id)
 		if (!updated) {
-			throw new NotFoundException('iiko integration is not configured')
+			throw new NotFoundException('Интеграция iiko не настроена')
 		}
 
 		return {
@@ -1394,7 +1393,7 @@ export class IntegrationService {
 		await this.featureAssertions.assertCanUseIikoIntegration(catalogId)
 		const integration = await this.repo.findIiko(catalogId)
 		if (!integration) {
-			throw new NotFoundException('iiko integration is not configured')
+			throw new NotFoundException('Интеграция iiko не настроена')
 		}
 		const metadata = this.iikoMetadataCrypto.parseStoredMetadata(
 			integration.metadata
@@ -1442,7 +1441,7 @@ export class IntegrationService {
 	}): Promise<void> {
 		const integration = await this.repo.findIikoById(params.integrationId)
 		if (!integration) {
-			throw new NotFoundException('iiko integration is not configured')
+			throw new NotFoundException('Интеграция iiko не настроена')
 		}
 		const metadata = this.iikoMetadataCrypto.parseStoredMetadata(
 			integration.metadata
@@ -1500,7 +1499,7 @@ export class IntegrationService {
 			event.organizationId &&
 			event.organizationId !== metadata.organizationId
 		) {
-			throw new ForbiddenException('Invalid iiko webhook organization')
+			throw new ForbiddenException('Неверная организация вебхука iiko')
 		}
 
 		const { event: storedEvent, created } =
@@ -3464,13 +3463,13 @@ export class IntegrationService {
 	): void {
 		const expectedHash = webhook.secretHash
 		if (!expectedHash) {
-			throw new ForbiddenException(`${label} is not registered`)
+			throw new ForbiddenException(`Вебхук ${label} не зарегистрирован`)
 		}
 
 		const actual = Buffer.from(this.hashWebhookSecret(secret), 'hex')
 		const expected = Buffer.from(expectedHash, 'hex')
 		if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
-			throw new ForbiddenException(`Invalid ${label} secret`)
+			throw new ForbiddenException(`Неверный секрет вебхука ${label}`)
 		}
 	}
 
@@ -3480,13 +3479,13 @@ export class IntegrationService {
 	): void {
 		const expectedHash = webhook.secretHash
 		if (!expectedHash) {
-			throw new ForbiddenException('iiko webhook is not registered')
+			throw new ForbiddenException('Вебхук iiko не зарегистрирован')
 		}
 
 		const actual = Buffer.from(this.hashWebhookSecret(secret), 'hex')
 		const expected = Buffer.from(expectedHash, 'hex')
 		if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
-			throw new ForbiddenException('Invalid iiko webhook secret')
+			throw new ForbiddenException('Неверный секрет вебхука iiko')
 		}
 	}
 
@@ -3497,7 +3496,7 @@ export class IntegrationService {
 	): void {
 		const expectedAccountId = webhook.accountId
 		if (expectedAccountId && expectedAccountId !== accountId) {
-			throw new ForbiddenException(`Invalid ${label} account`)
+			throw new ForbiddenException(`Неверный аккаунт вебхука ${label}`)
 		}
 	}
 
@@ -4158,7 +4157,7 @@ export class IntegrationService {
 	): Record<string, string | null> {
 		return Object.fromEntries(
 			Object.entries(details).filter(([, value]) => value !== undefined)
-		) as Record<string, string | null>
+		)
 	}
 
 	private asRecord(value: unknown): Record<string, unknown> | null {

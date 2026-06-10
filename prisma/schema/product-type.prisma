@@ -18,8 +18,9 @@ model ProductType {
   isArchived Boolean   @default(false) @map("is_archived")
   archivedAt DateTime? @map("archived_at")
 
-  attributes ProductTypeAttribute[]
-  products   Product[]
+  attributes        ProductTypeAttribute[]
+  modifierTemplates ProductTypeModifierGroupTemplate[]
+  products          Product[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

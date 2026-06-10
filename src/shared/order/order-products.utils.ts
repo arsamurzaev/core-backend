@@ -3,12 +3,16 @@ export type OrderProductSnapshot = {
 	productId: string | null
 	variantId: string | null
 	saleUnitId: string | null
+	priceListId: string | null
+	priceListCode: string | null
+	priceListName: string | null
 	guestSessionId: string | null
 	guestName: string | null
 	variantHidden: boolean
 	saleUnitHidden: boolean
 	variant: OrderProductVariantSnapshot | null
 	saleUnit: OrderProductSaleUnitSnapshot | null
+	modifiers: OrderProductModifierSnapshot[]
 	externalProducts: OrderExternalLinkSnapshot[]
 	externalVariants: OrderExternalLinkSnapshot[]
 	quantity: number
@@ -38,6 +42,20 @@ export type OrderProductSaleUnitSnapshot = {
 	price: number | null
 	barcode: string | null
 	isDefault: boolean | null
+}
+
+export type OrderProductModifierSnapshot = {
+	id: string | null
+	productModifierGroupId: string | null
+	productModifierOptionId: string | null
+	catalogModifierGroupId: string | null
+	catalogModifierOptionId: string | null
+	groupCode: string | null
+	groupName: string | null
+	optionCode: string | null
+	optionName: string | null
+	quantity: number
+	unitPrice: number
 }
 
 export type OrderExternalLinkSnapshot = {
@@ -106,12 +124,16 @@ export function normalizeOrderProducts(value: unknown): OrderProductSnapshot[] {
 				productId: readString(item.productId),
 				variantId: readString(item.variantId),
 				saleUnitId: readString(item.saleUnitId),
+				priceListId: readString(item.priceListId),
+				priceListCode: readString(item.priceListCode),
+				priceListName: readString(item.priceListName),
 				guestSessionId: readString(item.guestSessionId),
 				guestName: readString(item.guestName),
 				variantHidden: item.variantHidden === true,
 				saleUnitHidden: item.saleUnitHidden === true,
 				variant: normalizeVariant(item.variant),
 				saleUnit: normalizeSaleUnit(item.saleUnit),
+				modifiers: normalizeModifiers(item.modifiers),
 				externalProducts: normalizeExternalLinks(item.externalProducts),
 				externalVariants: normalizeExternalLinks(item.externalVariants),
 				quantity,
@@ -134,6 +156,29 @@ export function normalizeOrderProducts(value: unknown): OrderProductSnapshot[] {
 							slug: readString(product.slug)
 						}
 					: null
+			}
+		]
+	})
+}
+
+function normalizeModifiers(value: unknown): OrderProductModifierSnapshot[] {
+	if (!Array.isArray(value)) return []
+
+	return value.flatMap(item => {
+		if (!isRecord(item)) return []
+		return [
+			{
+				id: readString(item.id),
+				productModifierGroupId: readString(item.productModifierGroupId),
+				productModifierOptionId: readString(item.productModifierOptionId),
+				catalogModifierGroupId: readString(item.catalogModifierGroupId),
+				catalogModifierOptionId: readString(item.catalogModifierOptionId),
+				groupCode: readString(item.groupCode),
+				groupName: readString(item.groupName),
+				optionCode: readString(item.optionCode),
+				optionName: readString(item.optionName),
+				quantity: normalizeQuantity(item.quantity),
+				unitPrice: normalizeMoney(item.unitPrice)
 			}
 		]
 	})

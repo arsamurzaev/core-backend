@@ -112,6 +112,35 @@ describe('CartVariantSelectionService', () => {
 		)
 	})
 
+	it('uses buyer catalog context while resolving an implicit variant', async () => {
+		sellableReader.resolveProductSellable.mockResolvedValue({
+			mode: 'SIMPLE',
+			variantId: 'default-variant',
+			requiresVariantSelection: false,
+			availabilityState: 'AVAILABLE'
+		})
+
+		await expect(
+			service.resolveCartVariantId(
+				tx as never,
+				'parent-catalog',
+				{
+					productId: 'product-1',
+					variantId: null,
+					saleUnitId: null,
+					quantity: 1
+				},
+				'NONE',
+				{ buyerCatalogId: 'child-catalog' }
+			)
+		).resolves.toBe('default-variant')
+		expect(sellableReader.resolveProductSellable).toHaveBeenCalledWith(
+			'parent-catalog',
+			'product-1',
+			{ quantity: 1, enforceStock: false, buyerCatalogId: 'child-catalog' }
+		)
+	})
+
 	it('resolves hidden default variant when product variants are disabled', async () => {
 		capabilities.canUseProductVariants.mockResolvedValue(false)
 		sellableReader.resolveProductSellable.mockResolvedValue({

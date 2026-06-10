@@ -41,11 +41,24 @@ describe('CategoryController', () => {
 	})
 
 	it('passes includeEmpty=false to category list service', async () => {
-		service.getAll.mockResolvedValue([] as any)
+		service.getAll.mockResolvedValue([])
 		const res = { setHeader: jest.fn() } as any
 		const req = { user: undefined } as any
 
 		await controller.getAll(res, req, 'false')
+
+		expect(service.getAll).toHaveBeenCalledWith({
+			includeEmpty: false,
+			includeInactive: false
+		})
+	})
+
+	it('ignores includeEmpty=true for public category list clients', async () => {
+		service.getAll.mockResolvedValue([])
+		const res = { setHeader: jest.fn() } as any
+		const req = { user: undefined } as any
+
+		await controller.getAll(res, req, 'true')
 
 		expect(service.getAll).toHaveBeenCalledWith({
 			includeEmpty: false,
@@ -64,7 +77,7 @@ describe('CategoryController', () => {
 	})
 
 	it('passes deleteProducts flag to category removal service', async () => {
-		service.remove.mockResolvedValue({ ok: true } as any)
+		service.remove.mockResolvedValue({ ok: true })
 
 		await controller.remove('cat-1', 'true')
 

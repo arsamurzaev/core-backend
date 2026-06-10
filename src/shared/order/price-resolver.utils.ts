@@ -15,9 +15,16 @@ export type PriceLineInput = {
 	product: PriceProductLike
 	variant?: { price: unknown } | null
 	saleUnit?: { price: unknown } | null
+	modifiers?: PriceModifierLike[] | null
 	quantity?: number
 	unitPriceSnapshot?: unknown
 	now?: Date
+}
+
+export type PriceModifierLike = {
+	quantity?: unknown
+	price?: unknown
+	unitPriceSnapshot?: unknown
 }
 
 export type ResolvedLinePricing = {
@@ -79,6 +86,19 @@ function toCents(value: unknown): number {
 
 function fromCents(value: number): number {
 	return Number((value / 100).toFixed(2))
+}
+
+function resolveModifierUnitTotalCents(
+	modifiers: PriceModifierLike[] | null | undefined
+): number {
+	return (modifiers ?? []).reduce((sum, modifier) => {
+		const quantity = Math.max(
+			1,
+			Math.trunc(toFiniteNumber(modifier.quantity) ?? 1)
+		)
+		const price = modifier.unitPriceSnapshot ?? modifier.price
+		return sum + toCents(price) * quantity
+	}, 0)
 }
 
 function clampDiscountPercent(value: unknown): number {
@@ -194,23 +214,27 @@ function resolveDiscountPercent(
 
 export function resolveLinePricing(input: PriceLineInput): ResolvedLinePricing {
 	const quantity = Math.max(0, Math.trunc(input.quantity ?? 1))
-	const baseUnitPriceCents = toCents(
+	const baseItemUnitPriceCents = toCents(
 		input.saleUnit?.price ?? input.variant?.price ?? input.product.price
 	)
+	const modifierUnitTotalCents = resolveModifierUnitTotalCents(input.modifiers)
 	const hasVariantOrSaleUnit = Boolean(input.saleUnit || input.variant)
-	const discountedUnitPriceCents = applyProductDiscountCents(
-		baseUnitPriceCents,
+	const discountedBaseItemUnitPriceCents = applyProductDiscountCents(
+		baseItemUnitPriceCents,
 		input.product,
 		{
 			canUseLegacyDiscountedPrice: !hasVariantOrSaleUnit,
 			now: input.now ?? new Date()
 		}
 	)
-	const snapshotPriceCents =
+	const snapshotBaseItemPriceCents =
 		input.unitPriceSnapshot === undefined || input.unitPriceSnapshot === null
 			? null
 			: toCents(input.unitPriceSnapshot)
-	const unitPriceCents = snapshotPriceCents ?? discountedUnitPriceCents
+	const baseUnitPriceCents = baseItemUnitPriceCents + modifierUnitTotalCents
+	const unitPriceCents =
+		(snapshotBaseItemPriceCents ?? discountedBaseItemUnitPriceCents) +
+		modifierUnitTotalCents
 	const lineTotalCents = unitPriceCents * quantity
 	const discountPercent = resolveDiscountPercent(
 		baseUnitPriceCents,

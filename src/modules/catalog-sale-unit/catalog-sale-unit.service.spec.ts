@@ -14,6 +14,17 @@ const runWithCatalog = <T>(fn: () => Promise<T>) =>
 		fn
 	)
 
+const runWithChildCatalog = <T>(fn: () => Promise<T>) =>
+	RequestContext.run(
+		{
+			requestId: 'test',
+			host: 'child.catalog.test',
+			catalogId: 'child-catalog-1',
+			parentId: 'catalog-1'
+		},
+		fn
+	)
+
 function createRecord(overrides: Record<string, unknown> = {}) {
 	return {
 		id: 'sale-unit-1',
@@ -94,6 +105,16 @@ describe('CatalogSaleUnitService', () => {
 			runWithCatalog(() => service.create({ name: 'Box' }))
 		).rejects.toBeInstanceOf(BadRequestException)
 		expect(repo.update).not.toHaveBeenCalled()
+		expect(repo.create).not.toHaveBeenCalled()
+	})
+
+	it('rejects sale unit creation from child catalog', async () => {
+		await expect(
+			runWithChildCatalog(() => service.create({ name: 'Box' }))
+		).rejects.toThrow(
+			'Дочерний каталог не может управлять товарами, категориями, брендами и справочниками каталога'
+		)
+
 		expect(repo.create).not.toHaveBeenCalled()
 	})
 

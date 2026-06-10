@@ -171,7 +171,7 @@ describe('ProductExternalSyncService', () => {
 		repo.softDelete.mockResolvedValue({
 			id: 'product-1',
 			mediaIds: []
-		} as never)
+		})
 
 		await expect(
 			service.softDeleteExternalProduct({
@@ -194,7 +194,7 @@ describe('ProductExternalSyncService', () => {
 	})
 
 	it('does not refresh delete side effects when external product is already missing', async () => {
-		repo.softDelete.mockResolvedValue(null as never)
+		repo.softDelete.mockResolvedValue(null)
 
 		await expect(
 			service.softDeleteExternalProduct({

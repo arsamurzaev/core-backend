@@ -356,7 +356,7 @@ export class MoySkladProductFolderSyncService {
 		tx?: RepositoryTransaction
 	): Promise<ProductFolderCategory> {
 		const category = normalizeCategory(
-			(await this.repo.createCategory(catalogId, name, parentId, tx)) as unknown
+			await this.repo.createCategory(catalogId, name, parentId, tx)
 		)
 		if (!category) {
 			throw new Error('MoySklad category sync failed to create category')
@@ -375,14 +375,14 @@ export class MoySkladProductFolderSyncService {
 		tx?: RepositoryTransaction
 	}): Promise<ProductFolderCategory | null> {
 		return normalizeCategory(
-			(await this.repo.updateCategory(
+			await this.repo.updateCategory(
 				{
 					categoryId: params.categoryId,
 					catalogId: params.catalogId,
 					data: params.data
 				},
 				params.tx
-			)) as unknown
+			)
 		)
 	}
 
@@ -408,11 +408,7 @@ export class MoySkladProductFolderSyncService {
 		tx?: RepositoryTransaction
 	): Promise<ProductFolderCategoryLink | null> {
 		return normalizeCategoryLink(
-			(await this.repo.findCategoryLinkByExternalId(
-				integrationId,
-				externalId,
-				tx
-			)) as unknown
+			await this.repo.findCategoryLinkByExternalId(integrationId, externalId, tx)
 		)
 	}
 
@@ -422,11 +418,7 @@ export class MoySkladProductFolderSyncService {
 		tx?: RepositoryTransaction
 	): Promise<{ externalId: string } | null> {
 		return normalizeExternalLink(
-			(await this.repo.findCategoryLinkByCategoryId(
-				integrationId,
-				categoryId,
-				tx
-			)) as unknown
+			await this.repo.findCategoryLinkByCategoryId(integrationId, categoryId, tx)
 		)
 	}
 

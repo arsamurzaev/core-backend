@@ -27,9 +27,12 @@ import {
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
 import {
+	CAPABILITY_CATALOG_MODIFIERS,
+	CAPABILITY_CATALOG_PRICE_LISTS,
 	CAPABILITY_CATALOG_SALE_UNITS,
 	CAPABILITY_INTEGRATION_IIKO,
 	CAPABILITY_INTEGRATION_MOYSKLAD,
+	CAPABILITY_INTEGRATION_ONE_C,
 	CAPABILITY_INVENTORY_INTERNAL,
 	CAPABILITY_PRODUCT_TYPES,
 	CAPABILITY_PRODUCT_VARIANTS,
@@ -80,8 +83,8 @@ import { AdminCreateCatalogDtoReq } from './dto/requests/admin-create-catalog.dt
 import { AdminCreateCountryDtoReq } from './dto/requests/admin-create-country.dto.req'
 import { AdminCreateGeoAdminDtoReq } from './dto/requests/admin-create-geo-admin.dto.req'
 import { AdminCreatePromoCodeDtoReq } from './dto/requests/admin-create-promo-code.dto.req'
-import { AdminCreateRegionalityDtoReq } from './dto/requests/admin-create-regionality.dto.req'
 import { AdminCreatePromoPaymentDtoReq } from './dto/requests/admin-create-promo-payment.dto.req'
+import { AdminCreateRegionalityDtoReq } from './dto/requests/admin-create-regionality.dto.req'
 import { AdminCreateSubscriptionPaymentDtoReq } from './dto/requests/admin-create-subscription-payment.dto.req'
 import { AdminDuplicateCatalogDtoReq } from './dto/requests/admin-duplicate-catalog.dto.req'
 import { AdminUpdateCatalogFeatureEntitlementDtoReq } from './dto/requests/admin-update-catalog-feature-entitlement.dto.req'
@@ -373,7 +376,7 @@ export class AdminService {
 		const ownerName = dto.ownerName ?? dto.name
 		const status = dto.status
 		const subscriptionEndsAt = dto.trialLicenseDays
-			? addDays(new Date(), dto.trialLicenseDays)
+			? addCalendarDays(new Date(), dto.trialLicenseDays)
 			: undefined
 		const metricConnections = [
 			{
@@ -1094,7 +1097,11 @@ export class AdminService {
 		}
 	}
 
-	async updateCatalog(id: string, dto: AdminUpdateCatalogDtoReq, actor?: AdminActor) {
+	async updateCatalog(
+		id: string,
+		dto: AdminUpdateCatalogDtoReq,
+		actor?: AdminActor
+	) {
 		await this.assertCatalogAccess(id, actor)
 		if (dto.regionalityIds !== undefined) {
 			await this.assertRegionalityIdsAllowed(dto.regionalityIds, actor, {
@@ -1169,7 +1176,12 @@ export class AdminService {
 					}
 				: {}),
 			...(dto.trialLicenseDays
-				? { subscriptionEndsAt: addDays(new Date(), dto.trialLicenseDays) }
+				? {
+						subscriptionEndsAt: addCalendarDays(
+							new Date(),
+							dto.trialLicenseDays
+						)
+					}
 				: {}),
 			...(dto.status !== undefined
 				? {
@@ -1292,7 +1304,10 @@ export class AdminService {
 		)
 	}
 
-	async getCatalogMoySkladStockDiagnostics(catalogId: string, actor?: AdminActor) {
+	async getCatalogMoySkladStockDiagnostics(
+		catalogId: string,
+		actor?: AdminActor
+	) {
 		await this.assertCatalogAccess(catalogId, actor)
 		await this.ensureCatalogExists(catalogId)
 
@@ -1831,7 +1846,10 @@ export class AdminService {
 		})
 	}
 
-	async createRegionality(dto: AdminCreateRegionalityDtoReq, actor?: AdminActor) {
+	async createRegionality(
+		dto: AdminCreateRegionalityDtoReq,
+		actor?: AdminActor
+	) {
 		const regionName = normalizeRequiredText(dto.regionName)
 		const country = await this.resolveRegionalityCountry(dto)
 		const countryCode = country.code
@@ -1878,10 +1896,7 @@ export class AdminService {
 
 		const existingByName = await this.prisma.regionality.findFirst({
 			where: {
-				OR: [
-					{ countryId: country.id },
-					{ countryId: null, countryCode }
-				],
+				OR: [{ countryId: country.id }, { countryId: null, countryCode }],
 				parentId,
 				name: regionName,
 				deleteAt: null
@@ -1899,9 +1914,7 @@ export class AdminService {
 				data: {
 					name: regionName,
 					country: { connect: { id: country.id } },
-					parent: parentId
-						? { connect: { id: parentId } }
-						: { disconnect: true },
+					parent: parentId ? { connect: { id: parentId } } : { disconnect: true },
 					countryCode,
 					countryName,
 					deleteAt: null
@@ -2776,6 +2789,8 @@ export class AdminService {
 				enabledFeatures.has(CAPABILITY_PRODUCT_VARIANTS) &&
 				enabledFeatures.has(CAPABILITY_PRODUCT_TYPES),
 			canUseCatalogSaleUnits: enabledFeatures.has(CAPABILITY_CATALOG_SALE_UNITS),
+			canUseCatalogModifiers: enabledFeatures.has(CAPABILITY_CATALOG_MODIFIERS),
+			canUseCatalogPriceLists: enabledFeatures.has(CAPABILITY_CATALOG_PRICE_LISTS),
 			canUseInternalInventory: enabledFeatures.has(CAPABILITY_INVENTORY_INTERNAL),
 			canUseMoySkladIntegration: enabledFeatures.has(
 				CAPABILITY_INTEGRATION_MOYSKLAD
@@ -2783,7 +2798,8 @@ export class AdminService {
 			canUseIikoIntegration:
 				enabledFeatures.has(CAPABILITY_INTEGRATION_IIKO) &&
 				enabledFeatures.has(CAPABILITY_PRODUCT_TYPES) &&
-				enabledFeatures.has(CAPABILITY_PRODUCT_VARIANTS)
+				enabledFeatures.has(CAPABILITY_PRODUCT_VARIANTS),
+			canUseOneCIntegration: enabledFeatures.has(CAPABILITY_INTEGRATION_ONE_C)
 		}
 	}
 
@@ -3035,6 +3051,12 @@ function normalizeLoginCandidate(value: string) {
 
 function addDays(date: Date, days: number) {
 	const result = new Date(date)
+	result.setDate(result.getDate() + days)
+	return result
+}
+
+function addCalendarDays(date: Date, days: number) {
+	const result = new Date(date.getFullYear(), date.getMonth(), date.getDate())
 	result.setDate(result.getDate() + days)
 	return result
 }

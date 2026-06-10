@@ -1,6 +1,7 @@
 ﻿import type { Prisma } from '@generated/client'
 import { Prisma as PrismaSql } from '@generated/client'
 import {
+	CatalogPriceListPriceTarget,
 	DataType,
 	ProductStatus,
 	ProductTypeScope,
@@ -31,6 +32,14 @@ export type ProductVariantUpdateData = {
 	stock?: number | null
 	status?: ProductVariantStatus
 	saleUnits?: ProductVariantSaleUnitInput[]
+}
+
+export type ProductCreatePriceListPriceData = {
+	priceListId: string
+	target: CatalogPriceListPriceTarget
+	price: number
+	variantKey?: string | null
+	catalogSaleUnitId?: string | null
 }
 
 export type AttributeFilterMeta = {
@@ -397,6 +406,7 @@ const variantAttributeSelect = {
 
 const productVariantSaleUnitSelect = {
 	id: true,
+	variantId: true,
 	catalogSaleUnitId: true,
 	code: true,
 	name: true,
@@ -857,10 +867,12 @@ export class ProductRepository {
 	}
 
 	async findVariantSummaries(
-		productIds: string[]
+		productIds: string[],
+		options: { canUseCatalogSaleUnits?: boolean } = {}
 	): Promise<ProductVariantSummaryRecord[]> {
 		const ids = [...new Set(productIds.filter(Boolean))]
 		if (!ids.length) return []
+		const canUseCatalogSaleUnits = options.canUseCatalogSaleUnits ?? true
 
 		const rows = await this.prisma.$queryRaw<
 			Array<{
@@ -890,17 +902,27 @@ export class ProductRepository {
 					pv.product_id,
 					pv.id,
 					pv.stock,
-					COALESCE(default_sale_unit.price, pv.price) AS price
+					${
+						canUseCatalogSaleUnits
+							? PrismaSql.sql`COALESCE(default_sale_unit.price, pv.price)`
+							: PrismaSql.sql`pv.price`
+					} AS price
 				FROM product_variants pv
-				LEFT JOIN LATERAL (
-					SELECT pvsu.price
-					FROM product_variant_sale_units pvsu
-					WHERE pvsu.variant_id = pv.id
-						AND pvsu.delete_at IS NULL
-						AND pvsu.is_active = TRUE
-					ORDER BY pvsu.is_default DESC, pvsu.display_order ASC, pvsu.created_at ASC
-					LIMIT 1
-				) default_sale_unit ON TRUE
+				${
+					canUseCatalogSaleUnits
+						? PrismaSql.sql`
+							LEFT JOIN LATERAL (
+								SELECT pvsu.price
+								FROM product_variant_sale_units pvsu
+								WHERE pvsu.variant_id = pv.id
+									AND pvsu.delete_at IS NULL
+									AND pvsu.is_active = TRUE
+								ORDER BY pvsu.is_default DESC, pvsu.display_order ASC, pvsu.created_at ASC
+								LIMIT 1
+							) default_sale_unit ON TRUE
+						`
+						: PrismaSql.sql``
+				}
 				WHERE pv.delete_at IS NULL
 					AND pv.status::text <> ${ProductVariantStatus.DISABLED}
 					AND NOT (pv.kind::text = ${ProductVariantKind.DEFAULT} OR pv.variant_key = ${DEFAULT_VARIANT_KEY})
@@ -1730,10 +1752,18 @@ export class ProductRepository {
 		catalogId: string,
 		data: ProductCreateInput,
 		attributes?: ProductAttributeValueData[],
-		variants?: ProductVariantData[]
+		variants?: ProductVariantData[],
+		priceListPrices?: ProductCreatePriceListPriceData[]
 	) {
 		return this.prisma.$transaction(tx =>
-			this.createWithRelations(tx, catalogId, data, attributes, variants)
+			this.createWithRelations(
+				tx,
+				catalogId,
+				data,
+				attributes,
+				variants,
+				priceListPrices
+			)
 		)
 	}
 
@@ -2097,7 +2127,8 @@ export class ProductRepository {
 		catalogId: string,
 		data: ProductCreateInput,
 		attributes?: ProductAttributeValueData[],
-		variants?: ProductVariantData[]
+		variants?: ProductVariantData[],
+		priceListPrices?: ProductCreatePriceListPriceData[]
 	) {
 		const product = await tx.product.create({
 			data,
@@ -2111,6 +2142,12 @@ export class ProductRepository {
 			await this.assertProductVariantStructuralInvariants(tx, product.id)
 		}
 		await this.assertActiveProductHasValidVariant(tx, product.id)
+		await this.createInitialPriceListPrices(
+			tx,
+			catalogId,
+			product.id,
+			priceListPrices
+		)
 
 		return product
 	}
@@ -2128,6 +2165,147 @@ export class ProductRepository {
 				productId
 			}))
 		})
+	}
+
+	private async createInitialPriceListPrices(
+		tx: Prisma.TransactionClient,
+		catalogId: string,
+		productId: string,
+		prices?: ProductCreatePriceListPriceData[]
+	): Promise<void> {
+		if (!prices?.length) return
+
+		const priceListIds = [...new Set(prices.map(price => price.priceListId))]
+		const priceLists = await tx.catalogPriceList.findMany({
+			where: {
+				id: { in: priceListIds },
+				catalogId,
+				deleteAt: null
+			},
+			select: { id: true }
+		})
+		const availablePriceListIds = new Set(
+			priceLists.map(priceList => priceList.id)
+		)
+		const missingPriceListIds = priceListIds.filter(
+			priceListId => !availablePriceListIds.has(priceListId)
+		)
+		if (missingPriceListIds.length) {
+			throw new BadRequestException(
+				`Прайс-листы недоступны для этого каталога: ${missingPriceListIds.join(', ')}`
+			)
+		}
+
+		const variantKeys = [
+			...new Set(
+				prices
+					.filter(price => price.target !== CatalogPriceListPriceTarget.PRODUCT)
+					.map(price => price.variantKey?.trim() || DEFAULT_VARIANT_KEY)
+			)
+		]
+		const variants = variantKeys.length
+			? await tx.productVariant.findMany({
+					where: {
+						productId,
+						deleteAt: null,
+						variantKey: { in: variantKeys }
+					},
+					select: {
+						id: true,
+						variantKey: true,
+						saleUnits: {
+							where: { deleteAt: null },
+							select: {
+								id: true,
+								catalogSaleUnitId: true
+							}
+						}
+					}
+				})
+			: []
+		const variantsByKey = new Map(
+			variants.map(variant => [variant.variantKey, variant])
+		)
+		const seen = new Set<string>()
+		const rows: Prisma.CatalogPriceListPriceCreateManyInput[] = []
+
+		for (const price of prices) {
+			if (!Number.isFinite(price.price) || price.price < 0) {
+				throw new BadRequestException('Цена должна быть больше или равна 0')
+			}
+
+			if (price.target === CatalogPriceListPriceTarget.PRODUCT) {
+				const key = `${price.priceListId}:${price.target}:${productId}`
+				if (seen.has(key)) throw new BadRequestException('Целевая цена дублируется')
+				seen.add(key)
+				rows.push({
+					priceListId: price.priceListId,
+					target: price.target,
+					targetId: productId,
+					productId,
+					variantId: null,
+					saleUnitId: null,
+					price: Number(price.price.toFixed(2))
+				})
+				continue
+			}
+
+			const variantKey = price.variantKey?.trim() || DEFAULT_VARIANT_KEY
+			const variant = variantsByKey.get(variantKey)
+			if (!variant) {
+				throw new BadRequestException(
+					`Вариация ${variantKey} недоступна для созданного товара`
+				)
+			}
+
+			if (price.target === CatalogPriceListPriceTarget.VARIANT) {
+				const key = `${price.priceListId}:${price.target}:${variant.id}`
+				if (seen.has(key)) throw new BadRequestException('Целевая цена дублируется')
+				seen.add(key)
+				rows.push({
+					priceListId: price.priceListId,
+					target: price.target,
+					targetId: variant.id,
+					productId,
+					variantId: variant.id,
+					saleUnitId: null,
+					price: Number(price.price.toFixed(2))
+				})
+				continue
+			}
+
+			const catalogSaleUnitId = price.catalogSaleUnitId?.trim()
+			if (!catalogSaleUnitId) {
+				throw new BadRequestException(
+					'Не указана единица продажи для цены прайс-листа'
+				)
+			}
+
+			const saleUnit = variant.saleUnits.find(
+				unit => unit.catalogSaleUnitId === catalogSaleUnitId
+			)
+			if (!saleUnit) {
+				throw new BadRequestException(
+					`Единица продажи ${catalogSaleUnitId} недоступна для созданного товара`
+				)
+			}
+
+			const key = `${price.priceListId}:${price.target}:${saleUnit.id}`
+			if (seen.has(key)) throw new BadRequestException('Целевая цена дублируется')
+			seen.add(key)
+			rows.push({
+				priceListId: price.priceListId,
+				target: price.target,
+				targetId: saleUnit.id,
+				productId,
+				variantId: variant.id,
+				saleUnitId: saleUnit.id,
+				price: Number(price.price.toFixed(2))
+			})
+		}
+
+		if (!rows.length) return
+		await tx.catalogPriceListPrice.createMany({ data: rows })
 	}
 
 	private async updateWithoutRelations(
@@ -3881,9 +4059,16 @@ export class ProductRepository {
 		}
 
 		if (!saleUnits.length) {
+			const removedSaleUnits = await tx.productVariantSaleUnit.findMany({
+				where: { variantId, deleteAt: null },
+				select: { id: true }
+			})
+			const removedSaleUnitIds = removedSaleUnits.map(unit => unit.id)
+			const now = new Date()
+			await this.archiveSaleUnitPriceListPrices(tx, removedSaleUnitIds, now)
 			await tx.productVariantSaleUnit.updateMany({
 				where: { variantId, deleteAt: null },
-				data: { deleteAt: new Date(), isActive: false, isDefault: false }
+				data: { deleteAt: now, isActive: false, isDefault: false }
 			})
 			return
 		}
@@ -3948,17 +4133,114 @@ export class ProductRepository {
 				},
 				select: { id: true }
 			})
+			await this.relinkSaleUnitPriceListPrices(tx, variantId, created.id, unit)
 			keptIds.push(created.id)
 		}
 
+		const removedSaleUnits = await tx.productVariantSaleUnit.findMany({
+			where: { variantId, deleteAt: null, id: { notIn: keptIds } },
+			select: { id: true }
+		})
+		await this.archiveSaleUnitPriceListPrices(
+			tx,
+			removedSaleUnits.map(unit => unit.id),
+			now
+		)
+
 		await tx.productVariantSaleUnit.updateMany({
-			where: {
-				variantId,
-				deleteAt: null,
-				id: { notIn: keptIds }
-			},
+			where: { variantId, deleteAt: null, id: { notIn: keptIds } },
 			data: { deleteAt: now, isActive: false, isDefault: false }
 		})
+	}
+
+	private async archiveSaleUnitPriceListPrices(
+		tx: Prisma.TransactionClient,
+		saleUnitIds: string[],
+		deleteAt: Date
+	): Promise<void> {
+		if (!saleUnitIds.length) return
+
+		await tx.catalogPriceListPrice.updateMany({
+			where: {
+				target: CatalogPriceListPriceTarget.SALE_UNIT,
+				deleteAt: null,
+				OR: [{ saleUnitId: { in: saleUnitIds } }, { targetId: { in: saleUnitIds } }]
+			},
+			data: { deleteAt }
+		})
+	}
+
+	private async relinkSaleUnitPriceListPrices(
+		tx: Prisma.TransactionClient,
+		variantId: string,
+		nextSaleUnitId: string,
+		unit: NormalizedVariantSaleUnit
+	): Promise<void> {
+		const staleSaleUnits = await tx.productVariantSaleUnit.findMany({
+			where: {
+				variantId,
+				id: { not: nextSaleUnitId },
+				OR: [
+					{ catalogSaleUnitId: unit.catalogSaleUnitId },
+					{ code: unit.code },
+					{ name: unit.name, baseQuantity: unit.baseQuantity }
+				],
+				priceListPrices: {
+					some: {
+						target: CatalogPriceListPriceTarget.SALE_UNIT,
+						deleteAt: null
+					}
+				}
+			},
+			select: {
+				id: true,
+				priceListPrices: {
+					where: {
+						target: CatalogPriceListPriceTarget.SALE_UNIT,
+						deleteAt: null
+					},
+					select: {
+						id: true,
+						priceListId: true,
+						productId: true,
+						variantId: true
+					}
+				}
+			}
+		})
+		if (!staleSaleUnits.length) return
+
+		const now = new Date()
+		for (const staleSaleUnit of staleSaleUnits) {
+			for (const price of staleSaleUnit.priceListPrices) {
+				const existingCurrentPrice = await tx.catalogPriceListPrice.findFirst({
+					where: {
+						priceListId: price.priceListId,
+						target: CatalogPriceListPriceTarget.SALE_UNIT,
+						targetId: nextSaleUnitId
+					},
+					select: { id: true }
+				})
+				if (existingCurrentPrice) {
+					await tx.catalogPriceListPrice.update({
+						where: { id: price.id },
+						data: { deleteAt: now }
+					})
+					continue
+				}
+
+				await tx.catalogPriceListPrice.update({
+					where: { id: price.id },
+					data: {
+						targetId: nextSaleUnitId,
+						saleUnitId: nextSaleUnitId,
+						productId: price.productId,
+						variantId: price.variantId,
+						deleteAt: null
+					}
+				})
+			}
+		}
 	}
 
 	private async normalizeVariantSaleUnits(

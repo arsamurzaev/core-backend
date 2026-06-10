@@ -189,7 +189,7 @@ export function buildCatalogConfigUpsert(
 			update,
 			create
 		}
-	} as NonNullable<CatalogUpdateInput['config']>
+	}
 }
 
 export function buildCatalogSettingsUpsert(
@@ -263,7 +263,7 @@ export function buildCatalogSettingsUpsert(
 			update,
 			create
 		}
-	} as NonNullable<CatalogUpdateInput['settings']>
+	}
 }
 
 export function buildCatalogContactsUpdate(

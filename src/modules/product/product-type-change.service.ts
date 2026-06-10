@@ -11,7 +11,11 @@ import {
 	CAPABILITY_ASSERT_PORT,
 	type CapabilityAssertPort
 } from '@/modules/capability/contracts'
-import { mustCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
+import {
+	assertCurrentCatalogCanManageCatalogContent,
+	mustCatalogId,
+	mustTypeId
+} from '@/shared/tenancy/ctx'
 import { normalizeRequiredString } from '@/shared/utils'
 
 import { ApplyProductTypeChangeDtoReq } from './dto/requests/apply-product-type-change.dto.req'
@@ -64,7 +68,7 @@ export class ProductTypeChangeService {
 		dto: ProductTypeCompatibilityPreviewDtoReq
 	): Promise<ProductTypeCompatibilityPreviewDto> {
 		if (dto.productTypeId === undefined) {
-			throw new BadRequestException('productTypeId is required')
+			throw new BadRequestException('Не указан тип товара')
 		}
 
 		const catalogId = mustCatalogId()
@@ -98,11 +102,12 @@ export class ProductTypeChangeService {
 	}
 
 	async applyProductTypeChange(id: string, dto: ApplyProductTypeChangeDtoReq) {
+		assertCurrentCatalogCanManageCatalogContent()
 		if (dto.productTypeId === undefined) {
-			throw new BadRequestException('productTypeId is required')
+			throw new BadRequestException('Не указан тип товара')
 		}
 		if (dto.confirm !== true) {
-			throw new BadRequestException('confirm must be true')
+			throw new BadRequestException('Подтверждение обязательно')
 		}
 
 		const catalogId = mustCatalogId()
@@ -142,7 +147,7 @@ export class ProductTypeChangeService {
 			await this.featureEntitlements.assertCanUseProductVariants(catalogId)
 			if (dto.items === undefined) {
 				throw new BadRequestException(
-					'Product type variant attributes require explicit variants'
+					'Тип товара с вариациями требует явного списка вариаций'
 				)
 			}
 		}
@@ -191,7 +196,7 @@ export class ProductTypeChangeService {
 			attributes,
 			variants
 		)
-		if (!updated) throw new NotFoundException('Product not found')
+		if (!updated) throw new NotFoundException('Товар не найден')
 		return this.finalizer.finalizeProduct(updated, catalogId, {
 			bumpCatalogTypeId: this.variants.hasCustomVariantValues(dto.items)
 				? typeId
@@ -220,7 +225,7 @@ export class ProductTypeChangeService {
 		)
 		if (!productType) {
 			throw new BadRequestException(
-				`Product type ${productTypeId} is not available for this catalog`
+				`Тип товара ${productTypeId} недоступен для этого каталога`
 			)
 		}
 		return productType
@@ -234,7 +239,7 @@ export class ProductTypeChangeService {
 			id,
 			catalogId
 		)
-		if (!product) throw new NotFoundException('Product not found')
+		if (!product) throw new NotFoundException('Товар не найден')
 		return product
 	}
 
@@ -255,7 +260,7 @@ export class ProductTypeChangeService {
 		if (!isIntegrated) return
 
 		throw new BadRequestException(
-			'Integrated product structure is managed by integration; product type and variants cannot be changed manually'
+			'Структура интеграционного товара управляется интеграцией; тип товара и вариации нельзя менять вручную'
 		)
 	}
 

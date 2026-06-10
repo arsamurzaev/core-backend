@@ -1,4 +1,5 @@
 ﻿import { Prisma } from '@generated/client'
+import { Role } from '@generated/enums'
 import { BadRequestException, Inject, Injectable } from '@nestjs/common'
 import { hash } from 'argon2'
 
@@ -24,6 +25,12 @@ export class UserService {
 	) {
 		const { login, password, role, regionalityIds, countryIds, name } = dto
 
+		if (role !== undefined && role !== Role.USER) {
+			throw new BadRequestException(
+				'Публичная регистрация доступна только для роли USER'
+			)
+		}
+
 		const hashedPassword = await hash(password)
 
 		const countryConnect =
@@ -41,7 +48,7 @@ export class UserService {
 			login,
 			password: hashedPassword,
 			isEmailConfirmed: false,
-			role,
+			role: Role.USER,
 			...(countryConnect ? { countries: countryConnect } : {}),
 			...(regionConnect ? { regions: regionConnect } : {})
 		}

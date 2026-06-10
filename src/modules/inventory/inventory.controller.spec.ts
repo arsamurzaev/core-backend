@@ -49,7 +49,7 @@ describe('InventoryController', () => {
 	})
 
 	it('delegates warehouse list to service', async () => {
-		service.getWarehouses.mockResolvedValue([] as any)
+		service.getWarehouses.mockResolvedValue([])
 
 		const result = await controller.getWarehouses()
 
@@ -78,7 +78,7 @@ describe('InventoryController', () => {
 	})
 
 	it('delegates balances list to service', async () => {
-		service.getWarehouseBalances.mockResolvedValue([] as any)
+		service.getWarehouseBalances.mockResolvedValue([])
 
 		const result = await controller.getWarehouseBalances('warehouse-1')
 
@@ -87,7 +87,7 @@ describe('InventoryController', () => {
 	})
 
 	it('delegates movement journal to service', async () => {
-		service.getWarehouseMovements.mockResolvedValue([] as any)
+		service.getWarehouseMovements.mockResolvedValue([])
 
 		const result = await controller.getWarehouseMovements('warehouse-1', '10')
 
@@ -99,7 +99,7 @@ describe('InventoryController', () => {
 	})
 
 	it('delegates reservation list to service', async () => {
-		service.getWarehouseReservations.mockResolvedValue([] as any)
+		service.getWarehouseReservations.mockResolvedValue([])
 
 		const result = await controller.getWarehouseReservations('warehouse-1', '10')
 

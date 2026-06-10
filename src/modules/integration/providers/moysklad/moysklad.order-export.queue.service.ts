@@ -1,4 +1,3 @@
-import type { Prisma } from '@generated/client'
 import { IntegrationProvider } from '@generated/enums'
 import {
 	Inject,
@@ -389,7 +388,7 @@ export class MoySkladOrderExportQueueService
 					const result = await this.orderExport.exportOrder(running)
 					await this.repo.markOrderExportSuccess(running.id, {
 						externalId: result.externalId,
-						response: result.response as unknown as Prisma.InputJsonValue
+						response: result.response
 					})
 					this.recordQueueOutcome(jobName, 'success', startedAt)
 					this.recordOrderExportEvent(job.data.trigger, 'success')

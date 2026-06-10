@@ -26,10 +26,14 @@ function parseCorsOrigins(cors: string | undefined): string[] {
 	return (cors ?? '').split(',').map(normalizeCorsEntry).filter(Boolean)
 }
 
-function isOriginAllowed(origin: string, allowedOrigins: string[]): boolean {
+function isOriginAllowed(
+	origin: string,
+	allowedOrigins: string[],
+	options: { allowWildcard: boolean }
+): boolean {
 	return allowedOrigins.some(allowedOrigin => {
 		if (allowedOrigin === '*') {
-			return true
+			return options.allowWildcard
 		}
 
 		if (allowedOrigin.includes('*')) {
@@ -47,6 +51,7 @@ export function getCorsConfig(
 	const allowedOrigins = parseCorsOrigins(
 		configService.get('http.cors', { infer: true })
 	)
+	const allowWildcardOrigin = process.env.NODE_ENV !== 'production'
 
 	return {
 		origin: (origin, callback) => {
@@ -55,7 +60,11 @@ export function getCorsConfig(
 				return
 			}
 
-			if (isOriginAllowed(origin, allowedOrigins)) {
+			if (
+				isOriginAllowed(origin, allowedOrigins, {
+					allowWildcard: allowWildcardOrigin
+				})
+			) {
 				callback(null, true)
 				return
 			}

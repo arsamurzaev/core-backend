@@ -1120,8 +1120,7 @@ export class OneCIntegrationService {
 			integrationId: integration.id,
 			code,
 			name: normalizeOptionalString(dto.name) ?? code,
-			kind: (dto.kind ??
-				IntegrationExternalObjectKind.CUSTOM) as IntegrationExternalObjectKind,
+			kind: dto.kind ?? IntegrationExternalObjectKind.CUSTOM,
 			endpoint: normalizeOptionalString(dto.endpoint),
 			method: normalizeOptionalString(dto.method)?.toUpperCase() ?? null,
 			schema: this.optionalJson(dto.schema),
@@ -1152,7 +1151,7 @@ export class OneCIntegrationService {
 				dto.name === undefined
 					? undefined
 					: normalizeRequiredString(dto.name, 'name'),
-			kind: dto.kind as IntegrationExternalObjectKind | undefined,
+			kind: dto.kind,
 			endpoint:
 				dto.endpoint === undefined
 					? undefined
@@ -1266,12 +1265,10 @@ export class OneCIntegrationService {
 			integrationId: integration.id,
 			externalObjectId:
 				externalObject?.id ?? normalizeOptionalString(dto.externalObjectId),
-			localEntity: dto.localEntity as IntegrationMappingLocalEntity,
+			localEntity: dto.localEntity,
 			externalObjectCode,
 			identityField: normalizeRequiredString(dto.identityField, 'identityField'),
-			direction:
-				(dto.direction as IntegrationMappingDirection | undefined) ??
-				IntegrationMappingDirection.IMPORT,
+			direction: dto.direction ?? IntegrationMappingDirection.IMPORT,
 			conflictPolicy: normalizeOptionalString(dto.conflictPolicy),
 			filters: this.optionalJson(dto.filters),
 			options: this.optionalJson(dto.options),
@@ -1301,7 +1298,7 @@ export class OneCIntegrationService {
 		const mapping = await this.repo.updateEntityMapping(existing.id, {
 			externalObjectId:
 				externalObject === undefined ? undefined : (externalObject?.id ?? null),
-			localEntity: dto.localEntity as IntegrationMappingLocalEntity | undefined,
+			localEntity: dto.localEntity,
 			externalObjectCode:
 				dto.externalObjectCode === undefined
 					? externalObject?.code
@@ -1310,7 +1307,7 @@ export class OneCIntegrationService {
 				dto.identityField === undefined
 					? undefined
 					: normalizeRequiredString(dto.identityField, 'identityField'),
-			direction: dto.direction as IntegrationMappingDirection | undefined,
+			direction: dto.direction,
 			conflictPolicy:
 				dto.conflictPolicy === undefined
 					? undefined
@@ -1353,12 +1350,8 @@ export class OneCIntegrationService {
 			entityMappingId: entityMapping.id,
 			localPath: normalizeRequiredString(dto.localPath, 'localPath'),
 			externalPath: normalizeRequiredString(dto.externalPath, 'externalPath'),
-			direction:
-				(dto.direction as IntegrationMappingDirection | undefined) ??
-				IntegrationMappingDirection.IMPORT,
-			dataType:
-				(dto.dataType as IntegrationMappingDataType | undefined) ??
-				IntegrationMappingDataType.STRING,
+			direction: dto.direction ?? IntegrationMappingDirection.IMPORT,
+			dataType: dto.dataType ?? IntegrationMappingDataType.STRING,
 			transform: this.optionalJson(dto.transform),
 			defaultValue: this.optionalJson(dto.defaultValue),
 			isRequired: dto.isRequired ?? false,
@@ -1399,8 +1392,8 @@ export class OneCIntegrationService {
 				dto.externalPath === undefined
 					? undefined
 					: normalizeRequiredString(dto.externalPath, 'externalPath'),
-			direction: dto.direction as IntegrationMappingDirection | undefined,
-			dataType: dto.dataType as IntegrationMappingDataType | undefined,
+			direction: dto.direction,
+			dataType: dto.dataType,
 			transform: this.optionalJson(dto.transform),
 			defaultValue: this.optionalJson(dto.defaultValue),
 			isRequired: dto.isRequired,
@@ -1881,7 +1874,7 @@ export class OneCIntegrationService {
 				...validateVariantImportResolution(row.mappedRow, row.product),
 				...validateVariantPayload(mapped),
 				...(skuConflict
-					? ['Mapped variant sku already belongs to another product']
+					? ['Сопоставленный SKU вариации уже принадлежит другому товару']
 					: [])
 			]
 			if (!variant) {
@@ -2607,7 +2600,7 @@ export class OneCIntegrationService {
 				tx
 			})
 			if (!product) {
-				throw new NotFoundException('Product not found')
+				throw new NotFoundException('Товар не найден')
 			}
 			return product
 		}
@@ -2619,7 +2612,7 @@ export class OneCIntegrationService {
 			tx
 		})
 		if (!updated) {
-			throw new NotFoundException('Product not found')
+			throw new NotFoundException('Товар не найден')
 		}
 
 		return updated
@@ -3822,11 +3815,11 @@ function validateVariantCreatePayload(
 		return errors
 	}
 	if (!normalizeIdentityValue(payload.sku)) {
-		errors.push('Mapped variant sku is required for create')
+		errors.push('SKU сопоставленной вариации обязателен для создания')
 	}
 	if (!attributes.length) {
 		errors.push(
-			'Mapped variant attributes are required for create; map attributes.<attributeId>'
+			'Атрибуты сопоставленной вариации обязательны для создания; сопоставьте attributes.<attributeId>'
 		)
 	}
 	return errors
@@ -3838,7 +3831,7 @@ function validateVariantPayload(payload: Record<string, unknown>): string[] {
 		Object.prototype.hasOwnProperty.call(payload, 'stock') &&
 		readNullableNumber(payload.stock) === null
 	) {
-		errors.push('Mapped variant stock must be a number')
+		errors.push('Остаток сопоставленной вариации должен быть числом')
 	}
 	if (
 		Object.prototype.hasOwnProperty.call(payload, 'price') &&
@@ -3846,11 +3839,11 @@ function validateVariantPayload(payload: Record<string, unknown>): string[] {
 		payload.price !== '' &&
 		readNullableNumber(payload.price) === null
 	) {
-		errors.push('Mapped variant price must be a number')
+		errors.push('Цена сопоставленной вариации должна быть числом')
 	}
 	const status = normalizeIdentityValue(payload.status)
 	if (status && !isProductVariantStatus(status)) {
-		errors.push(`Mapped variant status is unsupported: ${status}`)
+		errors.push(`Статус сопоставленной вариации не поддерживается: ${status}`)
 	}
 	return errors
 }
@@ -4191,7 +4184,7 @@ function readValueSyncNextValue(
 		return {
 			present: false,
 			value: null,
-			error: 'Mapped price is required'
+			error: 'Сопоставленная цена обязательна'
 		}
 	}
 	const value = readNullableNumber(payload.price)
@@ -4199,7 +4192,7 @@ function readValueSyncNextValue(
 		return {
 			present: true,
 			value: null,
-			error: 'Mapped price must be a number'
+			error: 'Сопоставленная цена должна быть числом'
 		}
 	}
 

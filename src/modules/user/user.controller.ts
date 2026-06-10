@@ -7,6 +7,7 @@ import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 import { RequestContext } from '@/shared/tenancy/request-context'
+import { AuthThrottle } from '@/shared/throttler/auth-throttle.decorator'
 
 import { CreateUserDtoReq } from './dto/requests/create-user.dto.req'
 import { UserService } from './user.service'
@@ -18,6 +19,7 @@ export class UserController {
 	constructor(private readonly userService: UserService) {}
 
 	@Post('register')
+	@AuthThrottle()
 	@ApiCreatedResponse({
 		description: 'Пользователь зарегистрирован, cookies установлены',
 		type: OkResponseDto

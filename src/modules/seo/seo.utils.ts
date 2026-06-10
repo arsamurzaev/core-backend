@@ -62,11 +62,8 @@ export function buildSeoCreateInput(
 		sitemapChangeFreq: dto.sitemapChangeFreq ?? undefined
 	}
 
-	assignNormalizedTextFields(
-		data as Record<string, unknown>,
-		dto as Partial<Record<SeoNormalizedTextField, string | null | undefined>>
-	)
-	assignNullableBooleanFlags(data as Record<string, unknown>, dto)
+	assignNormalizedTextFields(data, dto)
+	assignNullableBooleanFlags(data, dto)
 
 	return data
 }
@@ -90,11 +87,7 @@ export function buildSeoUpdateInput(
 		data.entityId = options.entityId
 	}
 
-	assignNormalizedTextFields(
-		data as Record<string, unknown>,
-		dto as Partial<Record<SeoNormalizedTextField, string | null | undefined>>,
-		true
-	)
+	assignNormalizedTextFields(data, dto, true)
 
 	if (dto.ogMediaId !== undefined) {
 		data.ogMedia = options.ogMediaId
@@ -134,7 +127,7 @@ export function buildSeoUpdateInput(
 		data.sitemapChangeFreq = dto.sitemapChangeFreq
 	}
 
-	assignNullableBooleanFlags(data as Record<string, unknown>, dto)
+	assignNullableBooleanFlags(data, dto)
 
 	return data
 }

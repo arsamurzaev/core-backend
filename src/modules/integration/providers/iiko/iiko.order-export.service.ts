@@ -14,7 +14,8 @@ import {
 } from '@/modules/capability/contracts'
 import {
 	normalizeOrderProducts,
-	type OrderExternalLinkSnapshot
+	type OrderExternalLinkSnapshot,
+	type OrderProductModifierSnapshot
 } from '@/shared/order/order-products.utils'
 
 import { INTEGRATION_EXTERNAL_ITEM_TYPE_TABLE } from '../../integration-external-items'
@@ -461,14 +462,16 @@ export class IikoOrderExportService {
 		const payloadItems: IikoCreateDeliveryOrderItem[] = []
 		for (const item of items) {
 			const ref = await this.resolveIikoItemRef(integrationId, item)
+			const modifiers = await this.resolveIikoModifiers(integrationId, item)
 			const amount = normalizeAmount(item.quantity)
-			const price = normalizeMoney(item.unitPrice)
+			const price = normalizeMoney(resolveIikoBaseItemUnitPrice(item))
 			payloadItems.push({
 				type: 'Product' as const,
 				productId: ref.productId,
 				...(ref.sizeId ? { productSizeId: ref.sizeId } : {}),
 				amount,
 				price,
+				...(modifiers.length ? { modifiers } : {}),
 				...(item.guestName ? { comment: `Guest: ${item.guestName}` } : {})
 			})
 		}
@@ -553,6 +556,50 @@ export class IikoOrderExportService {
 		throw new NonRetryableIikoOrderExportError(
 			`No iiko mapping for product=${item.productId ?? 'null'}, variant=${item.variantId ?? 'null'}`
 		)
+	}
+
+	private async resolveIikoModifiers(
+		integrationId: string,
+		item: {
+			modifiers: OrderProductModifierSnapshot[]
+		}
+	): Promise<NonNullable<IikoCreateDeliveryOrderItem['modifiers']>> {
+		const result: NonNullable<IikoCreateDeliveryOrderItem['modifiers']> = []
+
+		for (const modifier of item.modifiers ?? []) {
+			const optionLink = await this.repo.findModifierOptionLinkForOrder(
+				integrationId,
+				{
+					productModifierOptionId: modifier.productModifierOptionId,
+					catalogModifierOptionId: modifier.catalogModifierOptionId
+				}
+			)
+			if (!optionLink) {
+				throw new NonRetryableIikoOrderExportError(
+					`No iiko mapping for modifier option=${modifier.productModifierOptionId ?? modifier.catalogModifierOptionId ?? 'null'}`
+				)
+			}
+
+			const groupLink = await this.repo.findModifierGroupLinkForOrder(
+				integrationId,
+				{
+					productModifierGroupId: modifier.productModifierGroupId,
+					catalogModifierGroupId: modifier.catalogModifierGroupId
+				}
+			)
+			const productId = resolveIikoModifierActualExternalId(optionLink)
+			const productGroupId = groupLink
+				? resolveIikoModifierActualExternalId(groupLink)
+				: null
+			result.push({
+				productId,
+				...(productGroupId ? { productGroupId } : {}),
+				amount: normalizeAmount(modifier.quantity),
+				price: normalizeMoney(modifier.unitPrice)
+			})
+		}
+
+		return result
 	}
 
 	private resolveSnapshotLinkRef(
@@ -1102,6 +1149,30 @@ function normalizeMoney(value: number): number {
 	return Number(normalized.toFixed(2))
 }
 
+function toMoneyCents(value: number): number {
+	const normalized = Number(value)
+	if (!Number.isFinite(normalized) || normalized < 0) return 0
+	return Math.round(normalized * 100)
+}
+
+function resolveModifierUnitTotalCents(
+	modifiers: OrderProductModifierSnapshot[] | null | undefined
+): number {
+	return (modifiers ?? []).reduce((sum, modifier) => {
+		const quantity = Math.max(1, Math.trunc(Number(modifier.quantity) || 1))
+		return sum + toMoneyCents(modifier.unitPrice) * quantity
+	}, 0)
+}
+
+function resolveIikoBaseItemUnitPrice(item: {
+	unitPrice: number
+	modifiers?: OrderProductModifierSnapshot[] | null
+}): number {
+	const itemUnitPriceCents = toMoneyCents(item.unitPrice)
+	const modifierUnitTotalCents = resolveModifierUnitTotalCents(item.modifiers)
+	return Math.max(0, itemUnitPriceCents - modifierUnitTotalCents) / 100
+}
+
 function normalizeIikoDateTime(value: unknown): string | null {
 	if (value instanceof Date) {
 		return Number.isNaN(value.getTime()) ? null : formatIikoDateTime(value)
@@ -1263,6 +1334,16 @@ function parseIikoExternalId(value: unknown): IikoOrderItemRef | null {
 		productId,
 		sizeId: normalizeIikoSizeId(rawSizeId)
 	}
+}
+
+function resolveIikoModifierActualExternalId(link: {
+	externalId: string | null
+	rawMeta: unknown
+}): string {
+	const rawMeta = isRecord(link.rawMeta) ? link.rawMeta : null
+	return (
+		readString(rawMeta?.actualExternalId) ?? readString(link.externalId) ?? ''
+	)
 }
 
 function normalizeIikoSizeId(value: string | null | undefined): string | null {

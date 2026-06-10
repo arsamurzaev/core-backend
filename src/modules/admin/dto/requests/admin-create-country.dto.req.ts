@@ -1,6 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
-import { IsNotEmpty, IsOptional, IsString, Matches, MaxLength } from 'class-validator'
+import {
+	IsNotEmpty,
+	IsOptional,
+	IsString,
+	Matches,
+	MaxLength
+} from 'class-validator'
 
 const COUNTRY_CODE_PATTERN = /^[A-Z0-9-]+$/
 
@@ -29,9 +35,7 @@ export class AdminCreateCountryDtoReq {
 		example: 'RU',
 		description: 'If omitted, generated from name.'
 	})
-	@Transform(({ value }: { value: unknown }) =>
-		trimOptionalUppercaseCode(value)
-	)
+	@Transform(({ value }: { value: unknown }) => trimOptionalUppercaseCode(value))
 	@IsOptional()
 	@IsString()
 	@Matches(COUNTRY_CODE_PATTERN)

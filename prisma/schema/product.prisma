@@ -61,6 +61,8 @@ model Product {
   variants          ProductVariant[]
   media             ProductMedia[]
   productAttributes ProductAttribute[]
+  modifierGroups    ProductModifierGroup[]
+  priceListPrices   CatalogPriceListPrice[]
   integrationLinks  IntegrationProductLink[]
   cartItem          CartItem[]
   categoryProducts  CategoryProduct[]
@@ -221,6 +223,8 @@ model ProductVariant {
   // Атрибуты варианта (size=M, color=white)
   attributes            VariantAttribute[]
   saleUnits             ProductVariantSaleUnit[]
+  modifierGroups        ProductModifierGroup[]
+  priceListPrices       CatalogPriceListPrice[]
   cartItems             CartItem[]
   integrationLinks      IntegrationVariantLink[]
   stockBalances         InventoryStockBalance[]
@@ -256,9 +260,10 @@ model ProductVariantSaleUnit {
 
   deleteAt DateTime? @map("delete_at")
 
-  variant         ProductVariant   @relation(fields: [variantId], references: [id], onDelete: Cascade)
-  catalogSaleUnit CatalogSaleUnit? @relation(fields: [catalogSaleUnitId], references: [id], onDelete: SetNull)
+  variant         ProductVariant          @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  catalogSaleUnit CatalogSaleUnit?        @relation(fields: [catalogSaleUnitId], references: [id], onDelete: SetNull)
   cartItems       CartItem[]
+  priceListPrices CatalogPriceListPrice[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

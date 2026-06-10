@@ -218,7 +218,7 @@ export class ProductVariantService {
 		items: ProductVariantDtoReq[]
 	): Promise<ProductVariantData[]> {
 		const product = await this.repo.findSkuById(id, catalogId)
-		if (!product) throw new NotFoundException('Product not found')
+		if (!product) throw new NotFoundException('Товар не найден')
 
 		this.assertProductTypeVariantInputs(productType, items)
 
@@ -348,7 +348,7 @@ export class ProductVariantService {
 		if (!isIntegrated) return
 
 		throw new BadRequestException(
-			'Integrated product variants are managed by integration; variants cannot be changed manually'
+			'Вариации интеграционного товара управляются интеграцией; их нельзя менять вручную'
 		)
 	}
 
@@ -371,7 +371,7 @@ export class ProductVariantService {
 		)
 		if (!productType) {
 			throw new BadRequestException(
-				`Product type ${productTypeId} is not available for this catalog`
+				`Тип товара ${productTypeId} недоступен для этого каталога`
 			)
 		}
 		return productType

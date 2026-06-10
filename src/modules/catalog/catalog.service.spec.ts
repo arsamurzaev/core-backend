@@ -23,15 +23,23 @@ const DEFAULT_FEATURE_FLAGS = {
 	canUseProductTypes: false,
 	canUseProductVariants: false,
 	canUseCatalogSaleUnits: false,
+	canUseCatalogModifiers: false,
+	canUseCatalogPriceLists: false,
 	canUseInternalInventory: false,
-	canUseMoySkladIntegration: false
+	canUseMoySkladIntegration: false,
+	canUseIikoIntegration: false,
+	canUseOneCIntegration: false
 }
 const DEFAULT_CAPABILITY_MAP = {
 	'product.types': false,
 	'product.variants': false,
 	'catalog.sale_units': false,
+	'catalog.modifiers': false,
+	'catalog.price_lists': false,
 	'inventory.internal': false,
-	'integration.moysklad': false
+	'integration.moysklad': false,
+	'integration.iiko': false,
+	'integration.one_c': false
 }
 const DEFAULT_CAPABILITY_RESPONSE = {
 	raw: DEFAULT_CAPABILITY_MAP,
@@ -216,8 +224,12 @@ describe('CatalogService', () => {
 			canUseProductTypes: false,
 			canUseProductVariants: false,
 			canUseCatalogSaleUnits: false,
+			canUseCatalogModifiers: false,
+			canUseCatalogPriceLists: false,
 			canUseInternalInventory: true,
 			canUseMoySkladIntegration: false,
+			canUseIikoIntegration: false,
+			canUseOneCIntegration: false,
 			raw: DEFAULT_CAPABILITY_MAP,
 			effective: {
 				...DEFAULT_CAPABILITY_MAP,
@@ -382,13 +394,13 @@ describe('CatalogService', () => {
 				contacts: [],
 				config: null,
 				settings: null
-			} as any)
+			})
 			.mockResolvedValueOnce({
 				id: 'type-1',
 				code: 'clothing',
 				name: 'Clothing',
 				attributes: []
-			} as any)
+			})
 
 		const result = await runWithCatalog(() => service.getCurrent())
 
@@ -436,7 +448,7 @@ describe('CatalogService', () => {
 			code: 'clothing',
 			name: 'Clothing',
 			attributes: []
-		} as any)
+		})
 
 		await runWithCatalog(() => service.getCurrent())
 
@@ -498,7 +510,7 @@ describe('CatalogService', () => {
 			code: 'clothing',
 			name: 'Clothing',
 			attributes: []
-		} as any)
+		})
 
 		const result = await runWithCatalog(() => service.getCurrentTypeSchema())
 
@@ -529,7 +541,7 @@ describe('CatalogService', () => {
 			code: 'clothing',
 			name: 'Clothing',
 			attributes: []
-		} as any)
+		})
 
 		const result = await runWithCatalogWithoutType(() =>
 			service.getCurrentTypeSchema()

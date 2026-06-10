@@ -1,4 +1,5 @@
 ﻿import { ProductStatus } from '@generated/enums'
+import { CatalogPriceListPriceTarget } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {
@@ -10,7 +11,9 @@ import {
 	IsNumber,
 	IsOptional,
 	IsString,
+	IsUUID,
 	MaxLength,
+	Min,
 	ValidateNested
 } from 'class-validator'
 
@@ -19,6 +22,55 @@ import {
 	ProductVariantDtoReq,
 	ProductVariantSaleUnitDtoReq
 } from './product-variant.dto.req'
+
+export class CreateProductPriceListVariantAttributeDtoReq {
+	@ApiProperty({ type: String, example: 'attribute-uuid' })
+	@IsUUID()
+	attributeId: string
+
+	@ApiProperty({ type: String, example: 'enum-value-uuid' })
+	@IsUUID()
+	enumValueId: string
+}
+
+export class CreateProductPriceListPriceDtoReq {
+	@ApiProperty({ type: String, example: 'price-list-uuid' })
+	@IsUUID()
+	priceListId: string
+
+	@ApiProperty({
+		enum: CatalogPriceListPriceTarget,
+		example: CatalogPriceListPriceTarget.PRODUCT
+	})
+	@IsEnum(CatalogPriceListPriceTarget)
+	target: CatalogPriceListPriceTarget
+
+	@ApiProperty({ type: Number, example: 999.0 })
+	@Transform(({ value }: { value: unknown }) => Number(value))
+	@IsNumber()
+	@Min(0)
+	price: number
+
+	@ApiPropertyOptional({
+		type: [CreateProductPriceListVariantAttributeDtoReq],
+		description:
+			'Variant identity for VARIANT and variant-scoped SALE_UNIT prices during product creation.'
+	})
+	@IsOptional()
+	@IsArray()
+	@ValidateNested({ each: true })
+	@Type(() => CreateProductPriceListVariantAttributeDtoReq)
+	variantAttributes?: CreateProductPriceListVariantAttributeDtoReq[]
+
+	@ApiPropertyOptional({
+		type: String,
+		example: 'catalog-sale-unit-uuid',
+		description: 'Required for SALE_UNIT prices.'
+	})
+	@IsOptional()
+	@IsUUID()
+	catalogSaleUnitId?: string
+}
 
 export class CreateProductDtoReq {
 	@ApiProperty({ type: String, example: 'Basic T-Shirt' })
@@ -132,4 +184,16 @@ export class CreateProductDtoReq {
 	@ValidateNested({ each: true })
 	@Type(() => ProductVariantDtoReq)
 	variants?: ProductVariantDtoReq[]
+
+	@ApiPropertyOptional({
+		type: [CreateProductPriceListPriceDtoReq],
+		description:
+			'Initial price-list prices. Backend resolves product, variant and sale-unit ids after creation.'
+	})
+	@IsOptional()
+	@IsArray()
+	@ArrayMaxSize(1000)
+	@ValidateNested({ each: true })
+	@Type(() => CreateProductPriceListPriceDtoReq)
+	priceListPrices?: CreateProductPriceListPriceDtoReq[]
 }

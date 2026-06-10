@@ -51,31 +51,34 @@ model Catalog {
   promoCodeId String?    @map("promo_code_id") @db.Uuid
   promoCode   PromoCode? @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
 
-  payments            Payment[]
-  activity            Activity[]
-  region              Regionality[]
-  config              CatalogConfig?
-  settings            CatalogSettings?
-  seoSettings         SeoSetting[]
-  metrics             Metrics[]
-  contacts            CatalogContact[]
-  products            Product[]
-  productTypes        ProductType[]
-  attributeEnumValues AttributeEnumValue[]
+  payments                  Payment[]
+  activity                  Activity[]
+  region                    Regionality[]
+  config                    CatalogConfig?
+  settings                  CatalogSettings?
+  seoSettings               SeoSetting[]
+  metrics                   Metrics[]
+  contacts                  CatalogContact[]
+  products                  Product[]
+  productTypes              ProductType[]
+  attributeEnumValues       AttributeEnumValue[]
   attributeEnumValueAliases AttributeEnumValueAlias[]
-  integrations        Integration[]
-  category            Category[]
-  brands              Brand[]
-  saleUnits           CatalogSaleUnit[]
-  order               Order[]
-  cart                Cart[]
-  cartTableSessions   CartTableSession[]
-  media               Media[]
-  domains             CatalogDomain[]
-  featureEntitlements CatalogFeatureEntitlement[]
-  inventoryWarehouses InventoryWarehouseCatalog[]
-  integrationExternalItems IntegrationExternalItem[]
-  domainEventOutbox   DomainEventOutbox[]
+  integrations              Integration[]
+  category                  Category[]
+  brands                    Brand[]
+  saleUnits                 CatalogSaleUnit[]
+  priceLists                CatalogPriceList[]
+  modifierGroups            CatalogModifierGroup[]
+  modifierOptions           CatalogModifierOption[]
+  order                     Order[]
+  cart                      Cart[]
+  cartTableSessions         CartTableSession[]
+  media                     Media[]
+  domains                   CatalogDomain[]
+  featureEntitlements       CatalogFeatureEntitlement[]
+  inventoryWarehouses       InventoryWarehouseCatalog[]
+  integrationExternalItems  IntegrationExternalItem[]
+  domainEventOutbox         DomainEventOutbox[]
 
   subscriptionEndsAt DateTime? @map("subscription_ends_at") // Дата окончания подписки
 
@@ -228,9 +231,13 @@ model CatalogSettings {
   googleVerification String? @map("google_verification")
   yandexVerification String? @map("yandex_verification")
 
+  activePriceListId String?           @map("active_price_list_id") @db.Uuid
+  activePriceList   CatalogPriceList? @relation(fields: [activePriceListId], references: [id], onDelete: SetNull)
+
   deleteAt  DateTime? @map("delete_at") // Дата удаления 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
+  @@index([activePriceListId])
   @@map("catalog_settings")
 }

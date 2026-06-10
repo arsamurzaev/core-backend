@@ -5,7 +5,11 @@ import {
 	NotFoundException
 } from '@nestjs/common'
 
-import { effectiveCatalogId, mustCatalogId } from '@/shared/tenancy/ctx'
+import {
+	assertCurrentCatalogCanManageCatalogContent,
+	effectiveCatalogId,
+	mustCatalogId
+} from '@/shared/tenancy/ctx'
 import { assertHasUpdateFields } from '@/shared/utils'
 
 import { BrandRepository } from './brand.repository'
@@ -33,6 +37,7 @@ export class BrandService {
 	}
 
 	async create(dto: CreateBrandDtoReq) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		const name = normalizeBrandName(dto.name)
 		const slug = normalizeBrandSlug(dto.slug)
@@ -43,6 +48,7 @@ export class BrandService {
 	}
 
 	async update(id: string, dto: UpdateBrandDtoReq) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		let slug: string | undefined
 		if (dto.slug !== undefined) {
@@ -60,6 +66,7 @@ export class BrandService {
 	}
 
 	async remove(id: string) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		this.requireBrand(await this.repo.softDelete(id, catalogId))
 

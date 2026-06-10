@@ -75,7 +75,8 @@ describe('IikoSyncService', () => {
 			products as any,
 			{
 				assertCanUseIikoIntegration: jest.fn().mockResolvedValue(undefined),
-				assertCanUseProductVariants: jest.fn().mockResolvedValue(undefined)
+				assertCanUseProductVariants: jest.fn().mockResolvedValue(undefined),
+				assertCanUseCatalogModifiers: jest.fn().mockResolvedValue(undefined)
 			} as any,
 			{
 				get: jest.fn().mockReturnValue({
@@ -203,6 +204,93 @@ describe('IikoSyncService', () => {
 						attributeId: 'attribute-size',
 						value: 'size-large',
 						displayName: 'Large'
+					})
+				]
+			})
+		)
+	})
+
+	it('imports external menu item modifier groups as beta catalog modifiers', async () => {
+		jest.spyOn(IikoClient.prototype, 'getExternalMenuById').mockResolvedValue({
+			itemGroups: [
+				{
+					id: 'group-1',
+					name: 'Pizza',
+					items: [
+						{
+							id: 'product-1',
+							sku: 'PIZZA',
+							name: 'Pizza',
+							type: 'DISH',
+							orderItemType: 'Product',
+							itemSizes: [
+								{
+									id: 'size-default',
+									sizeName: 'Default',
+									isDefault: true,
+									prices: [{ organizations: ['org-1'], price: 490 }],
+									itemModifierGroups: [
+										{
+											itemGroupId: 'modifier-group-cheese',
+											sku: 'CHEESE',
+											name: 'Cheese',
+											restrictions: {
+												minQuantity: 0,
+												maxQuantity: 2,
+												byDefault: 0
+											},
+											items: [
+												{
+													itemId: 'modifier-extra-cheese',
+													sku: 'EXTRA_CHEESE',
+													name: 'Extra cheese',
+													prices: [{ organizations: ['org-1'], price: 79 }],
+													restrictions: [
+														{
+															minQuantity: 0,
+															maxQuantity: 2,
+															byDefault: 0
+														}
+													]
+												}
+											]
+										}
+									]
+								}
+							]
+						}
+					]
+				}
+			],
+			revision: 12
+		})
+
+		const repo = createRepoMock()
+		const service = createService(repo, createProductsMock())
+
+		await service.syncCatalog('catalog-1')
+
+		expect(repo.syncIikoProductModifiers).toHaveBeenCalledWith(
+			expect.objectContaining({
+				catalogId: 'catalog-1',
+				integrationId: 'integration-1',
+				productId: 'local-product-1',
+				groups: [
+					expect.objectContaining({
+						externalId: 'modifier-group-cheese',
+						code: 'iiko-cheese',
+						name: 'Cheese',
+						variantId: null,
+						maxSelected: 2,
+						options: [
+							expect.objectContaining({
+								externalId: 'modifier-extra-cheese',
+								code: 'iiko-extra-cheese',
+								name: 'Extra cheese',
+								price: 79,
+								maxQuantity: 2
+							})
+						]
 					})
 				]
 			})
@@ -586,6 +674,21 @@ function createRepoMock() {
 			previousStock: null,
 			nextStock: null
 		}),
+		findDefaultProductVariant: jest.fn().mockResolvedValue({
+			id: 'default-variant',
+			productId: 'local-product-1',
+			sku: 'PIZZA',
+			variantKey: 'default',
+			kind: 'DEFAULT',
+			stock: 0,
+			price: 490,
+			status: 'ACTIVE',
+			isAvailable: true,
+			deleteAt: null
+		}),
+		syncIikoProductModifiers: jest
+			.fn()
+			.mockResolvedValue({ groups: 0, options: 0 }),
 		archiveMissingIntegratedProductVariants: jest.fn().mockResolvedValue(0),
 		applyIikoStopListAvailability: jest.fn(),
 		findProductLinksByIntegration: jest.fn().mockResolvedValue([]),
@@ -658,7 +761,8 @@ function createService(
 		products as any,
 		{
 			assertCanUseIikoIntegration: jest.fn().mockResolvedValue(undefined),
-			assertCanUseProductVariants: jest.fn().mockResolvedValue(undefined)
+			assertCanUseProductVariants: jest.fn().mockResolvedValue(undefined),
+			assertCanUseCatalogModifiers: jest.fn().mockResolvedValue(undefined)
 		} as any,
 		{
 			get: jest.fn().mockReturnValue({

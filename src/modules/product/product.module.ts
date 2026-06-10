@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 
 import { PrismaModule } from '@/infrastructure/prisma/prisma.module'
 import { CapabilityModule } from '@/modules/capability/public'
+import { CatalogPriceListModule } from '@/modules/catalog-price-list/public'
 import { S3Module } from '@/modules/s3/public'
 import { SeoRepository } from '@/modules/seo/public'
 import { MediaUrlService } from '@/shared/media/media-url.service'
@@ -36,7 +37,7 @@ import { ProductService } from './product.service'
 
 @Module({
 	controllers: [ProductController],
-	imports: [PrismaModule, S3Module, CapabilityModule],
+	imports: [PrismaModule, S3Module, CapabilityModule, CatalogPriceListModule],
 	providers: [
 		ProductService,
 		ProductCommandService,

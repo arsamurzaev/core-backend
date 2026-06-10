@@ -42,7 +42,7 @@ export class CatalogSaleUnitController {
 
 	@Get()
 	@UseGuards(OptionalSessionGuard)
-	@ApiOperation({ summary: 'List current catalog sale units' })
+	@ApiOperation({ summary: 'Получить единицы продажи текущего каталога' })
 	@ApiQuery({
 		name: 'includeArchived',
 		required: false,
@@ -66,10 +66,10 @@ export class CatalogSaleUnitController {
 
 	@Get('/:id')
 	@UseGuards(OptionalSessionGuard)
-	@ApiOperation({ summary: 'Get current catalog sale unit' })
-	@ApiParam({ name: 'id', description: 'Catalog sale unit ID' })
+	@ApiOperation({ summary: 'Получить единицу продажи текущего каталога' })
+	@ApiParam({ name: 'id', description: 'ID единицы продажи' })
 	@ApiOkResponse({ type: CatalogSaleUnitDto })
-	@ApiNotFoundResponse({ description: 'Sale unit not found' })
+	@ApiNotFoundResponse({ description: 'Единица продажи не найдена' })
 	getById(@Param('id') id: string) {
 		return this.service.getById(id)
 	}
@@ -78,10 +78,10 @@ export class CatalogSaleUnitController {
 	@ApiSecurity('csrf')
 	@UseGuards(SessionGuard, CatalogAccessGuard)
 	@Roles(Role.CATALOG)
-	@ApiOperation({ summary: 'Create current catalog sale unit' })
+	@ApiOperation({ summary: 'Создать единицу продажи текущего каталога' })
 	@ApiCreatedResponse({ type: CatalogSaleUnitDto })
-	@ApiBadRequestResponse({ description: 'Validation error' })
-	@ApiForbiddenResponse({ description: 'Forbidden' })
+	@ApiBadRequestResponse({ description: 'Ошибка валидации' })
+	@ApiForbiddenResponse({ description: 'Доступ запрещен' })
 	create(@Body() dto: CreateCatalogSaleUnitDtoReq) {
 		return this.service.create(dto)
 	}
@@ -90,12 +90,12 @@ export class CatalogSaleUnitController {
 	@ApiSecurity('csrf')
 	@UseGuards(SessionGuard, CatalogAccessGuard)
 	@Roles(Role.CATALOG)
-	@ApiOperation({ summary: 'Update current catalog sale unit' })
-	@ApiParam({ name: 'id', description: 'Catalog sale unit ID' })
+	@ApiOperation({ summary: 'Обновить единицу продажи текущего каталога' })
+	@ApiParam({ name: 'id', description: 'ID единицы продажи' })
 	@ApiOkResponse({ type: CatalogSaleUnitDto })
-	@ApiBadRequestResponse({ description: 'Validation error' })
-	@ApiNotFoundResponse({ description: 'Sale unit not found' })
-	@ApiForbiddenResponse({ description: 'Forbidden' })
+	@ApiBadRequestResponse({ description: 'Ошибка валидации' })
+	@ApiNotFoundResponse({ description: 'Единица продажи не найдена' })
+	@ApiForbiddenResponse({ description: 'Доступ запрещен' })
 	update(@Param('id') id: string, @Body() dto: UpdateCatalogSaleUnitDtoReq) {
 		return this.service.update(id, dto)
 	}
@@ -104,11 +104,11 @@ export class CatalogSaleUnitController {
 	@ApiSecurity('csrf')
 	@UseGuards(SessionGuard, CatalogAccessGuard)
 	@Roles(Role.CATALOG)
-	@ApiOperation({ summary: 'Archive current catalog sale unit' })
-	@ApiParam({ name: 'id', description: 'Catalog sale unit ID' })
+	@ApiOperation({ summary: 'Архивировать единицу продажи текущего каталога' })
+	@ApiParam({ name: 'id', description: 'ID единицы продажи' })
 	@ApiOkResponse({ type: OkResponseDto })
-	@ApiNotFoundResponse({ description: 'Sale unit not found' })
-	@ApiForbiddenResponse({ description: 'Forbidden' })
+	@ApiNotFoundResponse({ description: 'Единица продажи не найдена' })
+	@ApiForbiddenResponse({ description: 'Доступ запрещен' })
 	archive(@Param('id') id: string) {
 		return this.service.archive(id)
 	}
@@ -118,6 +118,6 @@ export class CatalogSaleUnitController {
 		const normalized = value.trim().toLowerCase()
 		if (['1', 'true', 'yes'].includes(normalized)) return true
 		if (['0', 'false', 'no'].includes(normalized)) return false
-		throw new BadRequestException(`${name} must be a boolean value`)
+		throw new BadRequestException(`Параметр ${name} должен быть boolean`)
 	}
 }

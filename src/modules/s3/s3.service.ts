@@ -423,15 +423,22 @@ export class S3Service implements OnModuleDestroy {
 
 	async createPresignedUpload(
 		contentType: string,
-		options: UploadImageOptions = {}
+		options: UploadImageOptions = {},
+		contentLength?: number
 	): Promise<PresignUploadResult> {
 		this.assertUploadEnabled()
 		const target = this.prepareRawObjectTarget(contentType, options)
+		const fileSize = Number(contentLength)
+		if (!Number.isFinite(fileSize) || fileSize <= 0) {
+			throw new BadRequestException('Некорректный размер файла')
+		}
+		this.assertFileSizeWithinLimit(fileSize)
 
 		const command = new PutObjectCommand({
 			Bucket: this.bucket,
 			Key: target.key,
 			ContentType: target.mimeType,
+			ContentLength: fileSize,
 			CacheControl: 'private, max-age=0',
 			...(this.publicRead ? { ACL: 'public-read' } : {})
 		})
@@ -477,16 +484,22 @@ export class S3Service implements OnModuleDestroy {
 			baseFields.acl = 'public-read'
 		}
 
-		const { url: uploadUrl, fields } = await createPresignedPost(this.client, {
-			Bucket: this.bucket,
-			Key: target.key,
-			Fields: baseFields,
-			Conditions: [
-				['content-length-range', 1, this.maxFileBytes],
-				['eq', '$Content-Type', target.mimeType]
-			],
-			Expires: this.presignExpiresSec
-		})
+		const presignedPostClient = this.client as unknown as Parameters<
+			typeof createPresignedPost
+		>[0]
+		const { url: uploadUrl, fields } = await createPresignedPost(
+			presignedPostClient,
+			{
+				Bucket: this.bucket,
+				Key: target.key,
+				Fields: baseFields,
+				Conditions: [
+					['content-length-range', 1, this.maxFileBytes],
+					['eq', '$Content-Type', target.mimeType]
+				],
+				Expires: this.presignExpiresSec
+			}
+		)
 
 		const mediaId = await this.createPresignRecord({
 			catalogId: target.catalogId,

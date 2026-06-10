@@ -10,6 +10,10 @@ export type ProductCommercialFields = Pick<
 	| 'stock'
 	| 'defaultVariantId'
 	| 'requiresVariantSelection'
+	| 'usesPriceList'
+	| 'priceListId'
+	| 'priceListCode'
+	| 'priceListName'
 >
 
 export function toProductCommercialFields(
@@ -23,7 +27,11 @@ export function toProductCommercialFields(
 		availabilityState: projection.availabilityState,
 		stock: projection.stock,
 		defaultVariantId: projection.defaultVariantId,
-		requiresVariantSelection: projection.requiresVariantSelection
+		requiresVariantSelection: projection.requiresVariantSelection,
+		usesPriceList: projection.usesPriceList,
+		priceListId: projection.priceListId,
+		priceListCode: projection.priceListCode,
+		priceListName: projection.priceListName
 	}
 }
 
@@ -65,7 +73,11 @@ export function buildFallbackProductCommercialFields(product: {
 		availabilityState: 'AVAILABLE',
 		stock: null,
 		defaultVariantId: null,
-		requiresVariantSelection: false
+		requiresVariantSelection: false,
+		usesPriceList: false,
+		priceListId: null,
+		priceListCode: null,
+		priceListName: null
 	}
 }
 
@@ -82,12 +94,21 @@ function toDecimalString(value: unknown): string | null {
 		return String(value)
 	}
 	if (value && typeof value === 'object') {
-		const toString = (value as { toString?: () => string }).toString
+		const candidate = value as {
+			toNumber?: () => unknown
+			toString?: () => string
+		}
+		if (typeof candidate.toNumber === 'function') {
+			const numberValue = candidate.toNumber()
+			if (typeof numberValue === 'number' && Number.isFinite(numberValue)) {
+				return numberValue.toFixed(2)
+			}
+		}
 		if (
-			typeof toString === 'function' &&
-			toString !== Object.prototype.toString
+			typeof candidate.toString === 'function' &&
+			candidate.toString !== Object.prototype.toString
 		) {
-			const normalized = toString()
+			const normalized = candidate.toString()
 			return normalized ? normalized : null
 		}
 	}

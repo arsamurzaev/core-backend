@@ -137,6 +137,9 @@ export class ProductVariantSaleUnitDto {
 	@ApiProperty({ type: String })
 	id: string
 
+	@ApiProperty({ type: String })
+	variantId: string
+
 	@ApiProperty({ type: String, nullable: true })
 	catalogSaleUnitId: string | null
 

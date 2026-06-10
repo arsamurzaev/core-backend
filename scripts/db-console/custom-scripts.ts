@@ -821,10 +821,7 @@ async function runMoySkladHideZeroStockVisibilityReport(
 	options: { apply?: boolean; json?: boolean } = {}
 ) {
 	const catalog = await resolveCatalogForCustomScript(ctx, lookup)
-	const candidates = await loadMoySkladHideVisibilityCandidates(
-		ctx,
-		catalog.id
-	)
+	const candidates = await loadMoySkladHideVisibilityCandidates(ctx, catalog.id)
 
 	if (ctx.options.json || options.json) {
 		if (!options.apply) {
@@ -839,7 +836,9 @@ async function runMoySkladHideZeroStockVisibilityReport(
 		}
 	} else {
 		console.log(
-			colors.cyan(colors.bold(`${catalog.name} / ${catalog.slug}: hide zero stock`))
+			colors.cyan(
+				colors.bold(`${catalog.name} / ${catalog.slug}: hide zero stock`)
+			)
 		)
 		console.log(colors.yellow(`Matched products: ${candidates.length}`))
 		table(candidates, undefined, candidates.length || ctx.options.limit)

@@ -145,7 +145,8 @@ const catalogSelect = {
 			address: true,
 			checkout: true,
 			googleVerification: true,
-			yandexVerification: true
+			yandexVerification: true,
+			activePriceListId: true
 		}
 	},
 	metrics: {

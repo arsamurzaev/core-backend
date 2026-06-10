@@ -174,10 +174,14 @@ describe('S3Service', () => {
 		mockedGetSignedUrl.mockResolvedValue('https://signed.example/upload')
 
 		const result = await runWithCatalog(() =>
-			service.createPresignedUpload(' IMAGE/WEBP ', {
-				folder: 'Catalog Images',
-				entityId: 'Entity 1'
-			})
+			service.createPresignedUpload(
+				' IMAGE/WEBP ',
+				{
+					folder: 'Catalog Images',
+					entityId: 'Entity 1'
+				},
+				1024
+			)
 		)
 
 		expect(result.ok).toBe(true)
@@ -194,6 +198,7 @@ describe('S3Service', () => {
 		expect(command).toBeInstanceOf(PutObjectCommand)
 		expect(command?.input.Bucket).toBe('catalog-bucket')
 		expect(command?.input.ContentType).toBe('image/webp')
+		expect(command?.input.ContentLength).toBe(1024)
 		expect(command?.input.CacheControl).toBe('private, max-age=0')
 		expect(command?.input.Key).toMatch(
 			/^catalogs\/catalog-1\/catalog-images\/entity-1\/\d{4}\/\d{2}\/\d{2}\/raw\/.+\.webp$/

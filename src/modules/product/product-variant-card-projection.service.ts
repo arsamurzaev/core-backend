@@ -1,9 +1,15 @@
 import { Injectable } from '@nestjs/common'
 
+import type { CatalogPriceListProductPriceContext } from '@/modules/catalog-price-list/public'
+
+import { applyPriceListContextToVariant } from './product-price-list-read.utils'
 import {
+	buildVariantPickerOptionsFromVariants,
 	buildVariantPickerOptionsMap,
+	buildVariantSummaryFromVariants,
 	buildVariantSummaryMap,
 	createEmptyVariantProjection,
+	type ProductVariantPickerSource,
 	type ProductVariantProjection,
 	shouldBuildVariantPickerOptions
 } from './product-variant-card-projection'
@@ -14,12 +20,23 @@ export class ProductVariantCardProjectionService {
 	constructor(private readonly repo: ProductRepository) {}
 
 	async resolveForProductIds(
-		productIds: string[]
+		productIds: string[],
+		priceContext?: CatalogPriceListProductPriceContext,
+		options: {
+			filterUnavailable?: boolean
+			canUseCatalogSaleUnits?: boolean
+		} = {}
 	): Promise<Map<string, ProductVariantProjection>> {
 		const ids = [...new Set(productIds.filter(Boolean))]
 		if (!ids.length) return new Map()
 
-		const summaries = await this.repo.findVariantSummaries(ids)
+		if (priceContext?.priceList) {
+			return this.resolveWithPriceList(ids, priceContext, options)
+		}
+
+		const summaries = await this.repo.findVariantSummaries(ids, {
+			canUseCatalogSaleUnits: options.canUseCatalogSaleUnits
+		})
 		const summaryMap = buildVariantSummaryMap(summaries)
 		const variantPickerProductIds = ids.filter(productId =>
 			shouldBuildVariantPickerOptions(
@@ -28,7 +45,8 @@ export class ProductVariantCardProjectionService {
 		)
 		const variantPickerOptionsMap = variantPickerProductIds.length
 			? buildVariantPickerOptionsMap(
-					await this.repo.findVariantPickerOptions(variantPickerProductIds)
+					await this.repo.findVariantPickerOptions(variantPickerProductIds),
+					{ canUseCatalogSaleUnits: options.canUseCatalogSaleUnits }
 				)
 			: new Map<string, ProductVariantProjection['variantPickerOptions']>()
 
@@ -41,6 +59,53 @@ export class ProductVariantCardProjectionService {
 					{
 						variantSummary: summary,
 						variantPickerOptions: variantPickerOptionsMap.get(productId) ?? []
+					}
+				] as const
+			})
+		)
+	}
+
+	private async resolveWithPriceList(
+		productIds: string[],
+		priceContext: CatalogPriceListProductPriceContext,
+		options: {
+			filterUnavailable?: boolean
+			canUseCatalogSaleUnits?: boolean
+		}
+	): Promise<Map<string, ProductVariantProjection>> {
+		const variants = await this.repo.findVariantPickerOptions(productIds)
+		const variantsByProductId = new Map<string, ProductVariantPickerSource[]>()
+
+		for (const variant of variants) {
+			const filtered = applyPriceListContextToVariant(
+				variant.productId,
+				variant,
+				priceContext,
+				options
+			)
+			if (!filtered) continue
+
+			const productVariants = variantsByProductId.get(variant.productId) ?? []
+			productVariants.push(filtered)
+			variantsByProductId.set(variant.productId, productVariants)
+		}
+
+		return new Map(
+			productIds.map(productId => {
+				const productVariants = variantsByProductId.get(productId) ?? []
+				const variantSummary = buildVariantSummaryFromVariants(productVariants, {
+					canUseCatalogSaleUnits: options.canUseCatalogSaleUnits
+				})
+
+				return [
+					productId,
+					{
+						variantSummary,
+						variantPickerOptions: buildVariantPickerOptionsFromVariants(
+							productVariants,
+							variantSummary,
+							{ canUseCatalogSaleUnits: options.canUseCatalogSaleUnits }
+						)
 					}
 				] as const
 			})

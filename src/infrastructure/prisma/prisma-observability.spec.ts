@@ -6,7 +6,7 @@ import {
 
 describe('prisma-observability', () => {
 	it('uses sane defaults for slow query logging', () => {
-		expect(resolvePrismaSlowQuerySettings({} as NodeJS.ProcessEnv)).toEqual({
+		expect(resolvePrismaSlowQuerySettings({})).toEqual({
 			thresholdMs: 300,
 			maxQueryLength: 500
 		})
@@ -16,7 +16,7 @@ describe('prisma-observability', () => {
 		const settings = resolvePrismaSlowQuerySettings({
 			PRISMA_SLOW_QUERY_THRESHOLD_MS: '0',
 			PRISMA_SLOW_QUERY_LOG_MAX_QUERY_LENGTH: '120'
-		} as NodeJS.ProcessEnv)
+		})
 
 		expect(settings).toEqual({
 			thresholdMs: 0,
@@ -30,7 +30,7 @@ describe('prisma-observability', () => {
 			resolvePrismaSlowQuerySettings({
 				PRISMA_SLOW_QUERY_THRESHOLD_MS: '-10',
 				PRISMA_SLOW_QUERY_LOG_MAX_QUERY_LENGTH: 'oops'
-			} as NodeJS.ProcessEnv)
+			})
 		).toEqual({
 			thresholdMs: 300,
 			maxQueryLength: 500

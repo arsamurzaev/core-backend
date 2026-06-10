@@ -154,8 +154,7 @@ export class AuthController {
 		clearSessionCookies(
 			res,
 			resolveCookieDomain(resolveServerHost(req)),
-			authReq.user?.role === Role.ADMIN ||
-				authReq.user?.role === Role.GEO_ADMIN
+			authReq.user?.role === Role.ADMIN || authReq.user?.role === Role.GEO_ADMIN
 				? { global: true }
 				: null
 		)

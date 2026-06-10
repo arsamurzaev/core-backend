@@ -1,4 +1,3 @@
-import type { Prisma } from '@generated/client'
 import { OrderStatus } from '@generated/enums'
 import { Inject, Injectable } from '@nestjs/common'
 
@@ -105,10 +104,7 @@ export class MoySkladOrderExportService {
 			storeId: metadata.orderExportStoreId
 		})
 
-		await this.repo.setOrderExportPayload(
-			exportRecord.id,
-			payload as unknown as Prisma.InputJsonValue
-		)
+		await this.repo.setOrderExportPayload(exportRecord.id, payload)
 
 		const client = new MoySkladClient({ token: metadata.token })
 		const existing = await client.findCustomerOrderByExternalCode(

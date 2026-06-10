@@ -32,14 +32,14 @@ export class CreateUserDtoReq {
 	@MinLength(2, { message: 'Имя не должно быть короче 2 символов' })
 	name: string
 
-	@ApiProperty({
+	@ApiPropertyOptional({
 		enum: Role,
 		enumName: 'Role',
 		example: Role.USER
 	})
-	@IsNotEmpty({ message: 'Роль не может быть пустой' })
+	@IsOptional()
 	@IsEnum(Role, { message: 'Некорректная роль' })
-	role: Role
+	role?: Role
 
 	@ApiPropertyOptional({
 		type: [String],

@@ -1,8 +1,7 @@
+import { NestFactory } from '@nestjs/core'
 import 'dotenv/config'
 
 import { IntegrationProvider } from '../prisma/generated/enums.js'
-import { NestFactory } from '@nestjs/core'
-
 import { AppModule } from '../src/core/app.module'
 import { PrismaService } from '../src/infrastructure/prisma/prisma.service'
 import { IikoSyncService } from '../src/modules/integration/providers/iiko/iiko.sync.service'

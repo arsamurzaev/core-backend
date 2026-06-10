@@ -30,7 +30,9 @@ async function main() {
 		await runStep(number, step)
 	}
 
-	console.log(`\nQuality gate passed in ${formatDuration(Date.now() - startedAt)}.`)
+	console.log(
+		`\nQuality gate passed in ${formatDuration(Date.now() - startedAt)}.`
+	)
 }
 
 function buildSteps(options: GateOptions): GateStep[] {
@@ -69,10 +71,7 @@ function buildSteps(options: GateOptions): GateStep[] {
 
 	if (!options.skipDb) {
 		steps.push(
-			npmStep('Default variant data audit', [
-				'run',
-				'db:audit-default-variants'
-			])
+			npmStep('Default variant data audit', ['run', 'db:audit-default-variants'])
 		)
 	}
 

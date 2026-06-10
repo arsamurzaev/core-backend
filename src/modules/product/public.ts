@@ -8,6 +8,7 @@ export {
 	ProductWithAttributesDto
 } from './dto/responses/product.dto.res'
 export { ProductModule } from './product.module'
+export { applyPriceListContextToProduct } from './product-price-list-read.utils'
 export {
 	EMPTY_VARIANT_SUMMARY,
 	type ProductVariantProjection

@@ -4,6 +4,8 @@ import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { isInclusiveExpiryActive } from '@/shared/utils'
 
 import {
+	CAPABILITY_CATALOG_MODIFIERS,
+	CAPABILITY_CATALOG_PRICE_LISTS,
 	CAPABILITY_CATALOG_SALE_UNITS,
 	CAPABILITY_INTEGRATION_IIKO,
 	CAPABILITY_INTEGRATION_MOYSKLAD,
@@ -100,6 +102,14 @@ export class CapabilityService {
 		return this.can(catalogId, CAPABILITY_CATALOG_SALE_UNITS, at)
 	}
 
+	canUseCatalogModifiers(catalogId: string, at = new Date()) {
+		return this.can(catalogId, CAPABILITY_CATALOG_MODIFIERS, at)
+	}
+
+	canUseCatalogPriceLists(catalogId: string, at = new Date()) {
+		return this.can(catalogId, CAPABILITY_CATALOG_PRICE_LISTS, at)
+	}
+
 	canUseInternalInventory(catalogId: string, at = new Date()) {
 		return this.can(catalogId, CAPABILITY_INVENTORY_INTERNAL, at)
 	}
@@ -128,7 +138,7 @@ export class CapabilityService {
 			item => item.key === capability
 		)?.disabledReason
 		throw new ForbiddenException(
-			message ?? reason ?? 'Feature is not enabled for this catalog'
+			message ?? reason ?? 'Функция не включена для этого каталога'
 		)
 	}
 
@@ -144,7 +154,7 @@ export class CapabilityService {
 		await this.assert(
 			catalogId,
 			CAPABILITY_PRODUCT_TYPES,
-			'Product types are not enabled for this catalog'
+			'Типы товаров не включены для этого каталога'
 		)
 	}
 
@@ -152,7 +162,7 @@ export class CapabilityService {
 		await this.assert(
 			catalogId,
 			CAPABILITY_PRODUCT_VARIANTS,
-			'Product variants are not enabled for this catalog'
+			'Вариации не включены для этого каталога'
 		)
 	}
 
@@ -160,7 +170,23 @@ export class CapabilityService {
 		await this.assert(
 			catalogId,
 			CAPABILITY_CATALOG_SALE_UNITS,
-			'Catalog sale units are not enabled for this catalog'
+			'Единицы продажи не включены для этого каталога'
+		)
+	}
+
+	async assertCanUseCatalogModifiers(catalogId: string) {
+		await this.assert(
+			catalogId,
+			CAPABILITY_CATALOG_MODIFIERS,
+			'Модификаторы не включены для этого каталога'
+		)
+	}
+
+	async assertCanUseCatalogPriceLists(catalogId: string) {
+		await this.assert(
+			catalogId,
+			CAPABILITY_CATALOG_PRICE_LISTS,
+			'Прайс-листы не включены для этого каталога'
 		)
 	}
 
@@ -168,7 +194,7 @@ export class CapabilityService {
 		await this.assert(
 			catalogId,
 			CAPABILITY_INVENTORY_INTERNAL,
-			'Internal inventory is not enabled for this catalog'
+			'Собственный склад не включен для этого каталога'
 		)
 	}
 
@@ -176,7 +202,7 @@ export class CapabilityService {
 		await this.assert(
 			catalogId,
 			CAPABILITY_INTEGRATION_MOYSKLAD,
-			'MoySklad integration is not enabled for this catalog'
+			'Интеграция МойСклад не включена для этого каталога'
 		)
 	}
 
@@ -184,7 +210,7 @@ export class CapabilityService {
 		await this.assert(
 			catalogId,
 			CAPABILITY_INTEGRATION_IIKO,
-			'iiko integration is not enabled for this catalog'
+			'Интеграция iiko не включена для этого каталога'
 		)
 	}
 
@@ -192,7 +218,7 @@ export class CapabilityService {
 		await this.assert(
 			catalogId,
 			CAPABILITY_INTEGRATION_ONE_C,
-			'1C integration is not enabled for this catalog'
+			'Интеграция 1C не включена для этого каталога'
 		)
 	}
 
@@ -252,16 +278,16 @@ export class CapabilityService {
 		effective: CatalogCapabilityFlagMap
 	): string | null {
 		if (effective[capability]) return null
-		if (!raw[capability]) return 'Capability is disabled for this catalog'
+		if (!raw[capability]) return 'Функция отключена для этого каталога'
 
 		const definition = CATALOG_CAPABILITY_DEFINITION_BY_KEY.get(capability)
 		const missingDependency = definition?.dependsOn.find(
 			dependency => !effective[dependency]
 		)
-		if (!missingDependency) return 'Capability is not available'
+		if (!missingDependency) return 'Функция недоступна'
 
 		const dependency = CATALOG_CAPABILITY_DEFINITION_BY_KEY.get(missingDependency)
-		return `Requires ${dependency?.title ?? missingDependency}`
+		return `Требуется функция: ${dependency?.title ?? missingDependency}`
 	}
 
 	private toFlags(effective: CatalogCapabilityFlagMap): CatalogCapabilityFlags {
@@ -269,6 +295,8 @@ export class CapabilityService {
 			canUseProductTypes: effective[CAPABILITY_PRODUCT_TYPES],
 			canUseProductVariants: effective[CAPABILITY_PRODUCT_VARIANTS],
 			canUseCatalogSaleUnits: effective[CAPABILITY_CATALOG_SALE_UNITS],
+			canUseCatalogModifiers: effective[CAPABILITY_CATALOG_MODIFIERS],
+			canUseCatalogPriceLists: effective[CAPABILITY_CATALOG_PRICE_LISTS],
 			canUseInternalInventory: effective[CAPABILITY_INVENTORY_INTERNAL],
 			canUseMoySkladIntegration: effective[CAPABILITY_INTEGRATION_MOYSKLAD],
 			canUseIikoIntegration: effective[CAPABILITY_INTEGRATION_IIKO],

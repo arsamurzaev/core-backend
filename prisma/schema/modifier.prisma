@@ -1,0 +1,312 @@
+enum ProductModifierScope {
+  PRODUCT
+  VARIANT
+}
+
+model CatalogModifierGroup {
+  id String @id @default(uuid()) @db.Uuid
+
+  catalogId String @map("catalog_id") @db.Uuid
+
+  code        String  @db.VarChar(100)
+  name        String  @db.VarChar(255)
+  description String? @db.VarChar(1000)
+
+  isRequired  Boolean @default(false) @map("is_required")
+  minSelected Int     @default(0) @map("min_selected")
+  maxSelected Int?    @map("max_selected")
+
+  isActive     Boolean @default(true) @map("is_active")
+  displayOrder Int     @default(0) @map("display_order")
+  rawMeta      Json?   @map("raw_meta")
+
+  deleteAt DateTime? @map("delete_at")
+
+  catalog          Catalog                            @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  options          CatalogModifierGroupOption[]
+  productBindings  ProductModifierGroup[]
+  typeTemplates    ProductTypeModifierGroupTemplate[]
+  integrationLinks IntegrationModifierGroupLink[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([catalogId, code])
+  @@index([catalogId, isActive, displayOrder])
+  @@index([catalogId, deleteAt])
+  @@map("catalog_modifier_groups")
+}
+
+model CatalogModifierOption {
+  id String @id @default(uuid()) @db.Uuid
+
+  catalogId String @map("catalog_id") @db.Uuid
+
+  code         String  @db.VarChar(100)
+  name         String  @db.VarChar(255)
+  description  String? @db.VarChar(1000)
+  defaultPrice Decimal @default(0) @map("default_price") @db.Decimal(12, 2)
+
+  isActive     Boolean @default(true) @map("is_active")
+  displayOrder Int     @default(0) @map("display_order")
+  rawMeta      Json?   @map("raw_meta")
+
+  deleteAt DateTime? @map("delete_at")
+
+  catalog          Catalog                             @relation(fields: [catalogId], references: [id], onDelete: Cascade)
+  groups           CatalogModifierGroupOption[]
+  productBindings  ProductModifierOption[]
+  typeTemplates    ProductTypeModifierOptionTemplate[]
+  integrationLinks IntegrationModifierOptionLink[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([catalogId, code])
+  @@index([catalogId, isActive, displayOrder])
+  @@index([catalogId, deleteAt])
+  @@map("catalog_modifier_options")
+}
+
+model CatalogModifierGroupOption {
+  groupId  String @map("group_id") @db.Uuid
+  optionId String @map("option_id") @db.Uuid
+
+  defaultPrice Decimal? @map("default_price") @db.Decimal(12, 2)
+  isDefault    Boolean  @default(false) @map("is_default")
+  isActive     Boolean  @default(true) @map("is_active")
+  displayOrder Int      @default(0) @map("display_order")
+
+  deleteAt DateTime? @map("delete_at")
+
+  group  CatalogModifierGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  option CatalogModifierOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@id([groupId, optionId])
+  @@index([optionId])
+  @@index([groupId, isActive, displayOrder])
+  @@map("catalog_modifier_group_options")
+}
+
+model ProductTypeModifierGroupTemplate {
+  id String @id @default(uuid()) @db.Uuid
+
+  productTypeId          String  @map("product_type_id") @db.Uuid
+  catalogModifierGroupId String? @map("catalog_modifier_group_id") @db.Uuid
+
+  code        String  @db.VarChar(100)
+  name        String  @db.VarChar(255)
+  description String? @db.VarChar(1000)
+
+  isRequired  Boolean @default(false) @map("is_required")
+  minSelected Int     @default(0) @map("min_selected")
+  maxSelected Int?    @map("max_selected")
+
+  isActive     Boolean @default(true) @map("is_active")
+  displayOrder Int     @default(0) @map("display_order")
+
+  deleteAt DateTime? @map("delete_at")
+
+  productType          ProductType                         @relation(fields: [productTypeId], references: [id], onDelete: Cascade)
+  catalogModifierGroup CatalogModifierGroup?               @relation(fields: [catalogModifierGroupId], references: [id], onDelete: SetNull)
+  options              ProductTypeModifierOptionTemplate[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([productTypeId, code])
+  @@index([catalogModifierGroupId])
+  @@index([productTypeId, isActive, displayOrder])
+  @@map("product_type_modifier_group_templates")
+}
+
+model ProductTypeModifierOptionTemplate {
+  id String @id @default(uuid()) @db.Uuid
+
+  templateGroupId         String  @map("template_group_id") @db.Uuid
+  catalogModifierOptionId String? @map("catalog_modifier_option_id") @db.Uuid
+
+  code String @db.VarChar(100)
+  name String @db.VarChar(255)
+
+  price       Decimal? @db.Decimal(12, 2)
+  maxQuantity Int?     @map("max_quantity")
+
+  isDefault    Boolean @default(false) @map("is_default")
+  isAvailable  Boolean @default(true) @map("is_available")
+  displayOrder Int     @default(0) @map("display_order")
+
+  deleteAt DateTime? @map("delete_at")
+
+  templateGroup         ProductTypeModifierGroupTemplate @relation(fields: [templateGroupId], references: [id], onDelete: Cascade)
+  catalogModifierOption CatalogModifierOption?           @relation(fields: [catalogModifierOptionId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([templateGroupId, code])
+  @@index([catalogModifierOptionId])
+  @@index([templateGroupId, isAvailable, displayOrder])
+  @@map("product_type_modifier_option_templates")
+}
+
+model ProductModifierGroup {
+  id String @id @default(uuid()) @db.Uuid
+
+  productId              String  @map("product_id") @db.Uuid
+  variantId              String? @map("variant_id") @db.Uuid
+  catalogModifierGroupId String? @map("catalog_modifier_group_id") @db.Uuid
+
+  scope    ProductModifierScope @default(PRODUCT)
+  scopeKey String               @map("scope_key") @db.VarChar(64)
+
+  code        String  @db.VarChar(100)
+  name        String  @db.VarChar(255)
+  description String? @db.VarChar(1000)
+
+  isRequired  Boolean @default(false) @map("is_required")
+  minSelected Int     @default(0) @map("min_selected")
+  maxSelected Int?    @map("max_selected")
+
+  isActive     Boolean @default(true) @map("is_active")
+  displayOrder Int     @default(0) @map("display_order")
+  rawMeta      Json?   @map("raw_meta")
+
+  deleteAt DateTime? @map("delete_at")
+
+  product              Product                        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant              ProductVariant?                @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  catalogModifierGroup CatalogModifierGroup?          @relation(fields: [catalogModifierGroupId], references: [id], onDelete: SetNull)
+  options              ProductModifierOption[]
+  cartModifiers        CartItemModifier[]
+  integrationLinks     IntegrationModifierGroupLink[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([productId, scopeKey, code])
+  @@index([productId, isActive, displayOrder])
+  @@index([variantId])
+  @@index([catalogModifierGroupId])
+  @@index([productId, variantId, deleteAt])
+  @@map("product_modifier_groups")
+}
+
+model ProductModifierOption {
+  id String @id @default(uuid()) @db.Uuid
+
+  productModifierGroupId  String  @map("product_modifier_group_id") @db.Uuid
+  catalogModifierOptionId String? @map("catalog_modifier_option_id") @db.Uuid
+
+  code String @db.VarChar(100)
+  name String @db.VarChar(255)
+
+  price       Decimal @default(0) @db.Decimal(12, 2)
+  maxQuantity Int?    @map("max_quantity")
+
+  isDefault    Boolean @default(false) @map("is_default")
+  isAvailable  Boolean @default(true) @map("is_available")
+  displayOrder Int     @default(0) @map("display_order")
+  rawMeta      Json?   @map("raw_meta")
+
+  deleteAt DateTime? @map("delete_at")
+
+  group                 ProductModifierGroup            @relation(fields: [productModifierGroupId], references: [id], onDelete: Cascade)
+  catalogModifierOption CatalogModifierOption?          @relation(fields: [catalogModifierOptionId], references: [id], onDelete: SetNull)
+  cartModifiers         CartItemModifier[]
+  integrationLinks      IntegrationModifierOptionLink[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([productModifierGroupId, code])
+  @@index([catalogModifierOptionId])
+  @@index([productModifierGroupId, isAvailable, displayOrder])
+  @@map("product_modifier_options")
+}
+
+model CartItemModifier {
+  id String @id @default(uuid()) @db.Uuid
+
+  cartItemId String @map("cart_item_id") @db.Uuid
+
+  productModifierGroupId  String? @map("product_modifier_group_id") @db.Uuid
+  productModifierOptionId String? @map("product_modifier_option_id") @db.Uuid
+  catalogModifierGroupId  String? @map("catalog_modifier_group_id") @db.Uuid
+  catalogModifierOptionId String? @map("catalog_modifier_option_id") @db.Uuid
+
+  groupCode  String @map("group_code") @db.VarChar(100)
+  groupName  String @map("group_name") @db.VarChar(255)
+  optionCode String @map("option_code") @db.VarChar(100)
+  optionName String @map("option_name") @db.VarChar(255)
+
+  quantity          Int     @default(1)
+  unitPriceSnapshot Decimal @map("unit_price_snapshot") @db.Decimal(12, 2)
+
+  rawMeta Json? @map("raw_meta")
+
+  cartItem              CartItem               @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+  productModifierGroup  ProductModifierGroup?  @relation(fields: [productModifierGroupId], references: [id], onDelete: SetNull)
+  productModifierOption ProductModifierOption? @relation(fields: [productModifierOptionId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([cartItemId])
+  @@index([productModifierGroupId])
+  @@index([productModifierOptionId])
+  @@index([catalogModifierGroupId])
+  @@index([catalogModifierOptionId])
+  @@map("cart_item_modifiers")
+}
+
+model IntegrationModifierGroupLink {
+  id String @id @default(uuid()) @db.Uuid
+
+  integrationId          String  @map("integration_id") @db.Uuid
+  catalogModifierGroupId String? @map("catalog_modifier_group_id") @db.Uuid
+  productModifierGroupId String? @map("product_modifier_group_id") @db.Uuid
+
+  externalId   String  @map("external_id") @db.VarChar(128)
+  externalCode String? @map("external_code") @db.VarChar(100)
+  rawMeta      Json?   @map("raw_meta")
+
+  integration          Integration           @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  catalogModifierGroup CatalogModifierGroup? @relation(fields: [catalogModifierGroupId], references: [id], onDelete: SetNull)
+  productModifierGroup ProductModifierGroup? @relation(fields: [productModifierGroupId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([integrationId, externalId])
+  @@index([catalogModifierGroupId])
+  @@index([productModifierGroupId])
+  @@map("integration_modifier_group_links")
+}
+
+model IntegrationModifierOptionLink {
+  id String @id @default(uuid()) @db.Uuid
+
+  integrationId           String  @map("integration_id") @db.Uuid
+  catalogModifierOptionId String? @map("catalog_modifier_option_id") @db.Uuid
+  productModifierOptionId String? @map("product_modifier_option_id") @db.Uuid
+
+  externalId   String  @map("external_id") @db.VarChar(128)
+  externalCode String? @map("external_code") @db.VarChar(100)
+  rawMeta      Json?   @map("raw_meta")
+
+  integration           Integration            @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  catalogModifierOption CatalogModifierOption? @relation(fields: [catalogModifierOptionId], references: [id], onDelete: SetNull)
+  productModifierOption ProductModifierOption? @relation(fields: [productModifierOptionId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([integrationId, externalId])
+  @@index([catalogModifierOptionId])
+  @@index([productModifierOptionId])
+  @@map("integration_modifier_option_links")
+}

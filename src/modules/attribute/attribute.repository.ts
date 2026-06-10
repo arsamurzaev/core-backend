@@ -446,16 +446,16 @@ export class AttributeRepository {
 		catalogId?: string | null
 	): Promise<AttributeEnumValueRecord | null> {
 		return this.prisma.$transaction(async tx => {
-			const source = (await tx.attributeEnumValue.findFirst({
+			const source = await tx.attributeEnumValue.findFirst({
 				where: { id: sourceId, attributeId, ...buildEnumValueWhere(catalogId) },
 				select: enumValueSelect
-			})) as AttributeEnumValueRecord | null
+			})
 			if (!source) return null
 
-			const target = (await tx.attributeEnumValue.findFirst({
+			const target = await tx.attributeEnumValue.findFirst({
 				where: { id: targetId, attributeId, ...buildEnumValueWhere(catalogId) },
 				select: enumValueSelect
-			})) as AttributeEnumValueRecord | null
+			})
 			if (!target) return null
 
 			const now = new Date()

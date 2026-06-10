@@ -1,4 +1,13 @@
-﻿import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common'
+import { Role } from '@generated/enums'
+import {
+	Body,
+	Controller,
+	Delete,
+	Get,
+	Param,
+	Post,
+	UseGuards
+} from '@nestjs/common'
 import {
 	ApiCreatedResponse,
 	ApiOkResponse,
@@ -7,6 +16,8 @@ import {
 	ApiTags
 } from '@nestjs/swagger'
 
+import { Roles } from '@/modules/auth/decorators/roles.decorator'
+import { SessionGuard } from '@/modules/auth/guards/session.guard'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
@@ -35,6 +46,8 @@ export class TypeController {
 		description: 'Создание нового типа.'
 	})
 	@Post()
+	@UseGuards(SessionGuard)
+	@Roles(Role.ADMIN)
 	@ApiCreatedResponse({ type: TypeDto })
 	async create(@Body() dto: CreateTypeDtoReq) {
 		return this.typeService.create(dto)
@@ -45,6 +58,8 @@ export class TypeController {
 		description: 'Удаление'
 	})
 	@Delete('/:id')
+	@UseGuards(SessionGuard)
+	@Roles(Role.ADMIN)
 	@ApiParam({
 		description: 'ID типа',
 		name: 'id'

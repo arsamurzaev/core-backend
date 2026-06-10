@@ -433,7 +433,7 @@ export class CatalogSeoSyncService {
 		current: unknown,
 		generatedAssets: GeneratedCatalogSeoAssets
 	): Record<string, unknown> {
-		const parsed = this.parseExtras(current) ?? ({} as Record<string, unknown>)
+		const parsed = this.parseExtras(current) ?? {}
 
 		return {
 			...parsed,

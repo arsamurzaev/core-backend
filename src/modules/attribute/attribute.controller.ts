@@ -80,7 +80,7 @@ export class AttributeController {
 
 	@Post()
 	@UseGuards(SessionGuard)
-	@Roles(Role.CATALOG)
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'Create attribute' })
 	@ApiCreatedResponse({ type: AttributeDto })
 	async create(@Body() dto: CreateAttributeDtoReq) {
@@ -89,7 +89,7 @@ export class AttributeController {
 
 	@Patch('/:id')
 	@UseGuards(SessionGuard)
-	@Roles(Role.CATALOG)
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'Update attribute' })
 	@ApiParam({ name: 'id', description: 'ID атрибута' })
 	@ApiOkResponse({ type: AttributeDto })
@@ -99,7 +99,7 @@ export class AttributeController {
 
 	@Delete('/:id')
 	@UseGuards(SessionGuard)
-	@Roles(Role.CATALOG)
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'Delete attribute' })
 	@ApiParam({ name: 'id', description: 'ID атрибута' })
 	@ApiOkResponse({ type: OkResponseDto })
@@ -123,7 +123,7 @@ export class AttributeController {
 
 	@Post('/:attributeId/enum')
 	@UseGuards(SessionGuard)
-	@Roles(Role.CATALOG)
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'Create enum value' })
 	@ApiParam({ name: 'attributeId', description: 'ID атрибута' })
 	@ApiCreatedResponse({ type: AttributeEnumValueDto })
@@ -136,7 +136,7 @@ export class AttributeController {
 
 	@Patch('/:attributeId/enum/:id')
 	@UseGuards(SessionGuard)
-	@Roles(Role.CATALOG)
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'Update enum value' })
 	@ApiParam({ name: 'attributeId', description: 'ID атрибута' })
 	@ApiParam({ name: 'id', description: 'ID значения перечисления' })
@@ -151,7 +151,7 @@ export class AttributeController {
 
 	@Delete('/:attributeId/enum/:id')
 	@UseGuards(SessionGuard)
-	@Roles(Role.CATALOG)
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'Delete enum value' })
 	@ApiParam({ name: 'attributeId', description: 'ID атрибута' })
 	@ApiParam({ name: 'id', description: 'ID значения перечисления' })
@@ -181,7 +181,7 @@ export class AttributeController {
 
 	@Post('/:attributeId/enum/:id/alias')
 	@UseGuards(SessionGuard)
-	@Roles(Role.CATALOG)
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'Create enum value alias' })
 	@ApiParam({ name: 'attributeId', description: 'ID атрибута' })
 	@ApiParam({ name: 'id', description: 'ID значения перечисления' })
@@ -196,7 +196,7 @@ export class AttributeController {
 
 	@Delete('/:attributeId/enum/:id/alias/:aliasId')
 	@UseGuards(SessionGuard)
-	@Roles(Role.CATALOG)
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'Delete enum value alias' })
 	@ApiParam({ name: 'attributeId', description: 'ID атрибута' })
 	@ApiParam({ name: 'id', description: 'ID значения перечисления' })
@@ -212,7 +212,7 @@ export class AttributeController {
 
 	@Post('/:attributeId/enum/:sourceId/merge')
 	@UseGuards(SessionGuard)
-	@Roles(Role.CATALOG)
+	@Roles(Role.ADMIN)
 	@ApiOperation({ summary: 'Merge enum values' })
 	@ApiParam({ name: 'attributeId', description: 'ID атрибута' })
 	@ApiParam({ name: 'sourceId', description: 'ID source значения' })

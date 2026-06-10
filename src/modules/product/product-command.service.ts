@@ -1,4 +1,7 @@
-import type { ProductStatus } from '@generated/enums'
+import {
+	CatalogPriceListPriceTarget,
+	type ProductStatus
+} from '@generated/enums'
 import type { ProductCreateInput, ProductUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
@@ -17,14 +20,21 @@ import {
 } from '@/modules/capability/contracts'
 import { S3Service } from '@/modules/s3/public'
 import { MediaRepository } from '@/shared/media/media.repository'
-import { mustCatalogId, mustTypeId } from '@/shared/tenancy/ctx'
+import {
+	assertCurrentCatalogCanManageCatalogContent,
+	mustCatalogId,
+	mustTypeId
+} from '@/shared/tenancy/ctx'
 import {
 	assertHasUpdateFields,
 	normalizeNullableTrimmedString,
 	normalizeRequiredString
 } from '@/shared/utils'
 
-import { CreateProductDtoReq } from './dto/requests/create-product.dto.req'
+import {
+	CreateProductDtoReq,
+	type CreateProductPriceListPriceDtoReq
+} from './dto/requests/create-product.dto.req'
 import {
 	SetProductVariantMatrixDtoReq,
 	SetProductVariantsDtoReq
@@ -42,6 +52,7 @@ import {
 } from './product-variant.service'
 import { ProductWriteFinalizer } from './product-write-finalizer.service'
 import {
+	type ProductCreatePriceListPriceData,
 	type ProductDetailsItem,
 	ProductRepository,
 	type ProductTypeValidationSchema,
@@ -53,6 +64,7 @@ type PreparedProductCreatePayload = {
 	data: ProductCreateInput
 	attributes: ProductAttributeValueData[]
 	variants?: ProductVariantData[]
+	priceListPrices?: ProductCreatePriceListPriceData[]
 	categoryIds: string[]
 }
 
@@ -136,12 +148,29 @@ export class ProductCommandService {
 	) {}
 
 	async create(dto: CreateProductDtoReq) {
-		const { mediaIds, attributes, brandId, categories, variants, ...rest } = dto
+		assertCurrentCatalogCanManageCatalogContent()
+		const {
+			mediaIds,
+			attributes,
+			brandId,
+			categories,
+			variants,
+			priceListPrices,
+			...rest
+		} = dto
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
 		await this.assertManualProductCreateAllowed(catalogId)
 		const payload = await this.prepareCreatePayload(
-			{ mediaIds, attributes, brandId, categories, variants, ...rest },
+			{
+				mediaIds,
+				attributes,
+				brandId,
+				categories,
+				variants,
+				priceListPrices,
+				...rest
+			},
 			catalogId,
 			typeId
 		)
@@ -150,7 +179,8 @@ export class ProductCommandService {
 			catalogId,
 			payload.data,
 			payload.attributes,
-			payload.variants
+			payload.variants,
+			payload.priceListPrices
 		)
 		await this.assignProductToCategories(
 			product.id,
@@ -173,6 +203,7 @@ export class ProductCommandService {
 	}
 
 	async update(id: string, dto: UpdateProductDtoReq) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
 		const payload = await this.prepareUpdatePayload(id, dto, catalogId, typeId)
@@ -234,6 +265,7 @@ export class ProductCommandService {
 	}
 
 	async setVariants(id: string, dto: SetProductVariantsDtoReq) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
 		return this.finalizeVariantReplacement(
@@ -244,6 +276,7 @@ export class ProductCommandService {
 	}
 
 	async setVariantMatrix(id: string, dto: SetProductVariantMatrixDtoReq) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
 		return this.finalizeVariantReplacement(
@@ -254,6 +287,7 @@ export class ProductCommandService {
 	}
 
 	async toggleStatus(id: string) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		await this.ensureDefaultVariantForLegacyUpdate(id, {}, catalogId)
 		const product = await this.repo.toggleStatus(id, catalogId)
@@ -267,6 +301,7 @@ export class ProductCommandService {
 	}
 
 	async togglePopular(id: string) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		const product = await this.repo.togglePopular(id, catalogId)
 		if (!product) throw new NotFoundException('Товар не найден')
@@ -278,6 +313,7 @@ export class ProductCommandService {
 	}
 
 	async duplicate(id: string) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
 		await this.assertManualProductCreateAllowed(catalogId)
@@ -340,6 +376,7 @@ export class ProductCommandService {
 	}
 
 	async remove(id: string) {
+		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		await this.assertManualProductDeleteAllowed(id, catalogId)
 		const product = await this.repo.softDelete(id, catalogId)
@@ -418,6 +455,7 @@ export class ProductCommandService {
 			categories,
 			variants,
 			saleUnits,
+			priceListPrices,
 			...rest
 		} = dto
 		const normalizedName = normalizeRequiredString(dto.name, 'name')
@@ -490,6 +528,11 @@ export class ProductCommandService {
 						saleUnits
 					})
 				]
+		await this.assertCanUseCreatePriceListPrices(catalogId, priceListPrices)
+		const preparedPriceListPrices = this.prepareCreatePriceListPrices(
+			priceListPrices,
+			preparedVariants
+		)
 
 		return {
 			data: {
@@ -520,8 +563,126 @@ export class ProductCommandService {
 				attributes
 			),
 			variants: preparedVariants,
+			priceListPrices: preparedPriceListPrices,
 			categoryIds: normalizedCategoryIds
 		}
+	}
+
+	private async assertCanUseCreatePriceListPrices(
+		catalogId: string,
+		input: CreateProductPriceListPriceDtoReq[] | undefined
+	): Promise<void> {
+		if (!input?.length) return
+
+		await this.featureAssertions.assertCanUseCatalogPriceLists(catalogId)
+		if (input.some(item => item.target === CatalogPriceListPriceTarget.VARIANT)) {
+			await this.featureAssertions.assertCanUseProductVariants(catalogId)
+		}
+		if (
+			input.some(item => item.target === CatalogPriceListPriceTarget.SALE_UNIT)
+		) {
+			await this.featureAssertions.assertCanUseCatalogSaleUnits(catalogId)
+		}
+	}
+
+	private prepareCreatePriceListPrices(
+		input: CreateProductPriceListPriceDtoReq[] | undefined,
+		variants: ProductVariantData[]
+	): ProductCreatePriceListPriceData[] | undefined {
+		if (!input?.length) return undefined
+
+		const variantsByIdentity = new Map(
+			variants.map(variant => [
+				this.buildVariantAttributeIdentity(variant.attributes),
+				variant
+			])
+		)
+
+		return input.map(item => {
+			const priceListId = normalizeRequiredString(item.priceListId, 'priceListId')
+			const price = Number(item.price)
+			if (!Number.isFinite(price) || price < 0) {
+				throw new BadRequestException('Цена должна быть больше или равна 0')
+			}
+
+			if (item.target === CatalogPriceListPriceTarget.PRODUCT) {
+				return {
+					priceListId,
+					target: item.target,
+					price: Number(price.toFixed(2))
+				}
+			}
+
+			const variantKey = this.resolveCreatePriceListVariantKey(
+				item,
+				variantsByIdentity
+			)
+
+			if (item.target === CatalogPriceListPriceTarget.VARIANT) {
+				return {
+					priceListId,
+					target: item.target,
+					price: Number(price.toFixed(2)),
+					variantKey
+				}
+			}
+
+			const catalogSaleUnitId = normalizeRequiredString(
+				item.catalogSaleUnitId,
+				'catalogSaleUnitId'
+			)
+			return {
+				priceListId,
+				target: item.target,
+				price: Number(price.toFixed(2)),
+				variantKey,
+				catalogSaleUnitId
+			}
+		})
+	}
+
+	private resolveCreatePriceListVariantKey(
+		item: CreateProductPriceListPriceDtoReq,
+		variantsByIdentity: Map<string, ProductVariantData>
+	): string {
+		const identity = this.buildVariantAttributeIdentity(item.variantAttributes)
+
+		if (!identity && item.target === CatalogPriceListPriceTarget.SALE_UNIT) {
+			return DEFAULT_VARIANT_KEY
+		}
+		if (!identity) {
+			throw new BadRequestException(
+				'variantAttributes are required for VARIANT price-list prices'
+			)
+		}
+
+		const variant = variantsByIdentity.get(identity)
+		if (!variant) {
+			throw new BadRequestException(
+				'Price-list price references a variant that is not being created'
+			)
+		}
+		return variant.variantKey
+	}
+
+	private buildVariantAttributeIdentity(
+		attributes:
+			| Array<{
+					attributeId: string
+					enumValueId?: string
+					value?: string
+			  }>
+			| undefined
+	): string {
+		return (attributes ?? [])
+			.map(attribute => {
+				const attributeId = attribute.attributeId?.trim()
+				const valueId = attribute.enumValueId?.trim() ?? attribute.value?.trim()
+				return attributeId && valueId ? `${attributeId}:${valueId}` : ''
+			})
+			.filter(Boolean)
+			.sort()
+			.join('|')
 	}
 
 	private async prepareUpdatePayload(
@@ -749,7 +910,7 @@ export class ProductCommandService {
 		if (!isIntegrated) return
 
 		throw new BadRequestException(
-			'Integrated product deletion is disabled; the product is managed by integration'
+			'Удаление интеграционного товара отключено: товар управляется интеграцией'
 		)
 	}
 
@@ -767,7 +928,7 @@ export class ProductCommandService {
 		if (!isIntegrated) return
 
 		throw new BadRequestException(
-			'Integrated product structure is managed by integration; product type and variants cannot be changed manually'
+			'Структура интеграционного товара управляется интеграцией; тип товара и вариации нельзя менять вручную'
 		)
 	}
 
@@ -937,7 +1098,7 @@ export class ProductCommandService {
 				data.productType = { disconnect: true }
 			} else {
 				if (!resolvedProductTypeId) {
-					throw new BadRequestException('productTypeId is required')
+					throw new BadRequestException('Не указан тип товара')
 				}
 				data.productType = { connect: { id: resolvedProductTypeId } }
 			}
@@ -981,7 +1142,7 @@ export class ProductCommandService {
 		const missing = ids.filter(id => !foundSet.has(id))
 		if (missing.length) {
 			throw new BadRequestException(
-				`Media were not found in catalog: ${missing.join(', ')}`
+				`Медиа не найдены в каталоге: ${missing.join(', ')}`
 			)
 		}
 	}
@@ -993,7 +1154,7 @@ export class ProductCommandService {
 		const brand = await this.repo.findBrandById(brandId, catalogId)
 		if (!brand) {
 			throw new BadRequestException(
-				`Brand ${brandId} is not available for this catalog`
+				`Бренд ${brandId} недоступен для этого каталога`
 			)
 		}
 	}
@@ -1005,7 +1166,7 @@ export class ProductCommandService {
 		const category = await this.repo.findCategoryById(categoryId, catalogId)
 		if (!category) {
 			throw new BadRequestException(
-				`Category ${categoryId} is not available for this catalog`
+				`Категория ${categoryId} недоступна для этого каталога`
 			)
 		}
 	}
@@ -1020,7 +1181,7 @@ export class ProductCommandService {
 		)
 		if (!productType) {
 			throw new BadRequestException(
-				`Product type ${productTypeId} is not available for this catalog`
+				`Тип товара ${productTypeId} недоступен для этого каталога`
 			)
 		}
 		return productType
@@ -1037,7 +1198,7 @@ export class ProductCommandService {
 		)
 		if (!productType) {
 			throw new BadRequestException(
-				`Product type ${productTypeId} is not available for this catalog`
+				`Тип товара ${productTypeId} недоступен для этого каталога`
 			)
 		}
 		return productType
@@ -1079,7 +1240,7 @@ export class ProductCommandService {
 		const missing = categoryIds.filter(id => !foundSet.has(id))
 		if (missing.length) {
 			throw new BadRequestException(
-				`Categories were not found in catalog: ${missing.join(', ')}`
+				`Категории не найдены в каталоге: ${missing.join(', ')}`
 			)
 		}
 	}

@@ -331,7 +331,6 @@ export class AttributeService {
 
 		const forbiddenFields = [
 			dto.value !== undefined ? 'value' : null,
-			dto.displayName !== undefined ? 'displayName' : null,
 			dto.businessId !== undefined ? 'businessId' : null,
 			dto.source !== undefined ? 'source' : null
 		].filter((field): field is string => field !== null)
@@ -339,7 +338,7 @@ export class AttributeService {
 		if (!forbiddenFields.length) return
 
 		throw new BadRequestException(
-			`Imported enum values are managed by integration; only displayOrder can be changed manually (${forbiddenFields.join(', ')})`
+			`Imported enum values are managed by integration; only displayName and displayOrder can be changed manually (${forbiddenFields.join(', ')})`
 		)
 	}
 
@@ -349,7 +348,7 @@ export class AttributeService {
 		if (enumValue.source !== AttributeEnumValueSource.IMPORTED) return
 
 		throw new BadRequestException(
-			'Imported enum values are managed by integration; only displayOrder can be changed manually'
+			'Imported enum values are managed by integration; only displayName and displayOrder can be changed manually'
 		)
 	}
 

@@ -802,7 +802,7 @@ export class MoySkladClient {
 					return (await response.json()) as T
 				}
 
-				return undefined as T
+				return undefined
 			} catch (error) {
 				if (
 					error instanceof MoySkladHttpError &&

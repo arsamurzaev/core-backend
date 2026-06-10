@@ -431,7 +431,7 @@ function normalizeIntegrationCheckoutData(
 			)
 		),
 		...(guestsCount ? { guestsCount, personsCount: guestsCount } : {})
-	} as CatalogCheckoutData
+	}
 }
 
 export function resolveCheckoutContactsSnapshot(params: {

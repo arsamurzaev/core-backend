@@ -41,14 +41,14 @@ export class CatalogDomainController {
 	@ApiOperation({ summary: 'List current catalog domains' })
 	@ApiOkResponse({ type: CatalogDomainDto, isArray: true })
 	list(): Promise<CatalogDomainDto[]> {
-		return this.service.listCurrent() as Promise<CatalogDomainDto[]>
+		return this.service.listCurrent()
 	}
 
 	@Post()
 	@ApiOperation({ summary: 'Attach domain to current catalog' })
 	@ApiCreatedResponse({ type: CatalogDomainDto })
 	create(@Body() dto: CreateCatalogDomainDtoReq): Promise<CatalogDomainDto> {
-		return this.service.createCurrent(dto) as Promise<CatalogDomainDto>
+		return this.service.createCurrent(dto)
 	}
 
 	@Post('/:id/check')
@@ -56,7 +56,7 @@ export class CatalogDomainController {
 	@ApiParam({ name: 'id' })
 	@ApiOkResponse({ type: CatalogDomainCheckDto })
 	check(@Param('id') id: string): Promise<CatalogDomainCheckDto> {
-		return this.service.checkCurrent(id) as Promise<CatalogDomainCheckDto>
+		return this.service.checkCurrent(id)
 	}
 
 	@Delete('/:id')
@@ -65,6 +65,6 @@ export class CatalogDomainController {
 	@ApiParam({ name: 'id' })
 	@ApiOkResponse({ type: CatalogDomainDto })
 	disable(@Param('id') id: string): Promise<CatalogDomainDto> {
-		return this.service.disableCurrent(id) as Promise<CatalogDomainDto>
+		return this.service.disableCurrent(id)
 	}
 }

@@ -15,6 +15,7 @@ import { Test, TestingModule } from '@nestjs/testing'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { RedisService } from '@/infrastructure/redis/redis.service'
 import { CAPABILITY_READER_PORT } from '@/modules/capability/contracts'
+import { CatalogPriceListResolverService } from '@/modules/catalog-price-list/public'
 import { ORDER_EXPORT_PORT } from '@/modules/integration/contracts'
 import { INVENTORY_RESERVATION_PORT } from '@/modules/inventory/contracts'
 import {
@@ -30,6 +31,7 @@ import { CartLinePricingService } from './cart-line-pricing.service'
 import { CartLineService } from './cart-line.service'
 import { CartLookupService } from './cart-lookup.service'
 import { CartManagerSessionService } from './cart-manager-session.service'
+import { CartModifierSelectionService } from './cart-modifier-selection.service'
 import { CartOrderExportService } from './cart-order-export.service'
 import { CartOrderSnapshotService } from './cart-order-snapshot.service'
 import { CartShareService } from './cart-share.service'
@@ -190,6 +192,7 @@ function issueHallTableGuestToken(
 }
 
 describe('CartService', () => {
+	const previousCartGuestTokenSecret = process.env.CART_GUEST_TOKEN_SECRET
 	let service: CartService
 	let prisma: {
 		cart: {
@@ -213,6 +216,10 @@ describe('CartService', () => {
 			update: jest.Mock
 			updateMany: jest.Mock
 			create: jest.Mock
+		}
+		cartItemModifier: {
+			deleteMany: jest.Mock
+			createMany: jest.Mock
 		}
 		order: {
 			create: jest.Mock
@@ -275,6 +282,21 @@ describe('CartService', () => {
 	let productMaintenance: {
 		repairMissingDefaultVariantForProduct: jest.Mock
 	}
+	let priceLists: {
+		resolveLinePrice: jest.Mock
+	}
+
+	beforeAll(() => {
+		process.env.CART_GUEST_TOKEN_SECRET = 'cart-service-spec-secret'
+	})
+
+	afterAll(() => {
+		if (previousCartGuestTokenSecret === undefined) {
+			delete process.env.CART_GUEST_TOKEN_SECRET
+			return
+		}
+		process.env.CART_GUEST_TOKEN_SECRET = previousCartGuestTokenSecret
+	})
 
 	beforeEach(async () => {
 		prisma = {
@@ -299,6 +321,10 @@ describe('CartService', () => {
 				update: jest.fn(),
 				updateMany: jest.fn(),
 				create: jest.fn()
+			},
+			cartItemModifier: {
+				deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+				createMany: jest.fn().mockResolvedValue({ count: 0 })
 			},
 			order: {
 				create: jest.fn()
@@ -402,6 +428,14 @@ describe('CartService', () => {
 		productMaintenance = {
 			repairMissingDefaultVariantForProduct: jest.fn()
 		}
+		priceLists = {
+			resolveLinePrice: jest.fn().mockResolvedValue({
+				priceList: null,
+				price: null,
+				target: null,
+				targetId: null
+			})
+		}
 
 		const module: TestingModule = await Test.createTestingModule({
 			providers: [
@@ -413,6 +447,7 @@ describe('CartService', () => {
 				CartLookupService,
 				CartLifecycleService,
 				CartManagerSessionService,
+				CartModifierSelectionService,
 				CartOrderExportService,
 				CartOrderSnapshotService,
 				CartShareService,
@@ -452,6 +487,10 @@ describe('CartService', () => {
 				{
 					provide: PRODUCT_SELLABLE_READER_PORT,
 					useValue: sellableReader
+				},
+				{
+					provide: CatalogPriceListResolverService,
+					useValue: priceLists
 				}
 			]
 		}).compile()
@@ -1509,7 +1548,7 @@ describe('CartService', () => {
 				productId: 'product-1',
 				quantity: 1
 			})
-		).rejects.toThrow('hall table session is not open')
+		).rejects.toThrow('Сессия стола не открыта')
 		expect(prisma.cartItem.create).not.toHaveBeenCalled()
 	})
 
@@ -1525,7 +1564,7 @@ describe('CartService', () => {
 				productId: 'product-1',
 				quantity: 1
 			})
-		).rejects.toThrow('x-cart-guest-token is required')
+		).rejects.toThrow('Заголовок x-cart-guest-token обязателен')
 		expect(prisma.cartItem.create).not.toHaveBeenCalled()
 	})
 
@@ -1960,7 +1999,7 @@ describe('CartService', () => {
 		expect(sellableReader.resolveProductSellable).toHaveBeenCalledWith(
 			'parent-catalog',
 			'product-1',
-			{ quantity: 1, enforceStock: false }
+			{ quantity: 1, enforceStock: false, buyerCatalogId: 'child-catalog' }
 		)
 		expect(prisma.cartItem.create).toHaveBeenCalled()
 		expect(result.cart.items).toHaveLength(1)
@@ -2146,7 +2185,7 @@ describe('CartService', () => {
 		expect(sellableReader.resolveProductSellable).toHaveBeenCalledWith(
 			'catalog-1',
 			'product-1',
-			{ quantity: 1, enforceStock: false }
+			{ quantity: 1, enforceStock: false, buyerCatalogId: 'catalog-1' }
 		)
 		expect(prisma.cartItem.findFirst).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -2155,7 +2194,8 @@ describe('CartService', () => {
 					productId: 'product-1',
 					variantId: 'variant-single',
 					saleUnitId: null,
-					guestSessionId: null
+					guestSessionId: null,
+					modifierSignature: ''
 				}
 			})
 		)
@@ -2169,6 +2209,168 @@ describe('CartService', () => {
 		)
 		expect(result.cart.items[0].variantId).toBe('variant-single')
 		expect(result.cart.items[0].variant?.id).toBe('variant-single')
+	})
+
+	it('removes a cart line with modifiers without revalidating product modifiers', async () => {
+		const currentCart = createCartEntity({
+			status: CartStatus.DRAFT,
+			items: [
+				createCartItem({
+					id: 'cart-item-cheese',
+					modifierSignature: 'modifier-group-1:modifier-option-1x2',
+					modifiers: [
+						{
+							id: 'cart-item-modifier-1',
+							productModifierGroupId: 'modifier-group-1',
+							productModifierOptionId: 'modifier-option-1',
+							catalogModifierGroupId: null,
+							catalogModifierOptionId: null,
+							groupCode: 'add',
+							groupName: 'Добавки',
+							optionCode: 'cheese',
+							optionName: 'Сыр',
+							quantity: 2,
+							unitPriceSnapshot: 100
+						}
+					]
+				})
+			]
+		})
+		const updatedCart = createCartEntity({
+			status: CartStatus.DRAFT,
+			items: []
+		})
+		const existingItem = {
+			id: 'cart-item-cheese',
+			createdAt: new Date('2026-03-25T09:00:00.000Z'),
+			deleteAt: null,
+			quantity: 1,
+			saleUnitId: null,
+			modifierSignature: 'modifier-group-1:modifier-option-1x2',
+			baseQuantity: 1,
+			unitPriceSnapshot: 1999,
+			guestSessionId: null,
+			guestName: null
+		}
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(updatedCart)
+		prisma.cartItem.findFirst.mockResolvedValueOnce(existingItem)
+		prisma.cartItem.findMany.mockResolvedValueOnce([existingItem])
+		prisma.cartItem.updateMany.mockResolvedValueOnce({ count: 1 })
+		prisma.cart.update.mockResolvedValueOnce(undefined)
+
+		const result = await service.upsertCurrentItem('catalog-1', 'token-1', {
+			productId: 'product-1',
+			quantity: 0,
+			modifiers: [
+				{
+					productModifierGroupId: 'modifier-group-1',
+					productModifierOptionId: 'modifier-option-1',
+					quantity: 2
+				}
+			]
+		})
+
+		expect(prisma.product.findFirst).not.toHaveBeenCalled()
+		expect(prisma.productVariant.findFirst).not.toHaveBeenCalled()
+		expect(prisma.cartItem.findFirst).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: {
+					cartId: 'cart-1',
+					productId: 'product-1',
+					variantId: null,
+					saleUnitId: null,
+					guestSessionId: null,
+					modifierSignature: 'modifier-group-1:modifier-option-1x2'
+				}
+			})
+		)
+		expect(prisma.cartItem.updateMany).toHaveBeenCalledWith({
+			where: { id: { in: ['cart-item-cheese'] } },
+			data: { deleteAt: expect.any(Date) }
+		})
+		expect(result.cart.items).toEqual([])
+	})
+
+	it('removes a sale unit cart line when variants are hidden from the client', async () => {
+		const currentCart = createCartEntity({
+			status: CartStatus.DRAFT,
+			items: [
+				createCartItem({
+					id: 'cart-item-box',
+					variantId: 'variant-1',
+					saleUnitId: 'sale-unit-hidden'
+				})
+			]
+		})
+		const updatedCart = createCartEntity({
+			status: CartStatus.DRAFT,
+			items: []
+		})
+		const existingItem = {
+			id: 'cart-item-box',
+			createdAt: new Date('2026-03-25T09:00:00.000Z'),
+			deleteAt: null,
+			quantity: 1,
+			saleUnitId: 'sale-unit-hidden',
+			modifierSignature: '',
+			baseQuantity: 12,
+			unitPriceSnapshot: 500,
+			priceListId: null,
+			priceListCode: null,
+			priceListName: null,
+			guestSessionId: null,
+			guestName: null
+		}
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(updatedCart)
+		prisma.cartItem.findFirst.mockResolvedValueOnce(null)
+		prisma.cartItem.findMany.mockResolvedValueOnce([existingItem])
+		prisma.cartItem.updateMany.mockResolvedValueOnce({ count: 1 })
+		prisma.cart.update.mockResolvedValueOnce(undefined)
+
+		const result = await service.upsertCurrentItem('catalog-1', 'token-1', {
+			productId: 'product-1',
+			saleUnitId: 'sale-unit-hidden',
+			quantity: 0
+		})
+
+		expect(prisma.product.findFirst).not.toHaveBeenCalled()
+		expect(prisma.productVariant.findFirst).not.toHaveBeenCalled()
+		expect(prisma.cartItem.findFirst).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: {
+					cartId: 'cart-1',
+					productId: 'product-1',
+					variantId: null,
+					saleUnitId: 'sale-unit-hidden',
+					guestSessionId: null,
+					modifierSignature: ''
+				}
+			})
+		)
+		expect(prisma.cartItem.findMany).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: {
+					cartId: 'cart-1',
+					productId: 'product-1',
+					saleUnitId: 'sale-unit-hidden',
+					guestSessionId: null,
+					modifierSignature: ''
+				}
+			})
+		)
+		expect(prisma.cartItem.updateMany).toHaveBeenCalledWith({
+			where: { id: { in: ['cart-item-box'] } },
+			data: { deleteAt: expect.any(Date) }
+		})
+		expect(result.cart.items).toEqual([])
 	})
 
 	it('adds a simple cart line without variant price when product variants are disabled for catalog', async () => {
@@ -2419,8 +2621,194 @@ describe('CartService', () => {
 			'catalog-1',
 			'product-1',
 			'variant-1',
-			{ quantity: 12, enforceStock: false }
+			{ quantity: 12, enforceStock: false, buyerCatalogId: 'catalog-1' }
 		)
+	})
+
+	it('stores selected sale unit price-list snapshot and maps cart totals from it', async () => {
+		const currentCart = createCartEntity({ status: CartStatus.DRAFT })
+		const updatedCart = createCartEntity({
+			status: CartStatus.DRAFT,
+			items: [
+				createCartItem({
+					variantId: 'variant-1',
+					saleUnitId: 'sale-unit-1',
+					priceListId: 'price-list-1',
+					priceListCode: 'wholesale',
+					priceListName: 'Опт',
+					variant: createVariant({ id: 'variant-1', price: 0 }),
+					saleUnit: {
+						id: 'sale-unit-1',
+						variantId: 'variant-1',
+						catalogSaleUnitId: null,
+						code: 'piece',
+						name: 'шт',
+						baseQuantity: 1,
+						price: 0,
+						barcode: null,
+						isDefault: true,
+						isActive: true,
+						displayOrder: 0
+					},
+					quantity: 2,
+					baseQuantity: 2,
+					unitPriceSnapshot: 200,
+					product: {
+						id: 'product-1',
+						name: 'Product 1',
+						slug: 'product-1',
+						price: null,
+						productAttributes: [],
+						media: []
+					}
+				})
+			]
+		})
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(updatedCart)
+		prisma.product.findFirst.mockResolvedValueOnce({
+			id: 'product-1',
+			catalogId: 'catalog-1',
+			price: null,
+			productAttributes: []
+		})
+		prisma.productVariantSaleUnit.findFirst
+			.mockResolvedValueOnce({ variantId: 'variant-1' })
+			.mockResolvedValueOnce({
+				id: 'sale-unit-1',
+				variantId: 'variant-1',
+				baseQuantity: 1,
+				price: 0
+			})
+		prisma.productVariant.findFirst.mockResolvedValueOnce({
+			id: 'variant-1',
+			price: 0
+		})
+		sellableReader.resolveVariantSellable.mockResolvedValueOnce({
+			catalogId: 'catalog-1',
+			productId: 'product-1',
+			mode: 'SIMPLE',
+			variantId: 'variant-1',
+			defaultVariantId: 'variant-1',
+			requiresVariantSelection: false,
+			priceState: 'KNOWN',
+			displayPrice: '200.00',
+			minPrice: '200.00',
+			maxPrice: '200.00',
+			availabilityState: 'AVAILABLE',
+			stock: null,
+			usesPriceList: true,
+			priceListId: 'price-list-1',
+			priceListCode: 'wholesale',
+			priceListName: 'Опт'
+		})
+		priceLists.resolveLinePrice.mockResolvedValueOnce({
+			priceList: {
+				id: 'price-list-1',
+				code: 'wholesale',
+				name: 'Опт'
+			},
+			price: '200.00',
+			target: 'SALE_UNIT',
+			targetId: 'sale-unit-1'
+		})
+		prisma.cartItem.findFirst.mockResolvedValueOnce(null)
+		prisma.cartItem.count.mockResolvedValueOnce(0)
+		prisma.cartItem.create.mockResolvedValueOnce({ id: 'cart-item-1' })
+		prisma.cart.update.mockResolvedValueOnce(undefined)
+
+		const result = await service.upsertCurrentItem('catalog-1', 'token-1', {
+			productId: 'product-1',
+			saleUnitId: 'sale-unit-1',
+			quantity: 2
+		})
+
+		expect(priceLists.resolveLinePrice).toHaveBeenCalledWith(
+			expect.objectContaining({
+				buyerCatalogId: 'catalog-1',
+				ownerCatalogId: 'catalog-1',
+				productId: 'product-1',
+				variantId: 'variant-1',
+				saleUnitId: 'sale-unit-1',
+				mode: 'SIMPLE'
+			})
+		)
+		expect(prisma.cartItem.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				data: expect.objectContaining({
+					saleUnitId: 'sale-unit-1',
+					unitPriceSnapshot: 200,
+					priceListId: 'price-list-1',
+					priceListCode: 'wholesale',
+					priceListName: 'Опт'
+				})
+			})
+		)
+		expect(result.cart.items[0]).toEqual(
+			expect.objectContaining({
+				unitPriceSnapshot: 200,
+				unitPrice: 200,
+				lineTotal: 400,
+				product: expect.objectContaining({ price: 200 }),
+				saleUnit: expect.objectContaining({ price: 200 })
+			})
+		)
+		expect(result.cart.totals.subtotal).toBe(400)
+	})
+
+	it('requires explicit sale unit selection when sale units are enabled', async () => {
+		capabilities.canUseProductVariants.mockResolvedValueOnce(false)
+		capabilities.getCurrentFeatures.mockResolvedValue({
+			canUseProductTypes: false,
+			canUseProductVariants: false,
+			canUseCatalogSaleUnits: true,
+			canUseCatalogModifiers: false,
+			canUseInternalInventory: false,
+			canUseMoySkladIntegration: false
+		})
+		const currentCart = createCartEntity({ status: CartStatus.DRAFT })
+
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(currentCart)
+			.mockResolvedValueOnce(currentCart)
+		prisma.product.findFirst.mockResolvedValueOnce({
+			id: 'product-1',
+			catalogId: 'catalog-1',
+			price: 1000,
+			productAttributes: []
+		})
+		sellableReader.resolveProductSellable.mockResolvedValueOnce({
+			mode: 'SIMPLE',
+			variantId: 'variant-1',
+			priceState: 'FIXED',
+			displayPrice: '1000.00',
+			requiresVariantSelection: false,
+			availabilityState: 'AVAILABLE',
+			stock: 10
+		})
+		prisma.productVariant.findFirst.mockResolvedValueOnce({
+			id: 'variant-1',
+			price: 1000
+		})
+		prisma.productVariantSaleUnit.findFirst.mockResolvedValueOnce({
+			id: 'sale-unit-default',
+			variantId: 'variant-1',
+			baseQuantity: 12,
+			price: 500
+		})
+
+		await expect(
+			service.upsertCurrentItem('catalog-1', 'token-1', {
+				productId: 'product-1',
+				quantity: 1
+			})
+		).rejects.toThrow('Выберите единицу продажи')
+
+		expect(prisma.cartItem.create).not.toHaveBeenCalled()
+		expect(prisma.cartItem.update).not.toHaveBeenCalled()
 	})
 
 	it('stores discounted variant price snapshot when adding an item', async () => {
@@ -2544,7 +2932,8 @@ describe('CartService', () => {
 					productId: 'product-1',
 					variantId: 'variant-medium',
 					saleUnitId: null,
-					guestSessionId: null
+					guestSessionId: null,
+					modifierSignature: ''
 				}
 			})
 		)
@@ -2803,7 +3192,7 @@ describe('CartService', () => {
 			'catalog-1',
 			'product-1',
 			'variant-1',
-			{ quantity: 12, enforceStock: true }
+			{ quantity: 12, enforceStock: true, buyerCatalogId: 'catalog-1' }
 		)
 		expect(prisma.cartItem.create).not.toHaveBeenCalled()
 	})
@@ -2889,6 +3278,102 @@ describe('CartService', () => {
 			'order-1'
 		)
 		expect(inventory.consumeCompletedOrderStockTx).not.toHaveBeenCalled()
+	})
+
+	it('keeps cart item modifiers in order snapshot during checkout', async () => {
+		const cartWithItems = createCartEntity({
+			status: CartStatus.IN_PROGRESS,
+			assignedManagerId: 'manager-1',
+			items: [
+				{
+					id: 'cart-item-1',
+					productId: 'product-1',
+					variantId: null,
+					saleUnitId: null,
+					quantity: 2,
+					createdAt: new Date('2026-03-25T09:00:00.000Z'),
+					updatedAt: new Date('2026-03-25T09:00:00.000Z'),
+					product: {
+						id: 'product-1',
+						catalogId: 'catalog-1',
+						name: 'Product 1',
+						slug: 'product-1',
+						price: 100,
+						productAttributes: []
+					},
+					modifiers: [
+						{
+							id: 'modifier-1',
+							productModifierGroupId: 'product-group-1',
+							productModifierOptionId: 'product-option-1',
+							catalogModifierGroupId: 'catalog-group-1',
+							catalogModifierOptionId: 'catalog-option-1',
+							groupCode: 'toppings',
+							groupName: 'Toppings',
+							optionCode: 'cheese',
+							optionName: 'Cheese',
+							quantity: 2,
+							unitPriceSnapshot: 15
+						}
+					]
+				}
+			]
+		})
+		const convertedCart = createCartEntity({
+			status: CartStatus.CONVERTED,
+			publicKey: null,
+			checkoutKey: null,
+			assignedManagerId: 'manager-1',
+			closedAt: new Date('2026-03-25T09:10:00.000Z'),
+			items: cartWithItems.items
+		})
+
+		sellableReader.resolveProductSellable.mockResolvedValueOnce({
+			mode: 'SIMPLE',
+			variantId: null,
+			priceState: 'KNOWN',
+			displayPrice: '100.00',
+			requiresVariantSelection: false,
+			availabilityState: 'AVAILABLE',
+			stock: null
+		})
+		prisma.cart.findFirst
+			.mockResolvedValueOnce(cartWithItems)
+			.mockResolvedValueOnce(cartWithItems)
+			.mockResolvedValueOnce(convertedCart)
+		prisma.catalog.findFirst.mockResolvedValue({
+			id: 'catalog-1',
+			userId: 'manager-1'
+		})
+		prisma.order.create.mockResolvedValue(
+			createCompletedOrderEntity({ totalAmount: 260 })
+		)
+
+		await service.completeManagerOrder('public-1', {
+			id: 'manager-1',
+			role: Role.CATALOG
+		})
+
+		const checkoutCartCall = prisma.cart.findFirst.mock.calls.find(
+			([args]) => args?.select?.comment && !args.select.token
+		)
+		expect(checkoutCartCall?.[0].select.items.select.modifiers).toBeDefined()
+		const createArgs = prisma.order.create.mock.calls[0][0]
+		expect(createArgs.data.products[0]).toEqual(
+			expect.objectContaining({
+				modifiers: [
+					expect.objectContaining({
+						id: 'modifier-1',
+						optionName: 'Cheese',
+						quantity: 2,
+						unitPrice: 15
+					})
+				],
+				unitPrice: 130,
+				lineTotal: 260
+			})
+		)
+		expect(createArgs.data.totalAmount).toBe(260)
 	})
 
 	it('applies manager checkout data before converting a preorder cart', async () => {
@@ -3498,7 +3983,7 @@ describe('CartService', () => {
 			'catalog-1',
 			'product-1',
 			'variant-hidden',
-			{ quantity: 1, enforceStock: false }
+			{ quantity: 1, enforceStock: false, buyerCatalogId: 'catalog-1' }
 		)
 		const createArgs = prisma.order.create.mock.calls[0][0]
 		expect(createArgs.data.products[0]).toEqual(

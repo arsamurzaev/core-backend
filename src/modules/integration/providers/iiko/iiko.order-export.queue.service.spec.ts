@@ -154,7 +154,7 @@ describe('IikoOrderExportQueueService', () => {
 	})
 
 	it('does not enqueue when iiko order export is disabled', async () => {
-		repo.findIiko.mockResolvedValue(integrationRecord as any)
+		repo.findIiko.mockResolvedValue(integrationRecord)
 		metadataCrypto.parseStoredMetadata.mockReturnValue({
 			exportOrders: false
 		} as any)
@@ -171,7 +171,7 @@ describe('IikoOrderExportQueueService', () => {
 	})
 
 	it('creates a pending iiko export and enqueues a provider-specific job', async () => {
-		repo.findIiko.mockResolvedValue(integrationRecord as any)
+		repo.findIiko.mockResolvedValue(integrationRecord)
 		repo.createPendingOrderExport.mockResolvedValue(exportRecord as any)
 		metadataCrypto.parseStoredMetadata.mockReturnValue({
 			exportOrders: true,
@@ -251,7 +251,7 @@ describe('IikoOrderExportQueueService', () => {
 	})
 
 	it('waits for a completed iiko order export', async () => {
-		repo.findIiko.mockResolvedValue(integrationRecord as any)
+		repo.findIiko.mockResolvedValue(integrationRecord)
 		metadataCrypto.parseStoredMetadata.mockReturnValue({
 			exportOrders: true,
 			terminalGroupId: 'terminal-1'
@@ -279,7 +279,7 @@ describe('IikoOrderExportQueueService', () => {
 	})
 
 	it('returns an error state when iiko order export is skipped', async () => {
-		repo.findIiko.mockResolvedValue(integrationRecord as any)
+		repo.findIiko.mockResolvedValue(integrationRecord)
 		metadataCrypto.parseStoredMetadata.mockReturnValue({
 			exportOrders: true,
 			terminalGroupId: 'terminal-1'
@@ -305,7 +305,7 @@ describe('IikoOrderExportQueueService', () => {
 	})
 
 	it('times out while waiting for iiko export confirmation', async () => {
-		repo.findIiko.mockResolvedValue(integrationRecord as any)
+		repo.findIiko.mockResolvedValue(integrationRecord)
 		metadataCrypto.parseStoredMetadata.mockReturnValue({
 			exportOrders: true,
 			terminalGroupId: 'terminal-1'

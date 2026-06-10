@@ -133,7 +133,7 @@ export class CatalogService {
 		}
 
 		const catalog = await this.repo.create(data)
-		await this.catalogSeoSync.syncCatalog(catalog as any)
+		await this.catalogSeoSync.syncCatalog(catalog)
 		return {
 			ok: true,
 			id: catalog.id,
@@ -269,7 +269,7 @@ export class CatalogService {
 			id
 		)
 		const catalog = await this.repo.update(id, data)
-		await this.catalogSeoSync.syncCatalog(catalog as any)
+		await this.catalogSeoSync.syncCatalog(catalog)
 		await this.invalidateCatalogCache(id)
 		await this.auditInternalInventoryEnabled(
 			id,
@@ -305,7 +305,7 @@ export class CatalogService {
 		if (!catalog) {
 			throw new NotFoundException('Каталог не найден')
 		}
-		await this.catalogSeoSync.syncCatalog(catalog as any)
+		await this.catalogSeoSync.syncCatalog(catalog)
 		await this.invalidateCatalogCache(store.catalogId)
 		await this.auditInternalInventoryEnabled(
 			store.catalogId,
@@ -385,7 +385,7 @@ export class CatalogService {
 		if (dto.inventoryMode !== CATALOG_INVENTORY_MODE_INTERNAL) return null
 
 		const settings = await this.loadCatalogSettingsSnapshot(catalogId)
-		return settings?.inventoryMode ?? ('NONE' as CatalogInventoryMode)
+		return settings?.inventoryMode ?? 'NONE'
 	}
 
 	private async auditInternalInventoryEnabled(
@@ -546,7 +546,7 @@ export class CatalogService {
 		const capabilities =
 			await this.featureReader.getCatalogCapabilities(catalogId)
 		return {
-			inventoryMode: inventoryMode ?? ('NONE' as CatalogInventoryMode),
+			inventoryMode: inventoryMode ?? 'NONE',
 			...capabilities.flags,
 			raw: capabilities.raw,
 			effective: capabilities.effective,
