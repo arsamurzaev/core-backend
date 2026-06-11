@@ -18,6 +18,7 @@ export type PriceLineInput = {
 	modifiers?: PriceModifierLike[] | null
 	quantity?: number
 	unitPriceSnapshot?: unknown
+	unitPriceSnapshotIsBasePrice?: boolean
 	now?: Date
 }
 
@@ -231,15 +232,18 @@ export function resolveLinePricing(input: PriceLineInput): ResolvedLinePricing {
 		input.unitPriceSnapshot === undefined || input.unitPriceSnapshot === null
 			? null
 			: toCents(input.unitPriceSnapshot)
-	const baseUnitPriceCents = baseItemUnitPriceCents + modifierUnitTotalCents
+	const snapshotIsBasePrice =
+		input.unitPriceSnapshotIsBasePrice && snapshotBaseItemPriceCents !== null
+	const baseUnitPriceCents =
+		(snapshotIsBasePrice ? snapshotBaseItemPriceCents : baseItemUnitPriceCents) +
+		modifierUnitTotalCents
 	const unitPriceCents =
 		(snapshotBaseItemPriceCents ?? discountedBaseItemUnitPriceCents) +
 		modifierUnitTotalCents
 	const lineTotalCents = unitPriceCents * quantity
-	const discountPercent = resolveDiscountPercent(
-		baseUnitPriceCents,
-		unitPriceCents
-	)
+	const discountPercent = snapshotIsBasePrice
+		? 0
+		: resolveDiscountPercent(baseUnitPriceCents, unitPriceCents)
 
 	return {
 		baseUnitPrice: fromCents(baseUnitPriceCents),

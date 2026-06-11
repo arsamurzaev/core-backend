@@ -466,8 +466,12 @@ export function resolveCartItemUnitPriceCents(item: {
 	saleUnit?: { price: unknown } | null
 	modifiers?: CartModifierLike[] | null
 	unitPriceSnapshot?: unknown
+	priceListId?: string | null
 }): number {
-	return resolveLinePricing(item).unitPriceCents
+	return resolveLinePricing({
+		...item,
+		unitPriceSnapshotIsBasePrice: Boolean(item.priceListId)
+	}).unitPriceCents
 }
 
 export function resolveCartItemPricing(item: {
@@ -476,9 +480,13 @@ export function resolveCartItemPricing(item: {
 	saleUnit?: { price: unknown } | null
 	modifiers?: CartModifierLike[] | null
 	unitPriceSnapshot?: unknown
+	priceListId?: string | null
 	quantity: number
 }) {
-	return resolveLinePricing(item)
+	return resolveLinePricing({
+		...item,
+		unitPriceSnapshotIsBasePrice: Boolean(item.priceListId)
+	})
 }
 
 export function resolveCartItemBaseQuantity(item: {

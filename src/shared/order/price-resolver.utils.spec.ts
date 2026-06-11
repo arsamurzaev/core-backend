@@ -91,4 +91,27 @@ describe('resolveLinePricing', () => {
 			}).unitPrice
 		).toBe(1200)
 	})
+
+	it('treats a price-list snapshot as the base price, not a discount', () => {
+		const pricing = resolveLinePricing({
+			product: {
+				price: 800,
+				productAttributes: []
+			},
+			quantity: 1,
+			unitPriceSnapshot: 720,
+			unitPriceSnapshotIsBasePrice: true,
+			now: new Date('2026-05-12T09:00:00.000Z')
+		})
+
+		expect(pricing).toEqual(
+			expect.objectContaining({
+				baseUnitPrice: 720,
+				unitPrice: 720,
+				discountPercent: 0,
+				hasDiscount: false,
+				lineTotal: 720
+			})
+		)
+	})
 })

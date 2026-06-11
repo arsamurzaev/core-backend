@@ -106,6 +106,55 @@ describe('mapCartEntity', () => {
 		expect(cart.totals.subtotal).toBe(400)
 	})
 
+	it('does not treat a lower price-list snapshot as a discount', () => {
+		const cart = mapCartEntity(
+			buildCart({
+				items: [
+					buildCartItem({
+						quantity: 1,
+						baseQuantity: 1,
+						unitPriceSnapshot: 720,
+						product: {
+							...buildCartItem().product,
+							price: 800
+						},
+						saleUnit: {
+							...buildCartItem().saleUnit,
+							price: 800
+						}
+					})
+				]
+			}),
+			undefined,
+			{
+				canUseProductVariants: true,
+				canUseCatalogSaleUnits: true,
+				canUseCatalogModifiers: true
+			}
+		)
+
+		expect(cart.items[0]).toEqual(
+			expect.objectContaining({
+				baseUnitPrice: 720,
+				unitPrice: 720,
+				discountPercent: 0,
+				hasDiscount: false,
+				lineTotal: 720,
+				product: expect.objectContaining({ price: 720 }),
+				saleUnit: expect.objectContaining({ price: 720 })
+			})
+		)
+		expect(cart.totals).toEqual(
+			expect.objectContaining({
+				baseSubtotal: 720,
+				discountTotal: 0,
+				hasDiscount: false,
+				subtotal: 720,
+				total: 720
+			})
+		)
+	})
+
 	it('uses price-list snapshot for variant cart lines with zero legacy price', () => {
 		const cart = mapCartEntity(
 			buildCart({
