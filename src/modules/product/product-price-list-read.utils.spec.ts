@@ -133,6 +133,40 @@ describe('product price-list read utils', () => {
 		expect(result.price).toBeNull()
 	})
 
+	it('does not keep legacy prices when active price list is applied without filtering', () => {
+		const result = applyPriceListContextToProduct(
+			{
+				id: 'product-1',
+				price: '999.00',
+				variants: [
+					{
+						id: 'variant-xs',
+						kind: ProductVariantKind.MATRIX,
+						variantKey: 'size=xs',
+						price: '1000.00',
+						saleUnits: [{ id: 'sale-unit-xs-piece', price: '350.00' }]
+					}
+				]
+			},
+			{
+				priceList: { id: 'price-list-1', code: 'retail', name: 'Retail' },
+				productPrices: new Map(),
+				variantPrices: new Map(),
+				saleUnitPrices: new Map()
+			},
+			{ filterUnavailable: false, canUseCatalogSaleUnits: true }
+		)
+
+		expect(result.price).toBeNull()
+		expect(result.variants).toEqual([
+			expect.objectContaining({
+				id: 'variant-xs',
+				price: null,
+				saleUnits: [expect.objectContaining({ price: null })]
+			})
+		])
+	})
+
 	it('keeps zero price as an explicit active price-list price', () => {
 		const result = applyPriceListContextToProduct(
 			{

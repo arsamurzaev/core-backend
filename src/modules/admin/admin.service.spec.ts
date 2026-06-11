@@ -218,6 +218,36 @@ function createDuplicateTransactionMock() {
 		catalogContact: {
 			createMany: jest.fn()
 		},
+		catalogFeatureEntitlement: {
+			createMany: jest.fn()
+		},
+		catalogModifierOption: {
+			create: jest.fn()
+		},
+		catalogModifierGroup: {
+			create: jest.fn()
+		},
+		catalogModifierGroupOption: {
+			createMany: jest.fn()
+		},
+		productType: {
+			create: jest.fn()
+		},
+		productTypeAttribute: {
+			createMany: jest.fn()
+		},
+		productTypeModifierGroupTemplate: {
+			create: jest.fn()
+		},
+		productTypeModifierOptionTemplate: {
+			createMany: jest.fn()
+		},
+		catalogSaleUnit: {
+			create: jest.fn()
+		},
+		inventoryWarehouseCatalog: {
+			createMany: jest.fn()
+		},
 		brand: {
 			create: jest.fn()
 		},
@@ -233,13 +263,31 @@ function createDuplicateTransactionMock() {
 		productVariant: {
 			create: jest.fn()
 		},
+		productVariantSaleUnit: {
+			createMany: jest.fn()
+		},
+		inventoryStockBalance: {
+			createMany: jest.fn()
+		},
 		variantAttribute: {
+			createMany: jest.fn()
+		},
+		productModifierGroup: {
+			create: jest.fn().mockResolvedValue({ id: 'product-modifier-group-copy' })
+		},
+		productModifierOption: {
 			createMany: jest.fn()
 		},
 		productMedia: {
 			createMany: jest.fn()
 		},
 		categoryProduct: {
+			createMany: jest.fn()
+		},
+		catalogPriceList: {
+			create: jest.fn()
+		},
+		catalogPriceListPrice: {
 			createMany: jest.fn()
 		},
 		seoSetting: {
@@ -267,10 +315,15 @@ function createDuplicateSourceCatalog() {
 			isActive: true,
 			defaultMode: null,
 			allowedModes: [],
+			inventoryMode: 'NONE',
+			address: null,
+			checkout: null,
 			googleVerification: null,
 			yandexVerification: null,
+			activePriceListId: null,
 			deleteAt: null
 		},
+		featureEntitlements: [],
 		contacts: [],
 		media: [
 			{
@@ -300,11 +353,18 @@ function createDuplicateSourceCatalog() {
 			}
 		],
 		brands: [],
+		modifierOptions: [],
+		modifierGroups: [],
+		productTypes: [],
+		saleUnits: [],
+		priceLists: [],
+		inventoryWarehouses: [],
 		category: [],
 		products: [
 			{
 				id: 'product-source',
 				brandId: null,
+				productTypeId: null,
 				sku: 'SKU-1',
 				name: 'Product',
 				slug: 'product',
@@ -315,6 +375,7 @@ function createDuplicateSourceCatalog() {
 				deleteAt: null,
 				productAttributes: [],
 				variants: [],
+				modifierGroups: [],
 				media: [{ mediaId: 'media-source', position: 0, kind: 'image' }],
 				categoryProducts: []
 			}
@@ -1355,19 +1416,20 @@ describe('AdminService', () => {
 
 		const targetCatalogId =
 			s3.copyObjectToCatalog.mock.calls[0][0].targetCatalogId
+		const duplicatedProductId = tx.product.create.mock.calls[0][0].data.id
 		expect(s3.copyObjectToCatalog).toHaveBeenNthCalledWith(1, {
 			sourceKey:
 				'catalogs/catalog-source/products/product-source/2026/05/18/raw/photo.jpg',
 			targetCatalogId,
 			path: 'products',
-			entityId: 'product-source'
+			entityId: duplicatedProductId
 		})
 		expect(s3.copyObjectToCatalog).toHaveBeenNthCalledWith(2, {
 			sourceKey:
 				'catalogs/catalog-source/products/product-source/2026/05/18/photo-thumb.avif',
 			targetCatalogId,
 			path: 'products',
-			entityId: 'product-source'
+			entityId: duplicatedProductId
 		})
 		expect(s3.copyObjectToCatalog.mock.invocationCallOrder[1]).toBeLessThan(
 			prisma.$transaction.mock.invocationCallOrder[0]
@@ -1430,6 +1492,347 @@ describe('AdminService', () => {
 				name: true,
 				login: true
 			}
+		})
+	})
+
+	it('duplicates catalog scoped product model extensions', async () => {
+		const tx = createDuplicateTransactionMock()
+		const { prisma, service } = createService(tx as any)
+		const source = {
+			...createDuplicateSourceCatalog(),
+			media: [],
+			featureEntitlements: [
+				{
+					feature: 'catalog.sale_units',
+					enabled: true,
+					expiresAt: null,
+					metadata: { copied: true }
+				}
+			],
+			settings: {
+				...createDuplicateSourceCatalog().settings,
+				inventoryMode: 'INTERNAL',
+				address: 'Main street, 1',
+				checkout: { enabledMethods: ['PICKUP'] },
+				activePriceListId: 'price-list-source'
+			},
+			modifierOptions: [
+				{
+					id: 'modifier-option-source',
+					code: 'ketchup',
+					name: 'Ketchup',
+					description: null,
+					defaultPrice: 10,
+					isActive: true,
+					displayOrder: 1,
+					rawMeta: { external: true },
+					deleteAt: null
+				}
+			],
+			modifierGroups: [
+				{
+					id: 'modifier-group-source',
+					code: 'sauces',
+					name: 'Sauces',
+					description: null,
+					isRequired: false,
+					minSelected: 0,
+					maxSelected: 2,
+					isActive: true,
+					displayOrder: 1,
+					rawMeta: null,
+					deleteAt: null,
+					options: [
+						{
+							optionId: 'modifier-option-source',
+							defaultPrice: 10,
+							isDefault: true,
+							isActive: true,
+							displayOrder: 1,
+							deleteAt: null
+						}
+					]
+				}
+			],
+			productTypes: [
+				{
+					id: 'product-type-source',
+					scope: 'CATALOG',
+					code: 'burger',
+					name: 'Burger',
+					description: null,
+					isActive: true,
+					isArchived: false,
+					archivedAt: null,
+					attributes: [
+						{
+							attributeId: 'attribute-source',
+							isVariant: true,
+							isRequired: true,
+							displayOrder: 1
+						}
+					],
+					modifierTemplates: [
+						{
+							id: 'template-source',
+							catalogModifierGroupId: 'modifier-group-source',
+							code: 'sauces',
+							name: 'Sauces',
+							description: null,
+							isRequired: false,
+							minSelected: 0,
+							maxSelected: 2,
+							isActive: true,
+							displayOrder: 1,
+							deleteAt: null,
+							options: [
+								{
+									catalogModifierOptionId: 'modifier-option-source',
+									code: 'ketchup',
+									name: 'Ketchup',
+									price: 10,
+									maxQuantity: 2,
+									isDefault: true,
+									isAvailable: true,
+									displayOrder: 1,
+									deleteAt: null
+								}
+							]
+						}
+					]
+				}
+			],
+			saleUnits: [
+				{
+					id: 'sale-unit-source',
+					code: 'piece',
+					name: 'Piece',
+					defaultBaseQuantity: 1,
+					barcode: null,
+					isActive: true,
+					displayOrder: 1,
+					deleteAt: null
+				}
+			],
+			priceLists: [
+				{
+					id: 'price-list-source',
+					code: 'hall',
+					name: 'Hall',
+					description: null,
+					isActive: true,
+					displayOrder: 1,
+					deleteAt: null,
+					prices: [
+						{
+							target: 'PRODUCT',
+							targetId: 'product-source',
+							productId: 'product-source',
+							variantId: null,
+							saleUnitId: null,
+							price: 100,
+							deleteAt: null
+						},
+						{
+							target: 'VARIANT',
+							targetId: 'variant-source',
+							productId: 'product-source',
+							variantId: 'variant-source',
+							saleUnitId: null,
+							price: 110,
+							deleteAt: null
+						},
+						{
+							target: 'SALE_UNIT',
+							targetId: 'variant-sale-unit-source',
+							productId: 'product-source',
+							variantId: 'variant-source',
+							saleUnitId: 'variant-sale-unit-source',
+							price: 120,
+							deleteAt: null
+						}
+					]
+				}
+			],
+			inventoryWarehouses: [{ warehouseId: 'warehouse-1', isDefault: true }],
+			products: [
+				{
+					...createDuplicateSourceCatalog().products[0],
+					productTypeId: 'product-type-source',
+					variants: [
+						{
+							id: 'variant-source',
+							sku: 'VARIANT-1',
+							variantKey: 'default',
+							kind: 'DEFAULT',
+							stock: 5,
+							price: 100,
+							status: 'ACTIVE',
+							isAvailable: true,
+							deleteAt: null,
+							attributes: [],
+							saleUnits: [
+								{
+									id: 'variant-sale-unit-source',
+									catalogSaleUnitId: 'sale-unit-source',
+									code: 'piece',
+									name: 'Piece',
+									baseQuantity: 1,
+									price: 100,
+									barcode: null,
+									isDefault: true,
+									isActive: true,
+									displayOrder: 1,
+									deleteAt: null
+								}
+							],
+							stockBalances: [
+								{
+									warehouseId: 'warehouse-1',
+									quantityOnHand: 5,
+									lastSyncedAt: null
+								}
+							]
+						}
+					],
+					modifierGroups: [
+						{
+							id: 'product-modifier-group-source',
+							variantId: 'variant-source',
+							catalogModifierGroupId: 'modifier-group-source',
+							scope: 'VARIANT',
+							scopeKey: 'variant-source',
+							code: 'sauces',
+							name: 'Sauces',
+							description: null,
+							isRequired: false,
+							minSelected: 0,
+							maxSelected: 2,
+							isActive: true,
+							displayOrder: 1,
+							rawMeta: null,
+							deleteAt: null,
+							options: [
+								{
+									catalogModifierOptionId: 'modifier-option-source',
+									code: 'ketchup',
+									name: 'Ketchup',
+									price: 10,
+									maxQuantity: 2,
+									isDefault: true,
+									isAvailable: true,
+									displayOrder: 1,
+									rawMeta: null,
+									deleteAt: null
+								}
+							]
+						}
+					]
+				}
+			]
+		} as any
+		prisma.catalog.findUnique.mockResolvedValueOnce(source)
+
+		await service.duplicateCatalog('catalog-source', {
+			name: 'Catalog Copy',
+			slug: 'catalog-copy',
+			typeId: 'type-1',
+			status: CatalogStatus.OPERATIONAL
+		})
+
+		const copiedProductTypeId = tx.productType.create.mock.calls[0][0].data.id
+		const copiedProductId = tx.product.create.mock.calls[0][0].data.id
+		const copiedVariantId = tx.productVariant.create.mock.calls[0][0].data.id
+		const copiedCatalogSaleUnitId =
+			tx.catalogSaleUnit.create.mock.calls[0][0].data.id
+		const copiedVariantSaleUnitId =
+			tx.productVariantSaleUnit.createMany.mock.calls[0][0].data[0].id
+
+		expect(tx.catalogSettings.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				data: expect.objectContaining({
+					inventoryMode: 'INTERNAL',
+					address: 'Main street, 1',
+					checkout: { enabledMethods: ['PICKUP'] }
+				})
+			})
+		)
+		expect(tx.catalogFeatureEntitlement.createMany).toHaveBeenCalledWith({
+			data: [
+				expect.objectContaining({
+					catalogId: expect.any(String),
+					feature: 'catalog.sale_units',
+					enabled: true
+				})
+			]
+		})
+		expect(tx.product.create).toHaveBeenCalledWith({
+			data: expect.objectContaining({
+				id: copiedProductId,
+				productTypeId: copiedProductTypeId
+			})
+		})
+		expect(tx.productVariant.create).toHaveBeenCalledWith({
+			data: expect.objectContaining({
+				id: copiedVariantId,
+				kind: 'DEFAULT'
+			})
+		})
+		expect(tx.productVariantSaleUnit.createMany).toHaveBeenCalledWith({
+			data: [
+				expect.objectContaining({
+					id: copiedVariantSaleUnitId,
+					variantId: copiedVariantId,
+					catalogSaleUnitId: copiedCatalogSaleUnitId
+				})
+			]
+		})
+		expect(tx.catalogPriceListPrice.createMany).toHaveBeenCalledWith({
+			data: expect.arrayContaining([
+				expect.objectContaining({
+					target: 'PRODUCT',
+					targetId: copiedProductId,
+					productId: copiedProductId
+				}),
+				expect.objectContaining({
+					target: 'VARIANT',
+					targetId: copiedVariantId,
+					variantId: copiedVariantId
+				}),
+				expect.objectContaining({
+					target: 'SALE_UNIT',
+					targetId: copiedVariantSaleUnitId,
+					saleUnitId: copiedVariantSaleUnitId
+				})
+			])
+		})
+		expect(tx.productModifierGroup.create).toHaveBeenCalledWith({
+			data: expect.objectContaining({
+				productId: copiedProductId,
+				variantId: copiedVariantId,
+				scopeKey: copiedVariantId
+			}),
+			select: { id: true }
+		})
+		expect(tx.inventoryWarehouseCatalog.createMany).toHaveBeenCalledWith({
+			data: [
+				{
+					warehouseId: 'warehouse-1',
+					catalogId: expect.any(String),
+					isDefault: true
+				}
+			]
+		})
+		expect(tx.inventoryStockBalance.createMany).toHaveBeenCalledWith({
+			data: [
+				expect.objectContaining({
+					warehouseId: 'warehouse-1',
+					variantId: copiedVariantId,
+					quantityOnHand: 5,
+					quantityReserved: 0,
+					quantityAvailable: 5
+				})
+			]
 		})
 	})
 

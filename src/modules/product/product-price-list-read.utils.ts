@@ -73,7 +73,7 @@ export function applyPriceListContextToProduct<
 
 	return {
 		...product,
-		price: productPrice ?? (filterUnavailable ? null : product.price),
+		price: productPrice ?? null,
 		variants
 	}
 }
@@ -103,7 +103,7 @@ export function applyPriceListContextToVariant<
 					acc.push({ ...saleUnit, price })
 					return acc
 				}
-				if (!filterUnavailable) acc.push(saleUnit)
+				if (!filterUnavailable) acc.push({ ...saleUnit, price: null })
 				return acc
 			}, [])
 		: []
@@ -122,7 +122,7 @@ export function applyPriceListContextToVariant<
 
 	return {
 		...variant,
-		price: displayPrice ?? variant.price,
+		price: displayPrice,
 		saleUnits
 	}
 }

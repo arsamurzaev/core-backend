@@ -490,9 +490,24 @@ export class AdminService {
 						isActive: true,
 						defaultMode: true,
 						allowedModes: true,
+						inventoryMode: true,
+						address: true,
+						checkout: true,
 						googleVerification: true,
 						yandexVerification: true,
+						activePriceListId: true,
 						deleteAt: true
+					}
+				},
+				featureEntitlements: {
+					where: {
+						feature: { in: [...CATALOG_CAPABILITIES] }
+					},
+					select: {
+						feature: true,
+						enabled: true,
+						expiresAt: true,
+						metadata: true
 					}
 				},
 				contacts: {
@@ -538,6 +553,132 @@ export class AdminService {
 						deleteAt: true
 					}
 				},
+				modifierOptions: {
+					select: {
+						id: true,
+						code: true,
+						name: true,
+						description: true,
+						defaultPrice: true,
+						isActive: true,
+						displayOrder: true,
+						rawMeta: true,
+						deleteAt: true
+					}
+				},
+				modifierGroups: {
+					select: {
+						id: true,
+						code: true,
+						name: true,
+						description: true,
+						isRequired: true,
+						minSelected: true,
+						maxSelected: true,
+						isActive: true,
+						displayOrder: true,
+						rawMeta: true,
+						deleteAt: true,
+						options: {
+							select: {
+								optionId: true,
+								defaultPrice: true,
+								isDefault: true,
+								isActive: true,
+								displayOrder: true,
+								deleteAt: true
+							}
+						}
+					}
+				},
+				productTypes: {
+					select: {
+						id: true,
+						scope: true,
+						code: true,
+						name: true,
+						description: true,
+						isActive: true,
+						isArchived: true,
+						archivedAt: true,
+						attributes: {
+							select: {
+								attributeId: true,
+								isVariant: true,
+								isRequired: true,
+								displayOrder: true
+							}
+						},
+						modifierTemplates: {
+							select: {
+								id: true,
+								catalogModifierGroupId: true,
+								code: true,
+								name: true,
+								description: true,
+								isRequired: true,
+								minSelected: true,
+								maxSelected: true,
+								isActive: true,
+								displayOrder: true,
+								deleteAt: true,
+								options: {
+									select: {
+										catalogModifierOptionId: true,
+										code: true,
+										name: true,
+										price: true,
+										maxQuantity: true,
+										isDefault: true,
+										isAvailable: true,
+										displayOrder: true,
+										deleteAt: true
+									}
+								}
+							}
+						}
+					}
+				},
+				saleUnits: {
+					select: {
+						id: true,
+						code: true,
+						name: true,
+						defaultBaseQuantity: true,
+						barcode: true,
+						isActive: true,
+						displayOrder: true,
+						deleteAt: true
+					}
+				},
+				priceLists: {
+					select: {
+						id: true,
+						code: true,
+						name: true,
+						description: true,
+						isActive: true,
+						displayOrder: true,
+						deleteAt: true,
+						prices: {
+							select: {
+								target: true,
+								targetId: true,
+								productId: true,
+								variantId: true,
+								saleUnitId: true,
+								price: true,
+								deleteAt: true
+							}
+						}
+					}
+				},
+				inventoryWarehouses: {
+					select: {
+						warehouseId: true,
+						isDefault: true
+					}
+				},
 				category: {
 					select: {
 						id: true,
@@ -554,6 +695,7 @@ export class AdminService {
 					select: {
 						id: true,
 						brandId: true,
+						productTypeId: true,
 						sku: true,
 						name: true,
 						slug: true,
@@ -579,6 +721,7 @@ export class AdminService {
 								id: true,
 								sku: true,
 								variantKey: true,
+								kind: true,
 								stock: true,
 								price: true,
 								status: true,
@@ -588,6 +731,61 @@ export class AdminService {
 									select: {
 										attributeId: true,
 										enumValueId: true,
+										deleteAt: true
+									}
+								},
+								saleUnits: {
+									select: {
+										id: true,
+										catalogSaleUnitId: true,
+										code: true,
+										name: true,
+										baseQuantity: true,
+										price: true,
+										barcode: true,
+										isDefault: true,
+										isActive: true,
+										displayOrder: true,
+										deleteAt: true
+									}
+								},
+								stockBalances: {
+									select: {
+										warehouseId: true,
+										quantityOnHand: true,
+										lastSyncedAt: true
+									}
+								}
+							}
+						},
+						modifierGroups: {
+							select: {
+								id: true,
+								variantId: true,
+								catalogModifierGroupId: true,
+								scope: true,
+								scopeKey: true,
+								code: true,
+								name: true,
+								description: true,
+								isRequired: true,
+								minSelected: true,
+								maxSelected: true,
+								isActive: true,
+								displayOrder: true,
+								rawMeta: true,
+								deleteAt: true,
+								options: {
+									select: {
+										catalogModifierOptionId: true,
+										code: true,
+										name: true,
+										price: true,
+										maxQuantity: true,
+										isDefault: true,
+										isAvailable: true,
+										displayOrder: true,
+										rawMeta: true,
 										deleteAt: true
 									}
 								}
@@ -663,6 +861,42 @@ export class AdminService {
 		const copiedS3Keys: string[] = []
 		const mediaIdMap = new Map<string, string>()
 		const duplicatedMedia: DuplicateCatalogPreparedMedia[] = []
+		const brandIdMap = new Map(
+			source.brands.map(brand => [brand.id, randomUUID()])
+		)
+		const categoryIdMap = new Map(
+			source.category.map(category => [category.id, randomUUID()])
+		)
+		const productTypeIdMap = new Map(
+			source.productTypes.map(productType => [productType.id, randomUUID()])
+		)
+		const catalogModifierOptionIdMap = new Map(
+			source.modifierOptions.map(option => [option.id, randomUUID()])
+		)
+		const catalogModifierGroupIdMap = new Map(
+			source.modifierGroups.map(group => [group.id, randomUUID()])
+		)
+		const catalogSaleUnitIdMap = new Map(
+			source.saleUnits.map(unit => [unit.id, randomUUID()])
+		)
+		const priceListIdMap = new Map(
+			source.priceLists.map(priceList => [priceList.id, randomUUID()])
+		)
+		const productIdMap = new Map<string, string>()
+		const variantIdMap = new Map<string, string>()
+		const variantSaleUnitIdMap = new Map<string, string>()
+		const inventoryWarehouseIds = new Set(
+			source.inventoryWarehouses.map(warehouse => warehouse.warehouseId)
+		)
+		for (const product of source.products) {
+			productIdMap.set(product.id, randomUUID())
+			for (const variant of product.variants) {
+				variantIdMap.set(variant.id, randomUUID())
+				for (const saleUnit of variant.saleUnits) {
+					variantSaleUnitIdMap.set(saleUnit.id, randomUUID())
+				}
+			}
+		}
 
 		let created!: {
 			owner: { id: string; name: string; login: string }
@@ -671,10 +905,19 @@ export class AdminService {
 		try {
 			for (const media of source.media) {
 				const nextMediaId = randomUUID()
+				const nextEntityId = mapDuplicatedMediaEntityId(media.entityId, {
+					sourceCatalogId: source.id,
+					nextCatalogId,
+					brandIdMap,
+					categoryIdMap,
+					productIdMap,
+					variantIdMap
+				})
 				const copiedKeys = await this.copyDuplicatedMediaKeys(
 					media,
 					nextCatalogId,
-					copiedS3Keys
+					copiedS3Keys,
+					nextEntityId
 				)
 				if (!copiedKeys) continue
 
@@ -704,7 +947,7 @@ export class AdminService {
 					width: media.width,
 					height: media.height,
 					path: media.path,
-					entityId: media.entityId,
+					entityId: nextEntityId,
 					storage: media.storage,
 					key: copiedKeys.key,
 					checksum: media.checksum,
@@ -815,10 +1058,25 @@ export class AdminService {
 								isActive: source.settings.isActive,
 								defaultMode: source.settings.defaultMode,
 								allowedModes: source.settings.allowedModes,
+								inventoryMode: source.settings.inventoryMode,
+								address: source.settings.address,
+								checkout: source.settings.checkout ?? Prisma.JsonNull,
 								googleVerification: source.settings.googleVerification,
 								yandexVerification: source.settings.yandexVerification,
 								deleteAt: source.settings.deleteAt
 							}
+						})
+					}
+
+					if (source.featureEntitlements.length) {
+						await tx.catalogFeatureEntitlement.createMany({
+							data: source.featureEntitlements.map(entitlement => ({
+								catalogId: catalog.id,
+								feature: entitlement.feature,
+								enabled: entitlement.enabled,
+								expiresAt: entitlement.expiresAt,
+								metadata: entitlement.metadata ?? Prisma.JsonNull
+							}))
 						})
 					}
 
@@ -834,13 +1092,186 @@ export class AdminService {
 						})
 					}
 
-					const brandIdMap = new Map<string, string>()
+					for (const option of source.modifierOptions) {
+						await tx.catalogModifierOption.create({
+							data: {
+								id: requireMappedId(
+									option.id,
+									catalogModifierOptionIdMap,
+									'catalog modifier option'
+								),
+								catalogId: catalog.id,
+								code: option.code,
+								name: option.name,
+								description: option.description,
+								defaultPrice: option.defaultPrice,
+								isActive: option.isActive,
+								displayOrder: option.displayOrder,
+								rawMeta: option.rawMeta ?? Prisma.JsonNull,
+								deleteAt: option.deleteAt
+							}
+						})
+					}
+
+					for (const group of source.modifierGroups) {
+						const nextGroupId = requireMappedId(
+							group.id,
+							catalogModifierGroupIdMap,
+							'catalog modifier group'
+						)
+						await tx.catalogModifierGroup.create({
+							data: {
+								id: nextGroupId,
+								catalogId: catalog.id,
+								code: group.code,
+								name: group.name,
+								description: group.description,
+								isRequired: group.isRequired,
+								minSelected: group.minSelected,
+								maxSelected: group.maxSelected,
+								isActive: group.isActive,
+								displayOrder: group.displayOrder,
+								rawMeta: group.rawMeta ?? Prisma.JsonNull,
+								deleteAt: group.deleteAt
+							}
+						})
+
+						const groupOptions = group.options
+							.map(option => {
+								const optionId = catalogModifierOptionIdMap.get(option.optionId)
+								return optionId
+									? {
+											groupId: nextGroupId,
+											optionId,
+											defaultPrice: option.defaultPrice,
+											isDefault: option.isDefault,
+											isActive: option.isActive,
+											displayOrder: option.displayOrder,
+											deleteAt: option.deleteAt
+										}
+									: null
+							})
+							.filter((item): item is NonNullable<typeof item> => item !== null)
+						if (groupOptions.length) {
+							await tx.catalogModifierGroupOption.createMany({
+								data: groupOptions
+							})
+						}
+					}
+
+					for (const productType of source.productTypes) {
+						const nextProductTypeId = requireMappedId(
+							productType.id,
+							productTypeIdMap,
+							'product type'
+						)
+						await tx.productType.create({
+							data: {
+								id: nextProductTypeId,
+								catalogId: catalog.id,
+								scope: productType.scope,
+								code: productType.code,
+								name: productType.name,
+								description: productType.description,
+								isActive: productType.isActive,
+								isArchived: productType.isArchived,
+								archivedAt: productType.archivedAt
+							}
+						})
+
+						if (productType.attributes.length) {
+							await tx.productTypeAttribute.createMany({
+								data: productType.attributes.map(attribute => ({
+									productTypeId: nextProductTypeId,
+									attributeId: attribute.attributeId,
+									isVariant: attribute.isVariant,
+									isRequired: attribute.isRequired,
+									displayOrder: attribute.displayOrder
+								}))
+							})
+						}
+					}
+
+					for (const productType of source.productTypes) {
+						const nextProductTypeId = requireMappedId(
+							productType.id,
+							productTypeIdMap,
+							'product type'
+						)
+						for (const template of productType.modifierTemplates) {
+							const nextTemplateId = randomUUID()
+							await tx.productTypeModifierGroupTemplate.create({
+								data: {
+									id: nextTemplateId,
+									productTypeId: nextProductTypeId,
+									catalogModifierGroupId: mapNullableId(
+										template.catalogModifierGroupId,
+										catalogModifierGroupIdMap
+									),
+									code: template.code,
+									name: template.name,
+									description: template.description,
+									isRequired: template.isRequired,
+									minSelected: template.minSelected,
+									maxSelected: template.maxSelected,
+									isActive: template.isActive,
+									displayOrder: template.displayOrder,
+									deleteAt: template.deleteAt
+								}
+							})
+
+							if (template.options.length) {
+								await tx.productTypeModifierOptionTemplate.createMany({
+									data: template.options.map(option => ({
+										templateGroupId: nextTemplateId,
+										catalogModifierOptionId: mapNullableId(
+											option.catalogModifierOptionId,
+											catalogModifierOptionIdMap
+										),
+										code: option.code,
+										name: option.name,
+										price: option.price,
+										maxQuantity: option.maxQuantity,
+										isDefault: option.isDefault,
+										isAvailable: option.isAvailable,
+										displayOrder: option.displayOrder,
+										deleteAt: option.deleteAt
+									}))
+								})
+							}
+						}
+					}
+
+					for (const unit of source.saleUnits) {
+						await tx.catalogSaleUnit.create({
+							data: {
+								id: requireMappedId(unit.id, catalogSaleUnitIdMap, 'catalog sale unit'),
+								catalogId: catalog.id,
+								code: unit.code,
+								name: unit.name,
+								defaultBaseQuantity: unit.defaultBaseQuantity,
+								barcode: unit.barcode,
+								isActive: unit.isActive,
+								displayOrder: unit.displayOrder,
+								deleteAt: unit.deleteAt
+							}
+						})
+					}
+
+					if (source.inventoryWarehouses.length) {
+						await tx.inventoryWarehouseCatalog.createMany({
+							data: source.inventoryWarehouses.map(warehouse => ({
+								warehouseId: warehouse.warehouseId,
+								catalogId: catalog.id,
+								isDefault: warehouse.isDefault
+							}))
+						})
+					}
+
 					for (const brand of source.brands) {
-						const nextBrandId = randomUUID()
-						brandIdMap.set(brand.id, nextBrandId)
 						await tx.brand.create({
 							data: {
-								id: nextBrandId,
+								id: requireMappedId(brand.id, brandIdMap, 'brand'),
 								catalogId: catalog.id,
 								name: brand.name,
 								slug: brand.slug,
@@ -849,18 +1280,21 @@ export class AdminService {
 						})
 					}
 
-					const categoryIdMap = new Map<string, string>()
+					const createdCategoryIds = new Set<string>()
 					const pendingCategories = [...source.category]
 					while (pendingCategories.length) {
 						let createdInPass = 0
 						for (let index = pendingCategories.length - 1; index >= 0; index -= 1) {
 							const category = pendingCategories[index]
-							if (category.parentId && !categoryIdMap.has(category.parentId)) {
+							if (category.parentId && !createdCategoryIds.has(category.parentId)) {
 								continue
 							}
 
-							const nextCategoryId = randomUUID()
-							categoryIdMap.set(category.id, nextCategoryId)
+							const nextCategoryId = requireMappedId(
+								category.id,
+								categoryIdMap,
+								'category'
+							)
 							await tx.category.create({
 								data: {
 									id: nextCategoryId,
@@ -877,6 +1311,7 @@ export class AdminService {
 								}
 							})
 							pendingCategories.splice(index, 1)
+							createdCategoryIds.add(category.id)
 							createdInPass += 1
 						}
 
@@ -885,16 +1320,17 @@ export class AdminService {
 						}
 					}
 
-					const productIdMap = new Map<string, string>()
 					for (const product of source.products) {
-						const nextProductId = randomUUID()
-						productIdMap.set(product.id, nextProductId)
+						const nextProductId = requireMappedId(product.id, productIdMap, 'product')
 						await tx.product.create({
 							data: {
 								id: nextProductId,
 								catalogId: catalog.id,
 								brandId: product.brandId
 									? (brandIdMap.get(product.brandId) ?? null)
+									: null,
+								productTypeId: product.productTypeId
+									? (productTypeIdMap.get(product.productTypeId) ?? null)
 									: null,
 								sku: buildDuplicatedSku(product.sku, slug),
 								name: product.name,
@@ -924,13 +1360,18 @@ export class AdminService {
 						}
 
 						for (const variant of product.variants) {
-							const nextVariantId = randomUUID()
+							const nextVariantId = requireMappedId(
+								variant.id,
+								variantIdMap,
+								'product variant'
+							)
 							await tx.productVariant.create({
 								data: {
 									id: nextVariantId,
 									productId: nextProductId,
 									sku: buildDuplicatedSku(variant.sku, slug),
 									variantKey: variant.variantKey,
+									kind: variant.kind,
 									stock: variant.stock,
 									price: variant.price,
 									status: variant.status,
@@ -946,6 +1387,100 @@ export class AdminService {
 										attributeId: attribute.attributeId,
 										enumValueId: attribute.enumValueId,
 										deleteAt: attribute.deleteAt
+									}))
+								})
+							}
+
+							if (variant.saleUnits.length) {
+								await tx.productVariantSaleUnit.createMany({
+									data: variant.saleUnits.map(unit => ({
+										id: requireMappedId(
+											unit.id,
+											variantSaleUnitIdMap,
+											'product variant sale unit'
+										),
+										variantId: nextVariantId,
+										catalogSaleUnitId: mapNullableId(
+											unit.catalogSaleUnitId,
+											catalogSaleUnitIdMap
+										),
+										code: unit.code,
+										name: unit.name,
+										baseQuantity: unit.baseQuantity,
+										price: unit.price,
+										barcode: unit.barcode,
+										isDefault: unit.isDefault,
+										isActive: unit.isActive,
+										displayOrder: unit.displayOrder,
+										deleteAt: unit.deleteAt
+									}))
+								})
+							}
+
+							const stockBalances = variant.stockBalances.filter(balance =>
+								inventoryWarehouseIds.has(balance.warehouseId)
+							)
+							if (stockBalances.length) {
+								await tx.inventoryStockBalance.createMany({
+									data: stockBalances.map(balance => ({
+										warehouseId: balance.warehouseId,
+										variantId: nextVariantId,
+										quantityOnHand: balance.quantityOnHand,
+										quantityReserved: 0,
+										quantityAvailable: balance.quantityOnHand,
+										lastMovementAt: null,
+										lastSyncedAt: balance.lastSyncedAt
+									}))
+								})
+							}
+						}
+
+						for (const group of product.modifierGroups) {
+							const mappedVariantId = mapNullableId(group.variantId, variantIdMap)
+							const nextScopeKey = group.variantId
+								? (mappedVariantId ?? group.scopeKey)
+								: (variantIdMap.get(group.scopeKey) ?? group.scopeKey)
+							const createdGroup = await tx.productModifierGroup.create({
+								data: {
+									productId: nextProductId,
+									variantId: mappedVariantId,
+									catalogModifierGroupId: mapNullableId(
+										group.catalogModifierGroupId,
+										catalogModifierGroupIdMap
+									),
+									scope: group.scope,
+									scopeKey: nextScopeKey,
+									code: group.code,
+									name: group.name,
+									description: group.description,
+									isRequired: group.isRequired,
+									minSelected: group.minSelected,
+									maxSelected: group.maxSelected,
+									isActive: group.isActive,
+									displayOrder: group.displayOrder,
+									rawMeta: group.rawMeta ?? Prisma.JsonNull,
+									deleteAt: group.deleteAt
+								},
+								select: { id: true }
+							})
+
+							if (group.options.length) {
+								await tx.productModifierOption.createMany({
+									data: group.options.map(option => ({
+										productModifierGroupId: createdGroup.id,
+										catalogModifierOptionId: mapNullableId(
+											option.catalogModifierOptionId,
+											catalogModifierOptionIdMap
+										),
+										code: option.code,
+										name: option.name,
+										price: option.price,
+										maxQuantity: option.maxQuantity,
+										isDefault: option.isDefault,
+										isAvailable: option.isAvailable,
+										displayOrder: option.displayOrder,
+										rawMeta: option.rawMeta ?? Prisma.JsonNull,
+										deleteAt: option.deleteAt
 									}))
 								})
 							}
@@ -985,6 +1520,67 @@ export class AdminService {
 						}
 					}
 
+					for (const priceList of source.priceLists) {
+						const nextPriceListId = requireMappedId(
+							priceList.id,
+							priceListIdMap,
+							'catalog price list'
+						)
+						await tx.catalogPriceList.create({
+							data: {
+								id: nextPriceListId,
+								catalogId: catalog.id,
+								code: priceList.code,
+								name: priceList.name,
+								description: priceList.description,
+								isActive: priceList.isActive,
+								displayOrder: priceList.displayOrder,
+								deleteAt: priceList.deleteAt
+							}
+						})
+
+						const prices = priceList.prices
+							.map(price => {
+								const productId = productIdMap.get(price.productId)
+								if (!productId) return null
+
+								const variantId = mapNullableId(price.variantId, variantIdMap)
+								const saleUnitId = mapNullableId(price.saleUnitId, variantSaleUnitIdMap)
+								const targetId = mapPriceListTargetId(price.target, {
+									sourceTargetId: price.targetId,
+									productIdMap,
+									variantIdMap,
+									variantSaleUnitIdMap
+								})
+								if (!targetId) return null
+
+								return {
+									priceListId: nextPriceListId,
+									target: price.target,
+									targetId,
+									productId,
+									variantId,
+									saleUnitId,
+									price: price.price,
+									deleteAt: price.deleteAt
+								}
+							})
+							.filter((item): item is NonNullable<typeof item> => item !== null)
+						if (prices.length) {
+							await tx.catalogPriceListPrice.createMany({ data: prices })
+						}
+					}
+
+					if (source.settings?.activePriceListId) {
+						await tx.catalogSettings.update({
+							where: { catalogId: catalog.id },
+							data: {
+								activePriceListId:
+									priceListIdMap.get(source.settings.activePriceListId) ?? null
+							}
+						})
+					}
+
 					for (const setting of source.seoSettings) {
 						await tx.seoSetting.create({
 							data: {
@@ -998,7 +1594,7 @@ export class AdminService {
 									brandIdMap
 								}),
 								urlPath: setting.urlPath,
-								canonicalUrl: setting.canonicalUrl,
+								canonicalUrl: null,
 								title: setting.title,
 								description: setting.description,
 								keywords: setting.keywords,
@@ -1011,7 +1607,7 @@ export class AdminService {
 								ogDescription: setting.ogDescription,
 								ogMediaId: mapNullableId(setting.ogMediaId, mediaIdMap),
 								ogType: setting.ogType,
-								ogUrl: setting.ogUrl,
+								ogUrl: null,
 								ogSiteName: setting.ogSiteName,
 								ogLocale: setting.ogLocale,
 								twitterCard: setting.twitterCard,
@@ -1177,10 +1773,7 @@ export class AdminService {
 				: {}),
 			...(dto.trialLicenseDays
 				? {
-						subscriptionEndsAt: addCalendarDays(
-							new Date(),
-							dto.trialLicenseDays
-						)
+						subscriptionEndsAt: addCalendarDays(new Date(), dto.trialLicenseDays)
 					}
 				: {}),
 			...(dto.status !== undefined
@@ -2343,7 +2936,8 @@ export class AdminService {
 	private async copyDuplicatedMediaKeys(
 		media: DuplicateCatalogMediaRecord,
 		targetCatalogId: string,
-		copiedS3Keys: string[]
+		copiedS3Keys: string[],
+		targetEntityId: string | null
 	): Promise<DuplicateCatalogCopiedMediaKeys | null> {
 		const rawKey =
 			media.storage === 's3'
@@ -2351,7 +2945,8 @@ export class AdminService {
 						media.key,
 						media,
 						targetCatalogId,
-						copiedS3Keys
+						copiedS3Keys,
+						targetEntityId
 					)
 				: media.key
 
@@ -2370,7 +2965,8 @@ export class AdminService {
 							variant.key,
 							media,
 							targetCatalogId,
-							copiedS3Keys
+							copiedS3Keys,
+							targetEntityId
 						)
 					: variant.key
 			if (!variantKey) {
@@ -2396,14 +2992,15 @@ export class AdminService {
 		sourceKey: string,
 		media: Pick<DuplicateCatalogMediaRecord, 'path' | 'entityId'>,
 		targetCatalogId: string,
-		copiedS3Keys: string[]
+		copiedS3Keys: string[],
+		targetEntityId: string | null
 	): Promise<string | null> {
 		try {
 			const result = await this.s3.copyObjectToCatalog({
 				sourceKey,
 				targetCatalogId,
 				path: media.path,
-				entityId: media.entityId
+				entityId: targetEntityId
 			})
 			copiedS3Keys.push(result.key)
 			return result.key
@@ -3174,6 +3771,16 @@ function mapNullableId(
 	return idMap.get(id) ?? null
 }
 
+function requireMappedId(
+	id: string,
+	idMap: Map<string, string>,
+	entityName: string
+) {
+	const mapped = idMap.get(id)
+	if (!mapped) throw new BadRequestException(`Unable to duplicate ${entityName}`)
+	return mapped
+}
+
 function isMissingS3ObjectError(error: unknown) {
 	if (typeof error !== 'object' || error === null) return false
 	const candidate = error as {
@@ -3197,6 +3804,47 @@ function buildDuplicatedSku(value: string, catalogSlug: string) {
 	const head = value.slice(0, maxHeadLength).replace(/[-_]+$/g, '')
 	const normalized = `${head || 'SKU'}${suffix}`.slice(0, SKU_MAX_LENGTH)
 	return normalized || `SKU-${catalogSlug}`.slice(0, SKU_MAX_LENGTH)
+}
+
+function mapDuplicatedMediaEntityId(
+	entityId: string | null | undefined,
+	options: {
+		sourceCatalogId: string
+		nextCatalogId: string
+		brandIdMap: Map<string, string>
+		categoryIdMap: Map<string, string>
+		productIdMap: Map<string, string>
+		variantIdMap: Map<string, string>
+	}
+) {
+	if (!entityId) return null
+	if (entityId === options.sourceCatalogId) return options.nextCatalogId
+	return (
+		options.productIdMap.get(entityId) ??
+		options.variantIdMap.get(entityId) ??
+		options.categoryIdMap.get(entityId) ??
+		options.brandIdMap.get(entityId) ??
+		entityId
+	)
+}
+
+function mapPriceListTargetId(
+	target: string,
+	options: {
+		sourceTargetId: string
+		productIdMap: Map<string, string>
+		variantIdMap: Map<string, string>
+		variantSaleUnitIdMap: Map<string, string>
+	}
+) {
+	if (target === 'PRODUCT')
+		return options.productIdMap.get(options.sourceTargetId)
+	if (target === 'VARIANT')
+		return options.variantIdMap.get(options.sourceTargetId)
+	if (target === 'SALE_UNIT') {
+		return options.variantSaleUnitIdMap.get(options.sourceTargetId)
+	}
+	return null
 }
 
 function mapSeoEntityId(
