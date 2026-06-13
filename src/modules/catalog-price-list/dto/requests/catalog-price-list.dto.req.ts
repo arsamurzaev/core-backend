@@ -17,14 +17,6 @@ function trimOptionalString(value: unknown): string | undefined {
 	return trimmed.length ? trimmed : undefined
 }
 
-function trimNullableString(value: unknown): string | null | undefined {
-	if (value === undefined) return undefined
-	if (value === null) return null
-	if (typeof value !== 'string') return value as string
-	const trimmed = value.trim()
-	return trimmed.length ? trimmed : null
-}
-
 export class CreateCatalogPriceListDtoReq {
 	@ApiProperty({ type: String, example: 'Retail' })
 	@IsString()
@@ -39,13 +31,6 @@ export class CreateCatalogPriceListDtoReq {
 	@MaxLength(100)
 	@Transform(({ value }: { value: unknown }) => trimOptionalString(value))
 	code?: string
-
-	@ApiPropertyOptional({ type: String, nullable: true })
-	@IsOptional()
-	@IsString()
-	@MaxLength(1000)
-	@Transform(({ value }: { value: unknown }) => trimNullableString(value))
-	description?: string | null
 
 	@ApiPropertyOptional({ type: Boolean })
 	@IsOptional()
@@ -75,13 +60,6 @@ export class UpdateCatalogPriceListDtoReq {
 	@MaxLength(100)
 	@Transform(({ value }: { value: unknown }) => trimOptionalString(value))
 	code?: string
-
-	@ApiPropertyOptional({ type: String, nullable: true })
-	@IsOptional()
-	@IsString()
-	@MaxLength(1000)
-	@Transform(({ value }: { value: unknown }) => trimNullableString(value))
-	description?: string | null
 
 	@ApiPropertyOptional({ type: Boolean })
 	@IsOptional()

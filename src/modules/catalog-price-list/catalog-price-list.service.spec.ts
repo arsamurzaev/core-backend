@@ -129,7 +129,6 @@ describe('CatalogPriceListService', () => {
 			catalogId: 'catalog-1',
 			code: 'retail',
 			name: 'Розница',
-			description: null,
 			isActive: true,
 			displayOrder: 0,
 			deleteAt: null

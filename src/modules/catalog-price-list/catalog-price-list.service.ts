@@ -164,7 +164,6 @@ export class CatalogPriceListService {
 				this.requireUpdatedPriceList(
 					await this.repo.update(existing.id, scope.ownerCatalogId, {
 						name,
-						description: dto.description ?? existing.description,
 						isActive: dto.isActive ?? true,
 						displayOrder: dto.displayOrder ?? existing.displayOrder,
 						deleteAt: null
@@ -178,7 +177,6 @@ export class CatalogPriceListService {
 				catalogId: scope.ownerCatalogId,
 				code,
 				name,
-				description: dto.description ?? null,
 				isActive: dto.isActive ?? true,
 				displayOrder: dto.displayOrder ?? 0
 			} satisfies CatalogPriceListCreateData)
@@ -205,7 +203,6 @@ export class CatalogPriceListService {
 			}
 			data.code = code
 		}
-		if (dto.description !== undefined) data.description = dto.description
 		if (dto.isActive !== undefined) {
 			data.isActive = dto.isActive
 			if (dto.isActive) data.deleteAt = null
@@ -695,7 +692,6 @@ export class CatalogPriceListService {
 			catalogId: priceList.catalogId,
 			code: priceList.code,
 			name: priceList.name,
-			description: priceList.description,
 			isActive: priceList.isActive,
 			displayOrder: priceList.displayOrder,
 			deleteAt: priceList.deleteAt?.toISOString() ?? null

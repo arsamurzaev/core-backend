@@ -8,7 +8,6 @@ export const catalogPriceListSelect = {
 	catalogId: true,
 	code: true,
 	name: true,
-	description: true,
 	isActive: true,
 	displayOrder: true,
 	deleteAt: true,
@@ -48,7 +47,6 @@ export type CatalogPriceListCreateData = {
 	catalogId: string
 	code: string
 	name: string
-	description?: string | null
 	isActive?: boolean
 	displayOrder?: number
 }
@@ -56,7 +54,6 @@ export type CatalogPriceListCreateData = {
 export type CatalogPriceListUpdateData = Partial<{
 	code: string
 	name: string
-	description: string | null
 	isActive: boolean
 	displayOrder: number
 	deleteAt: Date | null
@@ -123,7 +120,6 @@ export class CatalogPriceListRepository {
 				catalogId: data.catalogId,
 				code: data.code,
 				name: data.name,
-				description: data.description ?? null,
 				isActive: data.isActive ?? true,
 				displayOrder: data.displayOrder ?? 0
 			},

@@ -14,9 +14,6 @@ export class CatalogPriceListDto {
 	@ApiProperty({ type: String })
 	name: string
 
-	@ApiProperty({ type: String, nullable: true })
-	description: string | null
-
 	@ApiProperty({ type: Boolean })
 	isActive: boolean
 

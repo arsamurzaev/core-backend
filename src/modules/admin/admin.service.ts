@@ -656,7 +656,6 @@ export class AdminService {
 						id: true,
 						code: true,
 						name: true,
-						description: true,
 						isActive: true,
 						displayOrder: true,
 						deleteAt: true,
@@ -1532,7 +1531,6 @@ export class AdminService {
 								catalogId: catalog.id,
 								code: priceList.code,
 								name: priceList.name,
-								description: priceList.description,
 								isActive: priceList.isActive,
 								displayOrder: priceList.displayOrder,
 								deleteAt: priceList.deleteAt
