@@ -215,6 +215,32 @@ describe('S3Service', () => {
 		expect(mediaCreateCall?.[0].data.status).toBe('UPLOADED')
 	})
 
+	it('creates presigned upload without content length for legacy clients', async () => {
+		prisma.media.create.mockResolvedValue({ id: 'media-legacy' })
+		mockedGetSignedUrl.mockResolvedValue('https://signed.example/upload')
+
+		const result = await runWithCatalog(() =>
+			service.createPresignedUpload('image/jpeg', { folder: 'products' })
+		)
+
+		expect(result.ok).toBe(true)
+
+		const signedUrlCall = mockedGetSignedUrl.mock.calls.at(0) as
+			| [unknown, PutObjectCommand]
+			| undefined
+		expect(signedUrlCall).toBeDefined()
+		expect(signedUrlCall?.[1].input.ContentLength).toBeUndefined()
+	})
+
+	it('rejects invalid presigned upload content length when provided', async () => {
+		await expect(
+			runWithCatalog(() =>
+				service.createPresignedUpload('image/jpeg', { folder: 'products' }, 0)
+			)
+		).rejects.toThrow('Некорректный размер файла')
+		expect(mockedGetSignedUrl).not.toHaveBeenCalled()
+	})
+
 	it('creates presigned post with normalized fields and max file size', async () => {
 		prisma.media.create.mockResolvedValue({ id: 'media-2' })
 		mockedCreatePresignedPost.mockResolvedValue({

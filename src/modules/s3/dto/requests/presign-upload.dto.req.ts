@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
-import { Transform } from 'class-transformer'
+import { Transform, Type } from 'class-transformer'
 import {
 	IsInt,
 	IsNotEmpty,
@@ -25,13 +25,15 @@ export class PresignUploadDtoReq {
 	@IsNotEmpty()
 	contentType: string
 
-	@ApiProperty({
+	@ApiPropertyOptional({
 		example: 1048576,
 		description: 'Размер файла в байтах'
 	})
+	@IsOptional()
+	@Type(() => Number)
 	@IsInt()
 	@Min(1)
-	contentLength: number
+	contentLength?: number
 
 	@ApiPropertyOptional({
 		example: 'products/seo',

@@ -428,17 +428,16 @@ export class S3Service implements OnModuleDestroy {
 	): Promise<PresignUploadResult> {
 		this.assertUploadEnabled()
 		const target = this.prepareRawObjectTarget(contentType, options)
-		const fileSize = Number(contentLength)
-		if (!Number.isFinite(fileSize) || fileSize <= 0) {
-			throw new BadRequestException('Некорректный размер файла')
+		const fileSize = this.normalizeOptionalContentLength(contentLength)
+		if (fileSize !== null) {
+			this.assertFileSizeWithinLimit(fileSize)
 		}
-		this.assertFileSizeWithinLimit(fileSize)
 
 		const command = new PutObjectCommand({
 			Bucket: this.bucket,
 			Key: target.key,
 			ContentType: target.mimeType,
-			ContentLength: fileSize,
+			...(fileSize !== null ? { ContentLength: fileSize } : {}),
 			CacheControl: 'private, max-age=0',
 			...(this.publicRead ? { ACL: 'public-read' } : {})
 		})
@@ -472,8 +471,9 @@ export class S3Service implements OnModuleDestroy {
 	): Promise<PresignPostResult> {
 		this.assertUploadEnabled()
 		const target = this.prepareRawObjectTarget(contentType, options)
-		if (contentLength && contentLength > this.maxFileBytes) {
-			this.assertFileSizeWithinLimit(contentLength)
+		const fileSize = this.normalizeOptionalContentLength(contentLength)
+		if (fileSize !== null) {
+			this.assertFileSizeWithinLimit(fileSize)
 		}
 
 		const baseFields: Record<string, string> = {
@@ -1763,6 +1763,17 @@ export class S3Service implements OnModuleDestroy {
 
 		normalizedParts.sort((a, b) => a.PartNumber - b.PartNumber)
 		return normalizedParts
+	}
+
+	private normalizeOptionalContentLength(value: unknown): number | null {
+		if (value === undefined || value === null) return null
+
+		const size = Number(value)
+		if (!Number.isInteger(size) || size <= 0) {
+			throw new BadRequestException('Некорректный размер файла')
+		}
+
+		return size
 	}
 
 	private assertFileSizeWithinLimit(
