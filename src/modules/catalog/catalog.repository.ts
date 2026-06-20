@@ -139,6 +139,7 @@ const catalogSelect = {
 	settings: {
 		select: {
 			isActive: true,
+			presentationMode: true,
 			defaultMode: true,
 			allowedModes: true,
 			inventoryMode: true,

@@ -1,5 +1,10 @@
-import { CatalogStatus, Role, SeoEntityType } from '@generated/enums'
-import { NotFoundException } from '@nestjs/common'
+import {
+	CatalogPresentationMode,
+	CatalogStatus,
+	Role,
+	SeoEntityType
+} from '@generated/enums'
+import { ForbiddenException, NotFoundException } from '@nestjs/common'
 
 import {
 	CATALOG_CACHE_VERSION,
@@ -407,6 +412,7 @@ function createAdminCatalogRecord(overrides: Record<string, unknown> = {}) {
 			logoMedia: null
 		},
 		settings: {
+			presentationMode: CatalogPresentationMode.CATALOG,
 			inventoryMode: 'NONE'
 		},
 		featureEntitlements: [],
@@ -1283,6 +1289,67 @@ describe('AdminService', () => {
 				})
 			})
 		)
+	})
+
+	it('updates catalog presentation mode for global admins', async () => {
+		const tx = createTransactionMock()
+		const { prisma, service, tx: transaction } = createService(tx)
+		prisma.catalog.findUnique.mockResolvedValueOnce({
+			id: 'catalog-1',
+			slug: 'catalog-one',
+			typeId: 'type-1',
+			userId: 'user-1',
+			metrics: []
+		})
+		tx.catalog.update.mockResolvedValueOnce(
+			createAdminCatalogRecord({
+				settings: {
+					presentationMode: CatalogPresentationMode.BUSINESS_CARD,
+					inventoryMode: 'NONE'
+				}
+			})
+		)
+
+		const result = await service.updateCatalog(
+			'catalog-1',
+			{ presentationMode: CatalogPresentationMode.BUSINESS_CARD },
+			{ id: 'admin-1', role: Role.ADMIN }
+		)
+
+		expect(transaction.catalog.update).toHaveBeenCalledWith(
+			expect.objectContaining({
+				where: { id: 'catalog-1' },
+				data: expect.objectContaining({
+					settings: {
+						upsert: {
+							create: {
+								presentationMode: CatalogPresentationMode.BUSINESS_CARD
+							},
+							update: {
+								presentationMode: CatalogPresentationMode.BUSINESS_CARD
+							}
+						}
+					}
+				})
+			})
+		)
+		expect(result.config?.presentationMode).toBe(
+			CatalogPresentationMode.BUSINESS_CARD
+		)
+	})
+
+	it('rejects catalog presentation mode updates from geo admins', async () => {
+		const { service, tx } = createService()
+
+		await expect(
+			service.updateCatalog(
+				'catalog-1',
+				{ presentationMode: CatalogPresentationMode.BUSINESS_CARD },
+				{ id: 'geo-admin-1', role: Role.GEO_ADMIN }
+			)
+		).rejects.toThrow(ForbiddenException)
+
+		expect(tx.catalog.update).not.toHaveBeenCalled()
 	})
 
 	it('disconnects the main metric when admin clears it', async () => {

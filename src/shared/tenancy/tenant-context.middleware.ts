@@ -131,6 +131,7 @@ export class CatalogContextMiddleware implements NestMiddleware {
 				catalogId: resolved?.catalogId,
 				catalogSlug: resolved?.slug,
 				typeId: resolved?.typeId,
+				presentationMode: resolved?.presentationMode,
 				ownerUserId: resolved?.ownerUserId ?? null,
 				parentId: resolved?.parentId ?? null
 			}

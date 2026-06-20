@@ -51,6 +51,7 @@ const DEFAULT_COMMAND_STATUS_POLL_INTERVAL_MS = 1500
 const DEFAULT_CUSTOMER_NAME = 'Guest'
 const DEFAULT_SIZE_EXTERNAL_ID = 'default'
 const DEFAULT_PREORDER_RESERVE_DURATION_MINUTES = 120
+const DEFAULT_LEGACY_ADDRESS_HOUSE = '-'
 
 type ExportIikoOrderResult = {
 	externalId: string
@@ -969,16 +970,14 @@ function buildLegacyDeliveryAddress(
 	const streetName = normalizeText(data.street) ?? parsed.street
 	const city =
 		normalizeText(data.city) ?? parsed.city ?? restaurantAddress?.city ?? null
-	const house = normalizeText(data.house) ?? parsed.house
+	const house =
+		readLimitedText(data.house, 10) ??
+		readLimitedText(parsed.house, 10) ??
+		DEFAULT_LEGACY_ADDRESS_HOUSE
 
 	if (!streetId && !classifierId && !streetName) {
 		throw new NonRetryableIikoOrderExportError(
 			'iiko legacy delivery address requires streetId, streetClassifierId, or street name'
-		)
-	}
-	if (!house) {
-		throw new NonRetryableIikoOrderExportError(
-			'iiko legacy delivery address requires house'
 		)
 	}
 
@@ -1036,30 +1035,21 @@ function parseLegacyAddress(address: string): {
 		.map(part => normalizeText(part))
 		.filter((part): part is string => Boolean(part))
 
-	if (parts.length >= 3) {
-		if (parts.length >= 4) {
-			return {
-				city: parts[parts.length - 3] ?? null,
-				street: parts[parts.length - 2] ?? null,
-				house: parts.slice(parts.length - 1).join(', ')
-			}
-		}
+	if (parts.length >= 2) {
+		const lastPart = parts[parts.length - 1] ?? null
+		const hasHouse = isLegacyHouseValue(lastPart)
+		const streetIndex = hasHouse ? parts.length - 2 : parts.length - 1
+		const cityIndex = streetIndex - 1
+
 		return {
-			city: parts[0],
-			street: parts[1],
-			house: parts.slice(2).join(', ')
-		}
-	}
-	if (parts.length === 2) {
-		return {
-			city: null,
-			street: parts[0],
-			house: parts[1]
+			city: cityIndex >= 0 ? (parts[cityIndex] ?? null) : null,
+			street: parts[streetIndex] ?? null,
+			house: hasHouse ? lastPart : null
 		}
 	}
 
 	const match = address.match(/^(.+?)\s+((?:д\.?\s*)?\d[\p{L}\d/-]*)$/iu)
-	if (match) {
+	if (match && isLegacyHouseValue(match[2])) {
 		return {
 			city: null,
 			street: normalizeText(match[1]),
@@ -1072,6 +1062,15 @@ function parseLegacyAddress(address: string): {
 		street: normalizeText(address),
 		house: null
 	}
+}
+
+function isLegacyHouseValue(value: unknown): boolean {
+	const house = normalizeText(value)
+	if (!house) return false
+
+	return /^(?:д\.?\s*)?(?:№|#)?\s*\d[\p{L}\d./-]*(?:\s*(?:к|корп\.?|корпус|стр\.?|строение|с|лит\.?|литера)\s*[\p{L}\d./-]+)?$/iu.test(
+		house
+	)
 }
 
 function resolveDeliveryCoordinates(

@@ -1,4 +1,5 @@
 import {
+	CatalogPresentationMode,
 	CatalogStatus,
 	IntegrationSyncRunStatus,
 	IntegrationSyncRunTrigger,
@@ -16,6 +17,7 @@ import {
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
 
 const CATALOG_INVENTORY_MODE_VALUES = ['NONE', 'EXTERNAL', 'INTERNAL'] as const
+const CATALOG_PRESENTATION_MODE_VALUES = ['CATALOG', 'BUSINESS_CARD'] as const
 const MOYSKLAD_STOCK_APPLY_SOURCES = ['FULL_SYNC', 'WEBHOOK'] as const
 
 export class AdminDeleteInfoDto {
@@ -388,6 +390,9 @@ export class AdminCatalogActivityListItemDto {
 export class AdminCatalogConfigListItemDto {
 	@ApiProperty({ enum: CatalogStatus })
 	status: CatalogStatus
+
+	@ApiProperty({ enum: CATALOG_PRESENTATION_MODE_VALUES })
+	presentationMode: CatalogPresentationMode
 
 	@ApiProperty({ enum: CATALOG_INVENTORY_MODE_VALUES })
 	inventoryMode: CatalogInventoryMode

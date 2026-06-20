@@ -111,6 +111,11 @@ enum ProductsDisplayMode {
   CATEGORY
 }
 
+enum CatalogPresentationMode {
+  CATALOG
+  BUSINESS_CARD
+}
+
 enum CatalogExperienceMode {
   DELIVERY
   BROWSE

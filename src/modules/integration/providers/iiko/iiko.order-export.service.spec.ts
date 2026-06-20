@@ -637,6 +637,82 @@ describe('IikoOrderExportService', () => {
 		})
 	})
 
+	it('uses default legacy house for landmark delivery address', async () => {
+		jest
+			.spyOn(IikoClient.prototype, 'getOrganizationSettings')
+			.mockResolvedValueOnce({
+				correlationId: 'settings-corr-1',
+				organizations: [
+					{
+						id: 'org-1',
+						addressFormatType: 'Legacy',
+						restaurantAddress: 'Грозный, Проспект Путина, 1'
+					}
+				]
+			})
+		repo.findOrderForExport.mockResolvedValueOnce({
+			...order,
+			address: 'Грозный Молл',
+			checkoutMethod: CartCheckoutMethod.DELIVERY,
+			checkoutData: {
+				address: 'Грозный Молл',
+				customerName: 'Ivan',
+				phone: '+7 (988) 111-22-33'
+			},
+			isDelivery: true
+		} as any)
+
+		await service.exportOrder(exportRecord as any)
+		const payload = repo.setOrderExportPayload.mock.calls[0]?.[1] as any
+
+		expect(payload.order.deliveryPoint).toEqual({
+			address: {
+				type: 'legacy',
+				street: {
+					name: 'Грозный Молл',
+					city: 'Грозный'
+				},
+				house: '-'
+			},
+			comment: 'Грозный Молл'
+		})
+	})
+
+	it('does not treat a comma-separated legacy landmark as house', async () => {
+		jest
+			.spyOn(IikoClient.prototype, 'getOrganizationSettings')
+			.mockResolvedValueOnce({
+				correlationId: 'settings-corr-1',
+				organizations: [{ id: 'org-1', addressFormatType: 'Legacy' }]
+			})
+		repo.findOrderForExport.mockResolvedValueOnce({
+			...order,
+			address: 'Грозный, Грозный Молл',
+			checkoutMethod: CartCheckoutMethod.DELIVERY,
+			checkoutData: {
+				address: 'Грозный, Грозный Молл',
+				customerName: 'Ivan',
+				phone: '+7 (988) 111-22-33'
+			},
+			isDelivery: true
+		} as any)
+
+		await service.exportOrder(exportRecord as any)
+		const payload = repo.setOrderExportPayload.mock.calls[0]?.[1] as any
+
+		expect(payload.order.deliveryPoint).toEqual({
+			address: {
+				type: 'legacy',
+				street: {
+					name: 'Грозный Молл',
+					city: 'Грозный'
+				},
+				house: '-'
+			},
+			comment: 'Грозный, Грозный Молл'
+		})
+	})
+
 	it('lets iiko validate legacy street without city when no fallback city exists', async () => {
 		jest
 			.spyOn(IikoClient.prototype, 'getOrganizationSettings')

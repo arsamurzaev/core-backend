@@ -1,6 +1,7 @@
 import {
 	CartCheckoutMethod,
 	CatalogExperienceMode,
+	CatalogPresentationMode,
 	CatalogStatus,
 	ContactType,
 	Metric,
@@ -16,6 +17,7 @@ import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
 
 const CATALOG_INVENTORY_MODES = ['NONE', 'EXTERNAL', 'INTERNAL'] as const
+const CATALOG_PRESENTATION_MODES = ['CATALOG', 'BUSINESS_CARD'] as const
 
 export class CatalogConfigDto {
 	@ApiProperty({ enum: CatalogStatus })
@@ -82,6 +84,9 @@ export class CatalogCheckoutConfigDto {
 export class CatalogSettingsDto {
 	@ApiProperty({ type: Boolean })
 	isActive: boolean
+
+	@ApiProperty({ enum: CATALOG_PRESENTATION_MODES })
+	presentationMode: CatalogPresentationMode
 
 	@ApiProperty({ enum: CatalogExperienceMode })
 	defaultMode: CatalogExperienceMode

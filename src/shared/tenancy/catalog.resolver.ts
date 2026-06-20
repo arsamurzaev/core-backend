@@ -7,6 +7,7 @@ export type ResolvedCatalog = {
 	catalogId: string
 	slug: string
 	typeId: string
+	presentationMode: 'CATALOG' | 'BUSINESS_CARD'
 
 	ownerUserId?: string | null
 	parentId?: string | null
@@ -49,14 +50,41 @@ export class CatalogResolver {
 		this.cache.set(key, { value, expiresAt: Date.now() + this.cacheMs })
 	}
 
+	private async withFreshPresentationMode(
+		catalog: ResolvedCatalog | null
+	): Promise<ResolvedCatalog | null> {
+		if (!catalog) return null
+
+		const settings = await this.prisma.catalogSettings.findUnique({
+			where: { catalogId: catalog.catalogId },
+			select: { presentationMode: true }
+		})
+
+		return {
+			...catalog,
+			presentationMode: settings?.presentationMode ?? 'CATALOG'
+		}
+	}
+
 	async resolveBySlug(slug: string): Promise<ResolvedCatalog | null> {
 		const key = `slug:${slug}`
 		const cached = this.getCached(key)
-		if (cached !== undefined) return cached
+		if (cached !== undefined) return this.withFreshPresentationMode(cached)
 
 		const catalog = await this.prisma.catalog.findFirst({
 			where: { slug, deleteAt: null },
-			select: { id: true, slug: true, typeId: true, userId: true, parentId: true }
+			select: {
+				id: true,
+				slug: true,
+				typeId: true,
+				userId: true,
+				parentId: true,
+				settings: {
+					select: {
+						presentationMode: true
+					}
+				}
+			}
 		})
 
 		const value = catalog
@@ -64,6 +92,7 @@ export class CatalogResolver {
 					catalogId: catalog.id,
 					slug: catalog.slug,
 					typeId: catalog.typeId,
+					presentationMode: catalog.settings?.presentationMode ?? 'CATALOG',
 					ownerUserId: catalog.userId ?? null,
 					parentId: catalog.parentId ?? null
 				}
@@ -79,7 +108,7 @@ export class CatalogResolver {
 
 		const key = `domain:${normalizedDomain}`
 		const cached = this.getCached(key)
-		if (cached !== undefined) return cached
+		if (cached !== undefined) return this.withFreshPresentationMode(cached)
 
 		const catalogDomain = await this.prisma.catalogDomain.findFirst({
 			where: {
@@ -94,7 +123,12 @@ export class CatalogResolver {
 						slug: true,
 						typeId: true,
 						userId: true,
-						parentId: true
+						parentId: true,
+						settings: {
+							select: {
+								presentationMode: true
+							}
+						}
 					}
 				}
 			}
@@ -109,7 +143,12 @@ export class CatalogResolver {
 					slug: true,
 					typeId: true,
 					userId: true,
-					parentId: true
+					parentId: true,
+					settings: {
+						select: {
+							presentationMode: true
+						}
+					}
 				}
 			}))
 
@@ -118,6 +157,7 @@ export class CatalogResolver {
 					catalogId: catalog.id,
 					slug: catalog.slug,
 					typeId: catalog.typeId,
+					presentationMode: catalog.settings?.presentationMode ?? 'CATALOG',
 					ownerUserId: catalog.userId ?? null,
 					parentId: catalog.parentId ?? null
 				}

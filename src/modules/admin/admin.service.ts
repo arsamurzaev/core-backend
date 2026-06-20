@@ -246,6 +246,7 @@ const adminCatalogSelect = {
 	},
 	settings: {
 		select: {
+			presentationMode: true,
 			inventoryMode: true
 		}
 	},
@@ -488,6 +489,7 @@ export class AdminService {
 				settings: {
 					select: {
 						isActive: true,
+						presentationMode: true,
 						defaultMode: true,
 						allowedModes: true,
 						inventoryMode: true,
@@ -1055,6 +1057,7 @@ export class AdminService {
 							where: { catalogId: catalog.id },
 							data: {
 								isActive: source.settings.isActive,
+								presentationMode: source.settings.presentationMode,
 								defaultMode: source.settings.defaultMode,
 								allowedModes: source.settings.allowedModes,
 								inventoryMode: source.settings.inventoryMode,
@@ -1696,6 +1699,8 @@ export class AdminService {
 		dto: AdminUpdateCatalogDtoReq,
 		actor?: AdminActor
 	) {
+		if (dto.presentationMode !== undefined) this.assertGlobalAdmin(actor)
+
 		await this.assertCatalogAccess(id, actor)
 		if (dto.regionalityIds !== undefined) {
 			await this.assertRegionalityIdsAllowed(dto.regionalityIds, actor, {
@@ -1780,6 +1785,16 @@ export class AdminService {
 							upsert: {
 								create: { status: dto.status },
 								update: { status: dto.status }
+							}
+						}
+					}
+				: {}),
+			...(dto.presentationMode !== undefined
+				? {
+						settings: {
+							upsert: {
+								create: { presentationMode: dto.presentationMode },
+								update: { presentationMode: dto.presentationMode }
 							}
 						}
 					}
@@ -3341,6 +3356,7 @@ export class AdminService {
 			config: config
 				? {
 						status: config.status,
+						presentationMode: settings?.presentationMode ?? 'CATALOG',
 						inventoryMode: settings?.inventoryMode ?? 'NONE',
 						...features
 					}

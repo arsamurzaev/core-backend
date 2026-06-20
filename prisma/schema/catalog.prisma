@@ -221,9 +221,10 @@ model CatalogSettings {
 
   isActive Boolean @default(true) @map("is_active")
 
-  defaultMode   CatalogExperienceMode   @default(DELIVERY) @map("default_mode")
-  allowedModes  CatalogExperienceMode[] @default([DELIVERY]) @map("allowed_modes")
-  inventoryMode CatalogInventoryMode    @default(NONE) @map("inventory_mode")
+  presentationMode CatalogPresentationMode @default(CATALOG) @map("presentation_mode")
+  defaultMode      CatalogExperienceMode   @default(DELIVERY) @map("default_mode")
+  allowedModes     CatalogExperienceMode[] @default([DELIVERY]) @map("allowed_modes")
+  inventoryMode    CatalogInventoryMode    @default(NONE) @map("inventory_mode")
 
   address  String? @map("address")
   checkout Json?

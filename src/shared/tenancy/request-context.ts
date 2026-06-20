@@ -8,6 +8,7 @@ export type RequestContextStore = {
 	catalogId?: string
 	catalogSlug?: string
 	typeId?: string
+	presentationMode?: 'CATALOG' | 'BUSINESS_CARD'
 
 	ownerUserId?: string | null
 

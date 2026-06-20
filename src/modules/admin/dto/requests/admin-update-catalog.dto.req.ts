@@ -1,4 +1,4 @@
-import { CatalogStatus } from '@generated/enums'
+import { CatalogPresentationMode, CatalogStatus } from '@generated/enums'
 import { ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
 import {
@@ -85,6 +85,16 @@ export class AdminUpdateCatalogDtoReq {
 	@IsOptional()
 	@IsEnum(CatalogStatus)
 	status?: CatalogStatus
+
+	@ApiPropertyOptional({
+		enum: CatalogPresentationMode,
+		example: CatalogPresentationMode.CATALOG,
+		description:
+			'Controls storefront presentation: full catalog or contact-only business card.'
+	})
+	@IsOptional()
+	@IsEnum(CatalogPresentationMode)
+	presentationMode?: CatalogPresentationMode
 
 	@ApiPropertyOptional({
 		type: String,
