@@ -29,10 +29,11 @@ model Type {
 
   // ─── Связи ───
   // Каталоги этого типа (H&M, Zara для clothing)
-  catalogs   Catalog[]
+  catalogs       Catalog[]
+  catalogSignups CatalogSignup[]
   // Атрибуты, определённые для этого типа (size, color для clothing)
-  attributes Attribute[]
-  activities Activity[]
+  attributes     Attribute[]
+  activities     Activity[]
 
   deleteAt  DateTime? @map("delete_at") // Дата удаления 
   createdAt DateTime  @default(now()) @map("created_at")

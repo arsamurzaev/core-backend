@@ -180,6 +180,13 @@ enum CatalogDomainStatus {
   DISABLED
 }
 
+enum CatalogSignupStatus {
+  PENDING
+  CONFIRMED
+  CONSUMED
+  EXPIRED
+}
+
 enum PaymentMethod {
   CASH
   TRANSFER

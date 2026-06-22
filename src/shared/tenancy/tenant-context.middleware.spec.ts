@@ -82,4 +82,26 @@ describe('CatalogContextMiddleware', () => {
 		)
 		expect((req as any).catalogId).toBe('catalog-2')
 	})
+
+	it.each(['register', 'login'])(
+		'does not treat %s platform subdomain as catalog slug',
+		async subdomain => {
+			process.env.CATALOG_BASE_DOMAINS = 'myctlg.ru'
+
+			const resolver = {
+				resolveBySlug: jest.fn(),
+				resolveByDomain: jest.fn().mockResolvedValue(null)
+			}
+			const middleware = new CatalogContextMiddleware(resolver as any)
+			const req = createRequest(`${subdomain}.myctlg.ru`)
+
+			await middleware.use(req, createResponse(), jest.fn())
+
+			expect(resolver.resolveBySlug).not.toHaveBeenCalled()
+			expect(resolver.resolveByDomain).toHaveBeenCalledWith(
+				`${subdomain}.myctlg.ru`
+			)
+			expect((req as any).catalogId).toBeUndefined()
+		}
+	)
 })

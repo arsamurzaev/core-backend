@@ -1,0 +1,31 @@
+model CatalogSignup {
+  id String @id @default(uuid()) @db.Uuid
+
+  fullName    String @map("full_name") @db.VarChar(255)
+  phone       String @db.VarChar(64)
+  email       String @db.VarChar(320)
+  catalogName String @map("catalog_name") @db.VarChar(255)
+  slug        String @db.VarChar(63)
+
+  type   Type   @relation(fields: [typeId], references: [id])
+  typeId String @map("type_id") @db.Uuid
+
+  tokenHash String              @unique @map("token_hash") @db.VarChar(64)
+  status    CatalogSignupStatus @default(PENDING)
+  expiresAt DateTime            @map("expires_at")
+
+  createdUser      User?    @relation("CatalogSignupCreatedUser", fields: [createdUserId], references: [id], onDelete: SetNull)
+  createdUserId    String?  @map("created_user_id") @db.Uuid
+  createdCatalog   Catalog? @relation("CatalogSignupCreatedCatalog", fields: [createdCatalogId], references: [id], onDelete: SetNull)
+  createdCatalogId String?  @map("created_catalog_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([email, status])
+  @@index([slug, status, expiresAt])
+  @@index([typeId])
+  @@index([createdUserId])
+  @@index([createdCatalogId])
+  @@map("catalog_signups")
+}

@@ -47,7 +47,13 @@ export class OptionalSessionGuard implements CanActivate {
 
 			const user = await this.prisma.user.findFirst({
 				where: { id: session.userId, deleteAt: null },
-				select: { id: true, role: true, login: true, name: true }
+				select: {
+					id: true,
+					role: true,
+					login: true,
+					name: true,
+					mustChangePassword: true
+				}
 			})
 			if (!user) {
 				clearSessionCookies(

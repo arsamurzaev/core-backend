@@ -20,7 +20,7 @@ describe('AuthService', () => {
 	let service: AuthService
 	let prisma: {
 		user: { findFirst: jest.Mock; update: jest.Mock }
-		catalog: { findUnique: jest.Mock }
+		catalog: { findFirst: jest.Mock; findUnique: jest.Mock }
 	}
 	let sessions: {
 		get: jest.Mock
@@ -48,6 +48,7 @@ describe('AuthService', () => {
 				update: jest.fn()
 			},
 			catalog: {
+				findFirst: jest.fn(),
 				findUnique: jest.fn()
 			}
 		}
@@ -110,7 +111,8 @@ describe('AuthService', () => {
 			login: 'admin',
 			name: 'Admin',
 			role: Role.ADMIN,
-			password: 'hashed-password'
+			password: 'hashed-password',
+			mustChangePassword: false
 		})
 		;(verify as jest.Mock).mockResolvedValue(true)
 		sessions.get.mockResolvedValue(null)
@@ -131,6 +133,45 @@ describe('AuthService', () => {
 			'success',
 			'none'
 		)
+	})
+
+	it('returns catalog redirect url for catalog owner platform login', async () => {
+		process.env.CATALOG_BASE_DOMAINS = 'myctlg.ru'
+		prisma.user.findFirst.mockResolvedValue({
+			id: 'user-2',
+			login: 'flowers',
+			name: 'Flowers Owner',
+			role: Role.CATALOG,
+			password: 'hashed-password',
+			mustChangePassword: false
+		})
+		prisma.catalog.findFirst.mockResolvedValue({
+			id: 'catalog-1',
+			slug: 'flowers'
+		})
+		;(verify as jest.Mock).mockResolvedValue(true)
+		sessions.get.mockResolvedValue(null)
+		sessions.createForUser.mockResolvedValue({
+			sid: 'sid-1',
+			csrf: 'csrf-1'
+		})
+
+		const result = await service.login(
+			{ login: 'flowers', password: 'secret' },
+			{ ip: '127.0.0.1', userAgent: 'jest' }
+		)
+
+		expect(result).toMatchObject({
+			catalogId: 'catalog-1',
+			redirectUrl: 'https://flowers.myctlg.ru'
+		})
+		expect(sessions.createForUser).toHaveBeenCalledWith('user-2', {
+			meta: {
+				ip: '127.0.0.1',
+				userAgent: 'jest',
+				catalogId: 'catalog-1'
+			}
+		})
 	})
 
 	it('records failed admin login metrics on invalid credentials', async () => {
@@ -157,7 +198,8 @@ describe('AuthService', () => {
 			login: 'catalog-user',
 			name: 'Catalog User',
 			role: Role.CATALOG,
-			password: 'hashed-password'
+			password: 'hashed-password',
+			mustChangePassword: false
 		})
 		;(verify as jest.Mock).mockResolvedValue(true)
 		prisma.catalog.findUnique.mockResolvedValue({
@@ -201,7 +243,7 @@ describe('AuthService', () => {
 		expect(hash).toHaveBeenCalledWith('newPassword')
 		expect(prisma.user.update).toHaveBeenCalledWith({
 			where: { id: 'user-1' },
-			data: { password: 'new-hash' }
+			data: { password: 'new-hash', mustChangePassword: false }
 		})
 		expect(sessions.destroyAllForUserExcept).toHaveBeenCalledWith(
 			'user-1',

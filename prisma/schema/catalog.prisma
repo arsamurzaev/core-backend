@@ -75,6 +75,7 @@ model Catalog {
   cartTableSessions         CartTableSession[]
   media                     Media[]
   domains                   CatalogDomain[]
+  catalogSignups            CatalogSignup[]             @relation("CatalogSignupCreatedCatalog")
   featureEntitlements       CatalogFeatureEntitlement[]
   inventoryWarehouses       InventoryWarehouseCatalog[]
   integrationExternalItems  IntegrationExternalItem[]

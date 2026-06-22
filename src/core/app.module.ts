@@ -18,6 +18,7 @@ import { AuthModule } from '@/modules/auth/auth.module'
 import { BrandModule } from '@/modules/brand/brand.module'
 import { CartModule } from '@/modules/cart/cart.module'
 import { CatalogModifierModule } from '@/modules/catalog-modifier/catalog-modifier.module'
+import { CatalogOnboardingModule } from '@/modules/catalog-onboarding/public'
 import { CatalogPriceListModule } from '@/modules/catalog-price-list/catalog-price-list.module'
 import { CatalogSaleUnitModule } from '@/modules/catalog-sale-unit/catalog-sale-unit.module'
 import { CatalogModule } from '@/modules/catalog/catalog.module'
@@ -157,6 +158,7 @@ function shouldSkipAuthThrottler(context: ExecutionContext): boolean {
 		AttributeModule,
 		BrandModule,
 		UserModule,
+		CatalogOnboardingModule,
 		CatalogModule,
 		CatalogModifierModule,
 		CatalogPriceListModule,

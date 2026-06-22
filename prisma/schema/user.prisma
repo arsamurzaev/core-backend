@@ -6,11 +6,16 @@ model User {
   login    String
   password String
 
+  email              String?
+  phone              String?
+  mustChangePassword Boolean @default(false) @map("must_change_password")
+
   role Role
 
   isEmailConfirmed Boolean
 
   catalogs            Catalog[]
+  catalogSignups      CatalogSignup[]      @relation("CatalogSignupCreatedUser")
   countries           Country[]
   regions             Regionality[]
   inventoryWarehouses InventoryWarehouse[]

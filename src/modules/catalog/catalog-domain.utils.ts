@@ -24,7 +24,7 @@ export function readCatalogReservedSubdomains(): Set<string> {
 	return new Set(
 		parseCsv(
 			process.env.CATALOG_RESERVED_SUBDOMAINS ??
-				'www,api,admin,app,static,cdn,assets,shtab,customers'
+				'www,api,admin,app,static,cdn,assets,shtab,customers,register,login'
 		)
 	)
 }

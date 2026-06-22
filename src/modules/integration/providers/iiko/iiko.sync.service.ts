@@ -230,6 +230,11 @@ export class IikoSyncService {
 				groups: menu.groups
 			})
 			const products = this.resolveSyncableProducts(menu)
+			const deactivatedProducts = await this.deactivateUnsyncableLinkedProducts({
+				catalogId,
+				integration: locked,
+				menu
+			})
 
 			const result = await this.syncProducts({
 				catalogId,
@@ -245,7 +250,7 @@ export class IikoSyncService {
 			const deletedProducts = await this.archiveMissingProducts({
 				catalogId,
 				integration: locked,
-				currentExternalIds: products.map(product => product.id)
+				currentExternalIds: this.resolveMenuProductExternalIds(menu)
 			})
 			const stock = metadata.terminalGroupId
 				? await this.applyStopListAvailability({
@@ -260,7 +265,7 @@ export class IikoSyncService {
 			await this.repo.finishIikoSync(catalogId, {
 				totalProducts: products.length,
 				createdProducts: result.createdProducts,
-				updatedProducts: result.updatedProducts,
+				updatedProducts: result.updatedProducts + deactivatedProducts,
 				deletedProducts,
 				syncedAt,
 				lastRevision: normalizeRevision(menu.revision),
@@ -279,7 +284,7 @@ export class IikoSyncService {
 				ok: true,
 				totalProducts: products.length,
 				createdProducts: result.createdProducts,
-				updatedProducts: result.updatedProducts,
+				updatedProducts: result.updatedProducts + deactivatedProducts,
 				deletedProducts,
 				createdVariants: result.createdVariants,
 				updatedVariants: result.updatedVariants,
@@ -720,6 +725,56 @@ export class IikoSyncService {
 			}
 			return resolvePriceOptions(product, new Map()).length > 0
 		})
+	}
+
+	private resolveMenuProductExternalIds(menu: IikoSyncMenu): string[] {
+		return Array.from(
+			new Set(
+				menu.products
+					.map(product => normalizeOptionalString(product.id))
+					.filter((id): id is string => Boolean(id))
+			)
+		)
+	}
+
+	private async deactivateUnsyncableLinkedProducts(params: {
+		catalogId: string
+		integration: IntegrationRecord
+		menu: IikoSyncMenu
+	}): Promise<number> {
+		const syncableExternalIds = new Set(
+			this.resolveSyncableProducts(params.menu).map(product => product.id)
+		)
+		let deactivated = 0
+
+		for (const product of params.menu.products) {
+			const externalId = normalizeOptionalString(product.id)
+			if (!externalId || syncableExternalIds.has(externalId)) continue
+
+			const link = await this.repo.findProductLinkByExternalId(
+				params.integration.id,
+				externalId
+			)
+			const localProduct = await this.findLinkedProduct(params.catalogId, link)
+			if (!localProduct || !canDeactivateUnsyncableIikoProduct(localProduct)) {
+				continue
+			}
+
+			const updated = await this.products.updateExternalProduct({
+				catalogId: params.catalogId,
+				productId: localProduct.id,
+				data: { status: ProductStatus.HIDDEN }
+			})
+			if (!updated) continue
+
+			await this.products.recomputeProductCommercialState({
+				catalogId: params.catalogId,
+				productId: localProduct.id
+			})
+			deactivated += 1
+		}
+
+		return deactivated
 	}
 
 	private async syncProducts(params: {
@@ -1208,6 +1263,16 @@ export class IikoSyncService {
 
 function isSyncableGroup(group: IikoSyncCategory): boolean {
 	return Boolean(group.id && group.name && !group.isDeleted && !group.isHidden)
+}
+
+function canDeactivateUnsyncableIikoProduct(
+	product: ProductExternalSyncProductRecord
+): boolean {
+	return (
+		product.status !== ProductStatus.HIDDEN &&
+		product.status !== ProductStatus.DRAFT &&
+		product.status !== ProductStatus.DELETE
+	)
 }
 
 function resolvePriceOptions(

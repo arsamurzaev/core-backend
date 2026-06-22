@@ -47,6 +47,7 @@ export class CatalogResolver {
 
 	private setCached(key: string, value: ResolvedCatalog | null): void {
 		if (!this.cacheMs) return
+		if (value === null) return
 		this.cache.set(key, { value, expiresAt: Date.now() + this.cacheMs })
 	}
 

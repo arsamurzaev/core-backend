@@ -72,7 +72,7 @@ export class AuthController {
 	) {
 		const { ip, userAgent } = getClientInfo(req)
 		const existingSid = getSessionCookie(req)
-		const { sid, csrf, user, catalogId } = await this.auth.login(
+		const { sid, csrf, user, catalogId, redirectUrl } = await this.auth.login(
 			dto,
 			{ ip, userAgent },
 			existingSid
@@ -88,7 +88,7 @@ export class AuthController {
 				: null
 		)
 
-		return { ok: true, user, catalogId }
+		return { ok: true, user, catalogId, redirectUrl }
 	}
 
 	@UseGuards(SessionGuard)

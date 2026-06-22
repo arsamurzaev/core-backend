@@ -449,21 +449,20 @@ export class ProductSellableService implements ProductSellableReader {
 		)
 		if (!enabledVariants.length) return 'UNAVAILABLE'
 
+		const availableVariants = enabledVariants.filter(
+			variant =>
+				variant.status === ProductVariantStatus.ACTIVE && variant.isAvailable
+		)
+		if (!availableVariants.length) return 'OUT_OF_STOCK'
+
 		if (!options.enforceStock) return 'AVAILABLE'
 
-		const hasEnoughStock = enabledVariants.some(
-			variant =>
-				variant.status === ProductVariantStatus.ACTIVE &&
-				variant.isAvailable &&
-				(variant.stock === null || variant.stock >= quantity)
+		const hasEnoughStock = availableVariants.some(
+			variant => variant.stock === null || variant.stock >= quantity
 		)
 		if (hasEnoughStock) return 'AVAILABLE'
 
-		return enabledVariants.some(
-			variant => variant.status === ProductVariantStatus.ACTIVE
-		)
-			? 'OUT_OF_STOCK'
-			: 'UNAVAILABLE'
+		return 'OUT_OF_STOCK'
 	}
 
 	private resolveTotalStock(variants: ProductVariantRow[]): number | null {

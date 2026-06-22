@@ -10,4 +10,12 @@ export class AuthLoginResponseDto extends OkResponseDto {
 
 	@ApiPropertyOptional({ type: String, nullable: true })
 	catalogId?: string | null
+
+	@ApiPropertyOptional({
+		type: String,
+		nullable: true,
+		description:
+			'URL for frontend redirect after platform login. Catalog owners receive their catalog URL.'
+	})
+	redirectUrl?: string | null
 }

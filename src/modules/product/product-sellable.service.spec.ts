@@ -251,6 +251,78 @@ describe('ProductSellableService', () => {
 		)
 	})
 
+	it('blocks selected out-of-stock variant even when stock enforcement is disabled', async () => {
+		prisma.product.findFirst.mockResolvedValue({
+			id: 'product-1',
+			catalogId: 'catalog-1',
+			price: null,
+			status: ProductStatus.ACTIVE,
+			variants: [
+				{
+					id: 'variant-s',
+					variantKey: 'size=s',
+					kind: ProductVariantKind.MATRIX,
+					price: 1000,
+					stock: 0,
+					status: ProductVariantStatus.OUT_OF_STOCK,
+					isAvailable: false,
+					attributes: [{ id: 'attribute-size-s' }]
+				},
+				{
+					id: 'variant-m',
+					variantKey: 'size=m',
+					kind: ProductVariantKind.MATRIX,
+					price: 1200,
+					stock: null,
+					status: ProductVariantStatus.ACTIVE,
+					isAvailable: true,
+					attributes: [{ id: 'attribute-size-m' }]
+				}
+			]
+		})
+
+		await expect(
+			service.resolveVariantSellable('catalog-1', 'product-1', 'variant-s')
+		).resolves.toEqual(
+			expect.objectContaining({
+				variantId: 'variant-s',
+				availabilityState: 'OUT_OF_STOCK',
+				stock: 0
+			})
+		)
+	})
+
+	it('blocks selected unavailable variant even when stock is not enforced', async () => {
+		prisma.product.findFirst.mockResolvedValue({
+			id: 'product-1',
+			catalogId: 'catalog-1',
+			price: null,
+			status: ProductStatus.ACTIVE,
+			variants: [
+				{
+					id: 'variant-s',
+					variantKey: 'size=s',
+					kind: ProductVariantKind.MATRIX,
+					price: 1000,
+					stock: null,
+					status: ProductVariantStatus.ACTIVE,
+					isAvailable: false,
+					attributes: [{ id: 'attribute-size-s' }]
+				}
+			]
+		})
+
+		await expect(
+			service.resolveVariantSellable('catalog-1', 'product-1', 'variant-s')
+		).resolves.toEqual(
+			expect.objectContaining({
+				variantId: 'variant-s',
+				availabilityState: 'OUT_OF_STOCK',
+				stock: null
+			})
+		)
+	})
+
 	it('treats null variant stock as untracked stock', async () => {
 		prisma.product.findFirst.mockResolvedValue({
 			id: 'product-1',

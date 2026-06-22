@@ -1,11 +1,13 @@
 export * from './contracts'
 export {
+	getSessionCookie,
 	resolveCookieDomain,
 	resolveServerHost,
 	setSessionCookies
 } from './auth-cookie.utils'
 export { AuthService } from './auth.service'
 export { ChangePasswordDtoReq } from './dto/requests/change-password.dto.req'
+export { AuthUserDto } from './dto/responses/auth-user.dto.res'
 export {
 	AuthSessionDto,
 	AuthSessionsResponseDto

@@ -13,7 +13,7 @@ import type {
 const RESERVED_SUBDOMAINS = new Set(
 	(
 		process.env.CATALOG_RESERVED_SUBDOMAINS ??
-		'www,api,admin,app,static,cdn,assets'
+		'www,api,admin,app,static,cdn,assets,shtab,customers,register,login'
 	)
 		.split(',')
 		.map(value => value.trim().toLowerCase())

@@ -66,7 +66,9 @@ const DEFAULT_RESERVED_SUBDOMAINS = [
 	'cdn',
 	'assets',
 	'shtab',
-	'customers'
+	'customers',
+	'register',
+	'login'
 ]
 
 // Вернёт slug, если host = {slug}.{baseDomain}

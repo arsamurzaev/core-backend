@@ -12,6 +12,7 @@ import { hash, verify } from 'argon2'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { RedisService } from '@/infrastructure/redis/redis.service'
+import { readCatalogBaseDomains } from '@/modules/catalog/catalog-domain.utils'
 import {
 	OBSERVABILITY_RECORDER_PORT,
 	type ObservabilityRecorderPort
@@ -132,7 +133,14 @@ export class AuthService {
 
 		const user = await this.prisma.user.findFirst({
 			where: { login, deleteAt: null },
-			select: { id: true, login: true, name: true, role: true, password: true }
+			select: {
+				id: true,
+				login: true,
+				name: true,
+				role: true,
+				password: true,
+				mustChangePassword: true
+			}
 		})
 
 		if (!user?.password) {
@@ -144,7 +152,13 @@ export class AuthService {
 			throw new UnauthorizedException('Неверные учётные данные')
 		}
 
-		return { id: user.id, login: user.login, name: user.name, role: user.role }
+		return {
+			id: user.id,
+			login: user.login,
+			name: user.name,
+			role: user.role,
+			mustChangePassword: user.mustChangePassword
+		}
 	}
 
 	async login(dto: LoginDtoReq, meta?: LoginMeta, existingSid?: string | null) {
@@ -153,12 +167,14 @@ export class AuthService {
 			const user = await this.validateUser(dto)
 
 			let catalogId: string | null = null
+			let redirectUrl: string | null = null
 			if (user.role === Role.CATALOG) {
 				const catalog = await this.prisma.catalog.findFirst({
 					where: { userId: user.id },
-					select: { id: true }
+					select: { id: true, slug: true }
 				})
 				catalogId = catalog?.id ?? null
+				redirectUrl = catalog?.slug ? buildCatalogUrl(catalog.slug) : null
 			}
 
 			const { sid, csrf, reused } = await this.createSessionForUser(
@@ -175,7 +191,7 @@ export class AuthService {
 				sessionReused: reused
 			})
 
-			return { sid, csrf, user, catalogId }
+			return { sid, csrf, user, catalogId, redirectUrl }
 		} catch (error) {
 			if (error instanceof UnauthorizedException) {
 				await this.recordFailedAttempt(meta?.ip)
@@ -280,7 +296,7 @@ export class AuthService {
 		const password = await hash(dto.newPassword)
 		await this.prisma.user.update({
 			where: { id: user.id },
-			data: { password }
+			data: { password, mustChangePassword: false }
 		})
 
 		if (currentSessionId) {
@@ -360,4 +376,8 @@ export class AuthService {
 
 		return 'other'
 	}
+}
+
+function buildCatalogUrl(slug: string): string {
+	return `https://${slug}.${readCatalogBaseDomains()[0] ?? 'myctlg.ru'}`
 }

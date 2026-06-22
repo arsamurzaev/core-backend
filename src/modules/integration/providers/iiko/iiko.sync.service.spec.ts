@@ -372,6 +372,91 @@ describe('IikoSyncService', () => {
 		expect(products.syncExternalProductDescription).not.toHaveBeenCalled()
 	})
 
+	it('hides linked products that become hidden in iiko external menu immediately', async () => {
+		jest.spyOn(IikoClient.prototype, 'getExternalMenuById').mockResolvedValue({
+			itemGroups: [
+				{
+					id: 'group-1',
+					name: 'Tea',
+					items: [
+						{
+							id: 'product-1',
+							sku: 'TEA',
+							name: 'Mango chamomile tea',
+							type: 'DISH',
+							orderItemType: 'Product',
+							isHidden: true,
+							itemSizes: [
+								{
+									id: 'size-default',
+									sizeName: 'Default',
+									isDefault: true,
+									prices: [{ organizations: ['org-1'], price: 250 }]
+								}
+							]
+						}
+					]
+				}
+			],
+			revision: 13
+		})
+
+		const repo = createRepoMock()
+		repo.findProductLinkByExternalId.mockResolvedValue({
+			id: 'product-link-1',
+			productId: 'local-product-1',
+			externalId: 'product-1'
+		})
+		const products = createProductsMock()
+		products.findExternalProductById.mockResolvedValue({
+			id: 'local-product-1',
+			catalogId: 'catalog-1',
+			productTypeId: null,
+			name: 'Mango chamomile tea',
+			sku: 'TEA',
+			slug: 'mango-chamomile-tea',
+			price: 250,
+			status: ProductStatus.ACTIVE,
+			deleteAt: null
+		})
+		products.updateExternalProduct.mockResolvedValue({
+			id: 'local-product-1',
+			catalogId: 'catalog-1',
+			productTypeId: null,
+			name: 'Mango chamomile tea',
+			sku: 'TEA',
+			slug: 'mango-chamomile-tea',
+			price: 250,
+			status: ProductStatus.HIDDEN,
+			deleteAt: null
+		})
+		const service = createService(repo, products)
+
+		const result = await service.syncCatalog('catalog-1')
+
+		expect(result.totalProducts).toBe(0)
+		expect(result.updatedProducts).toBe(1)
+		expect(products.updateExternalProduct).toHaveBeenCalledWith({
+			catalogId: 'catalog-1',
+			productId: 'local-product-1',
+			data: { status: ProductStatus.HIDDEN }
+		})
+		expect(products.recomputeProductCommercialState).toHaveBeenCalledWith({
+			catalogId: 'catalog-1',
+			productId: 'local-product-1'
+		})
+		expect(products.softDeleteExternalProduct).not.toHaveBeenCalled()
+		expect(repo.finishIikoSync).toHaveBeenCalledWith(
+			'catalog-1',
+			expect.objectContaining({
+				totalProducts: 0,
+				updatedProducts: 1,
+				deletedProducts: 0,
+				lastRevision: 13
+			})
+		)
+	})
+
 	it('syncs one linked iiko product without hiding missing products', async () => {
 		jest.spyOn(IikoClient.prototype, 'getExternalMenuById').mockResolvedValue({
 			itemGroups: [

@@ -8,6 +8,7 @@ export type SessionUser = {
 	role: Role
 	login?: string | null
 	name?: string | null
+	mustChangePassword?: boolean
 }
 
 export type AuthRequest = Request & {

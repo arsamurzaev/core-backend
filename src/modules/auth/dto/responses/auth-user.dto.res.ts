@@ -13,4 +13,7 @@ export class AuthUserDto {
 
 	@ApiProperty({ enum: Role })
 	role: Role
+
+	@ApiProperty({ type: Boolean })
+	mustChangePassword: boolean
 }
