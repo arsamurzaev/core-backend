@@ -41,6 +41,7 @@ const TERMINAL_CART_STATUSES = new Set<CartStatus>([
 ])
 
 const INVENTORY_MODE_NONE: CatalogInventoryMode = 'NONE'
+const INVENTORY_MODE_EXTERNAL: CatalogInventoryMode = 'EXTERNAL'
 const INVENTORY_MODE_INTERNAL: CatalogInventoryMode = 'INTERNAL'
 
 const checkoutCartSelect = {
@@ -323,6 +324,7 @@ export class OrderCheckoutService {
 	): boolean {
 		return (
 			inventoryMode !== INVENTORY_MODE_NONE &&
+			inventoryMode !== INVENTORY_MODE_EXTERNAL &&
 			inventoryMode !== INVENTORY_MODE_INTERNAL
 		)
 	}

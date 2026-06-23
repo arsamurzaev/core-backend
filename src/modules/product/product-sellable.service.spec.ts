@@ -61,6 +61,61 @@ describe('ProductSellableService', () => {
 		)
 	})
 
+	it('treats zero stock as available when stock enforcement is disabled', async () => {
+		prisma.product.findFirst.mockResolvedValue({
+			id: 'product-1',
+			catalogId: 'catalog-1',
+			price: null,
+			status: ProductStatus.ACTIVE,
+			variants: [
+				{
+					id: 'default-variant',
+					variantKey: 'default',
+					price: 1200,
+					stock: 0,
+					status: ProductVariantStatus.ACTIVE,
+					isAvailable: true,
+					attributes: []
+				}
+			]
+		})
+
+		await expect(
+			service.resolveProductSellable('catalog-1', 'product-1', {
+				enforceStock: false
+			})
+		).resolves.toEqual(
+			expect.objectContaining({
+				availabilityState: 'AVAILABLE',
+				stock: 0
+			})
+		)
+
+		await expect(
+			service.resolveVariantSellable('catalog-1', 'product-1', 'default-variant', {
+				enforceStock: false
+			})
+		).resolves.toEqual(
+			expect.objectContaining({
+				mode: 'SIMPLE',
+				variantId: 'default-variant',
+				availabilityState: 'AVAILABLE',
+				stock: 0
+			})
+		)
+
+		await expect(
+			service.resolveVariantSellable('catalog-1', 'product-1', 'default-variant', {
+				enforceStock: true
+			})
+		).resolves.toEqual(
+			expect.objectContaining({
+				availabilityState: 'OUT_OF_STOCK',
+				stock: 0
+			})
+		)
+	})
+
 	it('uses default sale unit price as simple product display price', async () => {
 		prisma.product.findFirst.mockResolvedValue({
 			id: 'product-1',
@@ -587,6 +642,75 @@ describe('ProductSellableService', () => {
 				priceState: 'KNOWN',
 				displayPrice: '1200.00',
 				stock: 3
+			})
+		)
+	})
+
+	it('ignores technical default variant availability when product variants are disabled', async () => {
+		const capabilities = {
+			canUseCatalogSaleUnits: jest.fn().mockResolvedValue(false),
+			canUseProductVariants: jest.fn().mockResolvedValue(false)
+		}
+		service = new ProductSellableService(
+			prisma as never,
+			undefined,
+			capabilities as never
+		)
+		prisma.product.findFirst.mockResolvedValue({
+			id: 'product-1',
+			catalogId: 'catalog-1',
+			price: 990,
+			status: ProductStatus.ACTIVE,
+			variants: [
+				{
+					id: 'default-variant',
+					variantKey: 'default',
+					kind: ProductVariantKind.DEFAULT,
+					price: 990,
+					stock: 0,
+					status: ProductVariantStatus.OUT_OF_STOCK,
+					isAvailable: false,
+					attributes: []
+				}
+			]
+		})
+
+		await expect(
+			service.resolveProductSellable('catalog-1', 'product-1', {
+				enforceStock: false
+			})
+		).resolves.toEqual(
+			expect.objectContaining({
+				mode: 'SIMPLE',
+				variantId: 'default-variant',
+				priceState: 'KNOWN',
+				displayPrice: '990.00',
+				availabilityState: 'AVAILABLE',
+				stock: 0
+			})
+		)
+
+		await expect(
+			service.resolveVariantSellable('catalog-1', 'product-1', 'default-variant', {
+				enforceStock: false
+			})
+		).resolves.toEqual(
+			expect.objectContaining({
+				mode: 'SIMPLE',
+				variantId: 'default-variant',
+				availabilityState: 'AVAILABLE',
+				stock: 0
+			})
+		)
+
+		await expect(
+			service.resolveVariantSellable('catalog-1', 'product-1', 'default-variant', {
+				enforceStock: true
+			})
+		).resolves.toEqual(
+			expect.objectContaining({
+				availabilityState: 'OUT_OF_STOCK',
+				stock: 0
 			})
 		)
 	})

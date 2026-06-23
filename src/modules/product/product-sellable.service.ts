@@ -256,7 +256,12 @@ export class ProductSellableService implements ProductSellableReader {
 			availabilityState: this.resolveAvailabilityState(
 				product.status,
 				pricedAvailabilityCandidates,
-				options
+				options,
+				this.shouldIgnoreTechnicalVariantAvailability(
+					features,
+					options,
+					selectedVariant
+				)
 			),
 			stock: this.resolveTotalStock(pricedAvailabilityCandidates),
 			usesPriceList: Boolean(priceContext.priceList),
@@ -439,9 +444,11 @@ export class ProductSellableService implements ProductSellableReader {
 	private resolveAvailabilityState(
 		productStatus: ProductStatus,
 		variants: ProductVariantRow[],
-		options: ProductSellableResolveOptions
+		options: ProductSellableResolveOptions,
+		ignoreTechnicalVariantAvailability: boolean
 	): ProductSellableAvailabilityState {
 		if (productStatus !== ProductStatus.ACTIVE) return 'UNAVAILABLE'
+		if (ignoreTechnicalVariantAvailability) return 'AVAILABLE'
 
 		const quantity = Math.max(1, Math.ceil(options.quantity ?? 1))
 		const enabledVariants = variants.filter(
@@ -463,6 +470,16 @@ export class ProductSellableService implements ProductSellableReader {
 		if (hasEnoughStock) return 'AVAILABLE'
 
 		return 'OUT_OF_STOCK'
+	}
+
+	private shouldIgnoreTechnicalVariantAvailability(
+		features: { canUseProductVariants: boolean },
+		options: ProductSellableResolveOptions,
+		selectedVariant: ProductVariantRow | null
+	): boolean {
+		if (features.canUseProductVariants || options.enforceStock) return false
+		if (!options.variantId) return true
+		return Boolean(selectedVariant && this.isDefaultVariant(selectedVariant))
 	}
 
 	private resolveTotalStock(variants: ProductVariantRow[]): number | null {

@@ -19,6 +19,7 @@ import {
 import type { NormalizedCartItemInput } from './cart.utils'
 
 const INVENTORY_MODE_NONE: CatalogInventoryMode = 'NONE'
+const INVENTORY_MODE_EXTERNAL: CatalogInventoryMode = 'EXTERNAL'
 
 type EnsureCartVariantPurchasableInput = {
 	catalogId: string
@@ -166,6 +167,9 @@ export class CartVariantSelectionService {
 	}
 
 	private shouldEnforceStock(inventoryMode: CatalogInventoryMode): boolean {
-		return inventoryMode !== INVENTORY_MODE_NONE
+		return (
+			inventoryMode !== INVENTORY_MODE_NONE &&
+			inventoryMode !== INVENTORY_MODE_EXTERNAL
+		)
 	}
 }

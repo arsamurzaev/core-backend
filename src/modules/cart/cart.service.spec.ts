@@ -3192,7 +3192,7 @@ describe('CartService', () => {
 			'catalog-1',
 			'product-1',
 			'variant-1',
-			{ quantity: 12, enforceStock: true, buyerCatalogId: 'catalog-1' }
+			{ quantity: 12, enforceStock: false, buyerCatalogId: 'catalog-1' }
 		)
 		expect(prisma.cartItem.create).not.toHaveBeenCalled()
 	})

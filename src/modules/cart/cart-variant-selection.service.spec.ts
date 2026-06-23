@@ -232,7 +232,7 @@ describe('CartVariantSelectionService', () => {
 		expect(sellableReader.resolveProductSellable).toHaveBeenCalledWith(
 			'catalog-1',
 			'product-1',
-			{ quantity: 1, enforceStock: true }
+			{ quantity: 1, enforceStock: false }
 		)
 	})
 
@@ -298,7 +298,7 @@ describe('CartVariantSelectionService', () => {
 		)
 	})
 
-	it('keeps stock enforcement in external inventory mode', async () => {
+	it('blocks unavailable variants in external inventory mode', async () => {
 		sellableReader.resolveVariantSellable.mockResolvedValue({
 			variantId: 'variant-1',
 			availabilityState: 'OUT_OF_STOCK',

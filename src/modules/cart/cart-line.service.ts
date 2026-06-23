@@ -50,6 +50,7 @@ import {
 } from './cart.utils'
 
 const INVENTORY_MODE_NONE: CatalogInventoryMode = 'NONE'
+const INVENTORY_MODE_EXTERNAL: CatalogInventoryMode = 'EXTERNAL'
 
 const TERMINAL_CART_STATUSES = new Set<CartStatus>([
 	CartStatus.CONVERTED,
@@ -663,7 +664,7 @@ export class CartLineService {
 
 		const options = {
 			quantity,
-			enforceStock: inventoryMode !== INVENTORY_MODE_NONE
+			enforceStock: this.shouldEnforceStock(inventoryMode)
 		}
 
 		if (variantId) {
@@ -789,6 +790,13 @@ export class CartLineService {
 		if (inventoryMode !== INVENTORY_MODE_NONE) {
 			throw new BadRequestException('Вариация товара недоступна')
 		}
+	}
+
+	private shouldEnforceStock(inventoryMode: CatalogInventoryMode): boolean {
+		return (
+			inventoryMode !== INVENTORY_MODE_NONE &&
+			inventoryMode !== INVENTORY_MODE_EXTERNAL
+		)
 	}
 
 	private async findExistingItems(
