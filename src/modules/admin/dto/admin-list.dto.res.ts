@@ -631,6 +631,9 @@ export class AdminCatalogListItemDto {
 	@ApiProperty({ type: String, nullable: true })
 	promoCodeId: string | null
 
+	@ApiProperty({ type: String, nullable: true })
+	phone: string | null
+
 	@ApiProperty({ type: Boolean })
 	promoCodePaid: boolean
 

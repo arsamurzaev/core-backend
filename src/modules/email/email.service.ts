@@ -1,11 +1,18 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 import nodemailer, { type Transporter } from 'nodemailer'
 
+type EmailAttachment = {
+	filename: string
+	content: Buffer | string
+	contentType?: string
+}
+
 type SendEmailInput = {
 	to: string
 	subject: string
 	html: string
 	text?: string
+	attachments?: EmailAttachment[]
 }
 
 @Injectable()
@@ -28,7 +35,15 @@ export class EmailService {
 			to: input.to,
 			subject: input.subject,
 			text: input.text ?? null,
-			html: input.html
+			html: input.html,
+			attachments:
+				input.attachments?.map(attachment => ({
+					filename: attachment.filename,
+					contentType: attachment.contentType ?? null,
+					size: Buffer.isBuffer(attachment.content)
+						? attachment.content.length
+						: Buffer.byteLength(attachment.content)
+				})) ?? []
 		} as any)
 	}
 
@@ -49,7 +64,8 @@ export class EmailService {
 			to: input.to,
 			subject: input.subject,
 			html: input.html,
-			text: input.text
+			text: input.text,
+			attachments: input.attachments
 		})
 	}
 

@@ -202,6 +202,11 @@ const adminCatalogSelect = {
 	userId: true,
 	promoCodeId: true,
 	subscriptionEndsAt: true,
+	user: {
+		select: {
+			phone: true
+		}
+	},
 	metrics: {
 		where: {
 			provider: Metric.YANDEX,
@@ -3330,6 +3335,7 @@ export class AdminService {
 			payments,
 			region,
 			settings,
+			user,
 			...rest
 		} = catalog
 		const promoCodePaid = Boolean(
@@ -3340,6 +3346,7 @@ export class AdminService {
 
 		return {
 			...rest,
+			phone: user?.phone ?? null,
 			activities: activity,
 			regionalities: region ?? [],
 			children: (rest.children ?? []).map(child => {

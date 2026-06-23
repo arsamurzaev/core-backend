@@ -31,6 +31,7 @@ import {
 } from '@/modules/catalog/public'
 import { EmailService } from '@/modules/email/public'
 
+import { generateCatalogAccessPdf } from './catalog-access-pdf'
 import { CatalogOnboardingConfirmDtoReq } from './dto/requests/catalog-onboarding-confirm.dto.req'
 import { CatalogOnboardingResendDtoReq } from './dto/requests/catalog-onboarding-resend.dto.req'
 import { CatalogOnboardingSignupDtoReq } from './dto/requests/catalog-onboarding-signup.dto.req'
@@ -45,7 +46,6 @@ const RESEND_COOLDOWN_SECONDS = Number(
 	process.env.CATALOG_SIGNUP_RESEND_COOLDOWN_SECONDS ?? 60
 )
 const LOCK_SECONDS = 30
-const PASSWORD_LENGTH = 20
 const REGISTER_SUBDOMAIN =
 	process.env.CATALOG_ONBOARDING_REGISTER_SUBDOMAIN ?? 'register'
 const LOGIN_SUBDOMAIN = process.env.CATALOG_LOGIN_SUBDOMAIN ?? 'login'
@@ -315,7 +315,7 @@ export class CatalogOnboardingService {
 						slug: signup.slug,
 						type: { connect: { id: signup.typeId } },
 						user: { connect: { id: owner.id } },
-						config: { create: { status: CatalogStatus.PROPOSAL } },
+						config: { create: { status: CatalogStatus.REGISTRATION } },
 						settings: { create: { isActive: true } },
 						contacts: {
 							create: [
@@ -354,7 +354,7 @@ export class CatalogOnboardingService {
 				existingSid ?? null
 			)
 			const catalogUrl = this.buildCatalogUrl(created.catalog.slug)
-			const loginUrl = this.buildLoginUrl()
+			const loginUrl = this.buildCatalogLoginUrl(created.catalog.slug)
 			const accessEmailSent = await this.sendAccessEmail(
 				signup,
 				temporaryPassword,
@@ -557,13 +557,21 @@ export class CatalogOnboardingService {
 		})
 		const html = await render(component)
 		const text = await render(component, { plainText: true })
+		const pdf = await generateCatalogAccessPdf({
+			catalogName: signup.catalogName,
+			catalogUrl,
+			loginUrl,
+			login: signup.slug,
+			password: temporaryPassword
+		})
 
 		try {
 			await this.email.send({
 				to: signup.email,
 				subject: 'Данные для входа в каталог',
 				html,
-				text
+				text,
+				attachments: [pdf]
 			})
 			return true
 		} catch (error) {
@@ -618,17 +626,9 @@ export class CatalogOnboardingService {
 		)
 	}
 
-	private buildLoginUrl(): string {
-		const baseDomain = this.getPrimaryBaseDomain()
-		const domain = `${LOGIN_SUBDOMAIN}.${baseDomain}`
-		const fallback = `https://${domain}`
-		return (
-			renderTemplate(process.env.CATALOG_LOGIN_URL_TEMPLATE, {
-				baseDomain,
-				domain,
-				loginSubdomain: LOGIN_SUBDOMAIN
-			}) || fallback
-		)
+	private buildCatalogLoginUrl(slug: string): string {
+		const catalogUrl = this.buildCatalogUrl(slug).replace(/\/+$/, '')
+		return `${catalogUrl}/auth/login`
 	}
 
 	private getPrimaryBaseDomain(): string {
@@ -685,30 +685,11 @@ function hashToken(token: string): string {
 }
 
 function generateTemporaryPassword(): string {
-	const lower = 'abcdefghijkmnopqrstuvwxyz'
-	const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
-	const digits = '23456789'
-	const symbols = '!@#$%^&*'
-	const all = lower + upper + digits + symbols
-	const chars = [pick(lower), pick(upper), pick(digits), pick(symbols)]
-
-	while (chars.length < PASSWORD_LENGTH) {
-		chars.push(pick(all))
+	let password = ''
+	while (password.length < 8) {
+		password += randomInt(0, 10).toString()
 	}
-
-	return shuffle(chars).join('')
-}
-
-function pick(alphabet: string): string {
-	return alphabet[randomInt(0, alphabet.length)]
-}
-
-function shuffle(values: string[]): string[] {
-	for (let i = values.length - 1; i > 0; i -= 1) {
-		const j = randomInt(0, i + 1)
-		;[values[i], values[j]] = [values[j], values[i]]
-	}
-	return values
+	return password
 }
 
 function renderTemplate(

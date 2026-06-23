@@ -4,6 +4,7 @@ import {
 	ContactType,
 	Role
 } from '@generated/enums'
+import { hash } from 'argon2'
 import { render } from 'react-email'
 
 import { CatalogOnboardingService } from './catalog-onboarding.service'
@@ -14,6 +15,14 @@ jest.mock('argon2', () => ({
 
 jest.mock('react-email', () => ({
 	render: jest.fn().mockResolvedValue('<email />')
+}))
+
+jest.mock('./catalog-access-pdf', () => ({
+	generateCatalogAccessPdf: jest.fn().mockResolvedValue({
+		filename: 'access.pdf',
+		content: Buffer.from('pdf'),
+		contentType: 'application/pdf'
+	})
 }))
 
 function createService() {
@@ -246,7 +255,7 @@ describe('CatalogOnboardingService', () => {
 			user: owner,
 			catalogId: 'catalog-1',
 			catalogUrl: 'https://flowers.myctlg.ru',
-			loginUrl: 'https://login.myctlg.ru',
+			loginUrl: 'https://flowers.myctlg.ru/auth/login',
 			accessEmailSent: true,
 			message:
 				'Аккаунт успешно подтвержден. Данные для доступа отправлены на почту.'
@@ -263,11 +272,12 @@ describe('CatalogOnboardingService', () => {
 				})
 			})
 		)
+		expect(hash).toHaveBeenCalledWith(expect.stringMatching(/^\d{8}$/))
 		expect(tx.catalog.create).toHaveBeenCalledWith(
 			expect.objectContaining({
 				data: expect.objectContaining({
 					slug: 'flowers',
-					config: { create: { status: CatalogStatus.PROPOSAL } },
+					config: { create: { status: CatalogStatus.REGISTRATION } },
 					settings: { create: { isActive: true } },
 					contacts: {
 						create: [
@@ -295,6 +305,12 @@ describe('CatalogOnboardingService', () => {
 		expect(email.send).toHaveBeenLastCalledWith(
 			expect.objectContaining({
 				to: 'owner@example.com',
+				attachments: [
+					expect.objectContaining({
+						filename: 'access.pdf',
+						contentType: 'application/pdf'
+					})
+				],
 				subject: 'Данные для входа в каталог'
 			})
 		)
@@ -302,7 +318,7 @@ describe('CatalogOnboardingService', () => {
 			expect.objectContaining({
 				props: expect.objectContaining({
 					catalogUrl: 'https://flowers.myctlg.ru',
-					loginUrl: 'https://login.myctlg.ru'
+					loginUrl: 'https://flowers.myctlg.ru/auth/login'
 				})
 			})
 		)

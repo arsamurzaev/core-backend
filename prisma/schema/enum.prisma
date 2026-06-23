@@ -163,6 +163,7 @@ enum InventoryReservationStatus {
 }
 
 enum CatalogStatus {
+  REGISTRATION
   PROPOSAL
   IMPLEMENTATION
   OPERATIONAL
