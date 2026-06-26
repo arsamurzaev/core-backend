@@ -1,6 +1,6 @@
 import type { Role } from '@generated/client'
 
-import type { SessionLoginEntry } from './session/session.utils'
+import type { SessionData, SessionLoginEntry } from './session/session.utils'
 
 type AuthSessionMeta = {
 	ip?: string | null
@@ -48,6 +48,8 @@ export interface AuthPasswordCommandPort {
 }
 
 export interface AuthSessionManagementPort {
+	get(sid: string): Promise<SessionData | null>
+	touch(sid: string, userId: string, ttlSeconds?: number): Promise<void>
 	listActiveForUser(userId: string): Promise<AuthActiveSessionEntry[]>
 	destroyForUser(userId: string, sid: string): Promise<boolean>
 	destroyAllForUserExcept(userId: string, keepSid: string): Promise<void>

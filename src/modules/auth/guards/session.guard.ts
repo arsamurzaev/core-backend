@@ -3,6 +3,7 @@ import {
 	CanActivate,
 	ExecutionContext,
 	ForbiddenException,
+	Inject,
 	Injectable,
 	UnauthorizedException
 } from '@nestjs/common'
@@ -21,8 +22,11 @@ import {
 	type SessionCookieScope,
 	setSessionCookies
 } from '../auth-cookie.utils'
+import {
+	AUTH_SESSION_MANAGEMENT_PORT,
+	type AuthSessionManagementPort
+} from '../contracts'
 import { ROLES_KEY } from '../decorators/roles.decorator'
-import { SessionService } from '../session/session.service'
 import type { AuthRequest } from '../types/auth-request'
 
 function isUnsafeMethod(method: string | undefined) {
@@ -48,7 +52,8 @@ function requiredRank(required: Role[]) {
 @Injectable()
 export class SessionGuard implements CanActivate {
 	constructor(
-		private readonly sessions: SessionService,
+		@Inject(AUTH_SESSION_MANAGEMENT_PORT)
+		private readonly sessions: AuthSessionManagementPort,
 		private readonly prisma: PrismaService,
 		private readonly reflector: Reflector
 	) {}

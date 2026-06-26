@@ -1,5 +1,10 @@
 import { Role } from '@generated/enums'
-import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common'
+import {
+	CanActivate,
+	ExecutionContext,
+	Inject,
+	Injectable
+} from '@nestjs/common'
 import type { Response } from 'express'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
@@ -13,13 +18,17 @@ import {
 	type SessionCookieScope,
 	setSessionCookies
 } from '../auth-cookie.utils'
-import { SessionService } from '../session/session.service'
+import {
+	AUTH_SESSION_MANAGEMENT_PORT,
+	type AuthSessionManagementPort
+} from '../contracts'
 import type { AuthRequest } from '../types/auth-request'
 
 @Injectable()
 export class OptionalSessionGuard implements CanActivate {
 	constructor(
-		private readonly sessions: SessionService,
+		@Inject(AUTH_SESSION_MANAGEMENT_PORT)
+		private readonly sessions: AuthSessionManagementPort,
 		private readonly prisma: PrismaService
 	) {}
 

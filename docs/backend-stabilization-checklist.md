@@ -84,6 +84,20 @@
 - [x] Закрыть `cron -> concrete modules`.
 - [x] Закрыть все cross-module internal imports, boundary report = 0.
 
+## 8. Следующий backend-шаг: integration -> product ports cleanup
+
+Дата фиксации: 2026-06-26
+
+Цель: пройти `integration` и убрать прямую зависимость integration sync от широкого `product/public.ts` там, где ее можно заменить на узкие product ports/contracts.
+
+- [ ] Просканировать `src/modules/integration/**` на импорты из `@/modules/product/public`.
+- [ ] Разделить реальные потребности integration sync: write/sync, read/projection, maintenance, DTO/types.
+- [ ] Оставить прямой импорт из `product/public.ts` только там, где он действительно является публичным контрактом модуля.
+- [ ] Для sync-flow заменить широкие зависимости на узкие product ports/contracts, например `ProductExternalSyncPort`, отдельные reader/projection ports или новые минимальные contracts.
+- [ ] Не протаскивать `ProductService`, repository и внутренние DTO через integration.
+- [ ] Обновить provider bindings в `ProductModule`/`IntegrationModule`, если понадобится новый port.
+- [ ] Прогнать architecture boundary test и integration/moysklad regression tests после cleanup.
+
 ## Verification
 
 - [x] `npm run prisma:generate`
