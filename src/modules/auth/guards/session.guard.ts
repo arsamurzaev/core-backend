@@ -30,6 +30,8 @@ function isUnsafeMethod(method: string | undefined) {
 	return m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE'
 }
 
+const AUTH_SESSION_SCOPE_HEADER = 'x-auth-session-scope'
+
 // Иерархия ролей: ADMIN > GEO_ADMIN > CATALOG > USER
 const ROLE_RANK: Record<Role, number> = {
 	ADMIN: 4,
@@ -61,7 +63,7 @@ export class SessionGuard implements CanActivate {
 		const http = context.switchToHttp()
 		const req = http.getRequest<AuthRequest>()
 		const res = http.getResponse<Response>()
-		let activeCookieScope = this.resolveCookieScope()
+		let activeCookieScope = this.resolveCookieScope(req)
 
 		try {
 			const sessionCookies = readSessionCookies(req, activeCookieScope)
@@ -151,7 +153,12 @@ export class SessionGuard implements CanActivate {
 		}
 	}
 
-	private resolveCookieScope(): SessionCookieScope | null {
+	private resolveCookieScope(req: AuthRequest): SessionCookieScope | null {
+		const requestedScope = String(
+			req.headers[AUTH_SESSION_SCOPE_HEADER] ?? ''
+		).toLowerCase()
+		if (requestedScope === 'global') return { global: true }
+
 		const catalogId = RequestContext.get()?.catalogId ?? null
 		return catalogId ? { catalogId } : null
 	}

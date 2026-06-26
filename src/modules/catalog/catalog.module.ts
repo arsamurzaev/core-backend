@@ -4,7 +4,7 @@ import { CapabilityModule } from '@/modules/capability/public'
 import { CatalogSaleUnitModule } from '@/modules/catalog-sale-unit/public'
 import { IntegrationModule } from '@/modules/integration/public'
 import { S3Module } from '@/modules/s3/public'
-import { SeoRepository } from '@/modules/seo/public'
+import { SeoModule } from '@/modules/seo/public'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 
@@ -27,7 +27,8 @@ import { InternalTlsController } from './internal-tls.controller'
 		S3Module,
 		IntegrationModule,
 		CapabilityModule,
-		CatalogSaleUnitModule
+		CatalogSaleUnitModule,
+		SeoModule
 	],
 	controllers: [
 		CatalogAdvancedSettingsController,
@@ -44,7 +45,6 @@ import { InternalTlsController } from './internal-tls.controller'
 		CatalogSeoSyncService,
 		CatalogDomainRepository,
 		CatalogRepository,
-		SeoRepository,
 		MediaRepository,
 		MediaUrlService,
 		{

@@ -33,6 +33,7 @@ import {
 	CatalogPriceListRepository,
 	CatalogPriceListUpdateData
 } from './catalog-price-list.repository'
+import type { CatalogPriceListManagementPort } from './contracts'
 import { BulkUpsertCatalogPriceListPricesDtoReq } from './dto/requests/catalog-price-list-price.dto.req'
 import {
 	CreateCatalogPriceListDtoReq,
@@ -127,7 +128,7 @@ function toDecimalString(value: unknown): string {
 }
 
 @Injectable()
-export class CatalogPriceListService {
+export class CatalogPriceListService implements CatalogPriceListManagementPort {
 	constructor(
 		private readonly repo: CatalogPriceListRepository,
 		private readonly prisma: PrismaService,

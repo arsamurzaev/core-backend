@@ -4,18 +4,20 @@ import { PrismaModule } from '@/infrastructure/prisma/prisma.module'
 import { CapabilityModule } from '@/modules/capability/public'
 import { CatalogPriceListModule } from '@/modules/catalog-price-list/public'
 import { S3Module } from '@/modules/s3/public'
-import { SeoRepository } from '@/modules/seo/public'
+import { SeoModule } from '@/modules/seo/public'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
 
 import {
+	PRODUCT_CATEGORY_READ_PROJECTOR_PORT,
 	PRODUCT_COMMAND_PORT,
 	PRODUCT_EXTERNAL_SYNC_PORT,
 	PRODUCT_MAINTENANCE_PORT,
 	PRODUCT_PRICING_PORT,
 	PRODUCT_READER_PORT,
-	PRODUCT_SELLABLE_READER_PORT
+	PRODUCT_SELLABLE_READER_PORT,
+	PRODUCT_VARIANT_PROJECTION_PORT
 } from './contracts'
 import { ProductAttributeBuilder } from './product-attribute.builder'
 import { ProductCommandService } from './product-command.service'
@@ -37,7 +39,13 @@ import { ProductService } from './product.service'
 
 @Module({
 	controllers: [ProductController],
-	imports: [PrismaModule, S3Module, CapabilityModule, CatalogPriceListModule],
+	imports: [
+		PrismaModule,
+		S3Module,
+		CapabilityModule,
+		CatalogPriceListModule,
+		SeoModule
+	],
 	providers: [
 		ProductService,
 		ProductCommandService,
@@ -55,10 +63,13 @@ import { ProductService } from './product.service'
 		ProductVariantBuilder,
 		ProductSeoSyncService,
 		ProductSeoDomainEventHandler,
-		SeoRepository,
 		ProductMediaMapper,
 		MediaRepository,
 		MediaUrlService,
+		{
+			provide: PRODUCT_CATEGORY_READ_PROJECTOR_PORT,
+			useExisting: ProductReadService
+		},
 		{ provide: PRODUCT_COMMAND_PORT, useExisting: ProductService },
 		{
 			provide: PRODUCT_EXTERNAL_SYNC_PORT,
@@ -67,18 +78,24 @@ import { ProductService } from './product.service'
 		{ provide: PRODUCT_MAINTENANCE_PORT, useExisting: ProductMaintenanceService },
 		{ provide: PRODUCT_READER_PORT, useExisting: ProductReadService },
 		{ provide: PRODUCT_PRICING_PORT, useExisting: ProductPricingService },
-		{ provide: PRODUCT_SELLABLE_READER_PORT, useExisting: ProductSellableService }
+		{
+			provide: PRODUCT_SELLABLE_READER_PORT,
+			useExisting: ProductSellableService
+		},
+		{
+			provide: PRODUCT_VARIANT_PROJECTION_PORT,
+			useExisting: ProductVariantCardProjectionService
+		}
 	],
 	exports: [
-		ProductService,
-		ProductMaintenanceService,
-		ProductVariantCardProjectionService,
+		PRODUCT_CATEGORY_READ_PROJECTOR_PORT,
 		PRODUCT_COMMAND_PORT,
 		PRODUCT_EXTERNAL_SYNC_PORT,
 		PRODUCT_MAINTENANCE_PORT,
 		PRODUCT_READER_PORT,
 		PRODUCT_PRICING_PORT,
-		PRODUCT_SELLABLE_READER_PORT
+		PRODUCT_SELLABLE_READER_PORT,
+		PRODUCT_VARIANT_PROJECTION_PORT
 	]
 })
 export class ProductModule {}

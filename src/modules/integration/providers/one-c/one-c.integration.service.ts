@@ -2495,7 +2495,7 @@ export class OneCIntegrationService {
 	private async createImportedProduct(
 		catalogId: string,
 		mapped: Record<string, unknown>,
-		tx: unknown
+		tx: Prisma.TransactionClient
 	): Promise<ProductExternalSyncProductRecord> {
 		const name = normalizeRequiredString(
 			normalizeIdentityValue(mapped.name) ?? '',
@@ -2529,7 +2529,7 @@ export class OneCIntegrationService {
 	private async updateImportedProduct(
 		catalogId: string,
 		row: OneCProductImportPreviewDto['rows'][number],
-		tx: unknown
+		tx: Prisma.TransactionClient
 	): Promise<ProductExternalSyncProductRecord> {
 		if (!row.productId) {
 			throw new BadRequestException('Product id is required for update')
@@ -2622,7 +2622,7 @@ export class OneCIntegrationService {
 		catalogId: string,
 		source: string,
 		excludeId: string | undefined,
-		tx: unknown
+		tx: Prisma.TransactionClient
 	): Promise<string> {
 		const base = buildSlugBase(source)
 		let suffix = 0
@@ -2648,7 +2648,7 @@ export class OneCIntegrationService {
 	private async resolveUniqueSku(
 		source: string,
 		excludeId: string | undefined,
-		tx: unknown
+		tx: Prisma.TransactionClient
 	): Promise<string> {
 		const base = source.trim().slice(0, PRODUCT_SKU_MAX_LENGTH)
 		let suffix = 0

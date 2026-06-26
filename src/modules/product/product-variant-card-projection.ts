@@ -1,45 +1,35 @@
 import { ProductVariantKind, ProductVariantStatus } from '@generated/enums'
 
-import type {
-	ProductVariantPickerOptionRecord,
-	ProductVariantSummaryRecord
-} from './product.repository'
+import {
+	EMPTY_VARIANT_SUMMARY,
+	type ProductVariantPickerOption,
+	type ProductVariantProjection,
+	type ProductVariantSummary
+} from './contracts'
 
-export type ProductVariantSummary = Omit<
-	ProductVariantSummaryRecord,
-	'productId'
->
+type ProductVariantSummarySource = ProductVariantSummary & {
+	productId: string
+}
 
-export type ProductVariantPickerOption = {
+export type ProductVariantPickerSource = {
 	id: string
-	label: string
-	price: string | null
-	stock: number | null
-	status: ProductVariantPickerOptionRecord['status']
-	isAvailable: boolean
-	saleUnitId: string | null
-	saleUnitPrice: string | null
-	maxQuantity: number | null
-}
-
-export type ProductVariantProjection = {
-	variantSummary: ProductVariantSummary
-	variantPickerOptions: ProductVariantPickerOption[]
-}
-
-export type ProductVariantPickerSource = Omit<
-	ProductVariantPickerOptionRecord,
-	'productId'
-> & {
 	productId?: string
-}
-
-export const EMPTY_VARIANT_SUMMARY: ProductVariantSummary = {
-	minPrice: null,
-	maxPrice: null,
-	activeCount: 0,
-	totalStock: 0,
-	singleVariantId: null
+	sku: string
+	variantKey: string
+	kind: ProductVariantKind
+	price: unknown
+	stock: number | null
+	status: ProductVariantStatus
+	isAvailable: boolean
+	saleUnits?: SaleUnitPickerSource[] | null
+	attributes: Array<{
+		attribute: { displayOrder: number }
+		enumValue?: {
+			displayOrder?: number | null
+			value: string
+			displayName?: string | null
+		} | null
+	}>
 }
 
 const FALLBACK_VARIANT_LABEL = 'Вариация'
@@ -289,7 +279,7 @@ export function buildVariantSummaryFromVariants(
 }
 
 export function buildVariantSummaryMap(
-	summaries: ProductVariantSummaryRecord[]
+	summaries: ProductVariantSummarySource[]
 ): Map<string, ProductVariantSummary> {
 	return new Map(
 		summaries.map(summary => {
@@ -300,7 +290,7 @@ export function buildVariantSummaryMap(
 }
 
 export function buildVariantPickerOptionsMap(
-	variants: ProductVariantPickerOptionRecord[],
+	variants: ProductVariantPickerSource[],
 	options: VariantPriceOptions = {}
 ): Map<string, ProductVariantPickerOption[]> {
 	const map = new Map<string, ProductVariantPickerOption[]>()

@@ -12,3 +12,4 @@ export {
 	resolveCatalogCheckoutConfig,
 	resolveCheckoutContactsSnapshot
 } from './catalog-checkout'
+export { readCatalogBaseDomains } from './catalog-domain.utils'

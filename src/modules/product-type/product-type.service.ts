@@ -33,13 +33,19 @@ import {
 	normalizeNullableTrimmedString
 } from '@/shared/utils'
 
-import { CreateProductTypeFromTemplateDtoReq } from './dto/requests/create-product-type-from-template.dto.req'
-import { CreateProductTypeDtoReq } from './dto/requests/create-product-type.dto.req'
-import { UpdateProductTypeDtoReq } from './dto/requests/update-product-type.dto.req'
-import { ProductTypeScope } from './product-type.constants'
-import {
+import type {
+	ProductTypeCommandPort,
+	ProductTypeCreateInput,
+	ProductTypeMatrixEditorSchema,
 	ProductTypeMatrixEditorSchemaRecord,
 	ProductTypeRecord,
+	ProductTypeSchemaPort,
+	ProductTypeUpdateInput,
+	ProductTypeVariantAttributesPort
+} from './contracts'
+import { CreateProductTypeFromTemplateDtoReq } from './dto/requests/create-product-type-from-template.dto.req'
+import { ProductTypeScope } from './product-type.constants'
+import {
 	ProductTypeRepository,
 	ProductTypeUpdateData
 } from './product-type.repository'
@@ -54,7 +60,12 @@ import {
 } from './product-type.utils'
 
 @Injectable()
-export class ProductTypeService {
+export class ProductTypeService
+	implements
+		ProductTypeCommandPort,
+		ProductTypeSchemaPort,
+		ProductTypeVariantAttributesPort
+{
 	constructor(
 		private readonly repo: ProductTypeRepository,
 		private readonly cache: CacheService,
@@ -97,7 +108,7 @@ export class ProductTypeService {
 		return this.requireProductType(await this.repo.findSystemTemplateById(id))
 	}
 
-	async create(dto: CreateProductTypeDtoReq) {
+	async create(dto: ProductTypeCreateInput) {
 		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		await this.featureEntitlements.assertCanUseProductTypes(catalogId)
@@ -122,7 +133,7 @@ export class ProductTypeService {
 		return productType
 	}
 
-	async createSystemTemplate(dto: CreateProductTypeDtoReq) {
+	async createSystemTemplate(dto: ProductTypeCreateInput) {
 		const name = normalizeProductTypeName(dto.name)
 		const code = await this.resolveCode(
 			dto.code,
@@ -193,7 +204,7 @@ export class ProductTypeService {
 		return productType
 	}
 
-	async update(id: string, dto: UpdateProductTypeDtoReq) {
+	async update(id: string, dto: ProductTypeUpdateInput) {
 		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		await this.featureEntitlements.assertCanUseProductTypes(catalogId)
@@ -232,7 +243,7 @@ export class ProductTypeService {
 		return productType
 	}
 
-	async updateSystemTemplate(id: string, dto: UpdateProductTypeDtoReq) {
+	async updateSystemTemplate(id: string, dto: ProductTypeUpdateInput) {
 		const current = this.requireProductType(
 			await this.repo.findSystemTemplateById(id)
 		)
@@ -270,7 +281,7 @@ export class ProductTypeService {
 	}
 
 	private async buildUpdateData(
-		dto: UpdateProductTypeDtoReq,
+		dto: ProductTypeUpdateInput,
 		scope: ProductTypeScope,
 		catalogId: string | null,
 		current: ProductTypeRecord
@@ -558,7 +569,7 @@ export class ProductTypeService {
 
 	private mapMatrixEditorSchema(
 		productType: ProductTypeMatrixEditorSchemaRecord
-	) {
+	): ProductTypeMatrixEditorSchema {
 		const attributes = productType.attributes.map(attribute => ({
 			productTypeId: attribute.productTypeId,
 			attributeId: attribute.attributeId,

@@ -1,10 +1,14 @@
 import { SeoChangeFreq, SeoEntityType } from '@generated/enums'
 import { SeoSettingCreateInput, SeoSettingUpdateInput } from '@generated/models'
-import { BadRequestException, Injectable, Logger } from '@nestjs/common'
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common'
 import sharp from 'sharp'
 
-import { S3Service, type UploadGeneratedAssetResult } from '@/modules/s3/public'
-import { SeoRepository } from '@/modules/seo/public'
+import {
+	MEDIA_STORAGE_PORT,
+	type MediaStoragePort,
+	type UploadGeneratedAssetResult
+} from '@/modules/s3/public'
+import { SEO_SETTINGS_PORT, type SeoSettingsPort } from '@/modules/seo/public'
 import {
 	MEDIA_VARIANT_NAMES,
 	MediaUrlService,
@@ -82,13 +86,15 @@ export class CatalogSeoSyncService {
 	private readonly logger = new Logger(CatalogSeoSyncService.name)
 
 	constructor(
-		private readonly seoRepo: SeoRepository,
-		private readonly s3Service: S3Service,
+		@Inject(SEO_SETTINGS_PORT)
+		private readonly seoSettings: SeoSettingsPort,
+		@Inject(MEDIA_STORAGE_PORT)
+		private readonly mediaStorage: MediaStoragePort,
 		private readonly mediaUrl: MediaUrlService
 	) {}
 
 	async syncCatalog(catalog: CatalogSeoSyncRecord): Promise<void> {
-		const existing = await this.seoRepo.findByEntity(
+		const existing = await this.seoSettings.findByEntity(
 			catalog.id,
 			SeoEntityType.CATALOG,
 			catalog.id
@@ -135,7 +141,7 @@ export class CatalogSeoSyncService {
 				sitemapChangeFreq: SeoChangeFreq.WEEKLY
 			}
 
-			await this.seoRepo.create(createData)
+			await this.seoSettings.create(createData)
 			return
 		}
 
@@ -179,7 +185,7 @@ export class CatalogSeoSyncService {
 			}
 		}
 
-		await this.seoRepo.update(existing.id, catalog.id, updateData)
+		await this.seoSettings.update(existing.id, catalog.id, updateData)
 	}
 
 	private async generateAssets(
@@ -331,7 +337,7 @@ export class CatalogSeoSyncService {
 
 		try {
 			if (source.storage === 's3') {
-				const downloaded = await this.s3Service.downloadObject(source.key)
+				const downloaded = await this.mediaStorage.downloadObject(source.key)
 				return downloaded.buffer
 			}
 
@@ -394,7 +400,7 @@ export class CatalogSeoSyncService {
 		buffer: Buffer,
 		size: { width?: number; height?: number }
 	): Promise<GeneratedSeoAsset> {
-		const result = await this.s3Service.uploadGeneratedAsset(
+		const result = await this.mediaStorage.uploadGeneratedAsset(
 			{
 				buffer,
 				contentType,

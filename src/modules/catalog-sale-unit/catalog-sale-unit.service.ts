@@ -29,6 +29,7 @@ import {
 	CatalogSaleUnitRepository,
 	CatalogSaleUnitUpdateData
 } from './catalog-sale-unit.repository'
+import type { CatalogSaleUnitManagementPort } from './contracts'
 import { CreateCatalogSaleUnitDtoReq } from './dto/requests/create-catalog-sale-unit.dto.req'
 import { UpdateCatalogSaleUnitDtoReq } from './dto/requests/update-catalog-sale-unit.dto.req'
 
@@ -52,7 +53,7 @@ function buildCodeBase(value: string): string {
 }
 
 @Injectable()
-export class CatalogSaleUnitService {
+export class CatalogSaleUnitService implements CatalogSaleUnitManagementPort {
 	constructor(
 		private readonly repo: CatalogSaleUnitRepository,
 		private readonly cache: CacheService,

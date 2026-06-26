@@ -26,6 +26,7 @@ export class RedisService
 			port: configService.get('redis.port', { infer: true }),
 			commandTimeout: 5000,
 			connectTimeout: 10000,
+			lazyConnect: true,
 			maxLoadingRetryTime: 5000,
 			enableOfflineQueue: true,
 			retryStrategy: times => Math.min(times * 500, 5000)
@@ -61,6 +62,7 @@ export class RedisService
 		})
 
 		try {
+			await this.connect()
 			await this.ping()
 			this.logger.log('Redis ping успешен')
 		} catch (error) {
@@ -72,6 +74,8 @@ export class RedisService
 	}
 
 	async onModuleDestroy() {
+		if (this.status === 'wait' || this.status === 'end') return
+
 		this.logger.log('Отключение от Redis...')
 
 		try {

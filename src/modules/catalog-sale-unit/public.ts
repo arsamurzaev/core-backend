@@ -1,5 +1,5 @@
+export * from './contracts'
 export { CatalogSaleUnitModule } from './catalog-sale-unit.module'
-export { CatalogSaleUnitService } from './catalog-sale-unit.service'
 export { CreateCatalogSaleUnitDtoReq } from './dto/requests/create-catalog-sale-unit.dto.req'
 export { UpdateCatalogSaleUnitDtoReq } from './dto/requests/update-catalog-sale-unit.dto.req'
 export { CatalogSaleUnitDto } from './dto/responses/catalog-sale-unit.dto.res'

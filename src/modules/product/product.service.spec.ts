@@ -6,8 +6,8 @@ import {
 	CAPABILITY_ASSERT_PORT,
 	CAPABILITY_READER_PORT
 } from '@/modules/capability/contracts'
-import { S3Service } from '@/modules/s3/s3.service'
-import { SeoRepository } from '@/modules/seo/seo.repository'
+import { MEDIA_STORAGE_PORT, type MediaStoragePort } from '@/modules/s3/public'
+import { SEO_SETTINGS_PORT, type SeoSettingsPort } from '@/modules/seo/public'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_TYPE_CACHE_VERSION,
@@ -51,9 +51,9 @@ describe('ProductService', () => {
 	let variantBuilder: jest.Mocked<ProductVariantBuilder>
 	let cache: jest.Mocked<CacheService>
 	let mediaRepo: jest.Mocked<MediaRepository>
-	let s3Service: jest.Mocked<S3Service>
+	let mediaStorage: jest.Mocked<MediaStoragePort>
 	let productSeoSync: jest.Mocked<ProductSeoSyncService>
-	let seoRepo: jest.Mocked<SeoRepository>
+	let seoSettings: jest.Mocked<SeoSettingsPort>
 	let capabilities: jest.Mocked<CapabilityService>
 	let sellableReader: {
 		resolveProductSellable: jest.Mock
@@ -189,13 +189,13 @@ describe('ProductService', () => {
 					}
 				},
 				{
-					provide: S3Service,
+					provide: MEDIA_STORAGE_PORT,
 					useValue: {
 						deleteObjectsByKeys: jest.fn()
 					}
 				},
 				{
-					provide: SeoRepository,
+					provide: SEO_SETTINGS_PORT,
 					useValue: {
 						findByEntity: jest.fn()
 					}
@@ -280,9 +280,9 @@ describe('ProductService', () => {
 		variantBuilder = module.get(ProductVariantBuilder)
 		cache = module.get(CacheService)
 		mediaRepo = module.get(MediaRepository)
-		s3Service = module.get(S3Service)
+		mediaStorage = module.get(MEDIA_STORAGE_PORT)
 		productSeoSync = module.get(ProductSeoSyncService)
-		seoRepo = module.get(SeoRepository)
+		seoSettings = module.get(SEO_SETTINGS_PORT)
 		capabilities = module.get(CapabilityService)
 		sellableReader = module.get(PRODUCT_SELLABLE_READER_PORT)
 
@@ -326,7 +326,7 @@ describe('ProductService', () => {
 			categoryProducts: [],
 			productType: { id: 'product-type-1', code: 'shoes', name: 'Shoes' }
 		} as any)
-		seoRepo.findByEntity.mockResolvedValue(null)
+		seoSettings.findByEntity.mockResolvedValue(null)
 		serviceState.cacheTtlSec = 0
 		serviceState.uncategorizedFirstPageCacheTtlSec = 0
 		serviceState.uncategorizedNextPageCacheTtlSec = 0
@@ -713,7 +713,7 @@ describe('ProductService', () => {
 			categoryProducts: [],
 			integrationLinks: []
 		} as any)
-		seoRepo.findByEntity.mockResolvedValue({
+		seoSettings.findByEntity.mockResolvedValue({
 			id: 'seo-1',
 			entityType: 'PRODUCT',
 			entityId: 'product-1',
@@ -731,7 +731,7 @@ describe('ProductService', () => {
 				title: 'SEO title'
 			}
 		})
-		expect(seoRepo.findByEntity).toHaveBeenCalledWith(
+		expect(seoSettings.findByEntity).toHaveBeenCalledWith(
 			'catalog-1',
 			'PRODUCT',
 			'product-1'
@@ -4938,7 +4938,7 @@ describe('ProductService', () => {
 			['media-1'],
 			'catalog-1'
 		)
-		expect(s3Service.deleteObjectsByKeys).toHaveBeenCalledWith([
+		expect(mediaStorage.deleteObjectsByKeys).toHaveBeenCalledWith([
 			'catalogs/catalog-1/products/raw/image-1.jpg',
 			'catalogs/catalog-1/products/card/image-1.webp'
 		])
@@ -4986,7 +4986,7 @@ describe('ProductService', () => {
 			runWithCatalog(() => service.remove('product-1'))
 		).resolves.toEqual({ ok: true })
 
-		expect(s3Service.deleteObjectsByKeys).not.toHaveBeenCalled()
+		expect(mediaStorage.deleteObjectsByKeys).not.toHaveBeenCalled()
 		expect(mediaRepo.deleteOrphanedByIds).not.toHaveBeenCalled()
 	})
 })

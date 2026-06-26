@@ -2,6 +2,7 @@ import {
 	CanActivate,
 	ExecutionContext,
 	ForbiddenException,
+	Inject,
 	Injectable
 } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
@@ -9,14 +10,15 @@ import { Reflector } from '@nestjs/core'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
 import type { CatalogCapability } from '../capability.constants'
-import { CapabilityService } from '../capability.service'
+import { CAPABILITY_ASSERT_PORT, type CapabilityAssertPort } from '../contracts'
 import { CAPABILITY_KEY } from '../decorators/require-capability.decorator'
 
 @Injectable()
 export class CapabilityGuard implements CanActivate {
 	constructor(
 		private readonly reflector: Reflector,
-		private readonly capabilities: CapabilityService
+		@Inject(CAPABILITY_ASSERT_PORT)
+		private readonly capabilities: CapabilityAssertPort
 	) {}
 
 	async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -31,7 +33,7 @@ export class CapabilityGuard implements CanActivate {
 			throw new ForbiddenException('Контекст каталога обязателен')
 		}
 
-		await this.capabilities.assert(catalogId, capability)
+		await this.capabilities.assertCanUse(catalogId, capability)
 		return true
 	}
 }

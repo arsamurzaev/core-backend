@@ -1,6 +1,12 @@
 export const OBSERVABILITY_RECORDER_PORT = Symbol('OBSERVABILITY_RECORDER_PORT')
 
 export interface ObservabilityRecorderPort {
+	recordPrismaSlowQuery(durationMs: number): void
+	recordCacheOperation(
+		operation: 'get_version' | 'bump_version' | 'get_json' | 'set_json' | 'del',
+		outcome: 'success' | 'error' | 'hit' | 'miss' | 'corrupted',
+		durationMs: number
+	): void
 	recordCronRun(
 		name: string,
 		status: 'success' | 'error',

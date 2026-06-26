@@ -9,7 +9,6 @@ import { AttributeService } from './attribute.service'
 @Module({
 	controllers: [AttributeController],
 	imports: [PrismaModule],
-	providers: [AttributeService, AttributeRepository],
-	exports: [AttributeService]
+	providers: [AttributeService, AttributeRepository]
 })
 export class AttributeModule {}

@@ -1,5 +1,32 @@
 import type { IntegrationProvider } from '@generated/enums'
 
+import type { PreviewIikoImportDtoReq } from './dto/requests/preview-iiko-import.dto.req'
+import type { TestIikoConnectionDtoReq } from './dto/requests/test-iiko-connection.dto.req'
+import type { TestMoySkladConnectionDtoReq } from './dto/requests/test-moysklad-connection.dto.req'
+import type { UpdateIikoIntegrationDtoReq } from './dto/requests/update-iiko-integration.dto.req'
+import type { UpdateMoySkladIntegrationDtoReq } from './dto/requests/update-moysklad-integration.dto.req'
+import type { UpsertIikoIntegrationDtoReq } from './dto/requests/upsert-iiko-integration.dto.req'
+import type { UpsertMoySkladIntegrationDtoReq } from './dto/requests/upsert-moysklad-integration.dto.req'
+import type {
+	IikoImportPreviewDto,
+	IikoIntegrationDto,
+	IikoIntegrationStatusDto,
+	IikoQueuedSyncDto,
+	IikoSyncProgressDto,
+	IikoSyncRunDto,
+	IikoTestConnectionDto,
+	IikoWebhookEventDto,
+	IikoWebhookSetupDto
+} from './dto/responses/iiko.dto.res'
+import type {
+	MoySkladIntegrationDto,
+	MoySkladIntegrationStatusDto,
+	MoySkladOrderExportRefsDto,
+	MoySkladQueuedSyncDto,
+	MoySkladSyncProgressDto,
+	MoySkladSyncRunDto,
+	MoySkladTestConnectionDto
+} from './dto/responses/moysklad.dto.res'
 import type {
 	IntegrationProviderAdapter,
 	IntegrationProviderConnectionResult,
@@ -10,10 +37,8 @@ import type {
 } from './provider-adapter.contract'
 
 export const ORDER_EXPORT_PORT = Symbol('ORDER_EXPORT_PORT')
-export const CATALOG_SYNC_PORT = Symbol('CATALOG_SYNC_PORT')
-export const STOCK_SYNC_PORT = Symbol('STOCK_SYNC_PORT')
-export const INTEGRATION_PROVIDER_REGISTRY = Symbol(
-	'INTEGRATION_PROVIDER_REGISTRY'
+export const INTEGRATION_ADVANCED_SETTINGS_PORT = Symbol(
+	'INTEGRATION_ADVANCED_SETTINGS_PORT'
 )
 
 export type OrderExportQueueResult = {
@@ -48,17 +73,46 @@ export interface OrderExportPort {
 	): Promise<OrderExportWaitResult>
 }
 
-export interface CatalogSyncPort {
-	queueCatalogSync(catalogId: string, trigger?: string): Promise<unknown>
-}
+export interface IntegrationAdvancedSettingsPort {
+	getMoySklad(): Promise<MoySkladIntegrationDto>
+	getMoySkladStatus(): Promise<MoySkladIntegrationStatusDto>
+	getMoySkladRuns(limit?: number | string): Promise<MoySkladSyncRunDto[]>
+	getMoySkladRunProgress(runId: string): Promise<MoySkladSyncProgressDto>
+	getMoySkladOrderExportRefs(): Promise<MoySkladOrderExportRefsDto>
+	upsertMoySklad(
+		dto: UpsertMoySkladIntegrationDtoReq
+	): Promise<MoySkladIntegrationDto>
+	updateMoySklad(
+		dto: UpdateMoySkladIntegrationDtoReq
+	): Promise<MoySkladIntegrationDto>
+	removeMoySklad(): Promise<{ ok: boolean }>
+	testMoySkladConnection(
+		dto: TestMoySkladConnectionDtoReq
+	): Promise<MoySkladTestConnectionDto>
+	syncMoySkladCatalog(): Promise<MoySkladQueuedSyncDto>
+	cancelMoySkladSync(): Promise<void>
 
-export interface StockSyncPort {
-	queueStockSync(catalogId: string, trigger?: string): Promise<unknown>
-}
-
-export interface IntegrationProviderRegistry {
-	get(provider: IntegrationProvider): IntegrationProviderAdapter
-	list(): readonly IntegrationProviderAdapter[]
+	getIiko(): Promise<IikoIntegrationDto>
+	getIikoStatus(): Promise<IikoIntegrationStatusDto>
+	getIikoRuns(limit?: number | string): Promise<IikoSyncRunDto[]>
+	getIikoWebhookEvents(
+		limit?: number | string,
+		status?: string
+	): Promise<IikoWebhookEventDto[]>
+	retryIikoWebhookEvent(eventId: string): Promise<IikoWebhookEventDto>
+	getIikoRunProgress(runId: string): Promise<IikoSyncProgressDto>
+	upsertIiko(dto: UpsertIikoIntegrationDtoReq): Promise<IikoIntegrationDto>
+	updateIiko(dto: UpdateIikoIntegrationDtoReq): Promise<IikoIntegrationDto>
+	removeIiko(): Promise<{ ok: boolean }>
+	testIikoConnection(
+		dto?: TestIikoConnectionDtoReq
+	): Promise<IikoTestConnectionDto>
+	previewIikoImport(dto: PreviewIikoImportDtoReq): Promise<IikoImportPreviewDto>
+	syncIikoCatalog(): Promise<IikoQueuedSyncDto>
+	syncIikoStock(): Promise<IikoQueuedSyncDto>
+	syncIikoProduct(productId: string): Promise<IikoQueuedSyncDto>
+	setupIikoWebhooks(): Promise<IikoWebhookSetupDto>
+	disableIikoWebhooks(): Promise<{ ok: boolean }>
 }
 
 export type {

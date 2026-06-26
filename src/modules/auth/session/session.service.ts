@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto'
 
 import { RedisService } from '@/infrastructure/redis/redis.service'
 
+import type { AuthSessionManagementPort } from '../contracts'
+
 import {
 	buildSessionClient,
 	buildSessionContext,
@@ -36,7 +38,7 @@ export type ActiveSessionEntry = SessionLoginEntry & {
 }
 
 @Injectable()
-export class SessionService {
+export class SessionService implements AuthSessionManagementPort {
 	private readonly logger = new Logger(SessionService.name)
 	private readonly prefix = 'sess:'
 	private readonly isDev = process.env.NODE_ENV !== 'production'

@@ -1,25 +1,39 @@
 import { Metric, MetricScope } from '@generated/enums'
 import {
 	BadRequestException,
+	Inject,
 	Injectable,
 	NotFoundException
 } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import {
-	type ActiveSessionEntry,
-	AuthService,
+	AUTH_PASSWORD_COMMAND_PORT,
+	AUTH_SESSION_MANAGEMENT_PORT,
+	type AuthActiveSessionEntry,
+	type AuthPasswordChangeInput,
+	type AuthPasswordCommandPort,
 	AuthSessionDto,
-	AuthSessionsResponseDto,
-	ChangePasswordDtoReq,
-	SessionService
+	type AuthSessionManagementPort,
+	AuthSessionsResponseDto
 } from '@/modules/auth/public'
 import {
-	CatalogSaleUnitService,
+	CATALOG_SALE_UNIT_MANAGEMENT_PORT,
+	type CatalogSaleUnitManagementPort,
 	CreateCatalogSaleUnitDtoReq,
 	UpdateCatalogSaleUnitDtoReq
 } from '@/modules/catalog-sale-unit/public'
-import { IntegrationService } from '@/modules/integration/public'
+import {
+	INTEGRATION_ADVANCED_SETTINGS_PORT,
+	type IntegrationAdvancedSettingsPort,
+	PreviewIikoImportDtoReq,
+	TestIikoConnectionDtoReq,
+	TestMoySkladConnectionDtoReq,
+	UpdateIikoIntegrationDtoReq,
+	UpdateMoySkladIntegrationDtoReq,
+	UpsertIikoIntegrationDtoReq,
+	UpsertMoySkladIntegrationDtoReq
+} from '@/modules/integration/public'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 
@@ -35,16 +49,20 @@ import { CatalogYandexMetrikaDto } from './dto/responses/catalog-yandex-metrika.
 @Injectable()
 export class CatalogAdvancedSettingsService {
 	constructor(
-		private readonly auth: AuthService,
-		private readonly sessions: SessionService,
+		@Inject(AUTH_PASSWORD_COMMAND_PORT)
+		private readonly auth: AuthPasswordCommandPort,
+		@Inject(AUTH_SESSION_MANAGEMENT_PORT)
+		private readonly sessions: AuthSessionManagementPort,
 		private readonly domains: CatalogDomainService,
-		private readonly integration: IntegrationService,
-		private readonly saleUnits: CatalogSaleUnitService,
+		@Inject(INTEGRATION_ADVANCED_SETTINGS_PORT)
+		private readonly integration: IntegrationAdvancedSettingsPort,
+		@Inject(CATALOG_SALE_UNIT_MANAGEMENT_PORT)
+		private readonly saleUnits: CatalogSaleUnitManagementPort,
 		private readonly prisma: PrismaService
 	) {}
 
 	changePassword(params: {
-		dto: ChangePasswordDtoReq
+		dto: AuthPasswordChangeInput
 		sessionId: string | null
 		userId: string
 	}): Promise<void> {
@@ -210,11 +228,11 @@ export class CatalogAdvancedSettingsService {
 		return this.integration.getMoySkladOrderExportRefs()
 	}
 
-	upsertMoySklad(dto: Parameters<IntegrationService['upsertMoySklad']>[0]) {
+	upsertMoySklad(dto: UpsertMoySkladIntegrationDtoReq) {
 		return this.integration.upsertMoySklad(dto)
 	}
 
-	updateMoySklad(dto: Parameters<IntegrationService['updateMoySklad']>[0]) {
+	updateMoySklad(dto: UpdateMoySkladIntegrationDtoReq) {
 		return this.integration.updateMoySklad(dto)
 	}
 
@@ -222,9 +240,7 @@ export class CatalogAdvancedSettingsService {
 		return this.integration.removeMoySklad()
 	}
 
-	testMoySkladConnection(
-		dto: Parameters<IntegrationService['testMoySkladConnection']>[0]
-	) {
+	testMoySkladConnection(dto: TestMoySkladConnectionDtoReq) {
 		return this.integration.testMoySkladConnection(dto)
 	}
 
@@ -261,11 +277,11 @@ export class CatalogAdvancedSettingsService {
 		return this.integration.getIikoRunProgress(runId)
 	}
 
-	upsertIiko(dto: Parameters<IntegrationService['upsertIiko']>[0]) {
+	upsertIiko(dto: UpsertIikoIntegrationDtoReq) {
 		return this.integration.upsertIiko(dto)
 	}
 
-	updateIiko(dto: Parameters<IntegrationService['updateIiko']>[0]) {
+	updateIiko(dto: UpdateIikoIntegrationDtoReq) {
 		return this.integration.updateIiko(dto)
 	}
 
@@ -273,15 +289,11 @@ export class CatalogAdvancedSettingsService {
 		return this.integration.removeIiko()
 	}
 
-	testIikoConnection(
-		dto: Parameters<IntegrationService['testIikoConnection']>[0]
-	) {
+	testIikoConnection(dto: TestIikoConnectionDtoReq) {
 		return this.integration.testIikoConnection(dto)
 	}
 
-	previewIikoImport(
-		dto: Parameters<IntegrationService['previewIikoImport']>[0]
-	) {
+	previewIikoImport(dto: PreviewIikoImportDtoReq) {
 		return this.integration.previewIikoImport(dto)
 	}
 
@@ -341,7 +353,7 @@ export class CatalogAdvancedSettingsService {
 	}
 
 	private mapSession(
-		entry: ActiveSessionEntry,
+		entry: AuthActiveSessionEntry,
 		currentSid: string | null
 	): AuthSessionDto {
 		const userAgent = entry.client.userAgent

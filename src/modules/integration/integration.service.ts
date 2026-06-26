@@ -53,6 +53,7 @@ import { mustCatalogId } from '@/shared/tenancy/ctx'
 
 import type { AuthRequest, SessionUser } from '../auth/types/auth-request'
 
+import type { IntegrationAdvancedSettingsPort } from './contracts'
 import { ApplyMoySkladMappingDtoReq } from './dto/requests/apply-moysklad-mapping.dto.req'
 import { PreviewIikoImportDtoReq } from './dto/requests/preview-iiko-import.dto.req'
 import { TestIikoConnectionDtoReq } from './dto/requests/test-iiko-connection.dto.req'
@@ -309,7 +310,7 @@ type AttributeMappingResolution = {
 }
 
 @Injectable()
-export class IntegrationService {
+export class IntegrationService implements IntegrationAdvancedSettingsPort {
 	private readonly logger = new Logger(IntegrationService.name)
 
 	constructor(

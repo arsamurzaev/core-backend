@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common'
+import { Inject, Injectable } from '@nestjs/common'
 
-import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import {
+	CAPABILITY_ASSERT_PORT,
 	CAPABILITY_CATALOG_MODIFIERS,
 	CAPABILITY_CATALOG_PRICE_LISTS,
 	CAPABILITY_CATALOG_SALE_UNITS,
@@ -11,7 +11,9 @@ import {
 	CAPABILITY_INVENTORY_INTERNAL,
 	CAPABILITY_PRODUCT_TYPES,
 	CAPABILITY_PRODUCT_VARIANTS,
-	CapabilityService,
+	CAPABILITY_READER_PORT,
+	type CapabilityAssertPort,
+	type CapabilityReaderPort,
 	CATALOG_CAPABILITIES,
 	type CatalogCapability,
 	type CatalogCapabilityFlags
@@ -37,12 +39,23 @@ export type CatalogFeatureFlags = CatalogCapabilityFlags
  * Backward-compatible shim. New code should inject capability ports directly.
  */
 @Injectable()
-export class CatalogFeatureEntitlementService extends CapabilityService {
-	constructor(prisma: PrismaService) {
-		super(prisma)
-	}
+export class CatalogFeatureEntitlementService {
+	constructor(
+		@Inject(CAPABILITY_READER_PORT)
+		private readonly reader: CapabilityReaderPort,
+		@Inject(CAPABILITY_ASSERT_PORT)
+		private readonly assertions: CapabilityAssertPort
+	) {}
 
 	canUse(catalogId: string, feature: string, at?: Date): Promise<boolean> {
-		return this.can(catalogId, feature as CatalogFeature, at)
+		return this.reader.can(catalogId, feature as CatalogFeature, at)
+	}
+
+	canUseInternalInventory(catalogId: string, at?: Date): Promise<boolean> {
+		return this.reader.canUseInternalInventory(catalogId, at)
+	}
+
+	assertCanUseInternalInventory(catalogId: string): Promise<void> {
+		return this.assertions.assertCanUseInternalInventory(catalogId)
 	}
 }

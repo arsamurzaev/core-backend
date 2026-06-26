@@ -1,6 +1,5 @@
 export * from './capability.constants'
 export * from './contracts'
 export { CapabilityModule } from './capability.module'
-export { CapabilityService } from './capability.service'
 export { RequireCapability } from './decorators/require-capability.decorator'
 export { CapabilityGuard } from './guards/capability.guard'

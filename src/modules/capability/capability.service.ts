@@ -20,31 +20,17 @@ import {
 	type CatalogCapabilityFlagMap,
 	type CatalogCapabilityFlags
 } from './capability.constants'
-
-export type CatalogCapabilityDefinitionDto = {
-	key: CatalogCapability
-	title: string
-	description: string
-	dependsOn: CatalogCapability[]
-}
-
-export type CatalogCapabilityStateDto = {
-	key: CatalogCapability
-	raw: boolean
-	effective: boolean
-	disabledReason: string | null
-}
-
-export type CatalogCapabilitiesDto = {
-	raw: CatalogCapabilityFlagMap
-	effective: CatalogCapabilityFlagMap
-	flags: CatalogCapabilityFlags
-	definitions: CatalogCapabilityDefinitionDto[]
-	items: CatalogCapabilityStateDto[]
-}
+import type {
+	CapabilityAssertPort,
+	CapabilityReaderPort,
+	CatalogCapabilitiesDto,
+	CatalogCapabilityDefinitionDto
+} from './contracts'
 
 @Injectable()
-export class CapabilityService {
+export class CapabilityService
+	implements CapabilityReaderPort, CapabilityAssertPort
+{
 	constructor(private readonly prisma: PrismaService) {}
 
 	getDefinitions(): CatalogCapabilityDefinitionDto[] {

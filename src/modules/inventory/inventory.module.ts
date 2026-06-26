@@ -15,6 +15,6 @@ import { InventoryService } from './inventory.service'
 		InventoryRepository,
 		{ provide: INVENTORY_RESERVATION_PORT, useExisting: InventoryService }
 	],
-	exports: [InventoryService, INVENTORY_RESERVATION_PORT]
+	exports: [INVENTORY_RESERVATION_PORT]
 })
 export class InventoryModule {}

@@ -1,105 +1,60 @@
-import { ForbiddenException } from '@nestjs/common'
-
-import { PrismaService } from '@/infrastructure/prisma/prisma.service'
-
 import {
 	CATALOG_FEATURE_INVENTORY_INTERNAL,
 	CatalogFeatureEntitlementService
 } from './catalog-feature-entitlement.service'
 
 describe('CatalogFeatureEntitlementService', () => {
-	let service: CatalogFeatureEntitlementService
-	let prisma: {
-		catalogFeatureEntitlement: {
-			findMany: jest.Mock
+	it('delegates feature checks to capability reader port', async () => {
+		const reader = {
+			can: jest.fn().mockResolvedValue(true),
+			canUseInternalInventory: jest.fn()
 		}
-	}
-
-	beforeEach(() => {
-		prisma = {
-			catalogFeatureEntitlement: {
-				findMany: jest.fn()
-			}
+		const assertions = {
+			assertCanUseInternalInventory: jest.fn()
 		}
-		service = new CatalogFeatureEntitlementService(
-			prisma as unknown as PrismaService
+		const service = new CatalogFeatureEntitlementService(
+			reader as any,
+			assertions as any
 		)
-	})
-
-	it('returns false when entitlement is missing', async () => {
-		prisma.catalogFeatureEntitlement.findMany.mockResolvedValue([])
-
-		await expect(service.canUseInternalInventory('catalog-1')).resolves.toBe(
-			false
-		)
-	})
-
-	it('returns false when entitlement is disabled', async () => {
-		prisma.catalogFeatureEntitlement.findMany.mockResolvedValue([
-			{
-				feature: CATALOG_FEATURE_INVENTORY_INTERNAL,
-				enabled: false,
-				expiresAt: null
-			}
-		])
-
-		await expect(service.canUseInternalInventory('catalog-1')).resolves.toBe(
-			false
-		)
-	})
-
-	it('returns false when entitlement is expired', async () => {
-		prisma.catalogFeatureEntitlement.findMany.mockResolvedValue([
-			{
-				feature: CATALOG_FEATURE_INVENTORY_INTERNAL,
-				enabled: true,
-				expiresAt: new Date('2026-05-01T00:00:00.000Z')
-			}
-		])
+		const at = new Date('2026-05-10T00:00:00.000Z')
 
 		await expect(
-			service.canUseInternalInventory(
-				'catalog-1',
-				new Date('2026-05-10T00:00:00.000Z')
-			)
-		).resolves.toBe(false)
-	})
-
-	it('returns true when entitlement is enabled and not expired', async () => {
-		prisma.catalogFeatureEntitlement.findMany.mockResolvedValue([
-			{
-				feature: CATALOG_FEATURE_INVENTORY_INTERNAL,
-				enabled: true,
-				expiresAt: new Date('2026-06-01T00:00:00.000Z')
-			}
-		])
-
-		await expect(
-			service.canUseInternalInventory(
-				'catalog-1',
-				new Date('2026-05-10T00:00:00.000Z')
-			)
+			service.canUse('catalog-1', CATALOG_FEATURE_INVENTORY_INTERNAL, at)
 		).resolves.toBe(true)
-		expect(prisma.catalogFeatureEntitlement.findMany).toHaveBeenCalledWith({
-			where: {
-				catalogId: 'catalog-1',
-				feature: {
-					in: expect.arrayContaining([CATALOG_FEATURE_INVENTORY_INTERNAL])
-				}
-			},
-			select: {
-				feature: true,
-				enabled: true,
-				expiresAt: true
-			}
-		})
+
+		expect(reader.can).toHaveBeenCalledWith(
+			'catalog-1',
+			CATALOG_FEATURE_INVENTORY_INTERNAL,
+			at
+		)
 	})
 
-	it('throws forbidden when internal inventory entitlement is unavailable', async () => {
-		prisma.catalogFeatureEntitlement.findMany.mockResolvedValue([])
+	it('keeps the legacy internal inventory helpers as port delegates', async () => {
+		const reader = {
+			can: jest.fn(),
+			canUseInternalInventory: jest.fn().mockResolvedValue(false)
+		}
+		const assertions = {
+			assertCanUseInternalInventory: jest.fn().mockResolvedValue(undefined)
+		}
+		const service = new CatalogFeatureEntitlementService(
+			reader as any,
+			assertions as any
+		)
 
+		await expect(service.canUseInternalInventory('catalog-1')).resolves.toBe(
+			false
+		)
 		await expect(
 			service.assertCanUseInternalInventory('catalog-1')
-		).rejects.toBeInstanceOf(ForbiddenException)
+		).resolves.toBeUndefined()
+
+		expect(reader.canUseInternalInventory).toHaveBeenCalledWith(
+			'catalog-1',
+			undefined
+		)
+		expect(assertions.assertCanUseInternalInventory).toHaveBeenCalledWith(
+			'catalog-1'
+		)
 	})
 })

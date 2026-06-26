@@ -8,6 +8,10 @@ import { CatalogPriceListResolverService } from './catalog-price-list-resolver.s
 import { CatalogPriceListController } from './catalog-price-list.controller'
 import { CatalogPriceListRepository } from './catalog-price-list.repository'
 import { CatalogPriceListService } from './catalog-price-list.service'
+import {
+	CATALOG_PRICE_LIST_MANAGEMENT_PORT,
+	CATALOG_PRICE_LIST_RESOLVER_PORT
+} from './contracts'
 
 @Module({
 	imports: [PrismaModule, CapabilityModule, CacheModule],
@@ -15,8 +19,16 @@ import { CatalogPriceListService } from './catalog-price-list.service'
 	providers: [
 		CatalogPriceListService,
 		CatalogPriceListRepository,
-		CatalogPriceListResolverService
+		CatalogPriceListResolverService,
+		{
+			provide: CATALOG_PRICE_LIST_MANAGEMENT_PORT,
+			useExisting: CatalogPriceListService
+		},
+		{
+			provide: CATALOG_PRICE_LIST_RESOLVER_PORT,
+			useExisting: CatalogPriceListResolverService
+		}
 	],
-	exports: [CatalogPriceListService, CatalogPriceListResolverService]
+	exports: [CATALOG_PRICE_LIST_MANAGEMENT_PORT, CATALOG_PRICE_LIST_RESOLVER_PORT]
 })
 export class CatalogPriceListModule {}

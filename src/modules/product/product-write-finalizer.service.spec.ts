@@ -2,7 +2,7 @@ import { CacheService } from '@/shared/cache/cache.service'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
 
-import { SeoRepository } from '../seo/seo.repository'
+import type { SeoSettingsPort } from '../seo/public'
 
 import { ProductSeoSyncService } from './product-seo-sync.service'
 import { ProductWriteFinalizer } from './product-write-finalizer.service'
@@ -25,7 +25,7 @@ describe('ProductWriteFinalizer', () => {
 			mediaUrl as unknown as MediaUrlService,
 			mapper as unknown as ProductMediaMapper,
 			seoSync as unknown as ProductSeoSyncService,
-			seoRepo as unknown as SeoRepository,
+			seoRepo as unknown as SeoSettingsPort,
 			events as any
 		)
 

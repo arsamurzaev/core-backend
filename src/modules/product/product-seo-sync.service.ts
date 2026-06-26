@@ -1,9 +1,9 @@
 import { ProductStatus, SeoChangeFreq, SeoEntityType } from '@generated/enums'
 import { SeoSettingCreateInput, SeoSettingUpdateInput } from '@generated/models'
-import { Injectable } from '@nestjs/common'
+import { Inject, Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
-import { SeoRepository } from '@/modules/seo/public'
+import { SEO_SETTINGS_PORT, type SeoSettingsPort } from '@/modules/seo/public'
 import {
 	MEDIA_DETAIL_VARIANT_NAMES,
 	MediaUrlService
@@ -23,7 +23,8 @@ type ProductSeoCatalogContext = {
 export class ProductSeoSyncService {
 	constructor(
 		private readonly prisma: PrismaService,
-		private readonly seoRepo: SeoRepository,
+		@Inject(SEO_SETTINGS_PORT)
+		private readonly seoSettings: SeoSettingsPort,
 		private readonly mediaUrl: MediaUrlService
 	) {}
 
@@ -32,7 +33,7 @@ export class ProductSeoSyncService {
 		catalogId: string
 	): Promise<void> {
 		const catalog = await this.loadCatalogContext(catalogId)
-		const existing = await this.seoRepo.findByEntity(
+		const existing = await this.seoSettings.findByEntity(
 			catalogId,
 			SeoEntityType.PRODUCT,
 			product.id
@@ -75,7 +76,7 @@ export class ProductSeoSyncService {
 				sitemapChangeFreq: SeoChangeFreq.WEEKLY
 			}
 
-			await this.seoRepo.create(data)
+			await this.seoSettings.create(data)
 			return
 		}
 
@@ -111,18 +112,18 @@ export class ProductSeoSyncService {
 				: { disconnect: true }
 		}
 
-		await this.seoRepo.update(existing.id, catalogId, data)
+		await this.seoSettings.update(existing.id, catalogId, data)
 	}
 
 	async removeProduct(productId: string, catalogId: string): Promise<void> {
-		const existing = await this.seoRepo.findByEntity(
+		const existing = await this.seoSettings.findByEntity(
 			catalogId,
 			SeoEntityType.PRODUCT,
 			productId
 		)
 		if (!existing) return
 
-		await this.seoRepo.softDelete(existing.id, catalogId)
+		await this.seoSettings.softDelete(existing.id, catalogId)
 	}
 
 	private async loadCatalogContext(

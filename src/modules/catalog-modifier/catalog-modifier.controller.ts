@@ -5,6 +5,7 @@ import {
 	Controller,
 	Delete,
 	Get,
+	Inject,
 	Param,
 	Patch,
 	Post,
@@ -31,7 +32,10 @@ import { OptionalSessionGuard } from '@/modules/auth/guards/optional-session.gua
 import { SessionGuard } from '@/modules/auth/guards/session.guard'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 
-import { CatalogModifierService } from './catalog-modifier.service'
+import {
+	CATALOG_MODIFIER_MANAGEMENT_PORT,
+	type CatalogModifierManagementPort
+} from './contracts'
 import {
 	CreateCatalogModifierGroupDtoReq,
 	UpdateCatalogModifierGroupDtoReq
@@ -51,7 +55,10 @@ import {
 @ApiTags('CatalogModifier')
 @Controller('catalog-modifier')
 export class CatalogModifierController {
-	constructor(private readonly service: CatalogModifierService) {}
+	constructor(
+		@Inject(CATALOG_MODIFIER_MANAGEMENT_PORT)
+		private readonly service: CatalogModifierManagementPort
+	) {}
 
 	@Get()
 	@UseGuards(OptionalSessionGuard)

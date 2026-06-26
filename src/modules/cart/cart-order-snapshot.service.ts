@@ -7,8 +7,9 @@ import {
 } from '@nestjs/common'
 
 import {
+	CATALOG_PRICE_LIST_RESOLVER_PORT,
 	type CatalogPriceListLinePrice,
-	CatalogPriceListResolverService
+	type CatalogPriceListResolverPort
 } from '@/modules/catalog-price-list/public'
 import {
 	PRODUCT_SELLABLE_READER_PORT,
@@ -126,7 +127,8 @@ export class CartOrderSnapshotService {
 		@Inject(PRODUCT_SELLABLE_READER_PORT)
 		private readonly sellableReader: ProductSellableReader,
 		@Optional()
-		private readonly priceLists?: CatalogPriceListResolverService
+		@Inject(CATALOG_PRICE_LIST_RESOLVER_PORT)
+		private readonly priceLists?: CatalogPriceListResolverPort
 	) {}
 
 	async buildSnapshotItems(

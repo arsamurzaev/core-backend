@@ -359,20 +359,14 @@ cd /opt/catalog/backend
 set -a
 . /etc/catalog/backend.env
 set +a
-bun run prisma:push
+bun run prisma:migrate:deploy
 exit
 ```
 
-Для строгого production-процесса лучше перейти на Prisma migrations и выполнять:
+Если это уже существующая база, созданная до baseline-миграции, сначала смотри `docs/prisma-migrations.md`: baseline нужно пометить как applied, а не накатывать поверх живых таблиц.
 
 ```bash
-bunx prisma migrate deploy
-```
-
-Но в текущем `package.json` уже есть команда:
-
-```bash
-bun run prisma:push
+bun run prisma:migrate:status
 ```
 
 ## 7. Systemd Для Backend
@@ -954,7 +948,7 @@ bun run build
 set -a
 . /etc/catalog/backend.env
 set +a
-bun run prisma:push
+bun run prisma:migrate:deploy
 exit
 
 sudo systemctl restart catalog-backend
@@ -1166,7 +1160,7 @@ exit
 sudo systemctl restart catalog-backend
 ```
 
-Если были изменения БД, rollback делай осторожно. `prisma db push` не хранит историю миграций.
+Если были изменения БД, rollback делай осторожно. Prisma migrations не хранят down-миграции, поэтому destructive rollback делается через backup/restore или отдельную forward-migration.
 
 ### Rollback Caddyfile
 
@@ -1244,7 +1238,7 @@ bun run build
 set -a
 . /etc/catalog/backend.env
 set +a
-bun run prisma:push
+bun run prisma:migrate:deploy
 exit
 sudo systemctl restart catalog-backend
 
@@ -1269,4 +1263,3 @@ curl -vk --resolve kingsname.ru:443:203.0.113.10 https://kingsname.ru/_svc_api/c
 - Ubuntu Nginx install docs: https://ubuntu.com/server/docs/how-to/web-services/install-nginx/
 - Certbot Ubuntu/Nginx instructions: https://certbot.eff.org/instructions?os=ubuntufocal&ws=nginx
 - Bun installation: https://bun.com/docs/installation
-

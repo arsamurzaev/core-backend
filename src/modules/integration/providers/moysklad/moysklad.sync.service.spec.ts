@@ -10,7 +10,7 @@ import {
 	PRODUCT_EXTERNAL_SYNC_PORT,
 	type ProductExternalSyncPort
 } from '@/modules/product/public'
-import { S3Service } from '@/modules/s3/s3.service'
+import { MEDIA_STORAGE_PORT, type MediaStoragePort } from '@/modules/s3/public'
 import { CacheService } from '@/shared/cache/cache.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 
@@ -31,7 +31,7 @@ describe('MoySkladSyncService', () => {
 	let service: MoySkladSyncService
 	let repo: jest.Mocked<IntegrationRepository>
 	let cache: jest.Mocked<CacheService>
-	let s3: jest.Mocked<S3Service>
+	let mediaStorage: jest.Mocked<MediaStoragePort>
 	let mediaRepo: jest.Mocked<MediaRepository>
 	let metadataCrypto: jest.Mocked<MoySkladMetadataCryptoService>
 	let productSync: MoySkladProductSyncService
@@ -123,7 +123,7 @@ describe('MoySkladSyncService', () => {
 					}
 				},
 				{
-					provide: S3Service,
+					provide: MEDIA_STORAGE_PORT,
 					useValue: {
 						uploadImage: jest.fn(),
 						deleteObjectsByKeys: jest.fn()
@@ -174,7 +174,7 @@ describe('MoySkladSyncService', () => {
 		service = module.get(MoySkladSyncService)
 		repo = module.get(IntegrationRepository)
 		cache = module.get(CacheService)
-		s3 = module.get(S3Service)
+		mediaStorage = module.get(MEDIA_STORAGE_PORT)
 		mediaRepo = module.get(MediaRepository)
 		metadataCrypto = module.get(MoySkladMetadataCryptoService)
 		productSync = module.get(MoySkladProductSyncService)
@@ -318,7 +318,7 @@ describe('MoySkladSyncService', () => {
 		repo.upsertProductLink.mockResolvedValue({ id: 'link-1' } as any)
 		repo.findProductLinksByIntegration.mockResolvedValue([])
 		repo.finishMoySkladSync.mockResolvedValue(integration as any)
-		s3.uploadImage.mockResolvedValue({
+		mediaStorage.uploadImage.mockResolvedValue({
 			mediaId: 'media-1',
 			key: 'integrations/moysklad/products/image-1.jpg'
 		} as any)
@@ -1956,7 +1956,7 @@ describe('MoySkladSyncService', () => {
 		repo.replaceProductMedia.mockResolvedValue(true)
 		repo.upsertProductLink.mockResolvedValue({ id: 'link-1' } as any)
 		repo.finishMoySkladSync.mockResolvedValue(integration as any)
-		s3.uploadImage.mockResolvedValue({
+		mediaStorage.uploadImage.mockResolvedValue({
 			mediaId: 'media-1',
 			key: 'integrations/moysklad/products/image-1.jpg'
 		} as any)

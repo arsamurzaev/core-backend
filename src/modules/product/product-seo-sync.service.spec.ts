@@ -1,5 +1,5 @@
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
-import { SeoRepository } from '@/modules/seo/seo.repository'
+import type { SeoSettingsPort } from '@/modules/seo/public'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 
 import { ProductSeoSyncService } from './product-seo-sync.service'
@@ -11,7 +11,7 @@ describe('ProductSeoSyncService', () => {
 			findUnique: jest.Mock
 		}
 	}
-	let seoRepo: jest.Mocked<SeoRepository>
+	let seoSettings: jest.Mocked<SeoSettingsPort>
 	let mediaUrl: jest.Mocked<MediaUrlService>
 
 	beforeEach(() => {
@@ -28,7 +28,7 @@ describe('ProductSeoSyncService', () => {
 			}
 		}
 
-		seoRepo = {
+		seoSettings = {
 			findByEntity: jest.fn(),
 			create: jest.fn(),
 			update: jest.fn(),
@@ -43,13 +43,13 @@ describe('ProductSeoSyncService', () => {
 
 		service = new ProductSeoSyncService(
 			prisma as unknown as PrismaService,
-			seoRepo,
+			seoSettings,
 			mediaUrl
 		)
 	})
 
 	it('creates rich product SEO with structured data and social media', async () => {
-		seoRepo.findByEntity.mockResolvedValue(null)
+		seoSettings.findByEntity.mockResolvedValue(null)
 
 		await service.syncProduct(
 			{
@@ -108,7 +108,7 @@ describe('ProductSeoSyncService', () => {
 			'catalog-1'
 		)
 
-		expect(seoRepo.create).toHaveBeenCalledWith(
+		expect(seoSettings.create).toHaveBeenCalledWith(
 			expect.objectContaining({
 				entityType: 'PRODUCT',
 				entityId: 'product-1',
@@ -122,7 +122,7 @@ describe('ProductSeoSyncService', () => {
 	})
 
 	it('updates existing product SEO and disables indexing for hidden products', async () => {
-		seoRepo.findByEntity.mockResolvedValue({
+		seoSettings.findByEntity.mockResolvedValue({
 			id: 'seo-1'
 		} as any)
 
@@ -143,7 +143,7 @@ describe('ProductSeoSyncService', () => {
 			'catalog-1'
 		)
 
-		expect(seoRepo.update).toHaveBeenCalledWith(
+		expect(seoSettings.update).toHaveBeenCalledWith(
 			'seo-1',
 			'catalog-1',
 			expect.objectContaining({
@@ -157,12 +157,12 @@ describe('ProductSeoSyncService', () => {
 	})
 
 	it('soft deletes product SEO on remove', async () => {
-		seoRepo.findByEntity.mockResolvedValue({
+		seoSettings.findByEntity.mockResolvedValue({
 			id: 'seo-1'
 		} as any)
 
 		await service.removeProduct('product-1', 'catalog-1')
 
-		expect(seoRepo.softDelete).toHaveBeenCalledWith('seo-1', 'catalog-1')
+		expect(seoSettings.softDelete).toHaveBeenCalledWith('seo-1', 'catalog-1')
 	})
 })

@@ -9,10 +9,11 @@ import {
 
 import { resolveObservabilitySettings } from '@/infrastructure/observability/observability.settings'
 
+import type { ObservabilityRecorderPort } from './contracts'
 import { statusCodeToClass } from './http-observability.utils'
 
 @Injectable()
-export class ObservabilityService {
+export class ObservabilityService implements ObservabilityRecorderPort {
 	private readonly settings = resolveObservabilitySettings()
 	private readonly registry = new Registry()
 

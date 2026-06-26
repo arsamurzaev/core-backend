@@ -41,6 +41,7 @@ import {
 	readCartTokenFromCookie,
 	type UpsertCartItemInput
 } from './cart.utils'
+import type { CartCommandPort } from './contracts'
 import { OrderCheckoutService } from './order-checkout.service'
 
 const CART_MANAGER_INACTIVITY_MS =
@@ -132,7 +133,9 @@ const cartTableSessionSelect = {
 	updatedAt: true
 } satisfies Prisma.CartTableSessionSelect
 @Injectable()
-export class CartService implements OnModuleInit, OnModuleDestroy {
+export class CartService
+	implements CartCommandPort, OnModuleInit, OnModuleDestroy
+{
 	private readonly logger = new Logger(CartService.name)
 	private managerSweepTimer: NodeJS.Timeout | null = null
 	private draftSweepTimer: NodeJS.Timeout | null = null

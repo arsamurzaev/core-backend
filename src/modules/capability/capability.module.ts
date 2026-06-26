@@ -14,11 +14,6 @@ import { CapabilityGuard } from './guards/capability.guard'
 		{ provide: CAPABILITY_READER_PORT, useExisting: CapabilityService },
 		{ provide: CAPABILITY_ASSERT_PORT, useExisting: CapabilityService }
 	],
-	exports: [
-		CapabilityService,
-		CapabilityGuard,
-		CAPABILITY_READER_PORT,
-		CAPABILITY_ASSERT_PORT
-	]
+	exports: [CapabilityGuard, CAPABILITY_READER_PORT, CAPABILITY_ASSERT_PORT]
 })
 export class CapabilityModule {}

@@ -1,6 +1,6 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common'
 
-import { S3Service } from '@/modules/s3/public'
+import { MEDIA_STORAGE_PORT, type MediaStoragePort } from '@/modules/s3/public'
 import { MediaRepository } from '@/shared/media/media.repository'
 
 import { IntegrationRepository } from '../../integration.repository'
@@ -21,7 +21,8 @@ export class IikoImageImportService {
 
 	constructor(
 		private readonly repo: IntegrationRepository,
-		private readonly s3Service: S3Service,
+		@Inject(MEDIA_STORAGE_PORT)
+		private readonly mediaStorage: MediaStoragePort,
 		private readonly mediaRepo: MediaRepository
 	) {}
 
@@ -50,7 +51,7 @@ export class IikoImageImportService {
 			try {
 				const downloaded = await params.client.downloadImage(imageUrl)
 				if (!downloaded) continue
-				const uploaded = await this.s3Service.uploadImage(
+				const uploaded = await this.mediaStorage.uploadImage(
 					{
 						buffer: downloaded.buffer,
 						size: downloaded.buffer.length,
@@ -98,7 +99,7 @@ export class IikoImageImportService {
 	private async cleanupUploaded(keys: string[]): Promise<void> {
 		if (!keys.length) return
 		try {
-			await this.s3Service.deleteObjectsByKeys(keys)
+			await this.mediaStorage.deleteObjectsByKeys(keys)
 		} catch (error) {
 			this.logger.warn(
 				`Failed to cleanup iiko images after import error: ${renderSafeProviderErrorMessage(error)}`
@@ -126,7 +127,7 @@ export class IikoImageImportService {
 		])
 
 		try {
-			await this.s3Service.deleteObjectsByKeys(keys)
+			await this.mediaStorage.deleteObjectsByKeys(keys)
 			await this.mediaRepo.deleteOrphanedByIds(
 				orphans.map(orphan => orphan.id),
 				catalogId

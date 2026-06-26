@@ -4,6 +4,8 @@ import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
+import type { SeoSettingsPort } from './contracts'
+
 const mediaSelect = {
 	id: true,
 	originalName: true,
@@ -68,7 +70,7 @@ const seoSelect = {
 }
 
 @Injectable()
-export class SeoRepository {
+export class SeoRepository implements SeoSettingsPort {
 	constructor(private readonly prisma: PrismaService) {}
 
 	findAll(catalogId: string) {

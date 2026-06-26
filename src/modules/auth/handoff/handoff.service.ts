@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { RedisService } from '@/infrastructure/redis/redis.service'
 
+import type { AuthHandoffIssuerPort } from '../contracts'
+
 import { sanitizeHandoffNext } from './handoff.utils'
 
 export type HandoffPayload = {
@@ -16,7 +18,7 @@ export type HandoffPayload = {
 }
 
 @Injectable()
-export class HandoffService {
+export class HandoffService implements AuthHandoffIssuerPort {
 	private readonly prefix = 'handoff:'
 	private readonly ttlSeconds = Number(process.env.HANDOFF_TTL_SECONDS ?? 30)
 

@@ -3,6 +3,7 @@ import process from 'node:process'
 
 type GateOptions = {
 	fast: boolean
+	requireShadow: boolean
 	skipDb: boolean
 	skipOpenApi: boolean
 }
@@ -22,7 +23,7 @@ async function main() {
 
 	console.log('Backend prod quality gate')
 	console.log(
-		`mode=${options.fast ? 'fast' : 'full'} skipOpenApi=${options.skipOpenApi} skipDb=${options.skipDb}`
+		`mode=${options.fast ? 'fast' : 'full'} requireShadow=${options.requireShadow} skipOpenApi=${options.skipOpenApi} skipDb=${options.skipDb}`
 	)
 
 	for (const [index, step] of steps.entries()) {
@@ -37,6 +38,11 @@ async function main() {
 
 function buildSteps(options: GateOptions): GateStep[] {
 	const steps: GateStep[] = [
+		npmStep('Prisma migrations check', [
+			'run',
+			'prisma:migrate:check',
+			...(options.requireShadow ? ['--', '--require-shadow'] : [])
+		]),
 		npmStep('Prisma generate', ['run', 'prisma:generate']),
 		npmStep('Build', ['run', 'build'])
 	]
@@ -118,6 +124,7 @@ function spawnStep(step: GateStep): Promise<number | null> {
 function parseOptions(args: string[]): GateOptions {
 	return {
 		fast: args.includes('--fast'),
+		requireShadow: args.includes('--require-shadow'),
 		skipDb: args.includes('--skip-db'),
 		skipOpenApi: args.includes('--skip-openapi')
 	}

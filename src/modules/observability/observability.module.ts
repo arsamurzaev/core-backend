@@ -17,6 +17,6 @@ import { ObservabilityService } from './observability.service'
 			useClass: HttpObservabilityInterceptor
 		}
 	],
-	exports: [ObservabilityService, OBSERVABILITY_RECORDER_PORT]
+	exports: [OBSERVABILITY_RECORDER_PORT]
 })
 export class ObservabilityModule {}

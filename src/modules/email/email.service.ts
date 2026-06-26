@@ -1,22 +1,10 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 import nodemailer, { type Transporter } from 'nodemailer'
 
-type EmailAttachment = {
-	filename: string
-	content: Buffer | string
-	contentType?: string
-}
-
-type SendEmailInput = {
-	to: string
-	subject: string
-	html: string
-	text?: string
-	attachments?: EmailAttachment[]
-}
+import type { EmailSenderPort, SendEmailInput } from './contracts'
 
 @Injectable()
-export class EmailService {
+export class EmailService implements EmailSenderPort {
 	private readonly logger = new Logger(EmailService.name)
 	private readonly driver = (
 		process.env.EMAIL_DRIVER ??

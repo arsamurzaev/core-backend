@@ -18,7 +18,7 @@ import {
 	type CapabilityAssertPort,
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
-import { S3Service } from '@/modules/s3/public'
+import { MEDIA_STORAGE_PORT, type MediaStoragePort } from '@/modules/s3/public'
 import { MediaRepository } from '@/shared/media/media.repository'
 import {
 	assertCurrentCatalogCanManageCatalogContent,
@@ -32,14 +32,14 @@ import {
 } from '@/shared/utils'
 
 import {
-	CreateProductDtoReq,
-	type CreateProductPriceListPriceDtoReq
-} from './dto/requests/create-product.dto.req'
+	type ProductCreateCommandInput,
+	type ProductCreatePriceListPriceInput,
+	type ProductUpdateCommandInput
+} from './contracts'
 import {
 	SetProductVariantMatrixDtoReq,
 	SetProductVariantsDtoReq
 } from './dto/requests/set-product-variants.dto.req'
-import { UpdateProductDtoReq } from './dto/requests/update-product.dto.req'
 import {
 	ProductAttributeBuilder,
 	type ProductAttributeValueData
@@ -143,11 +143,12 @@ export class ProductCommandService {
 		private readonly featureReader: CapabilityReaderPort,
 		private readonly finalizer: ProductWriteFinalizer,
 		private readonly mediaRepo: MediaRepository,
-		private readonly s3Service: S3Service,
+		@Inject(MEDIA_STORAGE_PORT)
+		private readonly mediaStorage: MediaStoragePort,
 		private readonly variants: ProductVariantService
 	) {}
 
-	async create(dto: CreateProductDtoReq) {
+	async create(dto: ProductCreateCommandInput) {
 		assertCurrentCatalogCanManageCatalogContent()
 		const {
 			mediaIds,
@@ -202,7 +203,7 @@ export class ProductCommandService {
 		})
 	}
 
-	async update(id: string, dto: UpdateProductDtoReq) {
+	async update(id: string, dto: ProductUpdateCommandInput) {
 		assertCurrentCatalogCanManageCatalogContent()
 		const catalogId = mustCatalogId()
 		const typeId = mustTypeId()
@@ -390,7 +391,7 @@ export class ProductCommandService {
 			)
 			const s3Keys = this.collectS3MediaKeys(orphanedMedia)
 			if (s3Keys.length) {
-				await this.s3Service.deleteObjectsByKeys(s3Keys)
+				await this.mediaStorage.deleteObjectsByKeys(s3Keys)
 			}
 			if (orphanedMedia.length) {
 				await this.mediaRepo.deleteOrphanedByIds(
@@ -408,7 +409,7 @@ export class ProductCommandService {
 	private async ensureDefaultVariantForLegacyUpdate(
 		id: string,
 		dto: Pick<
-			UpdateProductDtoReq,
+			ProductUpdateCommandInput,
 			'price' | 'status' | 'variants' | 'variantMatrix' | 'saleUnits'
 		>,
 		catalogId: string
@@ -443,7 +444,7 @@ export class ProductCommandService {
 	}
 
 	private async prepareCreatePayload(
-		dto: CreateProductDtoReq,
+		dto: ProductCreateCommandInput,
 		catalogId: string,
 		typeId: string
 	): Promise<PreparedProductCreatePayload> {
@@ -570,7 +571,7 @@ export class ProductCommandService {
 
 	private async assertCanUseCreatePriceListPrices(
 		catalogId: string,
-		input: CreateProductPriceListPriceDtoReq[] | undefined
+		input: ProductCreatePriceListPriceInput[] | undefined
 	): Promise<void> {
 		if (!input?.length) return
 
@@ -586,7 +587,7 @@ export class ProductCommandService {
 	}
 
 	private prepareCreatePriceListPrices(
-		input: CreateProductPriceListPriceDtoReq[] | undefined,
+		input: ProductCreatePriceListPriceInput[] | undefined,
 		variants: ProductVariantData[]
 	): ProductCreatePriceListPriceData[] | undefined {
 		if (!input?.length) return undefined
@@ -642,7 +643,7 @@ export class ProductCommandService {
 	}
 
 	private resolveCreatePriceListVariantKey(
-		item: CreateProductPriceListPriceDtoReq,
+		item: ProductCreatePriceListPriceInput,
 		variantsByIdentity: Map<string, ProductVariantData>
 	): string {
 		const identity = this.buildVariantAttributeIdentity(item.variantAttributes)
@@ -687,7 +688,7 @@ export class ProductCommandService {
 
 	private async prepareUpdatePayload(
 		id: string,
-		dto: UpdateProductDtoReq,
+		dto: ProductUpdateCommandInput,
 		catalogId: string,
 		typeId: string
 	): Promise<PreparedProductUpdatePayload> {
@@ -937,7 +938,7 @@ export class ProductCommandService {
 		catalogId: string,
 		validationScope: ProductValidationScopeInput,
 		productType: ProductTypeValidationSchema | null,
-		items: UpdateProductDtoReq['variantMatrix'],
+		items: ProductUpdateCommandInput['variantMatrix'],
 		data: ProductUpdateInput,
 		productRef: ProductValidationRef | null
 	): Promise<ProductVariantData[]> {
@@ -970,7 +971,7 @@ export class ProductCommandService {
 	}
 
 	private buildDefaultVariantSaleUnitUpdate(
-		dto: Pick<UpdateProductDtoReq, 'price' | 'saleUnits'>
+		dto: Pick<ProductUpdateCommandInput, 'price' | 'saleUnits'>
 	): ProductVariantUpdateData {
 		const update: ProductVariantUpdateData = {
 			variantKey: DEFAULT_VARIANT_KEY,
@@ -983,7 +984,7 @@ export class ProductCommandService {
 	}
 
 	private variantUpdatesRequireProductVariants(
-		variants: UpdateProductDtoReq['variants']
+		variants: ProductUpdateCommandInput['variants']
 	): boolean {
 		if (!variants?.length) return false
 
@@ -1070,7 +1071,7 @@ export class ProductCommandService {
 	}
 
 	private async buildUpdateData(
-		dto: UpdateProductDtoReq,
+		dto: ProductUpdateCommandInput,
 		catalogId: string,
 		resolvedProductTypeId?: string | null
 	): Promise<ProductUpdateInput> {
@@ -1108,7 +1109,7 @@ export class ProductCommandService {
 	}
 
 	private async resolveUpdatedCategoryId(
-		dto: UpdateProductDtoReq,
+		dto: ProductUpdateCommandInput,
 		catalogId: string,
 		categoryIds?: string[]
 	): Promise<string | undefined> {

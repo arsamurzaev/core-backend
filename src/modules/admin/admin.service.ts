@@ -43,7 +43,7 @@ import {
 	PRODUCT_MAINTENANCE_PORT,
 	type ProductMaintenancePort
 } from '@/modules/product/public'
-import { S3Service } from '@/modules/s3/public'
+import { MEDIA_STORAGE_PORT, type MediaStoragePort } from '@/modules/s3/public'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_CACHE_VERSION,
@@ -348,7 +348,8 @@ export class AdminService {
 	constructor(
 		private readonly prisma: PrismaService,
 		private readonly mediaUrl: MediaUrlService,
-		private readonly s3: S3Service,
+		@Inject(MEDIA_STORAGE_PORT)
+		private readonly mediaStorage: MediaStoragePort,
 		private readonly cache: CacheService,
 		@Inject(CAPABILITY_READER_PORT)
 		private readonly capabilities: CapabilityReaderPort,
@@ -1645,7 +1646,9 @@ export class AdminService {
 				}
 			)
 		} catch (error) {
-			await this.s3.deleteObjectsByKeys(copiedS3Keys).catch(() => undefined)
+			await this.mediaStorage
+				.deleteObjectsByKeys(copiedS3Keys)
+				.catch(() => undefined)
 			throw error
 		}
 
@@ -2942,7 +2945,7 @@ export class AdminService {
 			)
 		}
 
-		const uploaded = await this.s3.uploadProofFile(
+		const uploaded = await this.mediaStorage.uploadProofFile(
 			proof.buffer,
 			proof.mimetype,
 			proof.originalname
@@ -3014,7 +3017,7 @@ export class AdminService {
 		targetEntityId: string | null
 	): Promise<string | null> {
 		try {
-			const result = await this.s3.copyObjectToCatalog({
+			const result = await this.mediaStorage.copyObjectToCatalog({
 				sourceKey,
 				targetCatalogId,
 				path: media.path,

@@ -2,6 +2,11 @@ import { Injectable } from '@nestjs/common'
 
 import type { CatalogPriceListProductPriceContext } from '@/modules/catalog-price-list/public'
 
+import type {
+	ProductVariantProjection,
+	ProductVariantProjectionReader,
+	ProductVariantProjectionResolveOptions
+} from './contracts'
 import { applyPriceListContextToVariant } from './product-price-list-read.utils'
 import {
 	buildVariantPickerOptionsFromVariants,
@@ -10,22 +15,18 @@ import {
 	buildVariantSummaryMap,
 	createEmptyVariantProjection,
 	type ProductVariantPickerSource,
-	type ProductVariantProjection,
 	shouldBuildVariantPickerOptions
 } from './product-variant-card-projection'
 import { ProductRepository } from './product.repository'
 
 @Injectable()
-export class ProductVariantCardProjectionService {
+export class ProductVariantCardProjectionService implements ProductVariantProjectionReader {
 	constructor(private readonly repo: ProductRepository) {}
 
 	async resolveForProductIds(
 		productIds: string[],
 		priceContext?: CatalogPriceListProductPriceContext,
-		options: {
-			filterUnavailable?: boolean
-			canUseCatalogSaleUnits?: boolean
-		} = {}
+		options: ProductVariantProjectionResolveOptions = {}
 	): Promise<Map<string, ProductVariantProjection>> {
 		const ids = [...new Set(productIds.filter(Boolean))]
 		if (!ids.length) return new Map()
@@ -68,10 +69,7 @@ export class ProductVariantCardProjectionService {
 	private async resolveWithPriceList(
 		productIds: string[],
 		priceContext: CatalogPriceListProductPriceContext,
-		options: {
-			filterUnavailable?: boolean
-			canUseCatalogSaleUnits?: boolean
-		}
+		options: ProductVariantProjectionResolveOptions
 	): Promise<Map<string, ProductVariantProjection>> {
 		const variants = await this.repo.findVariantPickerOptions(productIds)
 		const variantsByProductId = new Map<string, ProductVariantPickerSource[]>()

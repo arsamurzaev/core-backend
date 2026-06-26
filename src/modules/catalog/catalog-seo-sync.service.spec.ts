@@ -1,26 +1,26 @@
 import { BadRequestException } from '@nestjs/common'
 import sharp from 'sharp'
 
-import { S3Service } from '@/modules/s3/s3.service'
-import { SeoRepository } from '@/modules/seo/seo.repository'
+import type { MediaStoragePort } from '@/modules/s3/public'
+import type { SeoSettingsPort } from '@/modules/seo/public'
 import { MediaUrlService } from '@/shared/media/media-url.service'
 
 import { CatalogSeoSyncService } from './catalog-seo-sync.service'
 
 describe('CatalogSeoSyncService', () => {
 	let service: CatalogSeoSyncService
-	let seoRepo: jest.Mocked<SeoRepository>
-	let s3Service: jest.Mocked<S3Service>
+	let seoSettings: jest.Mocked<SeoSettingsPort>
+	let mediaStorage: jest.Mocked<MediaStoragePort>
 	let mediaUrl: jest.Mocked<MediaUrlService>
 
 	beforeEach(() => {
-		seoRepo = {
+		seoSettings = {
 			findByEntity: jest.fn(),
 			create: jest.fn(),
 			update: jest.fn()
 		} as any
 
-		s3Service = {
+		mediaStorage = {
 			uploadGeneratedAsset: jest.fn(),
 			downloadObject: jest.fn()
 		} as any
@@ -29,12 +29,12 @@ describe('CatalogSeoSyncService', () => {
 			resolveUrl: jest.fn()
 		} as any
 
-		service = new CatalogSeoSyncService(seoRepo, s3Service, mediaUrl)
+		service = new CatalogSeoSyncService(seoSettings, mediaStorage, mediaUrl)
 	})
 
 	it('creates default catalog SEO with generated assets', async () => {
-		seoRepo.findByEntity.mockResolvedValue(null)
-		s3Service.uploadGeneratedAsset
+		seoSettings.findByEntity.mockResolvedValue(null)
+		mediaStorage.uploadGeneratedAsset
 			.mockResolvedValueOnce({
 				ok: true,
 				mediaId: 'favicon-media',
@@ -64,8 +64,8 @@ describe('CatalogSeoSyncService', () => {
 			}
 		})
 
-		expect(seoRepo.create).toHaveBeenCalledTimes(1)
-		expect(seoRepo.create).toHaveBeenCalledWith(
+		expect(seoSettings.create).toHaveBeenCalledTimes(1)
+		expect(seoSettings.create).toHaveBeenCalledWith(
 			expect.objectContaining({
 				entityId: 'catalog-1',
 				entityType: 'CATALOG',
@@ -78,13 +78,13 @@ describe('CatalogSeoSyncService', () => {
 	})
 
 	it('updates existing SEO and merges generated assets into extras', async () => {
-		seoRepo.findByEntity.mockResolvedValue({
+		seoSettings.findByEntity.mockResolvedValue({
 			id: 'seo-1',
 			extras: JSON.stringify({ custom: true }),
 			ogMedia: null,
 			twitterMedia: null
 		} as any)
-		s3Service.uploadGeneratedAsset
+		mediaStorage.uploadGeneratedAsset
 			.mockResolvedValueOnce({
 				ok: true,
 				mediaId: 'favicon-media',
@@ -110,8 +110,8 @@ describe('CatalogSeoSyncService', () => {
 			name: 'Store'
 		})
 
-		expect(seoRepo.update).toHaveBeenCalledTimes(1)
-		expect(seoRepo.update).toHaveBeenCalledWith(
+		expect(seoSettings.update).toHaveBeenCalledTimes(1)
+		expect(seoSettings.update).toHaveBeenCalledWith(
 			'seo-1',
 			'catalog-1',
 			expect.objectContaining({
@@ -134,8 +134,8 @@ describe('CatalogSeoSyncService', () => {
 			.png()
 			.toBuffer()
 
-		seoRepo.findByEntity.mockResolvedValue(null)
-		s3Service.downloadObject
+		seoSettings.findByEntity.mockResolvedValue(null)
+		mediaStorage.downloadObject
 			.mockResolvedValueOnce({
 				buffer: imageBuffer,
 				contentType: 'image/png',
@@ -146,7 +146,7 @@ describe('CatalogSeoSyncService', () => {
 				contentType: 'image/png',
 				size: imageBuffer.length
 			})
-		s3Service.uploadGeneratedAsset
+		mediaStorage.uploadGeneratedAsset
 			.mockResolvedValueOnce({
 				ok: true,
 				mediaId: 'favicon-media',
@@ -187,21 +187,21 @@ describe('CatalogSeoSyncService', () => {
 			}
 		})
 
-		expect(s3Service.downloadObject).toHaveBeenCalledTimes(2)
-		expect(s3Service.downloadObject).toHaveBeenNthCalledWith(
+		expect(mediaStorage.downloadObject).toHaveBeenCalledTimes(2)
+		expect(mediaStorage.downloadObject).toHaveBeenNthCalledWith(
 			1,
 			'catalogs/catalog-1/background.png'
 		)
-		expect(s3Service.downloadObject).toHaveBeenNthCalledWith(
+		expect(mediaStorage.downloadObject).toHaveBeenNthCalledWith(
 			2,
 			'catalogs/catalog-1/logo.png'
 		)
-		expect(s3Service.uploadGeneratedAsset).toHaveBeenCalledTimes(3)
+		expect(mediaStorage.uploadGeneratedAsset).toHaveBeenCalledTimes(3)
 	})
 
 	it('creates SEO without assets when uploads are disabled', async () => {
-		seoRepo.findByEntity.mockResolvedValue(null)
-		s3Service.uploadGeneratedAsset.mockRejectedValue(
+		seoSettings.findByEntity.mockResolvedValue(null)
+		mediaStorage.uploadGeneratedAsset.mockRejectedValue(
 			new BadRequestException('Загрузка файлов отключена')
 		)
 
@@ -211,7 +211,7 @@ describe('CatalogSeoSyncService', () => {
 			name: 'Store'
 		})
 
-		expect(seoRepo.create).toHaveBeenCalledWith(
+		expect(seoSettings.create).toHaveBeenCalledWith(
 			expect.not.objectContaining({
 				ogMedia: expect.anything(),
 				twitterMedia: expect.anything()

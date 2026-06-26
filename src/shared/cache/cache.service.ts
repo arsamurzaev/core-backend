@@ -1,7 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 
 import { RedisService } from '@/infrastructure/redis/redis.service'
-import { ObservabilityService } from '@/modules/observability/observability.service'
+import {
+	OBSERVABILITY_RECORDER_PORT,
+	type ObservabilityRecorderPort
+} from '@/modules/observability/contracts'
 
 const CACHE_PREFIX = 'cache'
 const VERSION_PREFIX = 'cache:version'
@@ -12,7 +15,8 @@ export class CacheService {
 
 	constructor(
 		private readonly redis: RedisService,
-		private readonly observability: ObservabilityService
+		@Inject(OBSERVABILITY_RECORDER_PORT)
+		private readonly observability: ObservabilityRecorderPort
 	) {}
 
 	buildKey(parts: Array<string | number | null | undefined>): string {

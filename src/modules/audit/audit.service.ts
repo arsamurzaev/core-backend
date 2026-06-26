@@ -1,4 +1,3 @@
-import type { Prisma } from '@generated/client'
 import { AuditActorType, AuditOutcome, AuditSeverity } from '@generated/enums'
 import { Injectable, Logger } from '@nestjs/common'
 
@@ -6,46 +5,10 @@ import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { getClientInfo } from '@/shared/http/utils/client-info'
 import { RequestContext } from '@/shared/tenancy/request-context'
 
-import type { AuthRequest, SessionUser } from '../auth/types/auth-request'
-
-type AuditTargetInput = {
-	targetType: string
-	targetId?: string | null
-	catalogId?: string | null
-	label?: string | null
-	snapshot?: Prisma.InputJsonValue | null
-}
-
-type AuditChangeInput = {
-	field: string
-	oldValue?: Prisma.InputJsonValue | null
-	newValue?: Prisma.InputJsonValue | null
-}
-
-export type AuditRecordInput = {
-	action: string
-	category?: string | null
-	outcome?: AuditOutcome
-	severity?: AuditSeverity
-	actor?: SessionUser | null
-	actorType?: AuditActorType
-	request?: AuthRequest | null
-	targetType?: string | null
-	targetId?: string | null
-	targetCatalogId?: string | null
-	targetLabel?: string | null
-	reason?: string | null
-	message?: string | null
-	before?: Prisma.InputJsonValue | null
-	after?: Prisma.InputJsonValue | null
-	diff?: Prisma.InputJsonValue | null
-	metadata?: Prisma.InputJsonValue | null
-	targets?: AuditTargetInput[]
-	changes?: AuditChangeInput[]
-}
+import type { AuditRecorderPort, AuditRecordInput } from './contracts'
 
 @Injectable()
-export class AuditService {
+export class AuditService implements AuditRecorderPort {
 	private readonly logger = new Logger(AuditService.name)
 
 	constructor(private readonly prisma: PrismaService) {}

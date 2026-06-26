@@ -1,48 +1,24 @@
-import type { Prisma } from '@generated/client'
 import { Injectable } from '@nestjs/common'
 
+import type {
+	ProductDefaultVariantDiagnostics,
+	ProductDefaultVariantPriceMismatchRepairCandidate,
+	ProductDefaultVariantPriceMismatchRepairOptions,
+	ProductDefaultVariantPriceMismatchRepairResult,
+	ProductDefaultVariantRepairOptions,
+	ProductMaintenancePort
+} from './contracts'
 import { ProductVariantService } from './product-variant.service'
 import { ProductWriteFinalizer } from './product-write-finalizer.service'
-import {
-	type ProductDefaultVariantDiagnosticCheck,
-	type ProductDefaultVariantPriceMismatchRepairCandidate,
-	ProductRepository
-} from './product.repository'
+import { ProductRepository } from './product.repository'
 
 const DEFAULT_VARIANT_REPAIR_BATCH_SIZE = 100
 const DEFAULT_VARIANT_DIAGNOSTIC_SAMPLE_LIMIT = 10
 const DEFAULT_VARIANT_PRICE_REPAIR_BATCH_SIZE = 100
 const DEFAULT_VARIANT_PRICE_REPAIR_SAMPLE_LIMIT = 20
 
-export type ProductDefaultVariantDiagnostics = {
-	catalogId: string
-	sampleLimit: number
-	checks: ProductDefaultVariantDiagnosticCheck[]
-	warnCount: number
-	failCount: number
-	ok: boolean
-}
-
-export type ProductDefaultVariantPriceMismatchRepairOptions = {
-	apply?: boolean
-	batchSize?: number
-	sampleLimit?: number
-}
-
-export type ProductDefaultVariantPriceMismatchRepairResult = {
-	catalogId: string
-	dryRun: boolean
-	checkedProducts: number
-	repairableProducts: number
-	updatedProducts: number
-	affectedCatalogs: number
-	batchSize: number
-	sampleLimit: number
-	samples: ProductDefaultVariantPriceMismatchRepairCandidate[]
-}
-
 @Injectable()
-export class ProductMaintenanceService {
+export class ProductMaintenanceService implements ProductMaintenancePort {
 	constructor(
 		private readonly repo: ProductRepository,
 		private readonly variants: ProductVariantService,
@@ -139,9 +115,9 @@ export class ProductMaintenanceService {
 	async repairMissingDefaultVariantForProduct(
 		catalogId: string,
 		productId: string,
-		options: { tx?: unknown } = {}
+		options: ProductDefaultVariantRepairOptions = {}
 	): Promise<boolean | null> {
-		const tx = options.tx as Prisma.TransactionClient | undefined
+		const tx = options.tx
 		const product = await this.repo.findSkuById(productId, catalogId, tx)
 		if (!product) return null
 

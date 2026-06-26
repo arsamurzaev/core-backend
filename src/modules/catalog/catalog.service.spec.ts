@@ -504,6 +504,102 @@ describe('CatalogService', () => {
 		expect(repo.getTypeByIdWithAttributes).not.toHaveBeenCalled()
 	})
 
+	it('composes current catalog runtime contract', async () => {
+		const capabilityMap = {
+			...DEFAULT_CAPABILITY_MAP,
+			'product.types': true
+		}
+		featureEntitlements.getCatalogCapabilities.mockResolvedValue({
+			raw: capabilityMap,
+			effective: capabilityMap,
+			flags: {
+				...DEFAULT_FEATURE_FLAGS,
+				canUseProductTypes: true
+			},
+			definitions: [
+				{
+					key: 'product.types',
+					title: 'Product types',
+					description: 'Product type schemas.',
+					dependsOn: []
+				}
+			],
+			items: [
+				{
+					key: 'product.types',
+					raw: true,
+					effective: true,
+					disabledReason: null
+				}
+			]
+		} as any)
+		repo.getCurrentShellById.mockResolvedValue({
+			id: 'catalog-1',
+			slug: 'store',
+			domain: 'store.test',
+			name: 'Store',
+			typeId: 'type-1',
+			parentId: null,
+			userId: null,
+			config: null,
+			settings: {
+				presentationMode: 'CATALOG',
+				defaultMode: 'HALL',
+				allowedModes: ['DELIVERY', 'HALL'],
+				inventoryMode: INVENTORY_MODE_INTERNAL,
+				checkout: {
+					enabledMethods: ['PREORDER']
+				}
+			},
+			contacts: []
+		} as any)
+		repo.getTypeByIdWithAttributes.mockResolvedValue({
+			id: 'type-1',
+			code: 'restaurant',
+			name: 'Restaurant',
+			attributes: []
+		})
+
+		const result = await runWithCatalog(() => service.getCurrentRuntime())
+
+		expect(result).toMatchObject({
+			schemaVersion: 1,
+			catalog: {
+				id: 'catalog-1',
+				slug: 'store',
+				domain: 'store.test',
+				name: 'Store',
+				typeId: 'type-1'
+			},
+			type: {
+				id: 'type-1',
+				code: 'restaurant',
+				name: 'Restaurant'
+			},
+			presentation: {
+				mode: 'CATALOG',
+				defaultMode: 'HALL',
+				allowedModes: ['DELIVERY', 'HALL']
+			},
+			checkout: {
+				availableMethods: ['DELIVERY', 'PICKUP', 'PREORDER'],
+				enabledMethods: ['PREORDER']
+			},
+			inventory: {
+				mode: INVENTORY_MODE_INTERNAL
+			},
+			capabilities: {
+				flags: {
+					...DEFAULT_FEATURE_FLAGS,
+					canUseProductTypes: true
+				},
+				raw: capabilityMap,
+				effective: capabilityMap
+			}
+		})
+		expect(result.capabilities.flags).not.toHaveProperty('inventoryMode')
+	})
+
 	it('returns current catalog type schema without loading shell when typeId is in context', async () => {
 		repo.getTypeByIdWithAttributes.mockResolvedValue({
 			id: 'type-1',

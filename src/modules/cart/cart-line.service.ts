@@ -15,8 +15,9 @@ import {
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
 import {
+	CATALOG_PRICE_LIST_RESOLVER_PORT,
 	type CatalogPriceListLinePrice,
-	CatalogPriceListResolverService
+	type CatalogPriceListResolverPort
 } from '@/modules/catalog-price-list/public'
 import {
 	PRODUCT_MAINTENANCE_PORT,
@@ -195,7 +196,8 @@ export class CartLineService {
 		@Inject(PRODUCT_SELLABLE_READER_PORT)
 		private readonly sellableReader: ProductSellableReader,
 		@Optional()
-		private readonly priceLists?: CatalogPriceListResolverService
+		@Inject(CATALOG_PRICE_LIST_RESOLVER_PORT)
+		private readonly priceLists?: CatalogPriceListResolverPort
 	) {}
 
 	async upsertItem(

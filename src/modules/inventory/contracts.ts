@@ -2,16 +2,7 @@ import type { Prisma } from '@generated/client'
 
 import type { DomainEvent } from '@/shared/domain-events/domain-events.contract'
 
-import type {
-	ExpireInventoryReservationsResult,
-	InventoryCartReservationLine,
-	InventoryCompletedOrderLine
-} from './inventory.repository'
-
 export const INVENTORY_RESERVATION_PORT = Symbol('INVENTORY_RESERVATION_PORT')
-export const INVENTORY_STOCK_READER_PORT = Symbol('INVENTORY_STOCK_READER_PORT')
-export const INVENTORY_MOVEMENT_PORT = Symbol('INVENTORY_MOVEMENT_PORT')
-export const INVENTORY_MODE_PORT = Symbol('INVENTORY_MODE_PORT')
 export const INVENTORY_EXTERNAL_STOCK_PORT = Symbol(
 	'INVENTORY_EXTERNAL_STOCK_PORT'
 )
@@ -19,6 +10,33 @@ export const INVENTORY_EXTERNAL_STOCK_PORT = Symbol(
 export type InventoryTransactionEffects = {
 	affectedCatalogIds: string[]
 	domainEvents: DomainEvent[]
+}
+
+export type InventoryVariantStockChange = {
+	catalogId?: string | null
+	variantId: string
+	productId: string | null
+	previousStock: number | null
+	nextStock: number
+	changed: boolean
+}
+
+export type InventoryCompletedOrderLine = {
+	cartItemId: string
+	productId: string
+	variantId: string | null
+	quantity: number
+}
+
+export type InventoryCartReservationLine = InventoryCompletedOrderLine
+
+export type ExpireInventoryReservationsResult = {
+	releasedReservations: number
+	affectedVariants: number
+	affectedVariantIds: string[]
+	affectedCatalogIds: string[]
+	stockChanges: InventoryVariantStockChange[]
+	domainEvents?: DomainEvent[]
 }
 
 export interface InventoryReservationPort {
@@ -62,21 +80,6 @@ export interface InventoryReservationPort {
 		catalogIds: Iterable<string | null | undefined>,
 		domainEvents?: DomainEvent[]
 	): Promise<void>
-}
-
-export interface InventoryStockReaderPort {
-	getAvailableStock?(
-		productId: string,
-		variantId?: string | null
-	): Promise<number>
-}
-
-export interface InventoryMovementPort {
-	recordMovement?(input: unknown): Promise<void>
-}
-
-export interface InventoryModePort {
-	getInventoryMode?(catalogId: string): Promise<string>
 }
 
 export type InventoryExternalStockApplySource = 'FULL_SYNC' | 'WEBHOOK'

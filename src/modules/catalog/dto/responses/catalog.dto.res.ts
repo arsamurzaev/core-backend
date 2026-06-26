@@ -11,7 +11,10 @@ import type { CatalogInventoryMode } from '@generated/enums'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
 import { AttributeDto } from '@/modules/attribute/public'
-import { CATALOG_CAPABILITIES } from '@/modules/capability/public'
+import {
+	CATALOG_CAPABILITIES,
+	type CatalogCapabilityFlags
+} from '@/modules/capability/public'
 import { SeoDto } from '@/modules/seo/public'
 import { OkResponseDto } from '@/shared/http/dto/ok.response.dto'
 import { MediaDto } from '@/shared/media/dto/media.dto.res'
@@ -317,6 +320,110 @@ export class CatalogCurrentShellDto extends CatalogDto {
 
 	@ApiProperty({ type: SeoDto, nullable: true })
 	seo: SeoDto | null
+}
+
+export class CatalogRuntimeCatalogDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	slug: string
+
+	@ApiProperty({ type: String, nullable: true })
+	domain: string | null
+
+	@ApiProperty({ type: String })
+	name: string
+
+	@ApiProperty({ type: String, nullable: true })
+	typeId: string | null
+}
+
+export class CatalogRuntimeTypeDto {
+	@ApiProperty({ type: String })
+	id: string
+
+	@ApiProperty({ type: String })
+	code: string
+
+	@ApiProperty({ type: String })
+	name: string
+}
+
+export class CatalogRuntimePresentationDto {
+	@ApiProperty({ enum: CATALOG_PRESENTATION_MODES })
+	mode: CatalogPresentationMode
+
+	@ApiProperty({ enum: CatalogExperienceMode })
+	defaultMode: CatalogExperienceMode
+
+	@ApiProperty({ enum: CatalogExperienceMode, isArray: true })
+	allowedModes: CatalogExperienceMode[]
+}
+
+export class CatalogRuntimeInventoryDto {
+	@ApiProperty({ enum: CATALOG_INVENTORY_MODES })
+	mode: CatalogInventoryMode
+}
+
+export class CatalogRuntimeCapabilitiesDto {
+	@ApiProperty({
+		type: Object,
+		additionalProperties: { type: 'boolean' },
+		description: 'Named UI-friendly feature flags derived from capabilities.'
+	})
+	flags: CatalogCapabilityFlags
+
+	@ApiProperty({
+		type: Object,
+		additionalProperties: { type: 'boolean' },
+		description: 'Raw admin entitlements before dependency resolution.'
+	})
+	raw: Record<(typeof CATALOG_CAPABILITIES)[number], boolean>
+
+	@ApiProperty({
+		type: Object,
+		additionalProperties: { type: 'boolean' },
+		description: 'Effective capabilities after dependency resolution.'
+	})
+	effective: Record<(typeof CATALOG_CAPABILITIES)[number], boolean>
+
+	@ApiProperty({
+		type: Object,
+		isArray: true,
+		description: 'Capability definitions for UI and admin surfaces.'
+	})
+	definitions: CatalogCurrentFeaturesDto['definitions']
+
+	@ApiProperty({
+		type: Object,
+		isArray: true,
+		description: 'Per-capability state with disabled reasons.'
+	})
+	items: CatalogCurrentFeaturesDto['items']
+}
+
+export class CatalogRuntimeDto {
+	@ApiProperty({ type: Number, example: 1 })
+	schemaVersion: 1
+
+	@ApiProperty({ type: CatalogRuntimeCatalogDto })
+	catalog: CatalogRuntimeCatalogDto
+
+	@ApiProperty({ type: CatalogRuntimeTypeDto, nullable: true })
+	type: CatalogRuntimeTypeDto | null
+
+	@ApiProperty({ type: CatalogRuntimePresentationDto })
+	presentation: CatalogRuntimePresentationDto
+
+	@ApiProperty({ type: CatalogCheckoutConfigDto })
+	checkout: CatalogCheckoutConfigDto
+
+	@ApiProperty({ type: CatalogRuntimeInventoryDto })
+	inventory: CatalogRuntimeInventoryDto
+
+	@ApiProperty({ type: CatalogRuntimeCapabilitiesDto })
+	capabilities: CatalogRuntimeCapabilitiesDto
 }
 
 export class CatalogCreateResponseDto extends OkResponseDto {

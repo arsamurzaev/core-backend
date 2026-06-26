@@ -4,6 +4,11 @@ import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 
+import type {
+	ProductTypeAttributeSummaryRecord,
+	ProductTypeMatrixEditorSchemaRecord,
+	ProductTypeRecord
+} from './contracts'
 import { ProductTypeScope } from './product-type.constants'
 import type { NormalizedProductTypeAttribute } from './product-type.utils'
 
@@ -174,22 +179,6 @@ function buildProductTypeMatrixEditorSchemaSelect(
 		}
 	}
 }
-
-type ProductTypeMatrixEditorSchemaSelect = ReturnType<
-	typeof buildProductTypeMatrixEditorSchemaSelect
->
-
-export type ProductTypeAttributeSummaryRecord = Prisma.AttributeGetPayload<{
-	select: typeof attributeSummarySelect
-}>
-
-export type ProductTypeRecord = Prisma.ProductTypeGetPayload<{
-	select: typeof productTypeSelect
-}>
-
-export type ProductTypeMatrixEditorSchemaRecord = Prisma.ProductTypeGetPayload<{
-	select: ProductTypeMatrixEditorSchemaSelect
-}>
 
 export type ProductTypeCreateData = {
 	catalogId?: string | null

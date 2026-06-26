@@ -18,7 +18,7 @@ bun run db:audit-default-variants -- --json
 ## Rollback Strategy
 
 - Prefer forward-compatible rollback: deploy the previous backend while leaving additive columns/tables in place. New tables are ignored by older code, and nullable `CartItem.variantId` remains compatible with legacy cart snapshots.
-- Do not drop new columns/tables during an incident unless a restored backup is ready. `prisma db push` does not keep down migrations, so destructive rollback is a restore operation, not an ad-hoc schema edit.
+- Do not drop new columns/tables during an incident unless a restored backup is ready. Prisma migrations do not keep down migrations, so destructive rollback is a restore operation, not an ad-hoc schema edit.
 - Pause MoySklad sync/export queues before rollback if the incident touches mapping, stock, or order export data.
 - If default variant or cart item backfill caused bad data, restore from the pre-apply backup. For limited issues, use the backup as the source of truth and repair only affected rows, then rerun the audit in dry-run mode.
 - If inventory balances are wrong after a migration, do not edit `InventoryMovement` rows in place. Add compensating movements or restore from backup if movement history itself is corrupt.

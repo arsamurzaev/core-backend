@@ -12,22 +12,10 @@ import {
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
 import {
-	type CatalogPriceListProductPriceContext,
-	CatalogPriceListResolverService
-} from '@/modules/catalog-price-list/public'
-import {
-	applyPriceListContextToProduct,
-	applyProductCommercialFields,
-	EMPTY_VARIANT_SUMMARY,
+	PRODUCT_CATEGORY_READ_PROJECTOR_PORT,
 	PRODUCT_COMMAND_PORT,
-	PRODUCT_SELLABLE_READER_PORT,
-	type ProductCommandPort,
-	type ProductCommercialFields,
-	type ProductSellableReader,
-	ProductVariantCardProjectionService,
-	type ProductVariantProjection,
-	resolveProductSaleUnitsForRead,
-	toProductCommercialFieldsMap
+	type ProductCategoryReadProjectorPort,
+	type ProductCommandPort
 } from '@/modules/product/public'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
@@ -42,18 +30,11 @@ import {
 	DOMAIN_EVENT_DISPATCHER,
 	type DomainEventDispatcher
 } from '@/shared/domain-events/domain-events.contract'
-import type { MediaDto } from '@/shared/media/dto/media.dto.res'
 import type { MediaRecord } from '@/shared/media/media-url.service'
-import {
-	MEDIA_LIST_VARIANT_NAMES,
-	MediaUrlService
-} from '@/shared/media/media-url.service'
+import { MediaUrlService } from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { ensureMediaInCatalog } from '@/shared/media/media.validation'
-import {
-	type ProductMappableRecord,
-	ProductMediaMapper
-} from '@/shared/media/product-media.mapper'
+import type { ProductMappableRecord } from '@/shared/media/product-media.mapper'
 import {
 	assertCurrentCatalogCanManageCatalogContent,
 	ctx,
@@ -69,7 +50,6 @@ import {
 import {
 	type CategoryProductInput,
 	type CategoryProductsPageItem,
-	type CategoryProductsPage as CategoryProductsPagePayload,
 	encodeCategoryProductsCursor,
 	normalizeCategoryName,
 	normalizeCategoryProducts,
@@ -77,34 +57,37 @@ import {
 	resolveCategoryProductPositions
 } from './category-products.utils'
 import { CategoryRepository } from './category.repository'
+import type {
+	CategoryCommandPort,
+	CategoryListOptions,
+	CategoryProductsReadOptions,
+	CategoryProductsReadPage,
+	CategoryReaderPort,
+	CategoryReadItem,
+	CategoryRemoveOptions
+} from './contracts'
 import { CreateCategoryDtoReq } from './dto/requests/create-category.dto.req'
 import { UpdateCategoryPositionDtoReq } from './dto/requests/update-category-position.dto.req'
 import { UpdateCategoryPositionsDtoReq } from './dto/requests/update-category-positions.dto.req'
 import { UpdateCategoryDtoReq } from './dto/requests/update-category.dto.req'
 
-type CategoryProductsPage = CategoryProductsPagePayload<unknown>
 type CategoryOrderItem = Awaited<
 	ReturnType<CategoryRepository['findAll']>
 >[number]
 type CategoryProductRef = Awaited<
 	ReturnType<CategoryRepository['findCategoryProductRefs']>
 >[number]
-type CategoryListOptions = {
-	includeEmpty?: boolean
-	includeInactive?: boolean
-}
 type CategoryProductsReadMode = {
 	applyPriceList: boolean
 	canUseCatalogPriceLists: boolean
 	canUseCatalogSaleUnits: boolean
 	enforcePriceListVisibility: boolean
 }
-type CategoryRemoveOptions = {
-	deleteProducts?: boolean
-}
 
 @Injectable()
-export class CategoryService {
+export class CategoryService
+	implements CategoryReaderPort, CategoryCommandPort
+{
 	private readonly listCacheTtlSec = CATEGORY_LIST_CACHE_TTL_SEC
 	private readonly firstPageCacheTtlSec =
 		CATEGORY_PRODUCTS_FIRST_PAGE_CACHE_TTL_SEC
@@ -116,14 +99,10 @@ export class CategoryService {
 		private readonly cache: CacheService,
 		private readonly mediaRepo: MediaRepository,
 		private readonly mediaUrl: MediaUrlService,
-		private readonly productMapper: ProductMediaMapper,
-		private readonly variantProjection: ProductVariantCardProjectionService,
 		@Inject(PRODUCT_COMMAND_PORT)
 		private readonly productCommands: ProductCommandPort,
-		@Inject(PRODUCT_SELLABLE_READER_PORT)
-		private readonly sellableReader: ProductSellableReader,
-		@Optional()
-		private readonly priceLists?: CatalogPriceListResolverService,
+		@Inject(PRODUCT_CATEGORY_READ_PROJECTOR_PORT)
+		private readonly productCategoryReads: ProductCategoryReadProjectorPort,
 		@Optional()
 		@Inject(CAPABILITY_READER_PORT)
 		private readonly capabilities?: CapabilityReaderPort,
@@ -196,13 +175,7 @@ export class CategoryService {
 
 	async getProductsByCategory(
 		id: string,
-		options?: {
-			cursor?: string
-			limit?: number | string
-			includeInactive?: boolean
-			applyPriceList?: boolean
-			enforcePriceListVisibility?: boolean
-		}
+		options?: CategoryProductsReadOptions
 	) {
 		const catalogId = effectiveCatalogId()
 		const category = await this.repo.findById(id, catalogId)
@@ -233,7 +206,7 @@ export class CategoryService {
 				: undefined
 
 		if (cacheKey) {
-			const cached = await this.cache.getJson<CategoryProductsPage>(cacheKey)
+			const cached = await this.cache.getJson<CategoryProductsReadPage>(cacheKey)
 			if (cached !== null) return cached
 		}
 
@@ -263,13 +236,7 @@ export class CategoryService {
 
 	async getProductCardsByCategory(
 		id: string,
-		options?: {
-			cursor?: string
-			limit?: number | string
-			includeInactive?: boolean
-			applyPriceList?: boolean
-			enforcePriceListVisibility?: boolean
-		}
+		options?: CategoryProductsReadOptions
 	) {
 		const catalogId = effectiveCatalogId()
 		const category = await this.repo.findById(id, catalogId)
@@ -306,7 +273,7 @@ export class CategoryService {
 				: undefined
 
 		if (cacheKey) {
-			const cached = await this.cache.getJson<CategoryProductsPage>(cacheKey)
+			const cached = await this.cache.getJson<CategoryProductsReadPage>(cacheKey)
 			if (cached !== null) return cached
 		}
 
@@ -573,15 +540,15 @@ export class CategoryService {
 		includeInactive: boolean
 		enforcePriceListVisibility: boolean
 	}): Promise<Map<string, number> | null> {
-		if (!params.enforcePriceListVisibility || !this.priceLists) return null
+		if (!params.enforcePriceListVisibility) return null
 
-		const priceContext = await this.resolvePriceListContext(
-			params.catalogId,
-			params.buyerCatalogId,
-			[],
-			true
-		)
-		if (!priceContext.priceList) return null
+		const activePriceListVisibility =
+			await this.productCategoryReads.resolveVisibleCategoryProductIds({
+				catalogId: params.catalogId,
+				buyerCatalogId: params.buyerCatalogId,
+				productIds: []
+			})
+		if (activePriceListVisibility === null) return null
 
 		const categoryIds = params.categories.map(category => category.id)
 		const refs = await this.repo.findCategoryProductRefs(
@@ -589,44 +556,34 @@ export class CategoryService {
 			categoryIds,
 			{ includeInactive: params.includeInactive }
 		)
-		return this.countVisibleCategoryProducts(params, refs)
+		const visibleProductIds =
+			await this.productCategoryReads.resolveVisibleCategoryProductIds({
+				catalogId: params.catalogId,
+				buyerCatalogId: params.buyerCatalogId,
+				productIds: refs.map(ref => ref.productId)
+			})
+		if (visibleProductIds === null) return null
+
+		return this.countVisibleCategoryProducts(params, refs, visibleProductIds)
 	}
 
-	private async countVisibleCategoryProducts(
+	private countVisibleCategoryProducts(
 		params: {
-			catalogId: string
-			buyerCatalogId: string
 			categories: CategoryOrderItem[]
 		},
-		refs: CategoryProductRef[]
-	): Promise<Map<string, number>> {
+		refs: CategoryProductRef[],
+		visibleProductIds: ReadonlySet<string>
+	): Map<string, number> {
 		const counts = new Map<string, number>(
 			params.categories.map(category => [category.id, 0] as const)
 		)
-		const productIds = [...new Set(refs.map(ref => ref.productId))]
-		if (!productIds.length) return counts
-
-		const commercialMap = toProductCommercialFieldsMap(
-			await this.sellableReader.resolveProductsSellable(
-				params.catalogId,
-				productIds,
-				{ buyerCatalogId: params.buyerCatalogId }
-			)
-		)
 
 		for (const ref of refs) {
-			const commercial = commercialMap.get(ref.productId)
-			if (!this.isVisibleByPriceList(commercial)) continue
+			if (!visibleProductIds.has(ref.productId)) continue
 			counts.set(ref.categoryId, (counts.get(ref.categoryId) ?? 0) + 1)
 		}
 
 		return counts
-	}
-
-	private isVisibleByPriceList(
-		commercial: ProductCommercialFields | undefined
-	): boolean {
-		return !(commercial?.usesPriceList && commercial.priceState === 'UNKNOWN')
 	}
 
 	private normalizeCategoryListForRead(categories: CategoryOrderItem[]) {
@@ -665,9 +622,9 @@ export class CategoryService {
 			cursor: string | undefined,
 			take: number
 		) => Promise<CategoryProductsPageItem<T>[]>
-	}): Promise<CategoryProductsPage> {
+	}): Promise<CategoryProductsReadPage> {
 		const take = params.limit + 1
-		const visibleItems: CategoryProductsPagePayload<unknown>['items'] = []
+		const visibleItems: CategoryProductsReadPage['items'] = []
 		let cursor = params.cursor
 		let nextCursor: string | null = null
 
@@ -724,37 +681,19 @@ export class CategoryService {
 		items: CategoryProductsPageItem<T>[]
 		applyPriceList: boolean
 		enforcePriceListVisibility: boolean
-	}): Promise<CategoryProductsPagePayload<unknown>['items']> {
+	}): Promise<CategoryProductsReadPage['items']> {
 		const products = params.items.map(item => item.product)
-		const productIds = products.map(product => product.id)
-		const priceContext = await this.resolvePriceListContext(
-			params.catalogId,
-			params.buyerCatalogId,
-			productIds,
-			params.applyPriceList
-		)
-		const [commercialMap, variantProjectionMap] = await Promise.all([
-			this.resolveCommercialProjectionMap(
-				params.catalogId,
-				products,
-				params.buyerCatalogId,
-				params.applyPriceList
-			),
-			this.variantProjection.resolveForProductIds(productIds, priceContext, {
-				filterUnavailable: params.enforcePriceListVisibility,
-				...(params.canUseCatalogSaleUnits ? {} : { canUseCatalogSaleUnits: false })
-			})
-		])
+		const mappedProducts = await this.productCategoryReads.mapCategoryProducts({
+			catalogId: params.catalogId,
+			buyerCatalogId: params.buyerCatalogId,
+			products,
+			canUseCatalogSaleUnits: params.canUseCatalogSaleUnits,
+			applyPriceList: params.applyPriceList,
+			enforcePriceListVisibility: params.enforcePriceListVisibility
+		})
 
-		return params.items.flatMap(({ product, ...item }) => {
-			const mappedProduct = this.mapProductForCategory(
-				commercialMap,
-				product,
-				params.enforcePriceListVisibility,
-				params.canUseCatalogSaleUnits,
-				priceContext,
-				variantProjectionMap
-			)
+		return params.items.flatMap(({ product: _product, ...item }, index) => {
+			const mappedProduct = mappedProducts[index] ?? null
 
 			return mappedProduct === null
 				? []
@@ -765,69 +704,6 @@ export class CategoryService {
 						}
 					]
 		})
-	}
-
-	private mapProductForCategory<
-		T extends ProductMappableRecord & { id: string; price?: unknown }
-	>(
-		commercialMap: ReadonlyMap<string, ProductCommercialFields>,
-		product: T,
-		enforcePriceListVisibility: boolean,
-		canUseCatalogSaleUnits: boolean,
-		priceContext: CatalogPriceListProductPriceContext,
-		variantProjectionMap?: ReadonlyMap<string, ProductVariantProjection>
-	) {
-		const commercial = commercialMap.get(product.id)
-		if (
-			enforcePriceListVisibility &&
-			commercial?.usesPriceList &&
-			commercial.priceState === 'UNKNOWN'
-		) {
-			return null
-		}
-		const readableProduct = applyPriceListContextToProduct(
-			product,
-			priceContext,
-			{
-				filterUnavailable: enforcePriceListVisibility,
-				...(canUseCatalogSaleUnits ? {} : { canUseCatalogSaleUnits: false })
-			}
-		)
-		const mapped = this.mapProductMedia(
-			applyProductCommercialFields(
-				readableProduct,
-				this.resolveCommercialForRead(commercial, enforcePriceListVisibility)
-			)
-		)
-		const saleUnits = resolveProductSaleUnitsForRead(mapped, {
-			canUseCatalogSaleUnits,
-			shouldExposeVariants: false
-		})
-		const mappedProduct = { ...mapped } as typeof mapped & {
-			variants?: unknown
-		}
-		delete mappedProduct.variants
-
-		if (!variantProjectionMap) {
-			return {
-				...mappedProduct,
-				saleUnits
-			}
-		}
-
-		const variantProjection = variantProjectionMap.get(product.id)
-		return {
-			...mappedProduct,
-			saleUnits,
-			variantSummary: variantProjection?.variantSummary ?? {
-				...EMPTY_VARIANT_SUMMARY
-			},
-			variantPickerOptions: variantProjection?.variantPickerOptions ?? []
-		}
-	}
-
-	private mapProductMedia<T extends ProductMappableRecord>(product: T) {
-		return this.productMapper.mapProduct(product, MEDIA_LIST_VARIANT_NAMES)
 	}
 
 	private shouldApplyPriceList(options?: { applyPriceList?: boolean }): boolean {
@@ -849,68 +725,12 @@ export class CategoryService {
 		return Boolean(store.parentId && store.parentId !== store.catalogId)
 	}
 
-	private resolveCommercialForRead(
-		commercial: ProductCommercialFields | undefined,
-		enforcePriceListVisibility: boolean
-	): ProductCommercialFields | undefined {
-		if (
-			!enforcePriceListVisibility &&
-			commercial?.usesPriceList &&
-			commercial.priceState === 'UNKNOWN'
-		) {
-			return undefined
-		}
-		return commercial
-	}
-
-	private async resolveCommercialProjectionMap(
-		catalogId: string,
-		products: Array<{ id: string }>,
-		buyerCatalogId: string,
-		applyPriceList = true
-	): Promise<Map<string, ProductCommercialFields>> {
-		const projections = await this.sellableReader.resolveProductsSellable(
-			catalogId,
-			products.map(product => product.id),
-			{
-				buyerCatalogId,
-				...(applyPriceList ? {} : { ignorePriceList: true })
-			}
-		)
-		return toProductCommercialFieldsMap(projections)
-	}
-
 	private async canUseCatalogSaleUnits(catalogId: string): Promise<boolean> {
 		return this.capabilities?.canUseCatalogSaleUnits(catalogId) ?? true
 	}
 
 	private async canUseCatalogPriceLists(catalogId: string): Promise<boolean> {
 		return this.capabilities?.canUseCatalogPriceLists(catalogId) ?? false
-	}
-
-	private resolvePriceListContext(
-		catalogId: string,
-		buyerCatalogId: string,
-		productIds: string[],
-		applyPriceList = true
-	): Promise<CatalogPriceListProductPriceContext> {
-		if (!applyPriceList || !this.priceLists) {
-			return Promise.resolve(this.emptyPriceListContext())
-		}
-		return this.priceLists.resolveProductPriceContext({
-			buyerCatalogId,
-			ownerCatalogId: catalogId,
-			productIds
-		})
-	}
-
-	private emptyPriceListContext(): CatalogPriceListProductPriceContext {
-		return {
-			priceList: null,
-			productPrices: new Map(),
-			variantPrices: new Map(),
-			saleUnitPrices: new Map()
-		}
 	}
 
 	private async prepareCategoryProductsForWrite(
@@ -1219,6 +1039,4 @@ export class CategoryService {
 	}
 }
 
-type CategoryListResponse = Array<
-	Omit<CategoryOrderItem, 'imageMedia'> & { imageMedia: MediaDto | null }
->
+type CategoryListResponse = CategoryReadItem[]

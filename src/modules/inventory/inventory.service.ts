@@ -42,7 +42,14 @@ import { RequestContext } from '@/shared/tenancy/request-context'
 
 import type { AuthRequest, SessionUser } from '../auth/types/auth-request'
 
-import type { InventoryTransactionEffects } from './contracts'
+import type {
+	ExpireInventoryReservationsResult,
+	InventoryCartReservationLine,
+	InventoryCompletedOrderLine,
+	InventoryReservationPort,
+	InventoryTransactionEffects,
+	InventoryVariantStockChange
+} from './contracts'
 import { CreateInventoryStockAdjustmentDtoReq } from './dto/requests/create-inventory-stock-adjustment.dto.req'
 import { CreateInventoryWarehouseDtoReq } from './dto/requests/create-inventory-warehouse.dto.req'
 import { UpdateInventoryWarehouseDtoReq } from './dto/requests/update-inventory-warehouse.dto.req'
@@ -54,11 +61,7 @@ import {
 	type InventoryWarehouseStatusValue
 } from './inventory.constants'
 import {
-	type ExpireInventoryReservationsResult,
-	type InventoryCartReservationLine,
-	type InventoryCompletedOrderLine,
 	InventoryRepository,
-	type InventoryVariantStockChange,
 	type InventoryWarehouseRecord,
 	type InventoryWarehouseWriteData
 } from './inventory.repository'
@@ -70,7 +73,7 @@ const CART_RESERVATION_TTL_MS =
 	30 * 60 * 1000
 
 @Injectable()
-export class InventoryService {
+export class InventoryService implements InventoryReservationPort {
 	constructor(
 		private readonly repo: InventoryRepository,
 		@Inject(CAPABILITY_ASSERT_PORT)

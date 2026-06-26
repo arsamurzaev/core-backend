@@ -41,6 +41,18 @@ import {
 import { mustCatalogId } from '@/shared/tenancy/ctx'
 import { formatUnknownValue } from '@/shared/utils'
 
+import type {
+	CopyObjectToCatalogParams,
+	CopyObjectToCatalogResult,
+	MediaStorageDownloadResult,
+	MediaStoragePort,
+	UploadedImageFile,
+	UploadGeneratedAsset,
+	UploadGeneratedAssetResult,
+	UploadImageOptions,
+	UploadImageResult
+} from './contracts'
+
 const DEFAULT_VARIANT_WIDTHS = [1200, 800, 400]
 const DEFAULT_IMAGE_FORMATS = ['avif']
 const DEFAULT_VARIANT_NAMES = new Map<number, string>([
@@ -125,50 +137,6 @@ type UploadQueueResult = {
 	count: number
 }
 
-export type UploadImageOptions = {
-	path?: string
-	folder?: string
-	entityId?: string
-	catalogId?: string
-}
-
-export type UploadedImageFile = {
-	buffer: Buffer
-	size: number
-	mimetype: string
-	originalname?: string
-}
-
-export type UploadImageResult = {
-	ok: true
-	mediaId: string
-	key: string
-	url: string
-	variants: ImageVariant[]
-}
-
-export type UploadGeneratedAsset = {
-	buffer: Buffer
-	contentType: string
-	originalName?: string
-	size?: number
-	width?: number
-	height?: number
-}
-
-export type UploadGeneratedAssetResult = {
-	ok: true
-	mediaId: string
-	key: string
-	url: string
-}
-
-export type CopyObjectToCatalogResult = {
-	ok: true
-	key: string
-	url: string
-}
-
 export type PresignUploadResult = {
 	ok: true
 	mediaId: string
@@ -227,7 +195,7 @@ type UploadQueueJob = {
 }
 
 @Injectable()
-export class S3Service implements OnModuleDestroy {
+export class S3Service implements MediaStoragePort, OnModuleDestroy {
 	private readonly queueTracer = trace.getTracer('catalog_backend.queue')
 	private readonly client: S3Client | null
 	private readonly enabled: boolean
@@ -740,13 +708,9 @@ export class S3Service implements OnModuleDestroy {
 		}
 	}
 
-	async copyObjectToCatalog(params: {
-		sourceKey: string
-		targetCatalogId: string
-		path?: string | null
-		folder?: string | null
-		entityId?: string | null
-	}): Promise<CopyObjectToCatalogResult> {
+	async copyObjectToCatalog(
+		params: CopyObjectToCatalogParams
+	): Promise<CopyObjectToCatalogResult> {
 		this.assertUploadEnabled()
 		const sourceKey = this.normalizeRequiredKey(params.sourceKey)
 		const targetCatalogId = params.targetCatalogId.trim()
@@ -769,11 +733,7 @@ export class S3Service implements OnModuleDestroy {
 		}
 	}
 
-	async downloadObject(key: string): Promise<{
-		buffer: Buffer
-		contentType?: string
-		size?: number
-	}> {
+	async downloadObject(key: string): Promise<MediaStorageDownloadResult> {
 		this.assertUploadEnabled()
 		const cleanedKey = this.normalizeRequiredKey(key)
 		return this.downloadObjectBuffer(cleanedKey)

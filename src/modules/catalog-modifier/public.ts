@@ -1,6 +1,5 @@
 export { CatalogModifierModule } from './catalog-modifier.module'
-export { CatalogModifierRepository } from './catalog-modifier.repository'
-export { CatalogModifierService } from './catalog-modifier.service'
+export * from './contracts'
 export { CreateCatalogModifierGroupDtoReq } from './dto/requests/catalog-modifier-group.dto.req'
 export { CreateCatalogModifierOptionDtoReq } from './dto/requests/catalog-modifier-option.dto.req'
 export { SetProductModifiersDtoReq } from './dto/requests/set-product-modifiers.dto.req'

@@ -10,6 +10,7 @@ import {
 	GoneException,
 	HttpException,
 	HttpStatus,
+	Inject,
 	Injectable,
 	Logger,
 	NotFoundException,
@@ -22,14 +23,17 @@ import { render } from 'react-email'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { RedisService } from '@/infrastructure/redis/redis.service'
-import { AuthService } from '@/modules/auth/public'
+import {
+	AUTH_SESSION_ISSUER_PORT,
+	type AuthSessionIssuerPort
+} from '@/modules/auth/public'
 import {
 	ensureCatalogSlugAllowed,
 	normalizeCatalogContactValue,
 	normalizeCatalogSlug,
 	readCatalogBaseDomains
 } from '@/modules/catalog/public'
-import { EmailService } from '@/modules/email/public'
+import { EMAIL_SENDER_PORT, type EmailSenderPort } from '@/modules/email/public'
 
 import { generateCatalogAccessPdf } from './catalog-access-pdf'
 import { CatalogOnboardingConfirmDtoReq } from './dto/requests/catalog-onboarding-confirm.dto.req'
@@ -75,8 +79,10 @@ export class CatalogOnboardingService {
 	constructor(
 		private readonly prisma: PrismaService,
 		private readonly redis: RedisService,
-		private readonly auth: AuthService,
-		private readonly email: EmailService
+		@Inject(AUTH_SESSION_ISSUER_PORT)
+		private readonly auth: AuthSessionIssuerPort,
+		@Inject(EMAIL_SENDER_PORT)
+		private readonly email: EmailSenderPort
 	) {}
 
 	async checkSystemDomain(dto: CheckSystemDomainDtoReq) {

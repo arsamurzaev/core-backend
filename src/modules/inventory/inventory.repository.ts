@@ -2,8 +2,13 @@ import type { Prisma } from '@generated/client'
 import { Injectable } from '@nestjs/common'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
-import type { DomainEvent } from '@/shared/domain-events/domain-events.contract'
 
+import type {
+	ExpireInventoryReservationsResult,
+	InventoryCartReservationLine,
+	InventoryCompletedOrderLine,
+	InventoryVariantStockChange
+} from './contracts'
 import {
 	INVENTORY_MOVEMENT_SOURCE,
 	INVENTORY_MOVEMENT_TYPE,
@@ -117,15 +122,6 @@ export type InventoryWarehouseWriteData = {
 	address?: string | null
 }
 
-export type InventoryVariantStockChange = {
-	catalogId?: string | null
-	variantId: string
-	productId: string | null
-	previousStock: number | null
-	nextStock: number
-	changed: boolean
-}
-
 export type InventoryStockAdjustmentResult =
 	| {
 			ok: true
@@ -142,15 +138,6 @@ export type InventoryStockAdjustmentResult =
 				| 'VARIANT_NOT_FOUND'
 				| 'INSUFFICIENT_STOCK'
 	  }
-
-export type InventoryCompletedOrderLine = {
-	cartItemId: string
-	productId: string
-	variantId: string | null
-	quantity: number
-}
-
-export type InventoryCartReservationLine = InventoryCompletedOrderLine
 
 export type InventoryCompletedOrderStockResult =
 	| {
@@ -189,15 +176,6 @@ export type InventoryCartReservationsResult =
 				| 'INSUFFICIENT_STOCK'
 			variantId?: string | null
 	  }
-
-export type ExpireInventoryReservationsResult = {
-	releasedReservations: number
-	affectedVariants: number
-	affectedVariantIds: string[]
-	affectedCatalogIds: string[]
-	stockChanges: InventoryVariantStockChange[]
-	domainEvents?: DomainEvent[]
-}
 
 type InventoryReservationForRelease = {
 	id: string

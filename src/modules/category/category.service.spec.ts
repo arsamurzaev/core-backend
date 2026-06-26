@@ -3,25 +3,42 @@ import { BadRequestException, NotFoundException } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
 
 import { CAPABILITY_READER_PORT } from '@/modules/capability/contracts'
-import { CatalogPriceListResolverService } from '@/modules/catalog-price-list/public'
 import {
+	CATALOG_PRICE_LIST_RESOLVER_PORT,
+	type CatalogPriceListResolverPort
+} from '@/modules/catalog-price-list/public'
+import {
+	EMPTY_VARIANT_SUMMARY,
+	PRODUCT_CATEGORY_READ_PROJECTOR_PORT,
 	PRODUCT_COMMAND_PORT,
 	PRODUCT_SELLABLE_READER_PORT,
+	PRODUCT_VARIANT_PROJECTION_PORT,
+	type ProductCategoryReadProjectorPort,
 	type ProductCommandPort,
 	type ProductSellableProjection,
 	type ProductSellableReader,
-	ProductVariantCardProjectionService
+	type ProductVariantProjectionReader
 } from '@/modules/product/public'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATEGORY_LIST_CACHE_VERSION,
 	CATEGORY_PRODUCTS_CACHE_VERSION
 } from '@/shared/cache/catalog-cache.constants'
-import { MediaUrlService } from '@/shared/media/media-url.service'
+import {
+	MEDIA_LIST_VARIANT_NAMES,
+	MediaUrlService
+} from '@/shared/media/media-url.service'
 import { MediaRepository } from '@/shared/media/media.repository'
 import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
 
 import { RequestContext } from '../../shared/tenancy/request-context'
+import {
+	applyProductCommercialFields,
+	type ProductCommercialFields,
+	toProductCommercialFieldsMap
+} from '../product/product-commercial-fields.mapper'
+import { applyPriceListContextToProduct } from '../product/product-price-list-read.utils'
+import { resolveProductSaleUnitsForRead } from '../product/product-sale-units-read.utils'
 
 import { CategoryRepository } from './category.repository'
 import { CategoryService } from './category.service'
@@ -37,8 +54,10 @@ describe('CategoryService', () => {
 	let cache: jest.Mocked<CacheService>
 	let productCommands: jest.Mocked<ProductCommandPort>
 	let sellableReader: jest.Mocked<ProductSellableReader>
-	let variantProjection: jest.Mocked<ProductVariantCardProjectionService>
-	let priceLists: jest.Mocked<CatalogPriceListResolverService>
+	let variantProjection: jest.Mocked<ProductVariantProjectionReader>
+	let productCategoryReads: jest.Mocked<ProductCategoryReadProjectorPort>
+	let priceLists: jest.Mocked<CatalogPriceListResolverPort>
+	let productMapper: ProductMediaMapper
 	let capabilities: {
 		canUseCatalogPriceLists: jest.Mock
 		canUseCatalogSaleUnits: jest.Mock
@@ -87,6 +106,26 @@ describe('CategoryService', () => {
 		...overrides
 	})
 
+	const isVisibleByPriceList = (
+		commercial: ProductCommercialFields | undefined
+	): boolean => {
+		return !(commercial?.usesPriceList && commercial.priceState === 'UNKNOWN')
+	}
+
+	const resolveCommercialForRead = (
+		commercial: ProductCommercialFields | undefined,
+		enforcePriceListVisibility: boolean
+	): ProductCommercialFields | undefined => {
+		if (
+			!enforcePriceListVisibility &&
+			commercial?.usesPriceList &&
+			commercial.priceState === 'UNKNOWN'
+		) {
+			return undefined
+		}
+		return commercial
+	}
+
 	beforeEach(async () => {
 		const module: TestingModule = await Test.createTestingModule({
 			providers: [
@@ -129,6 +168,13 @@ describe('CategoryService', () => {
 					}
 				},
 				{
+					provide: PRODUCT_CATEGORY_READ_PROJECTOR_PORT,
+					useValue: {
+						mapCategoryProducts: jest.fn(),
+						resolveVisibleCategoryProductIds: jest.fn()
+					}
+				},
+				{
 					provide: MediaRepository,
 					useValue: {
 						findById: jest.fn(),
@@ -142,13 +188,13 @@ describe('CategoryService', () => {
 					}
 				},
 				{
-					provide: ProductVariantCardProjectionService,
+					provide: PRODUCT_VARIANT_PROJECTION_PORT,
 					useValue: {
 						resolveForProductIds: jest.fn().mockResolvedValue(new Map())
 					}
 				},
 				{
-					provide: CatalogPriceListResolverService,
+					provide: CATALOG_PRICE_LIST_RESOLVER_PORT,
 					useValue: {
 						resolveProductPriceContext: jest.fn().mockResolvedValue({
 							priceList: null,
@@ -197,9 +243,11 @@ describe('CategoryService', () => {
 		repo = module.get(CategoryRepository)
 		cache = module.get(CacheService)
 		productCommands = module.get(PRODUCT_COMMAND_PORT)
+		productCategoryReads = module.get(PRODUCT_CATEGORY_READ_PROJECTOR_PORT)
 		sellableReader = module.get(PRODUCT_SELLABLE_READER_PORT)
-		variantProjection = module.get(ProductVariantCardProjectionService)
-		priceLists = module.get(CatalogPriceListResolverService)
+		variantProjection = module.get(PRODUCT_VARIANT_PROJECTION_PORT)
+		priceLists = module.get(CATALOG_PRICE_LIST_RESOLVER_PORT)
+		productMapper = module.get(ProductMediaMapper)
 		capabilities = module.get(CAPABILITY_READER_PORT)
 
 		cache.buildKey.mockImplementation(parts =>
@@ -214,6 +262,97 @@ describe('CategoryService', () => {
 		serviceState.listCacheTtlSec = 0
 		serviceState.firstPageCacheTtlSec = 0
 		serviceState.nextPageCacheTtlSec = 0
+
+		productCategoryReads.resolveVisibleCategoryProductIds.mockImplementation(
+			async input => {
+				const priceContext = await priceLists.resolveProductPriceContext({
+					buyerCatalogId: input.buyerCatalogId,
+					ownerCatalogId: input.catalogId,
+					productIds: []
+				})
+				if (!priceContext.priceList) return null
+				if (!input.productIds.length) return new Set()
+
+				const commercialMap = toProductCommercialFieldsMap(
+					await sellableReader.resolveProductsSellable(
+						input.catalogId,
+						input.productIds,
+						{ buyerCatalogId: input.buyerCatalogId }
+					)
+				)
+
+				return new Set(
+					input.productIds.filter(productId =>
+						isVisibleByPriceList(commercialMap.get(productId))
+					)
+				)
+			}
+		)
+		productCategoryReads.mapCategoryProducts.mockImplementation(async input => {
+			const productIds = input.products.map(product => product.id)
+			const priceContext = await priceLists.resolveProductPriceContext({
+				buyerCatalogId: input.buyerCatalogId,
+				ownerCatalogId: input.catalogId,
+				productIds
+			})
+			const commercialMap = toProductCommercialFieldsMap(
+				await sellableReader.resolveProductsSellable(input.catalogId, productIds, {
+					buyerCatalogId: input.buyerCatalogId,
+					...(input.applyPriceList === false ? { ignorePriceList: true } : {})
+				})
+			)
+			const variantProjectionMap = await variantProjection.resolveForProductIds(
+				productIds,
+				priceContext,
+				{
+					filterUnavailable: input.enforcePriceListVisibility ?? true,
+					...(input.canUseCatalogSaleUnits ? {} : { canUseCatalogSaleUnits: false })
+				}
+			)
+
+			return input.products.map(product => {
+				const commercial = commercialMap.get(product.id)
+				const enforcePriceListVisibility = input.enforcePriceListVisibility ?? true
+				if (
+					enforcePriceListVisibility &&
+					commercial?.usesPriceList &&
+					commercial.priceState === 'UNKNOWN'
+				) {
+					return null
+				}
+
+				const readableProduct = applyPriceListContextToProduct(
+					product,
+					priceContext,
+					{
+						filterUnavailable: enforcePriceListVisibility,
+						...(input.canUseCatalogSaleUnits ? {} : { canUseCatalogSaleUnits: false })
+					}
+				)
+				const mapped = applyProductCommercialFields(
+					productMapper.mapProduct(readableProduct, MEDIA_LIST_VARIANT_NAMES),
+					resolveCommercialForRead(commercial, enforcePriceListVisibility)
+				)
+				const saleUnits = resolveProductSaleUnitsForRead(mapped, {
+					canUseCatalogSaleUnits: input.canUseCatalogSaleUnits,
+					shouldExposeVariants: false
+				})
+				const mappedProduct = { ...mapped } as typeof mapped & {
+					variants?: unknown
+				}
+				delete mappedProduct.variants
+				const projection = variantProjectionMap.get(product.id)
+
+				return {
+					...mappedProduct,
+					saleUnits,
+					variantSummary: projection?.variantSummary ?? {
+						...EMPTY_VARIANT_SUMMARY
+					},
+					variantPickerOptions: projection?.variantPickerOptions ?? []
+				}
+			})
+		})
 	})
 
 	it('should be defined', () => {
@@ -291,7 +430,7 @@ describe('CategoryService', () => {
 				imageMedia: null
 			}
 		] as any)
-		priceLists.resolveProductPriceContext.mockResolvedValueOnce({
+		priceLists.resolveProductPriceContext.mockResolvedValue({
 			priceList: { id: 'price-list-1', code: 'retail', name: 'Retail' },
 			productPrices: new Map(),
 			variantPrices: new Map(),

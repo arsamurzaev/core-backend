@@ -12,13 +12,17 @@ import { hash, verify } from 'argon2'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { RedisService } from '@/infrastructure/redis/redis.service'
-import { readCatalogBaseDomains } from '@/modules/catalog/catalog-domain.utils'
+import { readCatalogBaseDomains } from '@/modules/catalog/contracts'
 import {
 	OBSERVABILITY_RECORDER_PORT,
 	type ObservabilityRecorderPort
 } from '@/modules/observability/contracts'
 
-import { ChangePasswordDtoReq } from './dto/requests/change-password.dto.req'
+import type {
+	AuthPasswordChangeInput,
+	AuthPasswordCommandPort,
+	AuthSessionIssuerPort
+} from './contracts'
 import { LoginDtoReq } from './dto/requests/login.dto.req'
 import { SessionService } from './session/session.service'
 
@@ -41,7 +45,9 @@ type AuthFailureReason =
 	| 'other'
 
 @Injectable()
-export class AuthService {
+export class AuthService
+	implements AuthSessionIssuerPort, AuthPasswordCommandPort
+{
 	private readonly logger = new Logger(AuthService.name)
 
 	constructor(
@@ -276,7 +282,7 @@ export class AuthService {
 
 	async changePassword(
 		userId: string,
-		dto: ChangePasswordDtoReq,
+		dto: AuthPasswordChangeInput,
 		currentSessionId?: string | null
 	): Promise<void> {
 		const user = await this.prisma.user.findFirst({

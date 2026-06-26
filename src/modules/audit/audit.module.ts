@@ -9,6 +9,6 @@ import { AUDIT_RECORDER_PORT } from './contracts'
 		AuditService,
 		{ provide: AUDIT_RECORDER_PORT, useExisting: AuditService }
 	],
-	exports: [AuditService, AUDIT_RECORDER_PORT]
+	exports: [AUDIT_RECORDER_PORT]
 })
 export class AuditModule {}

@@ -6,7 +6,10 @@ import { ProductModule } from '@/modules/product/public'
 import { S3Module } from '@/modules/s3/public'
 import { MediaRepository } from '@/shared/media/media.repository'
 
-import { ORDER_EXPORT_PORT } from './contracts'
+import {
+	INTEGRATION_ADVANCED_SETTINGS_PORT,
+	ORDER_EXPORT_PORT
+} from './contracts'
 import { IntegrationOrderExportDispatcherService } from './integration-order-export-dispatcher.service'
 import { IntegrationController } from './integration.controller'
 import { IntegrationRepository } from './integration.repository'
@@ -72,6 +75,10 @@ import { OneCIntegrationRepository } from './providers/one-c/one-c.repository'
 		MoySkladVariantSyncService,
 		MediaRepository,
 		{
+			provide: INTEGRATION_ADVANCED_SETTINGS_PORT,
+			useExisting: IntegrationService
+		},
+		{
 			provide: ORDER_EXPORT_PORT,
 			useExisting: IntegrationOrderExportDispatcherService
 		},
@@ -81,11 +88,7 @@ import { OneCIntegrationRepository } from './providers/one-c/one-c.repository'
 		}
 	],
 	exports: [
-		IntegrationService,
-		IikoQueueService,
-		IikoOrderExportQueueService,
-		MoySkladQueueService,
-		MoySkladOrderExportQueueService,
+		INTEGRATION_ADVANCED_SETTINGS_PORT,
 		ORDER_EXPORT_PORT,
 		INVENTORY_EXTERNAL_STOCK_PORT
 	]

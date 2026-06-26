@@ -18,6 +18,13 @@ import {
 	MEDIA_LIST_VARIANT_NAMES
 } from '@/shared/media/media-url.service'
 
+import type {
+	ProductDefaultVariantDiagnosticCheck,
+	ProductDefaultVariantDiagnosticCode,
+	ProductDefaultVariantDiagnosticSample,
+	ProductDefaultVariantDiagnosticStatus,
+	ProductDefaultVariantPriceMismatchRepairCandidate
+} from './contracts'
 import type { ProductAttributeValueData } from './product-attribute.builder'
 import { tokenizeProductSearchTerm } from './product-search.utils'
 import type {
@@ -124,33 +131,6 @@ export type ProductDefaultPageCursor = {
 export type ProductSeededPageCursor = {
 	score: string
 	id: string
-}
-
-export type ProductDefaultVariantDiagnosticCode =
-	| 'SIMPLE_WITHOUT_DEFAULT_VARIANT'
-	| 'MULTIPLE_DEFAULT_VARIANTS'
-	| 'CUSTOM_VARIANT_WITHOUT_ATTRIBUTES'
-	| 'DEFAULT_VARIANT_WITH_ATTRIBUTES'
-	| 'DEFAULT_VARIANT_PRICE_MISMATCH'
-
-export type ProductDefaultVariantDiagnosticStatus = 'ok' | 'warn' | 'fail'
-
-export type ProductDefaultVariantDiagnosticSample = {
-	productId: string
-	productName: string
-	productSku: string
-	variantId: string | null
-	variantKey: string | null
-	variantSku: string | null
-	details: string | null
-}
-
-export type ProductDefaultVariantDiagnosticCheck = {
-	code: ProductDefaultVariantDiagnosticCode
-	status: ProductDefaultVariantDiagnosticStatus
-	count: number
-	message: string
-	samples: ProductDefaultVariantDiagnosticSample[]
 }
 
 const DEFAULT_VARIANT_KEY = 'default'
@@ -639,17 +619,6 @@ export type ProductDefaultVariantRepairCandidate = {
 	sku: string
 	price: unknown
 	status: ProductStatus
-}
-
-export type ProductDefaultVariantPriceMismatchRepairCandidate = {
-	productId: string
-	productName: string
-	productSku: string
-	variantId: string
-	variantKey: string
-	variantSku: string
-	previousProductPrice: string | null
-	nextProductPrice: string | null
 }
 
 type ProductVariantInvariantRow = {

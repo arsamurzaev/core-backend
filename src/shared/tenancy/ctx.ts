@@ -27,7 +27,9 @@ export const isBusinessCardCatalogContext = (): boolean => {
 
 export const assertCurrentCatalogCanManageCatalogContent = (): void => {
 	if (isChildCatalogContext()) {
-		throw new ForbiddenException('Child catalog cannot manage catalog content')
+		throw new ForbiddenException(
+			'Дочерний каталог не может управлять товарами, категориями, брендами и справочниками каталога'
+		)
 	}
 
 	if (isBusinessCardCatalogContext()) {

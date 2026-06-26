@@ -15,7 +15,7 @@ import { Test, TestingModule } from '@nestjs/testing'
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import { RedisService } from '@/infrastructure/redis/redis.service'
 import { CAPABILITY_READER_PORT } from '@/modules/capability/contracts'
-import { CatalogPriceListResolverService } from '@/modules/catalog-price-list/public'
+import { CATALOG_PRICE_LIST_RESOLVER_PORT } from '@/modules/catalog-price-list/public'
 import { ORDER_EXPORT_PORT } from '@/modules/integration/contracts'
 import { INVENTORY_RESERVATION_PORT } from '@/modules/inventory/contracts'
 import {
@@ -489,7 +489,7 @@ describe('CartService', () => {
 					useValue: sellableReader
 				},
 				{
-					provide: CatalogPriceListResolverService,
+					provide: CATALOG_PRICE_LIST_RESOLVER_PORT,
 					useValue: priceLists
 				}
 			]

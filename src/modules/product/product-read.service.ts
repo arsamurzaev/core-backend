@@ -18,10 +18,15 @@ import {
 } from '@/modules/capability/contracts'
 import type { CatalogCapabilityFlags } from '@/modules/capability/public'
 import {
+	CATALOG_PRICE_LIST_RESOLVER_PORT,
 	type CatalogPriceListProductPriceContext,
-	CatalogPriceListResolverService
+	type CatalogPriceListResolverPort
 } from '@/modules/catalog-price-list/public'
-import { SeoRepository } from '@/modules/seo/public'
+import {
+	SEO_SETTINGS_PORT,
+	type SeoSettingsPort,
+	type SeoSettingsRecord
+} from '@/modules/seo/public'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_PRODUCTS_CACHE_TTL_SEC,
@@ -49,8 +54,19 @@ import {
 } from '@/shared/tenancy/ctx'
 
 import {
+	EMPTY_VARIANT_SUMMARY,
 	PRODUCT_SELLABLE_READER_PORT,
-	type ProductSellableReader
+	type ProductCategoryReadProjectionInput,
+	type ProductCategoryReadProjectorPort,
+	type ProductCategoryReadSource,
+	type ProductCategoryVisibleProductIdsInput,
+	type ProductReaderListItem,
+	type ProductReaderPort,
+	type ProductReadOptions,
+	type ProductSellableReader,
+	type ProductUncategorizedReadOptions,
+	type ProductVariantPickerOption,
+	type ProductVariantSummary
 } from './contracts'
 import {
 	applyProductCommercialFields,
@@ -82,16 +98,8 @@ import {
 	type ProductFilterQueryBase,
 	type ProductPublicDetailsItem,
 	ProductRepository,
-	type ProductVariantPickerOptionRecord,
-	type ProductVariantSummaryRecord
+	type ProductVariantPickerOptionRecord
 } from './product.repository'
-
-export type ProductReadOptions = {
-	includeInactive?: boolean
-	includeVariantIntegration?: boolean
-	applyPriceList?: boolean
-	enforcePriceListVisibility?: boolean
-}
 
 type ProductReadFeatures = Pick<
 	CatalogCapabilityFlags,
@@ -103,11 +111,7 @@ type ProductReadFeatures = Pick<
 	| 'canUseIikoIntegration'
 >
 
-type ProductSeoRecord = NonNullable<
-	Awaited<ReturnType<SeoRepository['findByEntity']>>
->
-
-type ProductSeoMapped = Omit<ProductSeoRecord, 'ogMedia' | 'twitterMedia'> & {
+type ProductSeoMapped = Omit<SeoSettingsRecord, 'ogMedia' | 'twitterMedia'> & {
 	ogMedia: MediaDto | null
 	twitterMedia: MediaDto | null
 }
@@ -120,18 +124,6 @@ type ProductInfiniteSeededRow = Awaited<
 >[number]
 type ProductInfiniteRow = ProductInfiniteDefaultRow | ProductInfiniteSeededRow
 
-type ProductVariantSummary = Omit<ProductVariantSummaryRecord, 'productId'>
-type ProductVariantPickerOption = {
-	id: string
-	label: string
-	price: string | null
-	stock: number | null
-	status: ProductVariantPickerOptionRecord['status']
-	isAvailable: boolean
-	saleUnitId: string | null
-	saleUnitPrice: string | null
-	maxQuantity: number | null
-}
 type ProductVariantPickerSource = Omit<
 	ProductVariantPickerOptionRecord,
 	'productId'
@@ -147,13 +139,6 @@ type ProductListMappableRecord = ProductMappableRecord & {
 
 const PRODUCT_INFINITE_DEFAULT_LIMIT = 24
 const PRODUCT_INFINITE_MAX_LIMIT = 50
-const EMPTY_VARIANT_SUMMARY: ProductVariantSummary = {
-	minPrice: null,
-	maxPrice: null,
-	activeCount: 0,
-	totalStock: 0,
-	singleVariantId: null
-}
 const FALLBACK_VARIANT_LABEL = 'Вариация'
 const DEFAULT_VARIANT_KEY = 'default'
 
@@ -524,7 +509,9 @@ function sanitizeProductForReadFeatures<T extends Record<string, unknown>>(
 }
 
 @Injectable()
-export class ProductReadService {
+export class ProductReadService
+	implements ProductReaderPort, ProductCategoryReadProjectorPort
+{
 	private readonly cacheTtlSec = CATALOG_PRODUCTS_CACHE_TTL_SEC
 	private readonly uncategorizedFirstPageCacheTtlSec =
 		CATEGORY_PRODUCTS_FIRST_PAGE_CACHE_TTL_SEC
@@ -535,17 +522,91 @@ export class ProductReadService {
 		private readonly repo: ProductRepository,
 		private readonly cache: CacheService,
 		private readonly mapper: ProductMediaMapper,
-		private readonly seoRepo: SeoRepository,
+		@Inject(SEO_SETTINGS_PORT)
+		private readonly seoSettings: SeoSettingsPort,
 		private readonly mediaUrl: MediaUrlService,
 		@Inject(CAPABILITY_READER_PORT)
 		private readonly capabilities: CapabilityReaderPort,
 		@Inject(PRODUCT_SELLABLE_READER_PORT)
 		private readonly sellableReader: ProductSellableReader,
 		@Optional()
-		private readonly priceLists?: CatalogPriceListResolverService
+		@Inject(CATALOG_PRICE_LIST_RESOLVER_PORT)
+		private readonly priceLists?: CatalogPriceListResolverPort
 	) {}
 
 	// ─── Public read methods ─────────────────────────────────────────────────
+
+	async mapCategoryProducts<TProduct extends ProductCategoryReadSource>(
+		input: ProductCategoryReadProjectionInput<TProduct>
+	): Promise<Array<ProductReaderListItem | null>> {
+		const products = input.products
+		if (!products.length) return []
+
+		const applyPriceList = this.shouldApplyPriceList(input)
+		const enforcePriceListVisibility = input.enforcePriceListVisibility ?? true
+		const productIds = products.map(product => product.id)
+		const priceContext = await this.resolvePriceListContext(
+			input.catalogId,
+			input.buyerCatalogId,
+			productIds,
+			applyPriceList
+		)
+		const [commercialMap, variantReadMaps] = await Promise.all([
+			this.resolveCommercialProjectionMap(
+				input.catalogId,
+				products,
+				input.buyerCatalogId,
+				applyPriceList
+			),
+			this.loadVariantReadMaps(
+				productIds,
+				priceContext,
+				enforcePriceListVisibility,
+				input.canUseCatalogSaleUnits
+			)
+		])
+
+		return products.map(product =>
+			this.mapCategoryProductForRead(
+				product,
+				commercialMap,
+				priceContext,
+				variantReadMaps,
+				{
+					canUseCatalogSaleUnits: input.canUseCatalogSaleUnits,
+					enforcePriceListVisibility
+				}
+			)
+		)
+	}
+
+	async resolveVisibleCategoryProductIds(
+		input: ProductCategoryVisibleProductIdsInput
+	): Promise<Set<string> | null> {
+		const productIds = [...new Set(input.productIds)]
+		const priceContext = await this.resolvePriceListContext(
+			input.catalogId,
+			input.buyerCatalogId,
+			[],
+			true
+		)
+		if (!priceContext.priceList) return null
+		if (!productIds.length) return new Set()
+
+		const commercialMap = await this.resolveCommercialProjectionMap(
+			input.catalogId,
+			productIds.map(id => ({ id })),
+			input.buyerCatalogId,
+			true
+		)
+
+		return new Set(
+			productIds.filter(productId => {
+				const commercial = commercialMap.get(productId)
+				return !(commercial?.usesPriceList && commercial.priceState === 'UNKNOWN')
+			})
+		)
+	}
 
 	async getAll(options?: ProductReadOptions) {
 		const catalogId = effectiveCatalogId()
@@ -787,11 +848,7 @@ export class ProductReadService {
 		return this.loadInfiniteCardsPage(query, options, 'recommendations')
 	}
 
-	async getUncategorizedInfinite(options?: {
-		cursor?: string
-		limit?: number | string
-		includeInactive?: boolean
-	}) {
+	async getUncategorizedInfinite(options?: ProductUncategorizedReadOptions) {
 		const catalogId = effectiveCatalogId()
 		const includeInactive = options?.includeInactive === true
 		const applyPriceList = this.shouldApplyPriceList(options)
@@ -854,11 +911,9 @@ export class ProductReadService {
 		)
 	}
 
-	async getUncategorizedInfiniteCards(options?: {
-		cursor?: string
-		limit?: number | string
-		includeInactive?: boolean
-	}) {
+	async getUncategorizedInfiniteCards(
+		options?: ProductUncategorizedReadOptions
+	) {
 		const catalogId = effectiveCatalogId()
 		const includeInactive = options?.includeInactive === true
 		const applyPriceList = this.shouldApplyPriceList(options)
@@ -1511,7 +1566,7 @@ export class ProductReadService {
 					: { canUseCatalogSaleUnits: false })
 			}
 		)
-		const seo = await this.seoRepo.findByEntity(
+		const seo = await this.seoSettings.findByEntity(
 			catalogId,
 			SeoEntityType.PRODUCT,
 			product.id
@@ -1644,6 +1699,62 @@ export class ProductReadService {
 				)
 			]
 		})
+	}
+
+	private mapCategoryProductForRead<T extends ProductCategoryReadSource>(
+		product: T,
+		commercialMap: ReadonlyMap<string, ProductCommercialFields>,
+		priceContext: CatalogPriceListProductPriceContext,
+		variantReadMaps: {
+			summaryMap: ReadonlyMap<string, ProductVariantSummary>
+			variantPickerOptionsMap: ReadonlyMap<string, ProductVariantPickerOption[]>
+		},
+		options: {
+			canUseCatalogSaleUnits: boolean
+			enforcePriceListVisibility: boolean
+		}
+	): ProductReaderListItem | null {
+		const commercial = commercialMap.get(product.id)
+		if (
+			options.enforcePriceListVisibility &&
+			commercial?.usesPriceList &&
+			commercial.priceState === 'UNKNOWN'
+		) {
+			return null
+		}
+
+		const readableProduct = applyPriceListContextToProduct(
+			product,
+			priceContext,
+			{
+				filterUnavailable: options.enforcePriceListVisibility,
+				...(options.canUseCatalogSaleUnits ? {} : { canUseCatalogSaleUnits: false })
+			}
+		)
+		const mappedProduct = applyProductCommercialFields(
+			this.mapper.mapProduct(readableProduct, MEDIA_LIST_VARIANT_NAMES),
+			this.resolveCommercialForRead(commercial, options.enforcePriceListVisibility)
+		)
+		const saleUnits = resolveProductSaleUnitsForRead(mappedProduct, {
+			canUseCatalogSaleUnits: options.canUseCatalogSaleUnits,
+			shouldExposeVariants: false
+		})
+		const mappedProductWithoutVariants = {
+			...mappedProduct
+		} as typeof mappedProduct & {
+			variants?: unknown
+		}
+		delete mappedProductWithoutVariants.variants
+
+		return {
+			...mappedProductWithoutVariants,
+			saleUnits,
+			variantSummary: variantReadMaps.summaryMap.get(product.id) ?? {
+				...EMPTY_VARIANT_SUMMARY
+			},
+			variantPickerOptions:
+				variantReadMaps.variantPickerOptionsMap.get(product.id) ?? []
+		} as ProductReaderListItem
 	}
 
 	private async loadVariantSummaryMap(
@@ -1852,7 +1963,7 @@ export class ProductReadService {
 		}
 	}
 
-	private mapSeo(seo?: ProductSeoRecord | null): ProductSeoMapped | null {
+	private mapSeo(seo?: SeoSettingsRecord | null): ProductSeoMapped | null {
 		if (!seo) return null
 
 		return {

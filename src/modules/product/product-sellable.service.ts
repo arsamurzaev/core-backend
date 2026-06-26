@@ -11,8 +11,9 @@ import {
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
 import {
+	CATALOG_PRICE_LIST_RESOLVER_PORT,
 	type CatalogPriceListProductPriceContext,
-	CatalogPriceListResolverService
+	type CatalogPriceListResolverPort
 } from '@/modules/catalog-price-list/public'
 
 import type {
@@ -77,7 +78,8 @@ export class ProductSellableService implements ProductSellableReader {
 	constructor(
 		private readonly prisma: PrismaService,
 		@Optional()
-		private readonly priceLists?: CatalogPriceListResolverService,
+		@Inject(CATALOG_PRICE_LIST_RESOLVER_PORT)
+		private readonly priceLists?: CatalogPriceListResolverPort,
 		@Optional()
 		@Inject(CAPABILITY_READER_PORT)
 		private readonly capabilities?: CapabilityReaderPort

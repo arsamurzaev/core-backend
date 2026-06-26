@@ -4,6 +4,7 @@ import type {
 	Prisma
 } from '@generated/client'
 import {
+	Inject,
 	Injectable,
 	Logger,
 	OnModuleDestroy,
@@ -13,7 +14,10 @@ import { ConfigService } from '@nestjs/config'
 import { PrismaPg } from '@prisma/adapter-pg'
 
 import { AllInterfaces } from '@/core/config'
-import { ObservabilityService } from '@/modules/observability/observability.service'
+import {
+	OBSERVABILITY_RECORDER_PORT,
+	type ObservabilityRecorderPort
+} from '@/modules/observability/contracts'
 
 import {
 	buildPrismaLogDefinitions,
@@ -36,7 +40,8 @@ export class PrismaService
 
 	constructor(
 		private readonly configService: ConfigService<AllInterfaces>,
-		private readonly observability: ObservabilityService
+		@Inject(OBSERVABILITY_RECORDER_PORT)
+		private readonly observability: ObservabilityRecorderPort
 	) {
 		const slowQuerySettings = resolvePrismaSlowQuerySettings()
 		const adapter = new PrismaPg({

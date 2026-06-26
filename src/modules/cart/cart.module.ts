@@ -22,6 +22,7 @@ import { CartSseService } from './cart-sse.service'
 import { CartVariantSelectionService } from './cart-variant-selection.service'
 import { CartController } from './cart.controller'
 import { CartService } from './cart.service'
+import { CART_COMMAND_PORT } from './contracts'
 import { OrderCheckoutService } from './order-checkout.service'
 
 @Module({
@@ -49,7 +50,9 @@ import { OrderCheckoutService } from './order-checkout.service'
 		CartSseService,
 		CartVariantSelectionService,
 		OrderCheckoutService,
-		MediaUrlService
-	]
+		MediaUrlService,
+		{ provide: CART_COMMAND_PORT, useExisting: CartService }
+	],
+	exports: [CART_COMMAND_PORT]
 })
 export class CartModule {}

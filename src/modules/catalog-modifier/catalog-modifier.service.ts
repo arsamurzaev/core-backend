@@ -34,6 +34,7 @@ import {
 	ProductModifierGroupReplacement,
 	ProductModifierOptionReplacement
 } from './catalog-modifier.repository'
+import type { CatalogModifierManagementPort } from './contracts'
 import {
 	CatalogModifierGroupOptionDtoReq,
 	CreateCatalogModifierGroupDtoReq,
@@ -169,7 +170,7 @@ function resolveEffectiveMinSelected(
 }
 
 @Injectable()
-export class CatalogModifierService {
+export class CatalogModifierService implements CatalogModifierManagementPort {
 	constructor(
 		private readonly repo: CatalogModifierRepository,
 		private readonly cache: CacheService,

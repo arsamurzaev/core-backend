@@ -25,6 +25,10 @@ import type { Response } from 'express'
 
 import { PrismaService } from '@/infrastructure/prisma/prisma.service'
 import {
+	AUTH_HANDOFF_ISSUER_PORT,
+	type AuthHandoffIssuerPort
+} from '@/modules/auth/public'
+import {
 	OBSERVABILITY_RECORDER_PORT,
 	type ObservabilityRecorderPort
 } from '@/modules/observability/contracts'
@@ -33,7 +37,6 @@ import { SkipCatalog } from '@/shared/tenancy/decorators/skip-catalog.decorator'
 
 import { Roles } from '../auth/decorators/roles.decorator'
 import { SessionGuard } from '../auth/guards/session.guard'
-import { HandoffService } from '../auth/public'
 import type { AuthRequest } from '../auth/types/auth-request'
 
 @ApiTags('Admin')
@@ -46,7 +49,8 @@ export class AdminSsoController {
 
 	constructor(
 		private readonly prisma: PrismaService,
-		private readonly handoff: HandoffService,
+		@Inject(AUTH_HANDOFF_ISSUER_PORT)
+		private readonly handoff: AuthHandoffIssuerPort,
 		@Inject(OBSERVABILITY_RECORDER_PORT)
 		private readonly observability: ObservabilityRecorderPort
 	) {}

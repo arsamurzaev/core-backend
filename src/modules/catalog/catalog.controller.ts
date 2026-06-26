@@ -41,6 +41,7 @@ import {
 	CatalogCurrentFeaturesDto,
 	CatalogCurrentShellDto,
 	CatalogDto,
+	CatalogRuntimeDto,
 	CatalogTypeDto
 } from './dto/responses/catalog.dto.res'
 
@@ -71,6 +72,17 @@ export class CatalogController {
 	): Promise<CatalogCurrentShellDto> {
 		setPublicCacheHeaders(res, PUBLIC_CACHE_CONTROL_STANDARD)
 		return this.catalogService.getCurrentShell() as Promise<CatalogCurrentShellDto>
+	}
+
+	@Get('/current/runtime')
+	@ApiOperation({ summary: 'Get current catalog runtime contract' })
+	@Public()
+	@ApiOkResponse({ type: CatalogRuntimeDto })
+	async getCurrentRuntime(
+		@Res({ passthrough: true }) res: Response
+	): Promise<CatalogRuntimeDto> {
+		setPublicCacheHeaders(res, PUBLIC_CACHE_CONTROL_STANDARD)
+		return this.catalogService.getCurrentRuntime() as Promise<CatalogRuntimeDto>
 	}
 
 	@Get('/current/type-schema')

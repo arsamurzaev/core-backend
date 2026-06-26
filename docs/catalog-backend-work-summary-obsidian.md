@@ -1,17 +1,17 @@
 ---
-title: "Catalog Backend: сводка работы с начала проекта"
+title: 'Catalog Backend: сводка работы с начала проекта'
 aliases:
-  - Catalog Backend
-  - Backend Catalog
-  - Сводка backend catalog
+ - Catalog Backend
+ - Backend Catalog
+ - Сводка backend catalog
 tags:
-  - catalog/backend
-  - catalog/architecture
-  - obsidian/map
-  - nestjs
-  - prisma
+ - catalog/backend
+ - catalog/architecture
+ - obsidian/map
+ - nestjs
+ - prisma
 created: 2026-05-07
-source: "Локальный репозиторий backend, git log, src, prisma, docs, ops"
+source: 'Локальный репозиторий backend, git log, src, prisma, docs, ops'
 ---
 
 # Catalog Backend: сводка работы с начала проекта
@@ -312,6 +312,7 @@ flowchart TD
 - `integration.prisma` - интеграции и external links;
 - `migration.prisma` - запуск миграций, entity map, issues;
 - `analytics.prisma`, `metric.prisma`, `seo.prisma`, `audit.prisma` - аналитика, метрики, SEO, аудит.
+- `AuditModule` отдает наружу `AUDIT_RECORDER_PORT`; `AuditService` остается внутренней реализацией global audit sink.
 
 ```mermaid
 erDiagram
@@ -413,6 +414,10 @@ sequenceDiagram
 
 `Type` описывает тип каталога. Например, одежда и ресторан могут иметь разные наборы атрибутов.
 
+`ProductTypeModule` закрепляет каталоговую схему товаров через типизированные `ProductTypeCommandPort`, `ProductTypeSchemaPort` и `ProductTypeVariantAttributesPort`. Command-port использует структурные input-типы, а публичные product-type record/schema-типы живут в `contracts.ts`, не в repository.
+
+`CatalogSaleUnitModule` отдает внешним модулям только `CatalogSaleUnitManagementPort`; `CatalogSaleUnitService` и repository остаются внутренней реализацией.
+
 ### Attribute
 
 `Attribute` задает структуру данных для товаров:
@@ -424,6 +429,8 @@ sequenceDiagram
 - datetime;
 - enum;
 - variant attribute.
+
+Техническая граница: `AttributeService` и `AttributeRepository` остаются внутренними для `AttributeModule`; наружу сейчас отданы только `AttributeModule` и публичный `AttributeDto`.
 
 Это дает проекту гибкость: backend не нужно менять каждый раз, когда появляется новый тип товара или новый параметр.
 
@@ -495,8 +502,32 @@ sequenceDiagram
 - duplicate получает суффикс копии;
 - кеш версионируется по каталогам и категориям;
 - product read-слой вынесен отдельно в `ProductReadService`;
+- публичная форма чтения товаров закреплена через `ProductReaderPort` и DI symbol `PRODUCT_READER_PORT`;
+- category-list projection закреплен через `ProductCategoryReadProjectorPort` и DI symbol `PRODUCT_CATEGORY_READ_PROJECTOR_PORT`;
+- `product-commercial-fields.mapper`, `product-price-list-read.utils` и `product-sale-units-read.utils` остаются внутренними read-helper файлами product-модуля и не экспортируются через `product/public.ts`;
+- `ProductCommandPort` использует структурные `ProductCreateCommandInput` / `ProductUpdateCommandInput`, не HTTP DTO;
+- `ProductVariantProjection`, `ProductVariantSummary`, `ProductVariantPickerOption` и `EMPTY_VARIANT_SUMMARY` описаны в `product/contracts.ts`;
+- `product-variant-card-projection` остается внутренним helper-файлом и не экспортируется через `product/public.ts`;
+- maintenance/pricing сценарии закреплены через типизированные `ProductMaintenancePort` и `ProductPricingPort`;
+- maintenance diagnostics/repair sample-типы живут в `product/contracts.ts`, а не в `ProductRepository`;
+- неиспользуемые placeholder-порты snapshot/variant resolver удалены: order snapshot остается в `CartOrderSnapshotService`, выбор продаваемого варианта - в `ProductSellableReader`;
 - медиа мапятся через `ProductMediaMapper` и `MediaUrlService`;
-- SEO подтягивается через `SeoRepository`.
+- SEO подтягивается через `SeoSettingsPort`.
+
+Прайс-листы:
+
+- управление прайс-листами закреплено через `CatalogPriceListManagementPort` и DI symbol `CATALOG_PRICE_LIST_MANAGEMENT_PORT`;
+- `CatalogPriceListService` остается внутренней реализацией `CatalogPriceListModule` и больше не экспортируется через `catalog-price-list/public.ts`;
+- pricing/read сценарии закреплены через `CatalogPriceListResolverPort` и DI symbol `CATALOG_PRICE_LIST_RESOLVER_PORT`;
+- `CatalogPriceListResolverService` остается внутренней реализацией `CatalogPriceListModule`, а внешние модули используют resolver-port;
+- architecture boundary test защищает public barrel и Nest module exports от повторного экспорта concrete price-list services.
+
+Модификаторы:
+
+- управление группами, опциями и привязками модификаторов к товару закреплено через `CatalogModifierManagementPort` и DI symbol `CATALOG_MODIFIER_MANAGEMENT_PORT`;
+- `CatalogModifierService` и `CatalogModifierRepository` остаются внутренней реализацией `CatalogModifierModule` и больше не экспортируются через `catalog-modifier/public.ts`;
+- HTTP controller внутри модуля тоже работает через management-port, поэтому контракт одинаковый для будущих внутренних и внешних потребителей;
+- architecture boundary test защищает public barrel от повторного экспорта `CatalogModifierService` и `CatalogModifierRepository`.
 
 Категории:
 
@@ -504,6 +535,7 @@ sequenceDiagram
 - имеют позиции;
 - имеют separate endpoints для infinite product lists;
 - могут возвращать карточки товаров и полные данные.
+- публичная граница модуля закреплена через `CategoryReaderPort`, `CategoryCommandPort` и `src/modules/category/public.ts`.
 
 Бренды:
 
@@ -555,6 +587,13 @@ flowchart TD
 - оригиналы и варианты разделены;
 - товары получают оптимальные изображения для карточек, detail-страниц и thumb.
 
+Техническая граница:
+
+- доменные модули работают с медиа-хранилищем через `MediaStoragePort` и DI token `MEDIA_STORAGE_PORT`;
+- `S3Service` остается внутренней реализацией `S3Module` и больше не экспортируется через `s3/public.ts`;
+- `S3Controller` может использовать concrete service внутри своего модуля, но product/catalog/admin/integration зависят только от порта;
+- architecture boundary test защищает `s3/public.ts` от повторного экспорта `S3Service`.
+
 ## 9. SEO
 
 SEO вынесено в отдельный `SeoModule` и таблицу `SeoSetting`.
@@ -572,11 +611,19 @@ SEO вынесено в отдельный `SeoModule` и таблицу `SeoSet
 flowchart LR
     Catalog --> CatalogSeoSync[CatalogSeoSyncService]
     Product --> ProductSeoSync[ProductSeoSyncService]
-    CatalogSeoSync --> SeoSetting
-    ProductSeoSync --> SeoSetting
+    CatalogSeoSync --> SeoPort[SeoSettingsPort]
+    ProductSeoSync --> SeoPort
+    SeoPort --> SeoSetting
     SeoSetting --> OgMedia[ogMedia]
     SeoSetting --> TwitterMedia[twitterMedia]
 ```
+
+Техническая граница:
+
+- `SeoModule` экспортирует `SEO_SETTINGS_PORT` и `SeoSettingsPort`;
+- `SeoRepository` остается внутренней реализацией модуля и больше не экспортируется через `seo/public.ts`;
+- product/catalog SEO sync и product read/finalizer получают SEO через DI-порт;
+- architecture boundary test защищает `seo/public.ts` от повторного экспорта `SeoRepository`.
 
 ## 10. Корзина и публичный сценарий менеджера
 
@@ -657,6 +704,13 @@ Auth-слой включает admin-login и catalog-login.
 - throttling через `CustomThrottlerGuard`;
 - отдельный admin session cookie и обычный session cookie.
 
+Техническая граница:
+
+- внешние модули больше не импортируют `AuthService`, `SessionService`, `HandoffService` через `auth/public.ts`;
+- наружу отданы узкие DI-порты: `AuthSessionIssuerPort`, `AuthPasswordCommandPort`, `AuthSessionManagementPort`, `AuthHandoffIssuerPort`;
+- `AuthPasswordCommandPort` принимает структурный `AuthPasswordChangeInput`, не HTTP DTO;
+- architecture boundary test защищает `auth/public.ts` от повторного экспорта implementation services.
+
 ```mermaid
 sequenceDiagram
     participant Client
@@ -680,6 +734,18 @@ sequenceDiagram
 > [!note]
 > В app-level throttling tracker используется session cookie, а для анонимных пользователей строится fingerprint из IP, user-agent и accept-language. Это снижает шанс случайно объединять всех пользователей за одним адресом.
 
+### Capability: доступность функций
+
+`CapabilityModule` отвечает за доступность платных/режимных функций каталога: product types, variants, sale units, modifiers, price lists, internal inventory и интеграции.
+
+Техническая граница:
+
+- наружу отданы `CapabilityReaderPort` и `CapabilityAssertPort`;
+- `CapabilityService` остается внутренней реализацией и больше не экспортируется через `capability/public.ts`;
+- `CapabilityGuard` проверяет доступ через `CapabilityAssertPort`, а не через concrete service;
+- legacy-shim `CatalogFeatureEntitlementService` делегирует проверки в capability ports;
+- architecture boundary test защищает `capability/public.ts` от повторного экспорта implementation service.
+
 ## 12. Интеграция МойСклад
 
 Интеграция с МойСклад вынесена в `IntegrationModule` и provider `moysklad`.
@@ -701,6 +767,12 @@ sequenceDiagram
 - sync service;
 - отдельные tests для client, metadata, queue, sync, controller, service.
 
+Технические границы:
+
+- публичный integration contract закрепляет `OrderExportPort`, `IntegrationAdvancedSettingsPort` и provider adapter type exports;
+- provider queue services и `IntegrationService` больше не экспортируются через `integration/public.ts`;
+- неиспользуемые placeholder-порты provider registry / catalog sync / stock sync удалены: реальная синхронизация пока идет через конкретные provider queue services.
+
 Что синхронизируется:
 
 - товары;
@@ -713,6 +785,7 @@ sequenceDiagram
 - изображения;
 - external links;
 - sync runs.
+- inventory reservation закреплен через `InventoryReservationPort`; `InventoryService` остается внутренней реализацией `InventoryModule`; reservation/result-типы живут в `inventory/contracts.ts`; неиспользуемые stock/movement/mode placeholder-порты удалены.
 
 ```mermaid
 flowchart TD
@@ -724,7 +797,7 @@ flowchart TD
     Client --> MoySklad[(МойСклад API)]
     Sync --> Product[ProductRepository / Prisma]
     Sync --> Category[Category links]
-    Sync --> S3[S3Service image import]
+    Sync --> S3[MediaStoragePort image import]
     Sync --> Cache[Cache invalidation]
     Sync --> Runs[IntegrationSyncRun]
     Sync --> Links[IntegrationProductLink / CategoryLink]
@@ -735,7 +808,7 @@ flowchart TD
 - внешняя сущность мапится через `IntegrationProductLink` или `IntegrationCategoryLink`;
 - slug/SKU строятся из внешних данных и защищаются суффиксами/хешем;
 - sync-lock ограничивает параллельные синхронизации;
-- картинки импортируются через S3Service;
+- картинки импортируются через `MediaStoragePort`;
 - cache версионируется после изменений.
 
 ## 13. Админка, платежи, промокоды и управление каталогами
@@ -806,6 +879,12 @@ Backend-часть:
 - internal TLS ask endpoint для Caddy;
 - cron-check pending domains.
 
+Cron-граница:
+
+- `CronModule` экспортируется через `src/modules/cron/public.ts`;
+- product/inventory/catalog scheduled jobs дергают доменную логику через DI-порты;
+- catalog domain check пишет cron metrics и OpenTelemetry span так же, как product/inventory cron.
+
 Infrastructure-часть:
 
 - Caddy как публичный TLS reverse proxy;
@@ -862,6 +941,12 @@ App-side:
 - requestId;
 - OpenTelemetry auto-instrumentation;
 - OTLP HTTP exporter.
+
+Техническая граница:
+
+- доменные и infrastructure/shared потребители пишут метрики через `OBSERVABILITY_RECORDER_PORT`;
+- `ObservabilityService` остается внутренней реализацией `ObservabilityModule`;
+- HTTP metrics controller и interceptor могут использовать concrete service внутри своего модуля.
 
 Infra-side:
 
@@ -1045,7 +1130,7 @@ bun run start:prod
 bun run test
 bun run test:e2e
 bun run lint
-bun run prisma:push
+bun run prisma:migrate:deploy
 bun run prisma:generate
 bun run admin:create
 bun run legacy:migrate
@@ -1075,9 +1160,12 @@ pm2 status
 Технические правила, которые уже видны по коду:
 
 - новые доменные запросы должны учитывать `catalogId`;
+- межмодульные зависимости лучше оформлять через `contracts.ts` и DI symbols, а не через прямой импорт конкретного сервиса;
+- root `AppModule` подключает доменные модули через `public.ts`, это защищено architecture boundary test;
+- выбранные `public.ts` и Nest `module.exports` защищены от повторного экспорта implementation services;
 - write-flow после изменения товаров/категорий/медиа должен инвалидировать cache versions;
 - SEO лучше синхронизировать рядом с изменением entity;
-- медиа лучше проводить через `MediaRepository`, `MediaUrlService`, `S3Service`;
+- медиа лучше проводить через `MediaRepository`, `MediaUrlService`, `MediaStoragePort`;
 - интеграции должны писать external links, а не пытаться угадывать соответствия каждый раз;
 - миграции должны иметь dry-run и не перетирать конфликтующие данные;
 - observability должна оставаться отключаемой через env, но код не должен удаляться;

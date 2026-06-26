@@ -8,6 +8,16 @@ import {
 	type CapabilityReaderPort
 } from '@/modules/capability/contracts'
 
+import type {
+	CatalogPriceListActivePriceListParams,
+	CatalogPriceListLinePrice,
+	CatalogPriceListLinePriceParams,
+	CatalogPriceListProductPriceContext,
+	CatalogPriceListProductPriceContextParams,
+	CatalogPriceListResolverPort,
+	CatalogPriceListSnapshot
+} from './contracts'
+
 const priceListSnapshotSelect = {
 	id: true,
 	code: true,
@@ -23,42 +33,19 @@ const priceListPriceResolverSelect = {
 	price: true
 } as const
 
-type PriceListSnapshot = {
-	id: string
-	code: string
-	name: string
-}
-
 type PriceDatabase = PrismaService | Prisma.TransactionClient
 
-export type CatalogPriceListProductPriceContext = {
-	priceList: PriceListSnapshot | null
-	productPrices: Map<string, string>
-	variantPrices: Map<string, string>
-	saleUnitPrices: Map<string, string>
-}
-
-export type CatalogPriceListLinePrice = {
-	priceList: PriceListSnapshot | null
-	price: string | null
-	target: CatalogPriceListPriceTarget | null
-	targetId: string | null
-}
-
 @Injectable()
-export class CatalogPriceListResolverService {
+export class CatalogPriceListResolverService implements CatalogPriceListResolverPort {
 	constructor(
 		private readonly prisma: PrismaService,
 		@Inject(CAPABILITY_READER_PORT)
 		private readonly capabilities: CapabilityReaderPort
 	) {}
 
-	async resolveProductPriceContext(params: {
-		buyerCatalogId: string
-		ownerCatalogId: string
-		productIds: string[]
-		tx?: Prisma.TransactionClient
-	}): Promise<CatalogPriceListProductPriceContext> {
+	async resolveProductPriceContext(
+		params: CatalogPriceListProductPriceContextParams
+	): Promise<CatalogPriceListProductPriceContext> {
 		const priceList = await this.resolveActivePriceList({
 			buyerCatalogId: params.buyerCatalogId,
 			ownerCatalogId: params.ownerCatalogId,
@@ -106,15 +93,9 @@ export class CatalogPriceListResolverService {
 		return context
 	}
 
-	async resolveLinePrice(params: {
-		buyerCatalogId: string
-		ownerCatalogId: string
-		productId: string
-		variantId?: string | null
-		saleUnitId?: string | null
-		mode: 'SIMPLE' | 'MATRIX'
-		tx?: Prisma.TransactionClient
-	}): Promise<CatalogPriceListLinePrice> {
+	async resolveLinePrice(
+		params: CatalogPriceListLinePriceParams
+	): Promise<CatalogPriceListLinePrice> {
 		const priceList = await this.resolveActivePriceList({
 			buyerCatalogId: params.buyerCatalogId,
 			ownerCatalogId: params.ownerCatalogId,
@@ -143,11 +124,9 @@ export class CatalogPriceListResolverService {
 		}
 	}
 
-	async resolveActivePriceList(params: {
-		buyerCatalogId: string
-		ownerCatalogId?: string | null
-		tx?: Prisma.TransactionClient
-	}): Promise<PriceListSnapshot | null> {
+	async resolveActivePriceList(
+		params: CatalogPriceListActivePriceListParams
+	): Promise<CatalogPriceListSnapshot | null> {
 		if (
 			!(await this.capabilities.canUseCatalogPriceLists(params.buyerCatalogId))
 		) {

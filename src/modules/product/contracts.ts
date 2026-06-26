@@ -1,17 +1,31 @@
-import type { ProductStatus } from '@generated/enums'
+import type { Prisma } from '@generated/client'
+import type {
+	CatalogPriceListPriceTarget,
+	ProductStatus,
+	ProductVariantStatus
+} from '@generated/enums'
+
+import type { CatalogPriceListProductPriceContext } from '@/modules/catalog-price-list/public'
+import type { ProductMappableRecord } from '@/shared/media/product-media.mapper'
+import type {
+	PriceLineInput,
+	ResolvedLinePricing
+} from '@/shared/order/price-resolver.utils'
 
 export const PRODUCT_COMMAND_PORT = Symbol('PRODUCT_COMMAND_PORT')
 export const PRODUCT_READER_PORT = Symbol('PRODUCT_READER_PORT')
-export const PRODUCT_SNAPSHOT_PORT = Symbol('PRODUCT_SNAPSHOT_PORT')
-export const PRODUCT_VARIANT_RESOLVER_PORT = Symbol(
-	'PRODUCT_VARIANT_RESOLVER_PORT'
-)
 export const PRODUCT_PRICING_PORT = Symbol('PRODUCT_PRICING_PORT')
 export const PRODUCT_SELLABLE_READER_PORT = Symbol(
 	'PRODUCT_SELLABLE_READER_PORT'
 )
 export const PRODUCT_EXTERNAL_SYNC_PORT = Symbol('PRODUCT_EXTERNAL_SYNC_PORT')
 export const PRODUCT_MAINTENANCE_PORT = Symbol('PRODUCT_MAINTENANCE_PORT')
+export const PRODUCT_VARIANT_PROJECTION_PORT = Symbol(
+	'PRODUCT_VARIANT_PROJECTION_PORT'
+)
+export const PRODUCT_CATEGORY_READ_PROJECTOR_PORT = Symbol(
+	'PRODUCT_CATEGORY_READ_PROJECTOR_PORT'
+)
 
 export type ProductSellableMode = 'SIMPLE' | 'MATRIX'
 export type ProductSellablePriceState = 'UNKNOWN' | 'KNOWN' | 'RANGE'
@@ -19,6 +33,174 @@ export type ProductSellableAvailabilityState =
 	| 'AVAILABLE'
 	| 'OUT_OF_STOCK'
 	| 'UNAVAILABLE'
+export type ProductTransaction = Prisma.TransactionClient
+export type ProductExternalTransaction = ProductTransaction
+export type ProductCommandProductResult = { id: string } & Record<
+	string,
+	unknown
+>
+export type ProductAttributeValueInput = {
+	attributeId: string
+	enumValueId?: string
+	valueString?: string
+	valueInteger?: number
+	valueDecimal?: number
+	valueBoolean?: boolean
+	valueDateTime?: string
+}
+export type ProductVariantSaleUnitCommandInput = {
+	catalogSaleUnitId: string
+	code?: string
+	name?: string
+	baseQuantity: number
+	price: number
+	barcode?: string | null
+	isDefault?: boolean
+	isActive?: boolean
+	displayOrder?: number
+}
+export type ProductVariantAttributeCommandInput = {
+	attributeId: string
+	enumValueId?: string
+	value?: string
+}
+export type ProductVariantCommandInput = {
+	price?: number | null
+	stock?: number | null
+	isAvailable?: boolean
+	status?: ProductVariantStatus
+	attributes?: ProductVariantAttributeCommandInput[]
+	saleUnits?: ProductVariantSaleUnitCommandInput[]
+}
+export type ProductVariantUpdateCommandInput = {
+	variantKey: string
+	price?: number | null
+	stock?: number | null
+	status?: ProductVariantStatus
+	saleUnits?: ProductVariantSaleUnitCommandInput[]
+}
+export type ProductCreatePriceListVariantAttributeInput = {
+	attributeId: string
+	enumValueId: string
+}
+export type ProductCreatePriceListPriceInput = {
+	priceListId: string
+	target: CatalogPriceListPriceTarget
+	price: number
+	variantAttributes?: ProductCreatePriceListVariantAttributeInput[]
+	catalogSaleUnitId?: string
+}
+export type ProductCreateCommandInput = {
+	name: string
+	price?: number | null
+	mediaIds?: string[]
+	isPopular?: boolean
+	status?: ProductStatus
+	position?: number
+	brandId?: string | null
+	productTypeId?: string | null
+	categories?: string[]
+	attributes?: ProductAttributeValueInput[]
+	saleUnits?: ProductVariantSaleUnitCommandInput[]
+	variants?: ProductVariantCommandInput[]
+	priceListPrices?: ProductCreatePriceListPriceInput[]
+}
+export type ProductUpdateCommandInput = {
+	name?: string
+	price?: number | null
+	mediaIds?: string[]
+	isPopular?: boolean
+	status?: ProductStatus
+	position?: number
+	brandId?: string | null
+	productTypeId?: string | null
+	categories?: string[]
+	categoryId?: string
+	categoryPosition?: number
+	attributes?: ProductAttributeValueInput[]
+	removeAttributeIds?: string[]
+	saleUnits?: ProductVariantSaleUnitCommandInput[]
+	variants?: ProductVariantUpdateCommandInput[]
+	variantMatrix?: ProductVariantCommandInput[]
+}
+export type ProductRemoveResult = {
+	ok: boolean
+}
+export type ProductReadQuery = Record<string, unknown>
+export type ProductReadOptions = {
+	includeInactive?: boolean
+	includeVariantIntegration?: boolean
+	applyPriceList?: boolean
+	enforcePriceListVisibility?: boolean
+}
+export type ProductUncategorizedReadOptions = ProductReadOptions & {
+	cursor?: string
+	limit?: number | string
+}
+export type ProductVariantProjectionResolveOptions = {
+	filterUnavailable?: boolean
+	canUseCatalogSaleUnits?: boolean
+}
+export type ProductVariantSummary = {
+	minPrice: string | null
+	maxPrice: string | null
+	activeCount: number
+	totalStock: number | null
+	singleVariantId: string | null
+}
+export const EMPTY_VARIANT_SUMMARY: ProductVariantSummary = {
+	minPrice: null,
+	maxPrice: null,
+	activeCount: 0,
+	totalStock: 0,
+	singleVariantId: null
+}
+export type ProductVariantPickerOption = {
+	id: string
+	label: string
+	price: string | null
+	stock: number | null
+	status: ProductVariantStatus
+	isAvailable: boolean
+	saleUnitId: string | null
+	saleUnitPrice: string | null
+	maxQuantity: number | null
+}
+export type ProductVariantProjection = {
+	variantSummary: ProductVariantSummary
+	variantPickerOptions: ProductVariantPickerOption[]
+}
+export type ProductReaderListItem = { id: string } & Record<string, unknown>
+export type ProductReaderDetailsItem = ProductReaderListItem
+export type ProductReaderInfinitePage = {
+	items: ProductReaderListItem[]
+	nextCursor: string | null
+	seed: string | null
+}
+export type ProductReaderCursorPage = {
+	items: ProductReaderListItem[]
+	nextCursor: string | null
+}
+export type ProductCategoryReadSource = ProductMappableRecord & {
+	id: string
+	price?: unknown
+	productType?: { id?: string | null } | null
+}
+export type ProductCategoryReadProjectionInput<
+	TProduct extends ProductCategoryReadSource = ProductCategoryReadSource
+> = {
+	catalogId: string
+	buyerCatalogId: string
+	products: TProduct[]
+	canUseCatalogSaleUnits: boolean
+	applyPriceList?: boolean
+	enforcePriceListVisibility?: boolean
+}
+export type ProductCategoryVisibleProductIdsInput = {
+	catalogId: string
+	buyerCatalogId: string
+	productIds: string[]
+}
 
 export type ProductSellableResolveOptions = {
 	variantId?: string | null
@@ -68,7 +250,7 @@ export type ProductExternalSyncProductRecord = {
 	name: string
 	sku: string
 	slug: string
-	price: unknown
+	price: Prisma.Decimal | null
 	status: ProductStatus
 	deleteAt: Date | null
 }
@@ -82,7 +264,7 @@ export type ProductExternalProductCreateInput = {
 	status: string
 	isPopular?: boolean
 	position?: number
-	tx?: unknown
+	tx?: ProductExternalTransaction
 }
 
 export type ProductExternalProductUpdateInput = {
@@ -97,14 +279,14 @@ export type ProductExternalProductUpdateInput = {
 		isPopular?: boolean
 		position?: number
 	}
-	tx?: unknown
+	tx?: ProductExternalTransaction
 }
 
 export type ProductExternalProductDescriptionInput = {
 	catalogId: string
 	productId: string
 	description?: string | null
-	tx?: unknown
+	tx?: ProductExternalTransaction
 }
 
 export type ProductExternalProductSoftDeleteInput = {
@@ -115,58 +297,92 @@ export type ProductExternalProductSoftDeleteInput = {
 export type ProductExternalProductIdentityInput = {
 	catalogId: string
 	productId: string
-	tx?: unknown
+	tx?: ProductExternalTransaction
 }
 
 export type ProductExternalProductSkuInput = {
 	catalogId: string
 	sku: string
-	tx?: unknown
+	tx?: ProductExternalTransaction
 }
 
 export type ProductExternalProductSlugExistsInput = {
 	catalogId: string
 	slug: string
 	excludeId?: string
-	tx?: unknown
+	tx?: ProductExternalTransaction
 }
 
 export type ProductExternalProductSkuExistsInput = {
 	sku: string
 	excludeId?: string
-	tx?: unknown
+	tx?: ProductExternalTransaction
 }
 
 export interface ProductReaderPort {
-	getAll(...args: unknown[]): Promise<unknown>
-	getPopular(...args: unknown[]): Promise<unknown>
-	getPopularCards(...args: unknown[]): Promise<unknown>
-	getInfinite(...args: unknown[]): Promise<unknown>
-	getInfiniteCards(...args: unknown[]): Promise<unknown>
-	getRecommendationsInfinite(...args: unknown[]): Promise<unknown>
-	getRecommendationsInfiniteCards(...args: unknown[]): Promise<unknown>
-	getUncategorizedInfinite(...args: unknown[]): Promise<unknown>
-	getUncategorizedInfiniteCards(...args: unknown[]): Promise<unknown>
-	getById(id: string, ...args: unknown[]): Promise<unknown>
-	getBySlug(slug: string, ...args: unknown[]): Promise<unknown>
+	getAll(options?: ProductReadOptions): Promise<ProductReaderListItem[]>
+	getPopular(options?: ProductReadOptions): Promise<ProductReaderListItem[]>
+	getPopularCards(options?: ProductReadOptions): Promise<ProductReaderListItem[]>
+	getInfinite(
+		query: ProductReadQuery,
+		options?: ProductReadOptions
+	): Promise<ProductReaderInfinitePage>
+	getInfiniteCards(
+		query: ProductReadQuery,
+		options?: ProductReadOptions
+	): Promise<ProductReaderInfinitePage>
+	getRecommendationsInfinite(
+		query: ProductReadQuery,
+		options?: ProductReadOptions
+	): Promise<ProductReaderInfinitePage>
+	getRecommendationsInfiniteCards(
+		query: ProductReadQuery,
+		options?: ProductReadOptions
+	): Promise<ProductReaderInfinitePage>
+	getUncategorizedInfinite(
+		options?: ProductUncategorizedReadOptions
+	): Promise<ProductReaderCursorPage>
+	getUncategorizedInfiniteCards(
+		options?: ProductUncategorizedReadOptions
+	): Promise<ProductReaderCursorPage>
+	getById(
+		id: string,
+		options?: ProductReadOptions
+	): Promise<ProductReaderDetailsItem>
+	getBySlug(
+		slug: string,
+		options?: ProductReadOptions
+	): Promise<ProductReaderDetailsItem>
+}
+
+export interface ProductCategoryReadProjectorPort {
+	mapCategoryProducts<TProduct extends ProductCategoryReadSource>(
+		input: ProductCategoryReadProjectionInput<TProduct>
+	): Promise<Array<ProductReaderListItem | null>>
+	resolveVisibleCategoryProductIds(
+		input: ProductCategoryVisibleProductIdsInput
+	): Promise<Set<string> | null>
 }
 
 export interface ProductCommandPort {
-	create(...args: unknown[]): Promise<unknown>
-	update(id: string, ...args: unknown[]): Promise<unknown>
-	remove(id: string, ...args: unknown[]): Promise<unknown>
-}
-
-export interface ProductSnapshotPort {
-	buildOrderSnapshot?(input: unknown): Promise<unknown>
-}
-
-export interface ProductVariantResolverPort {
-	resolvePurchasableVariant?(input: unknown): Promise<unknown>
+	create(dto: ProductCreateCommandInput): Promise<ProductCommandProductResult>
+	update(
+		id: string,
+		dto: ProductUpdateCommandInput
+	): Promise<ProductCommandProductResult>
+	remove(id: string): Promise<ProductRemoveResult>
 }
 
 export interface ProductPricingPort {
-	resolveLinePrice(input: unknown): unknown
+	resolveLinePrice(input: PriceLineInput): ResolvedLinePricing
+}
+
+export interface ProductVariantProjectionReader {
+	resolveForProductIds(
+		productIds: string[],
+		priceContext?: CatalogPriceListProductPriceContext,
+		options?: ProductVariantProjectionResolveOptions
+	): Promise<Map<string, ProductVariantProjection>>
 }
 
 export interface ProductSellableReader {
@@ -191,9 +407,6 @@ export interface ProductSellableReader {
 }
 
 export interface ProductExternalSyncPort {
-	upsertExternalProduct?(input: unknown): Promise<unknown>
-	upsertExternalVariant?(input: unknown): Promise<unknown>
-
 	findExternalProductById(
 		input: ProductExternalProductIdentityInput
 	): Promise<ProductExternalSyncProductRecord | null>
@@ -239,25 +452,88 @@ export type ProductMaintenanceResult = {
 	updatedProducts: number
 	affectedCatalogs: number
 }
+export type ProductDefaultVariantRepairResult = {
+	checkedProducts: number
+	repairedProducts: number
+	affectedCatalogs: number
+}
+export type ProductDefaultVariantDiagnosticCode =
+	| 'SIMPLE_WITHOUT_DEFAULT_VARIANT'
+	| 'MULTIPLE_DEFAULT_VARIANTS'
+	| 'CUSTOM_VARIANT_WITHOUT_ATTRIBUTES'
+	| 'DEFAULT_VARIANT_WITH_ATTRIBUTES'
+	| 'DEFAULT_VARIANT_PRICE_MISMATCH'
+export type ProductDefaultVariantDiagnosticStatus = 'ok' | 'warn' | 'fail'
+export type ProductDefaultVariantDiagnosticSample = {
+	productId: string
+	productName: string
+	productSku: string
+	variantId: string | null
+	variantKey: string | null
+	variantSku: string | null
+	details: string | null
+}
+export type ProductDefaultVariantDiagnosticCheck = {
+	code: ProductDefaultVariantDiagnosticCode
+	status: ProductDefaultVariantDiagnosticStatus
+	count: number
+	message: string
+	samples: ProductDefaultVariantDiagnosticSample[]
+}
+export type ProductDefaultVariantDiagnostics = {
+	catalogId: string
+	sampleLimit: number
+	checks: ProductDefaultVariantDiagnosticCheck[]
+	warnCount: number
+	failCount: number
+	ok: boolean
+}
+export type ProductDefaultVariantPriceMismatchRepairOptions = {
+	apply?: boolean
+	batchSize?: number
+	sampleLimit?: number
+}
+export type ProductDefaultVariantPriceMismatchRepairCandidate = {
+	productId: string
+	productName: string
+	productSku: string
+	variantId: string
+	variantKey: string
+	variantSku: string
+	previousProductPrice: string | null
+	nextProductPrice: string | null
+}
+export type ProductDefaultVariantPriceMismatchRepairResult = {
+	catalogId: string
+	dryRun: boolean
+	checkedProducts: number
+	repairableProducts: number
+	updatedProducts: number
+	affectedCatalogs: number
+	batchSize: number
+	sampleLimit: number
+	samples: ProductDefaultVariantPriceMismatchRepairCandidate[]
+}
+export type ProductDefaultVariantRepairOptions = {
+	tx?: ProductTransaction
+}
 
 export interface ProductMaintenancePort {
 	expireScheduledDiscounts(now?: Date): Promise<ProductMaintenanceResult>
 	repairMissingDefaultVariantForProduct(
 		catalogId: string,
 		productId: string,
-		options?: { tx?: unknown }
+		options?: ProductDefaultVariantRepairOptions
 	): Promise<boolean | null>
-	repairMissingDefaultVariantsForCatalog(catalogId: string): Promise<unknown>
+	repairMissingDefaultVariantsForCatalog(
+		catalogId: string
+	): Promise<ProductDefaultVariantRepairResult>
 	diagnoseDefaultVariantsForCatalog(
 		catalogId: string,
 		sampleLimit?: number
-	): Promise<unknown>
+	): Promise<ProductDefaultVariantDiagnostics>
 	repairDefaultVariantPriceMismatchesForCatalog(
 		catalogId: string,
-		options?: {
-			apply?: boolean
-			batchSize?: number
-			sampleLimit?: number
-		}
-	): Promise<unknown>
+		options?: ProductDefaultVariantPriceMismatchRepairOptions
+	): Promise<ProductDefaultVariantPriceMismatchRepairResult>
 }

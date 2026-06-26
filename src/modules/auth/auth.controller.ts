@@ -88,7 +88,7 @@ export class AuthController {
 				: null
 		)
 
-		return { ok: true, user, catalogId, redirectUrl }
+		return { ok: true, user, catalogId, csrf, redirectUrl }
 	}
 
 	@UseGuards(SessionGuard)
@@ -101,7 +101,8 @@ export class AuthController {
 	})
 	@ApiUnauthorizedResponse({ description: 'Не авторизован' })
 	me(@Req() req: Request) {
-		return { ok: true, user: (req as AuthRequest).user }
+		const authReq = req as AuthRequest
+		return { ok: true, user: authReq.user, csrf: authReq.session?.csrf ?? null }
 	}
 
 	@UseGuards(SessionGuard)

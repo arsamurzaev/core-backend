@@ -1,7 +1,11 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
-import type { CatalogInventoryMode } from '@generated/enums'
+import type {
+	CatalogExperienceMode,
+	CatalogInventoryMode,
+	CatalogPresentationMode
+} from '@generated/enums'
 import { CatalogCreateInput, CatalogUpdateInput } from '@generated/models'
 import {
 	BadRequestException,
@@ -61,16 +65,30 @@ import {
 } from './catalog.utils'
 import { CreateCatalogDtoReq } from './dto/requests/create-catalog.dto.req'
 import { UpdateCatalogDtoReq } from './dto/requests/update-catalog.dto.req'
+import type { CatalogRuntimeDto } from './dto/responses/catalog.dto.res'
 
 type CatalogCurrent = any
 type CatalogWithCheckoutSettings = Record<string, unknown> & {
 	settings?:
 		| (Record<string, unknown> & {
 				checkout?: unknown
+				presentationMode?: CatalogPresentationMode | null
+				defaultMode?: CatalogExperienceMode | null
+				allowedModes?: CatalogExperienceMode[] | null
 				inventoryMode?: CatalogInventoryMode | null
 		  })
 		| null
 }
+type CatalogRuntimeTypeSchema = {
+	id: string
+	code: string
+	name: string
+}
+
+const CATALOG_RUNTIME_SCHEMA_VERSION = 1
+const CATALOG_PRESENTATION_MODE_DEFAULT: CatalogPresentationMode = 'CATALOG'
+const CATALOG_EXPERIENCE_MODE_DEFAULT: CatalogExperienceMode = 'DELIVERY'
+const CATALOG_INVENTORY_MODE_NONE: CatalogInventoryMode = 'NONE'
 const CATALOG_INVENTORY_MODE_INTERNAL: CatalogInventoryMode = 'INTERNAL'
 
 @Injectable()
@@ -200,6 +218,25 @@ export class CatalogService {
 			},
 			type
 		)
+	}
+
+	async getCurrentRuntime(): Promise<CatalogRuntimeDto> {
+		const store = RequestContext.get()
+		if (!store?.catalogId) throw new NotFoundException('Каталог не найден')
+
+		const shell = await this.loadCurrentCatalogShell(
+			store.catalogId,
+			Boolean(this.cacheTtlSec)
+		)
+		const type = shell.typeId
+			? await this.loadCatalogTypeSchema(shell.typeId, Boolean(this.cacheTtlSec))
+			: null
+		const features = await this.buildCatalogFeatures(
+			store.catalogId,
+			this.readInventoryMode(shell)
+		)
+
+		return this.buildCatalogRuntime(shell, type, features)
 	}
 
 	async getCurrentTypeSchema() {
@@ -552,6 +589,66 @@ export class CatalogService {
 			effective: capabilities.effective,
 			definitions: capabilities.definitions,
 			items: capabilities.items
+		}
+	}
+
+	private buildCatalogRuntime(
+		shell: CatalogCurrent,
+		type: CatalogRuntimeTypeSchema | null,
+		features: Record<string, unknown>
+	): CatalogRuntimeDto {
+		const settings = shell.settings ?? null
+		const defaultMode = settings?.defaultMode ?? CATALOG_EXPERIENCE_MODE_DEFAULT
+		const allowedModes =
+			Array.isArray(settings?.allowedModes) && settings.allowedModes.length > 0
+				? settings.allowedModes
+				: [defaultMode]
+		const {
+			inventoryMode: _inventoryMode,
+			raw,
+			effective,
+			definitions,
+			items,
+			...flags
+		} = features
+
+		return {
+			schemaVersion: CATALOG_RUNTIME_SCHEMA_VERSION,
+			catalog: {
+				id: shell.id,
+				slug: shell.slug,
+				domain: shell.domain ?? null,
+				name: shell.name,
+				typeId: shell.typeId ?? null
+			},
+			type: type
+				? {
+						id: type.id,
+						code: type.code,
+						name: type.name
+					}
+				: null,
+			presentation: {
+				mode: settings?.presentationMode ?? CATALOG_PRESENTATION_MODE_DEFAULT,
+				defaultMode,
+				allowedModes
+			},
+			checkout: resolveCatalogCheckoutConfig({
+				checkout: settings?.checkout,
+				typeCode: type?.code ?? null
+			}),
+			inventory: {
+				mode: settings?.inventoryMode ?? CATALOG_INVENTORY_MODE_NONE
+			},
+			capabilities: {
+				flags: flags as CatalogRuntimeDto['capabilities']['flags'],
+				raw: (raw ?? {}) as CatalogRuntimeDto['capabilities']['raw'],
+				effective: (effective ??
+					{}) as CatalogRuntimeDto['capabilities']['effective'],
+				definitions: (definitions ??
+					[]) as CatalogRuntimeDto['capabilities']['definitions'],
+				items: (items ?? []) as CatalogRuntimeDto['capabilities']['items']
+			}
 		}
 	}
 

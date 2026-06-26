@@ -5,29 +5,28 @@ import {
 	mustCatalogId
 } from '@/shared/tenancy/ctx'
 
+import type {
+	ProductCommandPort,
+	ProductCreateCommandInput,
+	ProductDefaultVariantPriceMismatchRepairOptions,
+	ProductReadOptions,
+	ProductUpdateCommandInput
+} from './contracts'
 import { ApplyProductTypeChangeDtoReq } from './dto/requests/apply-product-type-change.dto.req'
-import { CreateProductDtoReq } from './dto/requests/create-product.dto.req'
 import { ProductTypeCompatibilityPreviewDtoReq } from './dto/requests/product-type-compatibility-preview.dto.req'
 import {
 	SetProductVariantMatrixDtoReq,
 	SetProductVariantsDtoReq
 } from './dto/requests/set-product-variants.dto.req'
 import { UpdateProductCategoryPositionDtoReq } from './dto/requests/update-product-category-position.dto.req'
-import { UpdateProductDtoReq } from './dto/requests/update-product.dto.req'
 import { ProductTypeCompatibilityPreviewDto } from './dto/responses/product.dto.res'
 import { ProductCommandService } from './product-command.service'
-import {
-	type ProductDefaultVariantPriceMismatchRepairOptions,
-	ProductMaintenanceService
-} from './product-maintenance.service'
-import {
-	type ProductReadOptions,
-	ProductReadService
-} from './product-read.service'
+import { ProductMaintenanceService } from './product-maintenance.service'
+import { ProductReadService } from './product-read.service'
 import { ProductTypeChangeService } from './product-type-change.service'
 
 @Injectable()
-export class ProductService {
+export class ProductService implements ProductCommandPort {
 	constructor(
 		private readonly reads: ProductReadService,
 		private readonly commands: ProductCommandService,
@@ -96,7 +95,7 @@ export class ProductService {
 		return this.reads.getBySlug(slug, options)
 	}
 
-	async create(dto: CreateProductDtoReq) {
+	async create(dto: ProductCreateCommandInput) {
 		return this.commands.create(dto)
 	}
 
@@ -104,7 +103,7 @@ export class ProductService {
 		return this.commands.duplicate(id)
 	}
 
-	async update(id: string, dto: UpdateProductDtoReq) {
+	async update(id: string, dto: ProductUpdateCommandInput) {
 		return this.commands.update(id, dto)
 	}
 

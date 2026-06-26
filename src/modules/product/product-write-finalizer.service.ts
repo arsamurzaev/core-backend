@@ -1,7 +1,11 @@
 import { ProductVariantKind, SeoEntityType } from '@generated/enums'
 import { Inject, Injectable, Optional } from '@nestjs/common'
 
-import { SeoRepository } from '@/modules/seo/public'
+import {
+	SEO_SETTINGS_PORT,
+	type SeoSettingsPort,
+	type SeoSettingsRecord
+} from '@/modules/seo/public'
 import { CacheService } from '@/shared/cache/cache.service'
 import {
 	CATALOG_TYPE_CACHE_VERSION,
@@ -24,11 +28,7 @@ import { ProductMediaMapper } from '@/shared/media/product-media.mapper'
 import { ProductSeoSyncService } from './product-seo-sync.service'
 import type { ProductDetailsItem } from './product.repository'
 
-type ProductSeoRecord = NonNullable<
-	Awaited<ReturnType<SeoRepository['findByEntity']>>
->
-
-type ProductSeoMapped = Omit<ProductSeoRecord, 'ogMedia' | 'twitterMedia'> & {
+type ProductSeoMapped = Omit<SeoSettingsRecord, 'ogMedia' | 'twitterMedia'> & {
 	ogMedia: MediaDto | null
 	twitterMedia: MediaDto | null
 }
@@ -47,7 +47,8 @@ export class ProductWriteFinalizer {
 		private readonly mediaUrl: MediaUrlService,
 		private readonly mapper: ProductMediaMapper,
 		private readonly productSeoSync: ProductSeoSyncService,
-		private readonly seoRepo: SeoRepository,
+		@Inject(SEO_SETTINGS_PORT)
+		private readonly seoSettings: SeoSettingsPort,
 		@Optional()
 		@Inject(DOMAIN_EVENT_DISPATCHER)
 		private readonly events?: DomainEventDispatcher
@@ -113,7 +114,7 @@ export class ProductWriteFinalizer {
 	}
 
 	async mapProductWithSeo(product: ProductDetailsItem, catalogId: string) {
-		const seo = await this.seoRepo.findByEntity(
+		const seo = await this.seoSettings.findByEntity(
 			catalogId,
 			SeoEntityType.PRODUCT,
 			product.id
@@ -177,7 +178,7 @@ export class ProductWriteFinalizer {
 		await this.cache.bumpVersion(CATALOG_TYPE_CACHE_VERSION, catalogTypeId)
 	}
 
-	private mapSeo(seo?: ProductSeoRecord | null): ProductSeoMapped | null {
+	private mapSeo(seo?: SeoSettingsRecord | null): ProductSeoMapped | null {
 		if (!seo) return null
 		return {
 			...seo,

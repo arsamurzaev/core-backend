@@ -10,6 +10,7 @@ npm run prod:check
 
 Он выполняет:
 
+- `npm run prisma:migrate:check`
 - `npm run prisma:generate`
 - `npm run build`
 - `npm run openapi:export -- --output=runtime/openapi.json`
@@ -34,4 +35,12 @@ npm run prod:check -- --skip-db
 npm run prod:check -- --skip-openapi
 ```
 
+Если в CI/stage настроена shadow-БД и нужно сделать ее обязательной:
+
+```bash
+npm run prod:check -- --require-shadow
+```
+
 Production apply-скрипты запускаются только после dry-run, backup и зеленого gate.
+
+Для изменений Prisma schema используй flow из [prisma-migrations.md](./prisma-migrations.md).

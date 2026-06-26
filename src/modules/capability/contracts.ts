@@ -1,11 +1,33 @@
 import type {
 	CatalogCapability,
+	CatalogCapabilityFlagMap,
 	CatalogCapabilityFlags
 } from './capability.constants'
-import type { CatalogCapabilitiesDto } from './capability.service'
 
 export const CAPABILITY_READER_PORT = Symbol('CAPABILITY_READER_PORT')
 export const CAPABILITY_ASSERT_PORT = Symbol('CAPABILITY_ASSERT_PORT')
+
+export type CatalogCapabilityDefinitionDto = {
+	key: CatalogCapability
+	title: string
+	description: string
+	dependsOn: CatalogCapability[]
+}
+
+export type CatalogCapabilityStateDto = {
+	key: CatalogCapability
+	raw: boolean
+	effective: boolean
+	disabledReason: string | null
+}
+
+export type CatalogCapabilitiesDto = {
+	raw: CatalogCapabilityFlagMap
+	effective: CatalogCapabilityFlagMap
+	flags: CatalogCapabilityFlags
+	definitions: CatalogCapabilityDefinitionDto[]
+	items: CatalogCapabilityStateDto[]
+}
 
 export interface CapabilityReaderPort {
 	getCurrentFeatures(
